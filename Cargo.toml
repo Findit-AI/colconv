@@ -6,7 +6,7 @@ repository = "https://github.com/findit-ai/colconv"
 homepage = "https://github.com/findit-ai/colconv"
 documentation = "https://docs.rs/colconv"
 description = "SIMD-dispatched color-conversion kernels covering the FFmpeg AVPixelFormat space, with a Sink-based API so consumers pick which derived outputs (RGB / Luma / HSV / custom) they want without paying for the ones they don't."
-license = "MIT OR Apache-2.0"
+license = "GPL-3.0-or-later"
 rust-version = "1.95.0"
 
 [lib]

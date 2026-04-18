@@ -7,7 +7,7 @@ on:
     paths-ignore:
       - 'README.md'
       - 'COPYRIGHT'
-      - 'LICENSE*'
+      - 'LICENSE'
       - '**.md'
       - '**.txt'
       - 'art'
@@ -15,7 +15,7 @@ on:
     paths-ignore:
       - 'README.md'
       - 'COPYRIGHT'
-      - 'LICENSE*'
+      - 'LICENSE'
       - '**.md'
       - '**.txt'
       - 'art'
