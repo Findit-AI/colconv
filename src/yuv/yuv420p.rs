@@ -24,7 +24,7 @@ impl SourceFormat for Yuv420p {}
 ///   (`width / 2` bytes) chroma samples as they appear in the source,
 ///   without upsampling. Sinks that need full-width chroma upsample
 ///   inline via the crate's fused row primitives (e.g. the MixedSinker
-///   for YUV does nearest-neighbor upsample inside `yuv_420_to_bgr_row`).
+///   for YUV does nearest-neighbor upsample inside `yuv_420_to_rgb_row`).
 /// - [`row`](Self::row) — output row index (`0 ..= frame.height() - 1`).
 /// - [`matrix`](Self::matrix), [`full_range`](Self::full_range) — carried
 ///   through from the kernel call so the Sink can use them when calling

@@ -24,8 +24,8 @@
 //! [`with_hsv`](sinker::MixedSinker::with_hsv) to select which channels
 //! to derive.
 //!
-//! See `docs/color-conversion-functions.md` for the full design
-//! rationale, the 48-entry per-format plan, and the priority tiers.
+//! The crate design also follows a per-format expansion plan with
+//! defined implementation priority tiers for the conversion kernels.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
