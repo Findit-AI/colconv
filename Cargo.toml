@@ -1,25 +1,38 @@
 [package]
-name = "template-rs"
+name = "colconv"
 version = "0.0.0"
-edition = "2021"
-repository = "https://github.com/al8n/template-rs"
-homepage = "https://github.com/al8n/template-rs"
-documentation = "https://docs.rs/template-rs"
-description = "A template for creating Rust open-source repo on GitHub"
-license = "MIT OR Apache-2.0"
-rust-version = "1.73"
+edition = "2024"
+repository = "https://github.com/findit-ai/colconv"
+homepage = "https://github.com/findit-ai/colconv"
+documentation = "https://docs.rs/colconv"
+description = "SIMD-dispatched color-conversion kernels covering the FFmpeg AVPixelFormat space, with a Sink-based API so consumers pick which derived outputs (RGB / Luma / HSV / custom) they want without paying for the ones they don't."
+license = "GPL-3.0-or-later"
+rust-version = "1.95.0"
+
+[lib]
+# `cargo bench` without this setting builds and runs the lib's `#[test]`
+# harness alongside the real bench targets; that harness rejects
+# `--output-format bencher` and breaks CI. We don't have any `#[bench]`
+# attributes in the lib anyway, so opt out of benchmarking it.
+bench = false
 
 [[bench]]
-path = "benches/foo.rs"
-name = "foo"
+name = "yuv_420_to_rgb"
+harness = false
+
+[[bench]]
+name = "rgb_to_hsv"
 harness = false
 
 [features]
 default = ["std"]
-alloc = []
-std = []
+alloc = ["libm"]
+std = ["thiserror/default"]
 
 [dependencies]
+derive_more = { version = "2", default-features = false, features = ["display", "is_variant"] }
+thiserror = { version = "2", default-features = false }
+libm = { version = "0.2", optional = true }
 
 [dev-dependencies]
 criterion = "0.8"
@@ -45,4 +58,11 @@ single_use_lifetimes = "warn"
 unexpected_cfgs = { level = "warn", check-cfg = [
   'cfg(all_tests)',
   'cfg(tarpaulin)',
+  # Testing / coverage helpers. These are set via `RUSTFLAGS='--cfg ...'`
+  # in CI to force the dispatcher down a specific path so lower‑tier
+  # kernels and the scalar fallback get coverage on runners that would
+  # otherwise always pick the top tier.
+  'cfg(colconv_force_scalar)',
+  'cfg(colconv_disable_avx512)',
+  'cfg(colconv_disable_avx2)',
 ] }

@@ -1,0 +1,371 @@
+//! Shared helpers for the x86_64 SIMD backends.
+//!
+//! Items here use SSE2 + SSSE3 + SSE4.1 intrinsics (e.g. `_mm_blendv_ps`,
+//! `_mm_packus_epi32`), so they're safe to call from any x86 backend at
+//! SSE4.1 or above (currently SSE4.1, AVX2, and AVX‑512).
+//! `#[inline(always)]` guarantees they inline into the caller,
+//! inheriting its `#[target_feature]` context.
+
+use core::arch::x86_64::{
+  __m128, __m128i, _mm_add_ps, _mm_blendv_ps, _mm_cmpeq_ps, _mm_cmplt_ps, _mm_cvtepi32_ps,
+  _mm_cvtepu8_epi32, _mm_cvttps_epi32, _mm_loadu_si128, _mm_max_ps, _mm_min_ps, _mm_mul_ps,
+  _mm_or_si128, _mm_packus_epi16, _mm_packus_epi32, _mm_rcp_ps, _mm_set1_ps, _mm_setr_epi8,
+  _mm_setzero_ps, _mm_shuffle_epi8, _mm_srli_si128, _mm_storeu_si128, _mm_sub_ps,
+};
+
+/// Writes 16 pixels of packed RGB (48 bytes) from three u8x16 channel
+/// vectors.
+///
+/// Three output blocks of 16 bytes each interleave R, G, B triples.
+/// Each channel contributes specific bytes to each block; the shuffle
+/// masks below assign those bytes (with `-1` = 0x80 = "zero the lane,
+/// to be OR'd in by another channel's contribution").
+///
+/// Conceptually, block 0 (bytes 0..16) takes:
+/// `R0, G0, B0, R1, G1, B1, R2, G2, B2, R3, G3, B3, R4, G4, B4, R5`.
+/// Block 1 (bytes 16..32):
+/// `G5, B5, R6, G6, B6, R7, G7, B7, R8, G8, B8, R9, G9, B9, R10, G10`.
+/// Block 2 (bytes 32..48):
+/// `B10, R11, G11, B11, ..., R15, G15, B15`.
+///
+/// Each of the three 16‑byte stores is the OR of three shuffles of
+/// the R, G, B inputs. This is the well‑known SSSE3 3‑way interleave
+/// pattern from libyuv / OpenCV.
+///
+/// # Safety
+///
+/// - `ptr` must point to at least 48 writable, properly aligned (or
+///   unaligned‑tolerated via the `storeu` variant) bytes.
+/// - The calling function must have SSSE3 available (either through
+///   `#[target_feature(enable = "ssse3")]` / a superset feature like
+///   `"sse4.1"` or `"avx2"`, or via the target's default feature set).
+#[inline(always)]
+pub(super) unsafe fn write_rgb_16(r: __m128i, g: __m128i, b: __m128i, ptr: *mut u8) {
+  unsafe {
+    // Shuffle masks for block 0 (first 16 output bytes).
+    //   dst byte i gets source byte mask[i] from the corresponding
+    //   input channel (R for r_mask, G for g_mask, B for b_mask).
+    //   0x80 (`-1` as i8) zeroes that output lane.
+    let r0 = _mm_setr_epi8(0, -1, -1, 1, -1, -1, 2, -1, -1, 3, -1, -1, 4, -1, -1, 5);
+    let g0 = _mm_setr_epi8(-1, 0, -1, -1, 1, -1, -1, 2, -1, -1, 3, -1, -1, 4, -1, -1);
+    let b0 = _mm_setr_epi8(-1, -1, 0, -1, -1, 1, -1, -1, 2, -1, -1, 3, -1, -1, 4, -1);
+    let out0 = _mm_or_si128(
+      _mm_or_si128(_mm_shuffle_epi8(r, r0), _mm_shuffle_epi8(g, g0)),
+      _mm_shuffle_epi8(b, b0),
+    );
+
+    // Block 1 (bytes 16..32).
+    let r1 = _mm_setr_epi8(-1, -1, 6, -1, -1, 7, -1, -1, 8, -1, -1, 9, -1, -1, 10, -1);
+    let g1 = _mm_setr_epi8(5, -1, -1, 6, -1, -1, 7, -1, -1, 8, -1, -1, 9, -1, -1, 10);
+    let b1 = _mm_setr_epi8(-1, 5, -1, -1, 6, -1, -1, 7, -1, -1, 8, -1, -1, 9, -1, -1);
+    let out1 = _mm_or_si128(
+      _mm_or_si128(_mm_shuffle_epi8(r, r1), _mm_shuffle_epi8(g, g1)),
+      _mm_shuffle_epi8(b, b1),
+    );
+
+    // Block 2 (bytes 32..48).
+    let r2 = _mm_setr_epi8(
+      -1, 11, -1, -1, 12, -1, -1, 13, -1, -1, 14, -1, -1, 15, -1, -1,
+    );
+    let g2 = _mm_setr_epi8(
+      -1, -1, 11, -1, -1, 12, -1, -1, 13, -1, -1, 14, -1, -1, 15, -1,
+    );
+    let b2 = _mm_setr_epi8(
+      10, -1, -1, 11, -1, -1, 12, -1, -1, 13, -1, -1, 14, -1, -1, 15,
+    );
+    let out2 = _mm_or_si128(
+      _mm_or_si128(_mm_shuffle_epi8(r, r2), _mm_shuffle_epi8(g, g2)),
+      _mm_shuffle_epi8(b, b2),
+    );
+
+    _mm_storeu_si128(ptr.cast(), out0);
+    _mm_storeu_si128(ptr.add(16).cast(), out1);
+    _mm_storeu_si128(ptr.add(32).cast(), out2);
+  }
+}
+
+/// Swaps the outer two channels of 16 packed 3‑byte pixels (48 bytes
+/// in, 48 bytes out). Drives both BGR→RGB and RGB→BGR conversions
+/// since the transformation is self‑inverse.
+///
+/// Uses the SSSE3 `_mm_shuffle_epi8` 3‑way gather pattern: each 16‑byte
+/// output chunk is built from shuffles of the three adjacent input
+/// chunks, combined with `_mm_or_si128`. 7 shuffles + 4 ORs per 16
+/// pixels. Mask values verified byte‑by‑byte against the scalar
+/// reference (see the equivalence tests in `neon`/x86 backends).
+///
+/// # Safety
+///
+/// - `input_ptr` must point to at least 48 readable bytes.
+/// - `output_ptr` must point to at least 48 writable bytes.
+/// - `input_ptr` / `output_ptr` ranges must not alias.
+/// - The calling function must have SSSE3 available (either through
+///   `#[target_feature(enable = "ssse3")]` / a superset feature like
+///   `"sse4.1"` / `"avx2"` / `"avx512bw"`, or the target's defaults).
+#[inline(always)]
+pub(super) unsafe fn swap_rb_16_pixels(input_ptr: *const u8, output_ptr: *mut u8) {
+  unsafe {
+    let in0 = _mm_loadu_si128(input_ptr.cast());
+    let in1 = _mm_loadu_si128(input_ptr.add(16).cast());
+    let in2 = _mm_loadu_si128(input_ptr.add(32).cast());
+
+    // Output chunk 0 (abs bytes 0..16): 15 bytes from chunk 0, byte 15
+    // (= R5) pulled from chunk 1 local position 1.
+    let m00 = _mm_setr_epi8(2, 1, 0, 5, 4, 3, 8, 7, 6, 11, 10, 9, 14, 13, 12, -1);
+    let m01 = _mm_setr_epi8(
+      -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 1,
+    );
+    let out0 = _mm_or_si128(_mm_shuffle_epi8(in0, m00), _mm_shuffle_epi8(in1, m01));
+
+    // Output chunk 1 (abs bytes 16..32): most from chunk 1, byte 17
+    // (= B5) from chunk 0, byte 30 (= R10) from chunk 2.
+    let m10 = _mm_setr_epi8(
+      -1, 15, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    );
+    let m11 = _mm_setr_epi8(0, -1, 4, 3, 2, 7, 6, 5, 10, 9, 8, 13, 12, 11, -1, 15);
+    let m12 = _mm_setr_epi8(
+      -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 0, -1,
+    );
+    let out1 = _mm_or_si128(
+      _mm_or_si128(_mm_shuffle_epi8(in0, m10), _mm_shuffle_epi8(in1, m11)),
+      _mm_shuffle_epi8(in2, m12),
+    );
+
+    // Output chunk 2 (abs bytes 32..48): 15 bytes from chunk 2, byte
+    // 32 (= B10) pulled from chunk 1 local position 14.
+    let m20 = _mm_setr_epi8(
+      14, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    );
+    let m21 = _mm_setr_epi8(-1, 3, 2, 1, 6, 5, 4, 9, 8, 7, 12, 11, 10, 15, 14, 13);
+    let out2 = _mm_or_si128(_mm_shuffle_epi8(in1, m20), _mm_shuffle_epi8(in2, m21));
+
+    _mm_storeu_si128(output_ptr.cast(), out0);
+    _mm_storeu_si128(output_ptr.add(16).cast(), out1);
+    _mm_storeu_si128(output_ptr.add(32).cast(), out2);
+  }
+}
+
+// ---- RGB → HSV support --------------------------------------------------
+//
+// Matches the scalar `rgb_to_hsv_row` within ±1 LSB. Every op mirrors
+// the scalar: f32 max/min preserves the same channel selection, and the
+// branch cascade uses `_mm_blendv_ps` in the same
+// `delta == 0 → v == r → v == g → v == b` priority as the scalar.
+// For division we use `_mm_rcp_ps` followed by one Newton‑Raphson
+// refinement step (`rcp * (2 - v * rcp)`) — ~3× faster than true
+// `_mm_div_ps` at the cost of ±1 LSB in S/H. `#[inline(always)]`
+// guarantees each helper inlines into its caller, so the
+// SSSE3+SSE4.1 intrinsics execute in whatever `target_feature` context
+// (sse4.1 / avx2 / avx512) the outer kernel declares.
+
+/// Deinterleaves 48 bytes of packed RGB into three u8x16 channel
+/// vectors (R, G, B). 9 shuffles + 6 ORs — mirror of the swap pattern.
+///
+/// # Safety
+///
+/// `input_ptr` must point to at least 48 readable bytes. Caller's
+/// `target_feature` must include SSSE3 (via sse4.1 or higher).
+#[inline(always)]
+pub(super) unsafe fn deinterleave_rgb_16(input_ptr: *const u8) -> (__m128i, __m128i, __m128i) {
+  unsafe {
+    let in0 = _mm_loadu_si128(input_ptr.cast());
+    let in1 = _mm_loadu_si128(input_ptr.add(16).cast());
+    let in2 = _mm_loadu_si128(input_ptr.add(32).cast());
+
+    // R bytes live at absolute positions 3k for k=0..15; in chunk 0
+    // that's local [0,3,6,9,12,15] (6 values), chunk 1 [2,5,8,11,14]
+    // (5 values), chunk 2 [1,4,7,10,13] (5 values).
+    let mr0 = _mm_setr_epi8(0, 3, 6, 9, 12, 15, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
+    let mr1 = _mm_setr_epi8(-1, -1, -1, -1, -1, -1, 2, 5, 8, 11, 14, -1, -1, -1, -1, -1);
+    let mr2 = _mm_setr_epi8(-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 1, 4, 7, 10, 13);
+    let r = _mm_or_si128(
+      _mm_or_si128(_mm_shuffle_epi8(in0, mr0), _mm_shuffle_epi8(in1, mr1)),
+      _mm_shuffle_epi8(in2, mr2),
+    );
+
+    // G bytes at positions 3k+1: chunk 0 [1,4,7,10,13], chunk 1
+    // [0,3,6,9,12,15], chunk 2 [2,5,8,11,14].
+    let mg0 = _mm_setr_epi8(1, 4, 7, 10, 13, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
+    let mg1 = _mm_setr_epi8(-1, -1, -1, -1, -1, 0, 3, 6, 9, 12, 15, -1, -1, -1, -1, -1);
+    let mg2 = _mm_setr_epi8(-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 2, 5, 8, 11, 14);
+    let g = _mm_or_si128(
+      _mm_or_si128(_mm_shuffle_epi8(in0, mg0), _mm_shuffle_epi8(in1, mg1)),
+      _mm_shuffle_epi8(in2, mg2),
+    );
+
+    // B bytes at positions 3k+2: chunk 0 [2,5,8,11,14], chunk 1
+    // [1,4,7,10,13], chunk 2 [0,3,6,9,12,15].
+    let mb0 = _mm_setr_epi8(2, 5, 8, 11, 14, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
+    let mb1 = _mm_setr_epi8(-1, -1, -1, -1, -1, 1, 4, 7, 10, 13, -1, -1, -1, -1, -1, -1);
+    let mb2 = _mm_setr_epi8(-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 0, 3, 6, 9, 12, 15);
+    let b = _mm_or_si128(
+      _mm_or_si128(_mm_shuffle_epi8(in0, mb0), _mm_shuffle_epi8(in1, mb1)),
+      _mm_shuffle_epi8(in2, mb2),
+    );
+
+    (r, g, b)
+  }
+}
+
+/// Widens a u8x16 to four f32x4 groups (lanes 0..3, 4..7, 8..11,
+/// 12..15). Zero‑extends via `_mm_cvtepu8_epi32` (SSE4.1) then converts
+/// to f32.
+#[inline(always)]
+fn u8x16_to_f32x4_quad(v: __m128i) -> (__m128, __m128, __m128, __m128) {
+  unsafe {
+    let i0 = _mm_cvtepu8_epi32(v);
+    let i1 = _mm_cvtepu8_epi32(_mm_srli_si128::<4>(v));
+    let i2 = _mm_cvtepu8_epi32(_mm_srli_si128::<8>(v));
+    let i3 = _mm_cvtepu8_epi32(_mm_srli_si128::<12>(v));
+    (
+      _mm_cvtepi32_ps(i0),
+      _mm_cvtepi32_ps(i1),
+      _mm_cvtepi32_ps(i2),
+      _mm_cvtepi32_ps(i3),
+    )
+  }
+}
+
+/// Packs four f32x4 vectors (16 values in [0, 255]) to one u8x16.
+/// Truncates f32 → i32 via `_mm_cvttps_epi32`, matches scalar `as u8`
+/// (values are pre‑clamped so saturation on the narrowing steps is
+/// a no‑op).
+#[inline(always)]
+fn f32x4_quad_to_u8x16(a: __m128, b: __m128, c: __m128, d: __m128) -> __m128i {
+  unsafe {
+    let ai = _mm_cvttps_epi32(a);
+    let bi = _mm_cvttps_epi32(b);
+    let ci = _mm_cvttps_epi32(c);
+    let di = _mm_cvttps_epi32(d);
+    let ab = _mm_packus_epi32(ai, bi); // i32x4 × 2 → u16x8
+    let cd = _mm_packus_epi32(ci, di);
+    _mm_packus_epi16(ab, cd) // u16x8 × 2 → u8x16
+  }
+}
+
+/// Computes HSV for 4 pixels. Mirrors the scalar
+/// `rgb_to_hsv_pixel` op‑for‑op. Returns `(h_quant, s_quant, v_quant)`
+/// as f32x4 — already clamped to the scalar output ranges, still f32
+/// awaiting the truncating cast in the caller.
+#[inline(always)]
+fn hsv_group(r: __m128, g: __m128, b: __m128) -> (__m128, __m128, __m128) {
+  unsafe {
+    let zero = _mm_setzero_ps();
+    let half = _mm_set1_ps(0.5);
+    let sixty = _mm_set1_ps(60.0);
+    let one_twenty = _mm_set1_ps(120.0);
+    let two_forty = _mm_set1_ps(240.0);
+    let three_sixty = _mm_set1_ps(360.0);
+    let one_seventy_nine = _mm_set1_ps(179.0);
+    let two_fifty_five = _mm_set1_ps(255.0);
+
+    let two = _mm_set1_ps(2.0);
+
+    // V = max(r, g, b); min = min(r, g, b); delta = V - min.
+    let v = _mm_max_ps(_mm_max_ps(r, g), b);
+    let min_rgb = _mm_min_ps(_mm_min_ps(r, g), b);
+    let delta = _mm_sub_ps(v, min_rgb);
+
+    // Replace `_mm_div_ps` with 11‑bit reciprocal + one Newton‑Raphson
+    // refinement step. On Skylake+/Zen4 `_mm_rcp_ps` is ~4 cycles vs
+    // `_mm_div_ps` at ~13, and the refinement (`rcp * (2 - v * rcp)`)
+    // adds ~7 cycles but brings precision to ~23 bits — more than
+    // enough for u8 HSV output. Net ~20% throughput improvement on
+    // x86 vs the f32 divide path. Output remains within ±1 LSB of the
+    // scalar LUT reference.
+    //
+    // v = 0 / delta = 0 inputs would produce NaN through the Newton
+    // step but are masked to 0 / 0 in the cascade below, so the NaNs
+    // are always discarded before quantization.
+    let v_rcp0 = _mm_rcp_ps(v);
+    let v_rcp = _mm_mul_ps(v_rcp0, _mm_sub_ps(two, _mm_mul_ps(v, v_rcp0)));
+    let delta_rcp0 = _mm_rcp_ps(delta);
+    let delta_rcp = _mm_mul_ps(delta_rcp0, _mm_sub_ps(two, _mm_mul_ps(delta, delta_rcp0)));
+
+    // S = if v == 0 { 0 } else { 255 * delta * rcp(v) }.
+    let mask_v_zero = _mm_cmpeq_ps(v, zero);
+    let s_nonzero = _mm_mul_ps(_mm_mul_ps(two_fifty_five, delta), v_rcp);
+    let s = _mm_blendv_ps(s_nonzero, zero, mask_v_zero);
+
+    // Hue branches.
+    let mask_delta_zero = _mm_cmpeq_ps(delta, zero);
+    let mask_v_is_r = _mm_cmpeq_ps(v, r);
+    let mask_v_is_g = _mm_cmpeq_ps(v, g);
+
+    // h_r = 60 * (g - b) * rcp(delta); wrap negatives by +360.
+    let h_r_raw = _mm_mul_ps(_mm_mul_ps(sixty, _mm_sub_ps(g, b)), delta_rcp);
+    let mask_neg = _mm_cmplt_ps(h_r_raw, zero);
+    let h_r = _mm_blendv_ps(h_r_raw, _mm_add_ps(h_r_raw, three_sixty), mask_neg);
+
+    // h_g = 60 * (b - r) * rcp(delta) + 120.
+    let h_g = _mm_add_ps(
+      _mm_mul_ps(_mm_mul_ps(sixty, _mm_sub_ps(b, r)), delta_rcp),
+      one_twenty,
+    );
+    // h_b = 60 * (r - g) * rcp(delta) + 240.
+    let h_b = _mm_add_ps(
+      _mm_mul_ps(_mm_mul_ps(sixty, _mm_sub_ps(r, g)), delta_rcp),
+      two_forty,
+    );
+
+    // Cascade priority: delta == 0 → 0; v == r → h_r; v == g → h_g;
+    // else → h_b. Same as scalar's `else if` chain.
+    let h_g_or_b = _mm_blendv_ps(h_b, h_g, mask_v_is_g);
+    let h_nonzero = _mm_blendv_ps(h_g_or_b, h_r, mask_v_is_r);
+    let hue = _mm_blendv_ps(h_nonzero, zero, mask_delta_zero);
+
+    // Quantize to scalar output ranges.
+    //   h = clamp(hue * 0.5 + 0.5, 0, 179)
+    //   s = clamp(s + 0.5, 0, 255)
+    //   v = clamp(v + 0.5, 0, 255)
+    let h_quant = _mm_min_ps(
+      _mm_max_ps(_mm_add_ps(_mm_mul_ps(hue, half), half), zero),
+      one_seventy_nine,
+    );
+    let s_quant = _mm_min_ps(_mm_max_ps(_mm_add_ps(s, half), zero), two_fifty_five);
+    let v_quant = _mm_min_ps(_mm_max_ps(_mm_add_ps(v, half), zero), two_fifty_five);
+
+    (h_quant, s_quant, v_quant)
+  }
+}
+
+/// Converts 16 RGB pixels to planar HSV (OpenCV 8‑bit encoding).
+/// Reads 48 bytes from `input_ptr`, writes 16 bytes each to `h_ptr`,
+/// `s_ptr`, `v_ptr`.
+///
+/// # Safety
+///
+/// - `input_ptr` must point to at least 48 readable bytes.
+/// - Each of `h_ptr`, `s_ptr`, `v_ptr` must point to at least 16
+///   writable bytes.
+/// - No aliasing between input and output.
+/// - Caller's `target_feature` must include SSE4.1 (or a superset:
+///   avx2, avx512bw).
+#[inline(always)]
+pub(super) unsafe fn rgb_to_hsv_16_pixels(
+  input_ptr: *const u8,
+  h_ptr: *mut u8,
+  s_ptr: *mut u8,
+  v_ptr: *mut u8,
+) {
+  unsafe {
+    let (r_u8, g_u8, b_u8) = deinterleave_rgb_16(input_ptr);
+
+    // Widen each channel to 4 × f32x4 groups (16 pixels → 4 groups of
+    // 4 lanes each).
+    let (r0, r1, r2, r3) = u8x16_to_f32x4_quad(r_u8);
+    let (g0, g1, g2, g3) = u8x16_to_f32x4_quad(g_u8);
+    let (b0, b1, b2, b3) = u8x16_to_f32x4_quad(b_u8);
+
+    // HSV compute per group.
+    let (h0, s0, v0) = hsv_group(r0, g0, b0);
+    let (h1, s1, v1) = hsv_group(r1, g1, b1);
+    let (h2, s2, v2) = hsv_group(r2, g2, b2);
+    let (h3, s3, v3) = hsv_group(r3, g3, b3);
+
+    // Pack each planar f32 quad back to u8x16 and store.
+    _mm_storeu_si128(h_ptr.cast(), f32x4_quad_to_u8x16(h0, h1, h2, h3));
+    _mm_storeu_si128(s_ptr.cast(), f32x4_quad_to_u8x16(s0, s1, s2, s3));
+    _mm_storeu_si128(v_ptr.cast(), f32x4_quad_to_u8x16(v0, v1, v2, v3));
+  }
+}

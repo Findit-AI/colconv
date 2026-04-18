@@ -1,0 +1,299 @@
+name: Benchmarks
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'benches/**'
+      - 'src/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/benchmark.yml'
+  pull_request:
+    paths:
+      - 'benches/**'
+      - 'src/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/benchmark.yml'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+# Needed by `aggregate-results` to POST a summary comment on PRs via the
+# issues API. Default GITHUB_TOKEN is read-only in repos that inherit
+# the org's restricted default permissions, so we grant the minimum set
+# explicitly.
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  benchmark:
+    name: ${{ matrix.label }}
+    strategy:
+      matrix:
+        include:
+          # aarch64 NEON — runtime dispatcher picks NEON; scalar variant in
+          # each bench exercised via `use_simd=false`.
+          - os: macos-latest
+            arch: aarch64
+            tier: neon
+            rustflags: ''
+            label: macos-aarch64-neon
+
+          # aarch64 with NEON short-circuited via `colconv_force_scalar`:
+          # dispatcher takes the scalar path on every call, producing a
+          # scalar baseline that matches the one measured inside the
+          # `use_simd=false` bench variant but with dispatcher branches
+          # also uncovered-then-covered for coverage fidelity.
+          - os: macos-latest
+            arch: aarch64
+            tier: scalar
+            rustflags: '--cfg colconv_force_scalar'
+            label: macos-aarch64-scalar
+
+          # x86_64 default — runtime dispatcher picks whichever x86 tier
+          # the runner supports. Standard ubuntu-latest is AMD EPYC 7763
+          # (Milan) which has AVX2 but NOT AVX-512, so this tier ends up
+          # exercising the AVX2 kernel in practice. Use the -avx512 row
+          # below for actual AVX-512 coverage.
+          - os: ubuntu-latest
+            arch: x86_64
+            tier: default
+            rustflags: ''
+            label: ubuntu-x86_64-default
+
+          # Note: no AVX-512 bench tier. GitHub-hosted free runners are
+          # AMD Milan (no AVX-512), and emulated numbers from Intel SDE
+          # are ~5-10× off real hardware — not worth measuring. Test
+          # correctness of the AVX-512 kernel is covered by the
+          # `test-sde` job in ci.yml instead.
+
+          # x86_64 with AVX-512 disabled: forces the AVX2 dispatch branch
+          # on runners that would otherwise always pick AVX-512. Gives
+          # explicit AVX2-tier numbers regardless of runner CPU.
+          - os: ubuntu-latest
+            arch: x86_64
+            tier: avx2-max
+            rustflags: '--cfg colconv_disable_avx512'
+            label: ubuntu-x86_64-avx2-max
+
+          # x86_64 with AVX-512 and AVX2 both disabled: forces the SSE4.1
+          # dispatch branch. Every x86_64 CPU since ~2008 has SSE4.1, so
+          # this tier exercises the SSE4.1 kernel on every runner.
+          - os: ubuntu-latest
+            arch: x86_64
+            tier: sse41-max
+            rustflags: '--cfg colconv_disable_avx512 --cfg colconv_disable_avx2'
+            label: ubuntu-x86_64-sse41-max
+
+          # x86_64 with every SIMD backend short-circuited: scalar-only
+          # baseline. Complements `use_simd=false` variants inside each
+          # bench (this tier also routes the dispatcher itself to scalar).
+          - os: ubuntu-latest
+            arch: x86_64
+            tier: scalar
+            rustflags: '--cfg colconv_force_scalar'
+            label: ubuntu-x86_64-scalar
+
+          # x86_64 with `-C target-cpu=native`: enables the full feature
+          # set of the runner's build-time CPU for LLVM auto-vectorization
+          # of scalar paths and maximum codegen quality for SIMD kernels.
+          - os: ubuntu-latest
+            arch: x86_64
+            tier: native
+            rustflags: '-C target-cpu=native'
+            label: ubuntu-x86_64-native
+
+          # Windows x86_64 — same dispatcher as Linux but validates the
+          # MSVC toolchain handles the intrinsics-heavy modules.
+          - os: windows-latest
+            arch: x86_64
+            tier: default
+            rustflags: ''
+            label: windows-x86_64-default
+
+    runs-on: ${{ matrix.os }}
+    env:
+      RUSTFLAGS: ${{ matrix.rustflags }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust
+        run: rustup update stable --no-self-update && rustup default stable
+
+      - name: Print CPU info (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          echo "=== /proc/cpuinfo (first flags line) ==="
+          grep -m1 '^flags' /proc/cpuinfo || true
+          echo "=== lscpu ==="
+          lscpu || true
+
+      - name: Print CPU info (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          echo "=== sysctl machdep.cpu ==="
+          sysctl machdep.cpu || true
+          echo "=== uname -m ==="
+          uname -m
+
+      - name: Print CPU info (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Get-CimInstance Win32_Processor | Select-Object Name, Manufacturer, NumberOfCores, NumberOfLogicalProcessors | Format-List
+
+      - name: Cache cargo build and registry
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-bench-${{ matrix.tier }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bench-${{ matrix.tier }}-
+            ${{ runner.os }}-bench-
+
+      - name: Run benchmarks
+        shell: bash
+        # `--benches` limits cargo to the registered bench targets.
+        # Without it, `cargo bench` also runs the library's `#[test]`
+        # harness in release mode, and the lib test harness rejects
+        # `--output-format bencher` with "Unrecognized option".
+        run: cargo bench --benches -- --output-format bencher | tee benchmark-all-${{ matrix.label }}.txt
+        continue-on-error: false
+
+      - name: Collect benchmark summary
+        shell: bash
+        run: |
+          summary="benchmark-summary-${{ matrix.label }}.md"
+          echo "## Benchmark Results for ${{ matrix.label }}" > "$summary"
+          echo "" >> "$summary"
+          echo "### System Information" >> "$summary"
+          echo "- OS: ${{ matrix.os }}" >> "$summary"
+          echo "- Arch: ${{ matrix.arch }}" >> "$summary"
+          echo "- SIMD tier: ${{ matrix.tier }}" >> "$summary"
+          echo "- Runner: ${{ runner.name }}" >> "$summary"
+          echo "- Runner arch (GH): ${{ runner.arch }}" >> "$summary"
+          echo "- RUSTFLAGS: \`${{ matrix.rustflags }}\`" >> "$summary"
+          echo "- Date: $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> "$summary"
+          echo "" >> "$summary"
+
+          for file in benchmark-*-${{ matrix.label }}.txt; do
+            if [ -f "$file" ]; then
+              bench="${file#benchmark-}"
+              bench="${bench%-${{ matrix.label }}.txt}"
+              echo "### ${bench}" >> "$summary"
+              echo "" >> "$summary"
+              echo "\`\`\`" >> "$summary"
+              grep "^test " "$file" >> "$summary" || echo "No results" >> "$summary"
+              echo "\`\`\`" >> "$summary"
+              echo "" >> "$summary"
+            fi
+          done
+
+          cat "$summary"
+
+      - name: Create benchmark archive
+        shell: bash
+        run: |
+          mkdir -p benchmark-results
+          mv benchmark-*.txt benchmark-results/ 2>/dev/null || true
+          mv benchmark-summary-${{ matrix.label }}.md benchmark-results/ 2>/dev/null || true
+          if [ -d "target/criterion" ]; then
+            cp -r target/criterion benchmark-results/criterion-${{ matrix.label }} || true
+          fi
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v7
+        with:
+          name: benchmark-results-${{ matrix.label }}
+          path: benchmark-results/
+          retention-days: 90
+
+      - name: Upload Criterion detailed results
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: criterion-detailed-${{ matrix.label }}
+          path: target/criterion/
+          retention-days: 90
+        continue-on-error: false
+
+  # Aggregate results from all platforms and SIMD tiers.
+  aggregate-results:
+    name: Aggregate benchmark results
+    needs: benchmark
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Download all benchmark results
+        uses: actions/download-artifact@v6
+        with:
+          path: all-results
+
+      - name: Create combined summary
+        shell: bash
+        run: |
+          echo "# Benchmark Results Summary" > BENCHMARK_SUMMARY.md
+          echo "" >> BENCHMARK_SUMMARY.md
+          echo "Date: $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> BENCHMARK_SUMMARY.md
+          echo "" >> BENCHMARK_SUMMARY.md
+
+          for os_dir in all-results/benchmark-results-*/; do
+            if [ -d "$os_dir" ]; then
+              for summary in "$os_dir"benchmark-summary-*.md; do
+                if [ -f "$summary" ]; then
+                  echo "" >> BENCHMARK_SUMMARY.md
+                  cat "$summary" >> BENCHMARK_SUMMARY.md
+                  echo "" >> BENCHMARK_SUMMARY.md
+                  echo "---" >> BENCHMARK_SUMMARY.md
+                fi
+              done
+            fi
+          done
+
+          cat BENCHMARK_SUMMARY.md
+
+      - name: Upload combined results
+        uses: actions/upload-artifact@v7
+        with:
+          name: benchmark-results-combined
+          path: |
+            BENCHMARK_SUMMARY.md
+            all-results/
+          retention-days: 90
+
+      - name: Comment PR with benchmark results
+        # Only on PRs from within the same repo — GITHUB_TOKEN in
+        # forked-PR runs is hard-limited to read-only regardless of
+        # `permissions:`, so attempting the comment would always 403.
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        uses: actions/github-script@v9
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const summary = fs.readFileSync('BENCHMARK_SUMMARY.md', 'utf8');
+
+            const comment = `## Benchmark Results\n\n${summary}\n\n<details>\n<summary>View detailed results</summary>\n\nDetailed Criterion results have been uploaded as artifacts. Download them from the workflow run to view charts and detailed statistics.\n\n</details>`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+        # Keep soft-failing: if org policy ever tightens further, a
+        # failed PR comment shouldn't red-X the workflow (the artifacts
+        # and inline job logs already have the numbers).
+        continue-on-error: true
