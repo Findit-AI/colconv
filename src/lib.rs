@@ -36,8 +36,14 @@ extern crate alloc as std;
 extern crate std;
 
 pub mod frame;
+
+#[cfg(any(feature = "std", feature = "alloc"))]
+#[cfg_attr(docsrs, doc(cfg(any(feature = "std", feature = "alloc"))))]
 pub mod row;
 pub mod sinker;
+
+#[cfg(any(feature = "std", feature = "alloc"))]
+#[cfg_attr(docsrs, doc(cfg(any(feature = "std", feature = "alloc"))))]
 pub mod yuv;
 
 /// A per-row sink for color-converted pixel data.
@@ -133,6 +139,7 @@ pub(crate) mod sealed {
 
 /// The three output planes for HSV, bundled so `MixedSinker` stores a
 /// single `Option<HsvBuffers>` rather than three independent options.
+#[cfg(any(feature = "std", feature = "alloc"))]
 struct HsvBuffers<'a> {
   h: &'a mut [u8],
   s: &'a mut [u8],
