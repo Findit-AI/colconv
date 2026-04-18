@@ -9,6 +9,13 @@ description = "SIMD-dispatched color-conversion kernels covering the FFmpeg AVPi
 license = "MIT OR Apache-2.0"
 rust-version = "1.95.0"
 
+[lib]
+# `cargo bench` without this setting builds and runs the lib's `#[test]`
+# harness alongside the real bench targets; that harness rejects
+# `--output-format bencher` and breaks CI. We don't have any `#[bench]`
+# attributes in the lib anyway, so opt out of benchmarking it.
+bench = false
+
 [[bench]]
 name = "yuv_420_to_rgb"
 harness = false

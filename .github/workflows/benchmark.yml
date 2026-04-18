@@ -148,7 +148,11 @@ jobs:
 
       - name: Run benchmarks
         shell: bash
-        run: cargo bench -- --output-format bencher | tee benchmark-all-${{ matrix.label }}.txt
+        # `--benches` limits cargo to the registered bench targets. Without
+        # it, `cargo bench` also runs the library's `#[test]` harness in
+        # release mode, and the lib test harness rejects `--output-format
+        # bencher` with "Unrecognized option: 'output-format'".
+        run: cargo bench --benches -- --output-format bencher | tee benchmark-all-${{ matrix.label }}.txt
         continue-on-error: false
 
       - name: Collect benchmark summary
