@@ -18,8 +18,8 @@ use crate::ColorMatrix;
 /// interprets Y in `[16, 235]` and chroma in `[16, 240]` (broadcast /
 /// limited-range convention).
 ///
-/// Output is packed `B, G, R` triples: `rgb_out[3*x] = B`,
-/// `rgb_out[3*x + 1] = G`, `rgb_out[3*x + 2] = R`.
+/// Output is packed `R, G, B` triples: `rgb_out[3*x] = R`,
+/// `rgb_out[3*x + 1] = G`, `rgb_out[3*x + 2] = B`.
 ///
 /// # Panics (debug builds)
 ///

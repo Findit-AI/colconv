@@ -11,15 +11,18 @@
 //!
 //! The row the Sink receives (`Self::Input<'_>`) has a shape that
 //! reflects the source format: [`yuv::Yuv420pRow`] carries Y / U / V
-//! slices plus matrix / range metadata; [`rgb::Bgr24Row`] (future) will
-//! carry a single packed RGB slice; etc. Each source family declares a
-//! subtrait (`Yuv420pSink: PixelSink<Input<'_> = Yuv420pRow<'_>>`) so
-//! kernel signatures stay sharp.
+//! slices plus matrix / range metadata; future packed‑RGB row types
+//! (`Rgb24Row`, `Bgr24Row`) will carry a single packed slice; etc.
+//! Each source family declares a subtrait
+//! (`Yuv420pSink: PixelSink<Input<'_> = Yuv420pRow<'_>>`) so kernel
+//! signatures stay sharp.
 //!
 //! For the common case — "give me RGB / Luma / HSV or any subset" —
-//! the crate ships [`sinker::MixedSinker`] plus the
-//! [`sinker::LumaSinker`] / [`sinker::BgrSinker`] / [`sinker::HsvSinker`]
-//! newtype shortcuts over it.
+//! the crate ships [`sinker::MixedSinker`], configured via
+//! [`with_rgb`](sinker::MixedSinker::with_rgb) /
+//! [`with_luma`](sinker::MixedSinker::with_luma) /
+//! [`with_hsv`](sinker::MixedSinker::with_hsv) to select which channels
+//! to derive.
 //!
 //! See `docs/color-conversion-functions.md` for the full design
 //! rationale, the 48-entry per-format plan, and the priority tiers.
@@ -48,7 +51,7 @@ pub mod yuv;
 
 /// A per-row sink for color-converted pixel data.
 ///
-/// Consumers (`LumaSinker`, `BgrSinker`, the application's own reducers,
+/// Consumers ([`sinker::MixedSinker`], the application's own reducers,
 /// etc.) implement this once per source format they want to accept. The
 /// source kernel calls [`Self::process`] for every output row of
 /// the frame.

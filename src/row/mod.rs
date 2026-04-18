@@ -4,12 +4,15 @@
 //! to them by a source kernel. Source kernels are pure row walkers;
 //! the actual arithmetic lives here.
 //!
-//! Backends:
-//! - [`scalar`] — always compiled, reference implementation.
-//! - [`arch::neon`] — aarch64 NEON.
-//! - Future: `x86_ssse3`, `x86_sse41`, `x86_avx2`, `x86_avx512`,
-//!   `wasm_simd128`, each gated on the appropriate `target_arch` /
-//!   `target_feature` cfg.
+//! Backends (all crate‑private modules):
+//! - `scalar` — always compiled, reference implementation.
+//! - `arch::neon` — aarch64 NEON.
+//! - `arch::x86_sse41`, `arch::x86_avx2`, `arch::x86_avx512` — x86_64
+//!   tiers.
+//! - `arch::wasm_simd128` — wasm32 simd128.
+//!
+//! Each is gated on the appropriate `target_arch` / `target_feature`
+//! cfg.
 //!
 //! Dispatch model: every backend is selected at call time by runtime
 //! CPU feature detection — `is_aarch64_feature_detected!` /
@@ -22,8 +25,11 @@
 //! target's default features.
 //!
 //! Output guarantees: every backend is either byte‑identical to
-//! [`scalar`] or differs by at most 1 LSB per channel (documented per
-//! backend). Tests in [`super::arch`] enforce this contract.
+//! `scalar` or differs by at most 1 LSB per channel (documented per
+//! backend). Tests in `arch` enforce this contract.
+//!
+//! Dispatcher `cfg_select!` requires Rust 1.95+ (stable, in the core
+//! prelude — no import needed). The crate's MSRV matches.
 
 pub(crate) mod arch;
 pub(crate) mod scalar;
@@ -33,7 +39,7 @@ use crate::ColorMatrix;
 /// Converts one row of 4:2:0 YUV to packed RGB.
 ///
 /// Dispatches to the best available backend for the current target.
-/// See [`scalar::yuv_420_to_rgb_row`] for the full semantic
+/// See `scalar::yuv_420_to_rgb_row` for the full semantic
 /// specification (range handling, matrix definitions, output layout).
 ///
 /// `use_simd = false` forces the scalar reference path, bypassing any
@@ -51,6 +57,17 @@ pub fn yuv_420_to_rgb_row(
   full_range: bool,
   use_simd: bool,
 ) {
+  // Runtime asserts at the dispatcher boundary. The unsafe SIMD
+  // kernels below rely on these invariants for bounds‑free pointer
+  // arithmetic, so we validate in *release* builds too — not just
+  // under `debug_assert!`. Kernels keep their own `debug_assert!`s as
+  // internal sanity checks.
+  assert_eq!(width & 1, 0, "YUV 4:2:0 requires even width");
+  assert!(y.len() >= width, "y row too short");
+  assert!(u_half.len() >= width / 2, "u_half row too short");
+  assert!(v_half.len() >= width / 2, "v_half row too short");
+  assert!(rgb_out.len() >= 3 * width, "rgb_out row too short");
+
   if use_simd {
     cfg_select! {
       target_arch = "aarch64" => {
@@ -129,7 +146,7 @@ pub fn yuv_420_to_rgb_row(
 }
 
 /// Converts one row of packed RGB to planar HSV (OpenCV 8‑bit
-/// encoding). See [`scalar::rgb_to_hsv_row`] for semantics.
+/// encoding). See `scalar::rgb_to_hsv_row` for semantics.
 ///
 /// `use_simd = false` forces the scalar reference path, bypassing any
 /// SIMD backend (same semantics as `yuv_420_to_rgb_row`).
@@ -142,6 +159,13 @@ pub fn rgb_to_hsv_row(
   width: usize,
   use_simd: bool,
 ) {
+  // Runtime asserts at the dispatcher boundary (see
+  // [`yuv_420_to_rgb_row`] for rationale).
+  assert!(rgb.len() >= 3 * width, "rgb row too short");
+  assert!(h_out.len() >= width, "h_out row too short");
+  assert!(s_out.len() >= width, "s_out row too short");
+  assert!(v_out.len() >= width, "v_out row too short");
+
   if use_simd {
     cfg_select! {
       target_arch = "aarch64" => {
@@ -219,6 +243,11 @@ pub fn rgb_to_bgr_row(rgb: &[u8], bgr_out: &mut [u8], width: usize, use_simd: bo
 /// Shared dispatcher behind `bgr_to_rgb_row` / `rgb_to_bgr_row`.
 #[cfg_attr(not(tarpaulin), inline(always))]
 fn swap_rb_channels_row(input: &[u8], output: &mut [u8], width: usize, use_simd: bool) {
+  // Runtime asserts at the dispatcher boundary (see
+  // [`yuv_420_to_rgb_row`] for rationale).
+  assert!(input.len() >= 3 * width, "input row too short");
+  assert!(output.len() >= 3 * width, "output row too short");
+
   if use_simd {
     cfg_select! {
       target_arch = "aarch64" => {

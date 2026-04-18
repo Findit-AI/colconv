@@ -1,10 +1,10 @@
 //! Shared helpers for the x86_64 SIMD backends.
 //!
-//! Items here use only SSE2 + SSSE3 intrinsics, so they're safe to
-//! call from any x86 backend at SSSE3 or above (currently SSE4.1 and
-//! AVX2; AVX‑512 will reuse them too). `#[inline(always)]` guarantees
-//! they inline into the caller, inheriting its `#[target_feature]`
-//! context.
+//! Items here use SSE2 + SSSE3 + SSE4.1 intrinsics (e.g. `_mm_blendv_ps`,
+//! `_mm_packus_epi32`), so they're safe to call from any x86 backend at
+//! SSE4.1 or above (currently SSE4.1, AVX2, and AVX‑512).
+//! `#[inline(always)]` guarantees they inline into the caller,
+//! inheriting its `#[target_feature]` context.
 
 use core::arch::x86_64::{
   __m128, __m128i, _mm_add_ps, _mm_blendv_ps, _mm_cmpeq_ps, _mm_cmplt_ps, _mm_cvtepi32_ps,
@@ -147,14 +147,16 @@ pub(super) unsafe fn swap_rb_16_pixels(input_ptr: *const u8, output_ptr: *mut u8
 
 // ---- RGB → HSV support --------------------------------------------------
 //
-// Matches the scalar `rgb_to_hsv_row` byte‑for‑byte. Every op mirrors
-// the scalar: f32 max/min preserves the same channel selection, true
-// `_mm_div_ps` matches scalar division, branch cascade uses
-// `_mm_blendv_ps` in the same
+// Matches the scalar `rgb_to_hsv_row` within ±1 LSB. Every op mirrors
+// the scalar: f32 max/min preserves the same channel selection, and the
+// branch cascade uses `_mm_blendv_ps` in the same
 // `delta == 0 → v == r → v == g → v == b` priority as the scalar.
-// `#[inline(always)]` guarantees each helper inlines into its caller,
-// so the SSSE3+SSE4.1 intrinsics execute in whatever `target_feature`
-// context (sse4.1 / avx2 / avx512) the outer kernel declares.
+// For division we use `_mm_rcp_ps` followed by one Newton‑Raphson
+// refinement step (`rcp * (2 - v * rcp)`) — ~3× faster than true
+// `_mm_div_ps` at the cost of ±1 LSB in S/H. `#[inline(always)]`
+// guarantees each helper inlines into its caller, so the
+// SSSE3+SSE4.1 intrinsics execute in whatever `target_feature` context
+// (sse4.1 / avx2 / avx512) the outer kernel declares.
 
 /// Deinterleaves 48 bytes of packed RGB into three u8x16 channel
 /// vectors (R, G, B). 9 shuffles + 6 ORs — mirror of the swap pattern.

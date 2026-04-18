@@ -380,8 +380,10 @@ pub(crate) unsafe fn bgr_rgb_swap_row(input: &[u8], output: &mut [u8], width: us
 
 /// AVX‑512 RGB → planar HSV. 64 pixels per iteration via four calls to
 /// the shared [`super::x86_common::rgb_to_hsv_16_pixels`] helper
-/// (SSE4.1‑level compute under AVX‑512 target_feature). Bit‑identical
-/// to scalar.
+/// (SSE4.1‑level compute under AVX‑512 target_feature). Matches the
+/// scalar reference within ±1 LSB — the shared helper uses `_mm_rcp_ps`
+/// + one Newton‑Raphson step instead of true division (see
+/// `x86_common.rs`).
 ///
 /// # Safety
 ///

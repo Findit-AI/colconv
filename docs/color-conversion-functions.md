@@ -39,10 +39,21 @@ What we give up: the kernel no longer produces BGR / HSV / Luma directly. A Sink
 Naming convention: `<src>_to<S: <Src>Sink>(src: <SrcFrame>, sink: &mut S)`. One kernel per source family; one Sink trait per source family (the trait's method signature reflects what a row of that format actually contains).
 
 ```rust
-// Planar YUV — the kernel upsamples chroma to full width before handing out.
-pub trait Yuv420pSink {
-    fn process_row(&mut self, y: &[u8], u: &[u8], v: &[u8], row: usize);
+// Planar YUV — the kernel hands the Sink a row struct carrying the
+// Y row (full width) plus the *half-width* U / V rows. Chroma
+// upsampling happens inside whichever kernel the Sink delegates to
+// (scalar / NEON / SSE4.1 / AVX2 / AVX-512 / wasm simd128) — there's
+// no intermediate full-width chroma buffer.
+pub struct Yuv420pRow<'a> {
+    y: &'a [u8],
+    u_half: &'a [u8],
+    v_half: &'a [u8],
+    row: usize,
+    matrix: ColorMatrix,
+    full_range: bool,
 }
+pub trait Yuv420pSink: for<'a> PixelSink<Input<'a> = Yuv420pRow<'a>> {}
+
 pub fn yuv420p_to<S: Yuv420pSink>(
     src: &Yuv420pFrame<'_>,
     full_range: bool,
@@ -50,19 +61,17 @@ pub fn yuv420p_to<S: Yuv420pSink>(
     sink: &mut S,
 );
 
-// Semi-planar — same pattern, interleaved UV.
-pub trait Nv12Sink {
-    fn process_row(&mut self, y: &[u8], uv: &[u8], row: usize);
-}
+// Semi-planar — same pattern, interleaved UV (also half-width in 4:2:0).
+pub struct Nv12Row<'a> { y: &'a [u8], uv_half: &'a [u8], row: usize, /* .. */ }
+pub trait Nv12Sink: for<'a> PixelSink<Input<'a> = Nv12Row<'a>> {}
 pub fn nv12_to<S: Nv12Sink>(
     src: &Nv12Frame<'_>, full_range: bool, matrix: ColorMatrix, sink: &mut S,
 );
 
-// Packed BGR — the kernel is essentially a stride-aware row walker.
-pub trait Bgr24Sink {
-    fn process_row(&mut self, bgr: &[u8], row: usize);
-}
-pub fn bgr24_to<S: Bgr24Sink>(src: &RgbFrame<'_>, sink: &mut S);
+// Packed RGB — the kernel is essentially a stride-aware row walker.
+pub struct Rgb24Row<'a> { rgb: &'a [u8], row: usize }
+pub trait Rgb24Sink: for<'a> PixelSink<Input<'a> = Rgb24Row<'a>> {}
+pub fn rgb24_to<S: Rgb24Sink>(src: &RgbFrame<'_>, sink: &mut S);
 ```
 
 ### 1.2 The 48 dispatch entries
