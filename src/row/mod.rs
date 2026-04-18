@@ -82,6 +82,10 @@ pub fn yuv_420_to_bgr_row(
       // Future x86_64 fallback cascade (avx512 promoted above, sse4.1 →
       // ssse3 below) slots in here, each branch guarded by the matching
       // `is_x86_feature_detected!` / `cfg!(target_feature = ...)` pair.
+      _ => {
+        // Targets without a SIMD backend (wasm32, riscv64, powerpc, …)
+        // fall through to the scalar path below.
+      }
     }
   }
 
