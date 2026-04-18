@@ -7,14 +7,14 @@
 //!
 //! The kernel carries `#[target_feature(enable = "sse4.1")]` so its
 //! intrinsics execute in an explicitly feature‑enabled context. The
-//! shared [`super::x86_common::write_bgr_16`] helper uses SSSE3
+//! shared [`super::x86_common::write_rgb_16`] helper uses SSSE3
 //! (`_mm_shuffle_epi8`), which is a subset of SSE4.1 and thus
 //! available here.
 //!
 //! # Numerical contract
 //!
 //! Bit‑identical to
-//! [`crate::row::scalar::yuv_420_to_bgr_row_scalar`]. All Q15 multiplies
+//! [`crate::row::scalar::yuv_420_to_rgb_row`]. All Q15 multiplies
 //! are i32‑widened with `(prod + (1 << 14)) >> 15` rounding — same
 //! structure as the NEON and AVX2 backends.
 //!
@@ -33,7 +33,7 @@
 //! 6. Y path: widen low/high 8 Y to i16x8, apply `y_off` / `y_scale`.
 //! 7. Saturating i16 add Y + chroma per channel.
 //! 8. Saturate‑narrow to u8x16 per channel, then interleave via
-//!    `super::x86_common::write_bgr_16`.
+//!    `super::x86_common::write_rgb_16`.
 
 use core::arch::x86_64::{
   __m128i, _mm_add_epi32, _mm_adds_epi16, _mm_cvtepi16_epi32, _mm_cvtepu8_epi16, _mm_loadl_epi64,
@@ -44,11 +44,14 @@ use core::arch::x86_64::{
 
 use crate::{
   ColorMatrix,
-  row::{arch::x86_common::write_bgr_16, scalar},
+  row::{
+    arch::x86_common::{swap_rb_16_pixels, write_rgb_16},
+    scalar,
+  },
 };
 
-/// SSE4.1 YUV 4:2:0 → packed BGR. Semantics match
-/// [`scalar::yuv_420_to_bgr_row_scalar`] byte‑identically.
+/// SSE4.1 YUV 4:2:0 → packed RGB. Semantics match
+/// [`scalar::yuv_420_to_rgb_row`] byte‑identically.
 ///
 /// # Safety
 ///
@@ -65,19 +68,19 @@ use crate::{
 /// 3. `y.len() >= width`.
 /// 4. `u_half.len() >= width / 2`.
 /// 5. `v_half.len() >= width / 2`.
-/// 6. `bgr_out.len() >= 3 * width`.
+/// 6. `rgb_out.len() >= 3 * width`.
 ///
 /// Bounds are verified by `debug_assert` in debug builds; release
 /// builds trust the caller because the kernel relies on unchecked
 /// pointer arithmetic (`_mm_loadu_si128`, `_mm_loadl_epi64`,
-/// `_mm_storeu_si128` inside `write_bgr_16`).
+/// `_mm_storeu_si128` inside `write_rgb_16`).
 #[inline]
 #[target_feature(enable = "sse4.1")]
-pub(crate) unsafe fn yuv_420_to_bgr_row_sse41(
+pub(crate) unsafe fn yuv_420_to_rgb_row(
   y: &[u8],
   u_half: &[u8],
   v_half: &[u8],
-  bgr_out: &mut [u8],
+  rgb_out: &mut [u8],
   width: usize,
   matrix: ColorMatrix,
   full_range: bool,
@@ -86,7 +89,7 @@ pub(crate) unsafe fn yuv_420_to_bgr_row_sse41(
   debug_assert!(y.len() >= width);
   debug_assert!(u_half.len() >= width / 2);
   debug_assert!(v_half.len() >= width / 2);
-  debug_assert!(bgr_out.len() >= width * 3);
+  debug_assert!(rgb_out.len() >= width * 3);
 
   let coeffs = scalar::Coefficients::for_matrix(matrix);
   let (y_off, y_scale, c_scale) = scalar::range_params(full_range);
@@ -168,19 +171,19 @@ pub(crate) unsafe fn yuv_420_to_bgr_row_sse41(
       let g_u8 = _mm_packus_epi16(g_lo, g_hi);
       let r_u8 = _mm_packus_epi16(r_lo, r_hi);
 
-      // 3‑way interleave → packed BGR (48 bytes).
-      write_bgr_16(b_u8, g_u8, r_u8, bgr_out.as_mut_ptr().add(x * 3));
+      // 3‑way interleave → packed RGB (48 bytes).
+      write_rgb_16(r_u8, g_u8, b_u8, rgb_out.as_mut_ptr().add(x * 3));
 
       x += 16;
     }
 
     // Scalar tail for the 0..14 leftover pixels.
     if x < width {
-      scalar::yuv_420_to_bgr_row_scalar(
+      scalar::yuv_420_to_rgb_row(
         &y[x..width],
         &u_half[x / 2..width / 2],
         &v_half[x / 2..width / 2],
-        &mut bgr_out[x * 3..width * 3],
+        &mut rgb_out[x * 3..width * 3],
         width - x,
         matrix,
         full_range,
@@ -238,6 +241,44 @@ fn scale_y(y_i16: __m128i, y_off_v: __m128i, y_scale_v: __m128i, rnd: __m128i) -
   }
 }
 
+// ===== BGR ↔ RGB byte swap ==============================================
+
+/// SSE4.1 BGR ↔ RGB byte swap. 16 pixels per iteration via the shared
+/// [`super::x86_common::swap_rb_16_pixels`] helper (SSSE3 `_mm_shuffle_epi8`
+/// underneath). Drives both conversion directions since the swap is
+/// self‑inverse.
+///
+/// # Safety
+///
+/// 1. SSE4.1 must be available (dispatcher obligation).
+/// 2. `input.len() >= 3 * width`.
+/// 3. `output.len() >= 3 * width`.
+/// 4. `input` / `output` must not alias.
+#[inline]
+#[target_feature(enable = "sse4.1")]
+pub(crate) unsafe fn bgr_rgb_swap_row(input: &[u8], output: &mut [u8], width: usize) {
+  debug_assert!(input.len() >= width * 3, "input row too short");
+  debug_assert!(output.len() >= width * 3, "output row too short");
+
+  // SAFETY: SSE4.1 is available per caller obligation; SSSE3 (required
+  // by `swap_rb_16_pixels`) is a subset. All pointer adds are bounded
+  // by the `while x + 16 <= width` condition.
+  unsafe {
+    let mut x = 0usize;
+    while x + 16 <= width {
+      swap_rb_16_pixels(input.as_ptr().add(x * 3), output.as_mut_ptr().add(x * 3));
+      x += 16;
+    }
+    if x < width {
+      scalar::bgr_rgb_swap_row(
+        &input[x * 3..width * 3],
+        &mut output[x * 3..width * 3],
+        width - x,
+      );
+    }
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -253,9 +294,9 @@ mod tests {
     let mut bgr_scalar = std::vec![0u8; width * 3];
     let mut bgr_sse41 = std::vec![0u8; width * 3];
 
-    scalar::yuv_420_to_bgr_row_scalar(&y, &u, &v, &mut bgr_scalar, width, matrix, full_range);
+    scalar::yuv_420_to_rgb_row(&y, &u, &v, &mut bgr_scalar, width, matrix, full_range);
     unsafe {
-      yuv_420_to_bgr_row_sse41(&y, &u, &v, &mut bgr_sse41, width, matrix, full_range);
+      yuv_420_to_rgb_row(&y, &u, &v, &mut bgr_sse41, width, matrix, full_range);
     }
 
     if bgr_scalar != bgr_sse41 {
@@ -316,6 +357,32 @@ mod tests {
     // Widths that leave a non‑trivial scalar tail (non‑multiple of 16).
     for w in [18usize, 30, 34, 1922] {
       check_equivalence(w, ColorMatrix::Bt601, false);
+    }
+  }
+
+  // ---- bgr_rgb_swap_row equivalence -----------------------------------
+
+  fn check_swap_equivalence(width: usize) {
+    let input: std::vec::Vec<u8> = (0..width * 3)
+      .map(|i| ((i * 17 + 41) & 0xFF) as u8)
+      .collect();
+    let mut out_scalar = std::vec![0u8; width * 3];
+    let mut out_sse41 = std::vec![0u8; width * 3];
+
+    scalar::bgr_rgb_swap_row(&input, &mut out_scalar, width);
+    unsafe {
+      bgr_rgb_swap_row(&input, &mut out_sse41, width);
+    }
+    assert_eq!(out_scalar, out_sse41, "SSE4.1 swap diverges from scalar");
+  }
+
+  #[test]
+  fn sse41_swap_matches_scalar() {
+    if !std::arch::is_x86_feature_detected!("sse4.1") {
+      return;
+    }
+    for w in [1usize, 15, 16, 17, 31, 32, 33, 1920, 1921] {
+      check_swap_equivalence(w);
     }
   }
 }

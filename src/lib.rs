@@ -6,17 +6,17 @@
 //! Every source pixel format has its own kernel (`yuv420p_to`,
 //! `nv12_to`, `bgr24_to`, …) that walks the source row by row and hands
 //! each row to a caller-supplied [`PixelSink`]. The Sink decides what
-//! to derive — luma only, BGR only, HSV only, all three, or something
+//! to derive — luma only, RGB only, HSV only, all three, or something
 //! custom — and writes into whatever buffers it owns.
 //!
 //! The row the Sink receives (`Self::Input<'_>`) has a shape that
 //! reflects the source format: [`yuv::Yuv420pRow`] carries Y / U / V
-//! slices plus matrix / range metadata; [`bgr::Bgr24Row`] (future) will
-//! carry a single packed BGR slice; etc. Each source family declares a
+//! slices plus matrix / range metadata; [`rgb::Bgr24Row`] (future) will
+//! carry a single packed RGB slice; etc. Each source family declares a
 //! subtrait (`Yuv420pSink: PixelSink<Input<'_> = Yuv420pRow<'_>>`) so
 //! kernel signatures stay sharp.
 //!
-//! For the common case — "give me BGR / Luma / HSV or any subset" —
+//! For the common case — "give me RGB / Luma / HSV or any subset" —
 //! the crate ships [`sinker::MixedSinker`] plus the
 //! [`sinker::LumaSinker`] / [`sinker::BgrSinker`] / [`sinker::HsvSinker`]
 //! newtype shortcuts over it.
@@ -124,7 +124,7 @@ pub enum ColorMatrix {
 ///
 /// Used as a type parameter on sinks that specialize per source —
 /// [`sinker::MixedSinker<'_, F>`] for example. Implementors are the
-/// zero-sized markers in [`yuv`], [`bgr`](sinker) etc.
+/// zero-sized markers in [`yuv`], [`rgb`](sinker) etc.
 pub trait SourceFormat: sealed::Sealed {}
 
 pub(crate) mod sealed {

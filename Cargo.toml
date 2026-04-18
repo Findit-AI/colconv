@@ -5,16 +5,16 @@ edition = "2024"
 repository = "https://github.com/findit-ai/colconv"
 homepage = "https://github.com/findit-ai/colconv"
 documentation = "https://docs.rs/colconv"
-description = "SIMD-dispatched color-conversion kernels covering the FFmpeg AVPixelFormat space, with a Sink-based API so consumers pick which derived outputs (BGR / Luma / HSV / custom) they want without paying for the ones they don't."
+description = "SIMD-dispatched color-conversion kernels covering the FFmpeg AVPixelFormat space, with a Sink-based API so consumers pick which derived outputs (RGB / Luma / HSV / custom) they want without paying for the ones they don't."
 license = "MIT OR Apache-2.0"
 rust-version = "1.95.0"
 
 [[bench]]
-name = "yuv_420_to_bgr"
+name = "yuv_420_to_rgb"
 harness = false
 
 [[bench]]
-name = "bgr_to_hsv"
+name = "rgb_to_hsv"
 harness = false
 
 [features]

@@ -1,4 +1,4 @@
-//! [`MixedSinker`] — the common "I want some subset of {BGR, Luma, HSV}
+//! [`MixedSinker`] — the common "I want some subset of {RGB, Luma, HSV}
 //! written into my own buffers" consumer.
 //!
 //! Generic over the source format via an `F: SourceFormat` type
@@ -11,11 +11,11 @@ use std::vec::Vec;
 
 use crate::{
   HsvBuffers, PixelSink, SourceFormat,
-  row::{bgr_to_hsv_row, yuv_420_to_bgr_row},
+  row::{rgb_to_hsv_row, yuv_420_to_rgb_row},
   yuv::{Yuv420p, Yuv420pRow, Yuv420pSink},
 };
 
-/// A sink that writes any subset of `{BGR, Luma, HSV}` into
+/// A sink that writes any subset of `{RGB, Luma, HSV}` into
 /// caller-provided buffers.
 ///
 /// Each output is optional — provide `Some(buffer)` to have that
@@ -23,10 +23,10 @@ use crate::{
 /// legal (the kernel still walks the source and calls `process`
 /// for each row, but nothing is written).
 ///
-/// When HSV is requested **without** BGR, `MixedSinker` keeps a single
-/// row of intermediate BGR in an internal scratch buffer (allocated
-/// lazily on first use). If BGR output is also requested, the user's
-/// BGR buffer serves as the intermediate for HSV and no scratch is
+/// When HSV is requested **without** RGB, `MixedSinker` keeps a single
+/// row of intermediate RGB in an internal scratch buffer (allocated
+/// lazily on first use). If RGB output is also requested, the user's
+/// RGB buffer serves as the intermediate for HSV and no scratch is
 /// allocated.
 ///
 /// # Type parameter
@@ -35,13 +35,13 @@ use crate::{
 /// Each format provides its own `impl PixelSink for MixedSinker<'_, F>`
 /// (the only `impl` landed in v0.1 is for [`Yuv420p`]).
 pub struct MixedSinker<'a, F: SourceFormat> {
-  bgr: Option<&'a mut [u8]>,
+  rgb: Option<&'a mut [u8]>,
   luma: Option<&'a mut [u8]>,
   hsv: Option<HsvBuffers<'a>>,
   width: usize,
   /// Lazily grown to `3 * width` bytes when HSV is requested without a
-  /// user BGR buffer. Empty otherwise.
-  bgr_scratch: Vec<u8>,
+  /// user RGB buffer. Empty otherwise.
+  rgb_scratch: Vec<u8>,
   /// Whether row primitives dispatch to their SIMD backend. Defaults
   /// to `true`; benchmarks flip this with [`Self::with_simd`] /
   /// [`Self::set_simd`] to A/B test scalar vs SIMD on the same frame.
@@ -51,25 +51,25 @@ pub struct MixedSinker<'a, F: SourceFormat> {
 
 impl<F: SourceFormat> MixedSinker<'_, F> {
   /// Creates an empty [`MixedSinker`] for the given output width in
-  /// pixels. No outputs are requested until `with_bgr` / `with_luma` /
+  /// pixels. No outputs are requested until `with_rgb` / `with_luma` /
   /// `with_hsv` are called on the builder.
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub fn new(width: usize) -> Self {
     Self {
-      bgr: None,
+      rgb: None,
       luma: None,
       hsv: None,
       width,
-      bgr_scratch: Vec::new(),
+      rgb_scratch: Vec::new(),
       simd: true,
       _fmt: PhantomData,
     }
   }
 
-  /// Returns `true` iff the sinker will write BGR.
+  /// Returns `true` iff the sinker will write RGB.
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub const fn produces_bgr(&self) -> bool {
-    self.bgr.is_some()
+  pub const fn produces_rgb(&self) -> bool {
+    self.rgb.is_some()
   }
 
   /// Returns `true` iff the sinker will write luma.
@@ -117,19 +117,19 @@ impl<F: SourceFormat> MixedSinker<'_, F> {
 }
 
 impl<'a, F: SourceFormat> MixedSinker<'a, F> {
-  /// Attaches a packed 24-bit BGR output buffer.
+  /// Attaches a packed 24-bit RGB output buffer.
   /// `buf.len()` must be `>= width * height * 3`.
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub const fn with_bgr(mut self, buf: &'a mut [u8]) -> Self {
-    self.set_bgr(buf);
+  pub const fn with_rgb(mut self, buf: &'a mut [u8]) -> Self {
+    self.set_rgb(buf);
     self
   }
 
-  /// Attaches a packed 24-bit BGR output buffer.
+  /// Attaches a packed 24-bit RGB output buffer.
   /// `buf.len()` must be `>= width * height * 3`.
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub const fn set_bgr(&mut self, buf: &'a mut [u8]) -> &mut Self {
-    self.bgr = Some(buf);
+  pub const fn set_rgb(&mut self, buf: &'a mut [u8]) -> &mut Self {
+    self.rgb = Some(buf);
     self
   }
 
@@ -176,13 +176,13 @@ impl PixelSink for MixedSinker<'_, Yuv420p> {
     let idx = row.row();
     let use_simd = self.simd;
 
-    // Split-borrow so the `bgr_scratch` path and the `hsv` write don't
-    // collide with the `bgr` read-after-write chain below.
+    // Split-borrow so the `rgb_scratch` path and the `hsv` write don't
+    // collide with the `rgb` read-after-write chain below.
     let Self {
-      bgr,
+      rgb,
       luma,
       hsv,
-      bgr_scratch,
+      rgb_scratch,
       ..
     } = self;
 
@@ -191,47 +191,48 @@ impl PixelSink for MixedSinker<'_, Yuv420p> {
       luma[idx * w..(idx + 1) * w].copy_from_slice(&row.y()[..w]);
     }
 
-    let want_bgr = bgr.is_some();
+    let want_rgb = rgb.is_some();
     let want_hsv = hsv.is_some();
-    if !want_bgr && !want_hsv {
+    if !want_rgb && !want_hsv {
       return;
     }
 
-    // Pick where the BGR row lands. If the caller wants BGR in their
+    // Pick where the RGB row lands. If the caller wants RGB in their
     // own buffer, write directly there; otherwise use the scratch.
     // Either way, the slice we hold is `&mut [u8]` that we then
     // reborrow as `&[u8]` for the HSV step.
-    let bgr_row: &mut [u8] = match bgr.as_deref_mut() {
+    let rgb_row: &mut [u8] = match rgb.as_deref_mut() {
       Some(buf) => &mut buf[idx * w * 3..(idx + 1) * w * 3],
       None => {
-        if bgr_scratch.len() < w * 3 {
-          bgr_scratch.resize(w * 3, 0);
+        if rgb_scratch.len() < w * 3 {
+          rgb_scratch.resize(w * 3, 0);
         }
-        &mut bgr_scratch[..w * 3]
+        &mut rgb_scratch[..w * 3]
       }
     };
 
-    // Fused YUV→BGR: upsample chroma in registers inside the row
+    // Fused YUV→RGB: upsample chroma in registers inside the row
     // primitive, no intermediate memory.
-    yuv_420_to_bgr_row(
+    yuv_420_to_rgb_row(
       row.y(),
       row.u_half(),
       row.v_half(),
-      bgr_row,
+      rgb_row,
       w,
       row.matrix(),
       row.full_range(),
       use_simd,
     );
 
-    // HSV from the BGR row we just wrote.
+    // HSV from the RGB row we just wrote.
     if let Some(hsv) = hsv.as_mut() {
-      bgr_to_hsv_row(
-        bgr_row,
+      rgb_to_hsv_row(
+        rgb_row,
         &mut hsv.h[idx * w..(idx + 1) * w],
         &mut hsv.s[idx * w..(idx + 1) * w],
         &mut hsv.v[idx * w..(idx + 1) * w],
         w,
+        use_simd,
       );
     }
   }
@@ -276,15 +277,15 @@ mod tests {
 
   #[test]
   fn bgr_only_converts_gray_to_gray() {
-    // Neutral chroma → gray BGR; solid Y=128 → ~128 in every BGR byte.
+    // Neutral chroma → gray RGB; solid Y=128 → ~128 in every RGB byte.
     let (yp, up, vp) = solid_yuv420p_frame(16, 8, 128, 128, 128);
     let src = Yuv420pFrame::new(&yp, &up, &vp, 16, 8, 16, 8, 8);
 
-    let mut bgr = std::vec![0u8; 16 * 8 * 3];
-    let mut sink = MixedSinker::<Yuv420p>::new(16).with_bgr(&mut bgr);
+    let mut rgb = std::vec![0u8; 16 * 8 * 3];
+    let mut sink = MixedSinker::<Yuv420p>::new(16).with_rgb(&mut rgb);
     yuv420p_to(&src, true, ColorMatrix::Bt601, &mut sink);
 
-    for px in bgr.chunks(3) {
+    for px in rgb.chunks(3) {
       assert!(px[0].abs_diff(128) <= 1);
       assert_eq!(px[0], px[1]);
       assert_eq!(px[1], px[2]);
@@ -293,7 +294,7 @@ mod tests {
 
   #[test]
   fn hsv_only_allocates_scratch_and_produces_gray_hsv() {
-    // Neutral gray → H=0, S=0, V=~128. No BGR buffer provided.
+    // Neutral gray → H=0, S=0, V=~128. No RGB buffer provided.
     let (yp, up, vp) = solid_yuv420p_frame(16, 8, 128, 128, 128);
     let src = Yuv420pFrame::new(&yp, &up, &vp, 16, 8, 16, 8, 8);
 
@@ -313,21 +314,21 @@ mod tests {
     let (yp, up, vp) = solid_yuv420p_frame(16, 8, 200, 128, 128);
     let src = Yuv420pFrame::new(&yp, &up, &vp, 16, 8, 16, 8, 8);
 
-    let mut bgr = std::vec![0u8; 16 * 8 * 3];
+    let mut rgb = std::vec![0u8; 16 * 8 * 3];
     let mut luma = std::vec![0u8; 16 * 8];
     let mut h = std::vec![0u8; 16 * 8];
     let mut s = std::vec![0u8; 16 * 8];
     let mut v = std::vec![0u8; 16 * 8];
     let mut sink = MixedSinker::<Yuv420p>::new(16)
-      .with_bgr(&mut bgr)
+      .with_rgb(&mut rgb)
       .with_luma(&mut luma)
       .with_hsv(&mut h, &mut s, &mut v);
     yuv420p_to(&src, true, ColorMatrix::Bt601, &mut sink);
 
     // Luma = Y plane verbatim.
     assert!(luma.iter().all(|&y| y == 200));
-    // BGR gray.
-    for px in bgr.chunks(3) {
+    // RGB gray.
+    for px in rgb.chunks(3) {
       assert!(px[0].abs_diff(200) <= 1);
     }
     // HSV of gray.
@@ -338,23 +339,23 @@ mod tests {
 
   #[test]
   fn bgr_with_hsv_uses_user_buffer_not_scratch() {
-    // When caller provides BGR, the scratch should remain empty (Vec len 0).
+    // When caller provides RGB, the scratch should remain empty (Vec len 0).
     let (yp, up, vp) = solid_yuv420p_frame(16, 8, 100, 128, 128);
     let src = Yuv420pFrame::new(&yp, &up, &vp, 16, 8, 16, 8, 8);
 
-    let mut bgr = std::vec![0u8; 16 * 8 * 3];
+    let mut rgb = std::vec![0u8; 16 * 8 * 3];
     let mut h = std::vec![0u8; 16 * 8];
     let mut s = std::vec![0u8; 16 * 8];
     let mut v = std::vec![0u8; 16 * 8];
     let mut sink = MixedSinker::<Yuv420p>::new(16)
-      .with_bgr(&mut bgr)
+      .with_rgb(&mut rgb)
       .with_hsv(&mut h, &mut s, &mut v);
     yuv420p_to(&src, true, ColorMatrix::Bt601, &mut sink);
 
     assert_eq!(
-      sink.bgr_scratch.len(),
+      sink.rgb_scratch.len(),
       0,
-      "scratch should stay unallocated when BGR buffer is provided"
+      "scratch should stay unallocated when RGB buffer is provided"
     );
   }
 
@@ -379,9 +380,9 @@ mod tests {
     let mut bgr_simd = std::vec![0u8; w * h * 3];
     let mut bgr_scalar = std::vec![0u8; w * h * 3];
 
-    let mut sink_simd = MixedSinker::<Yuv420p>::new(w).with_bgr(&mut bgr_simd);
+    let mut sink_simd = MixedSinker::<Yuv420p>::new(w).with_rgb(&mut bgr_simd);
     let mut sink_scalar = MixedSinker::<Yuv420p>::new(w)
-      .with_bgr(&mut bgr_scalar)
+      .with_rgb(&mut bgr_scalar)
       .with_simd(false);
     assert!(sink_simd.simd());
     assert!(!sink_scalar.simd());

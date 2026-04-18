@@ -30,10 +30,10 @@ pub(crate) mod scalar;
 
 use crate::ColorMatrix;
 
-/// Converts one row of 4:2:0 YUV to packed BGR.
+/// Converts one row of 4:2:0 YUV to packed RGB.
 ///
 /// Dispatches to the best available backend for the current target.
-/// See [`scalar::yuv_420_to_bgr_row_scalar`] for the full semantic
+/// See [`scalar::yuv_420_to_rgb_row`] for the full semantic
 /// specification (range handling, matrix definitions, output layout).
 ///
 /// `use_simd = false` forces the scalar reference path, bypassing any
@@ -41,11 +41,11 @@ use crate::ColorMatrix;
 /// directly on the same input; production code should pass `true`.
 #[cfg_attr(not(tarpaulin), inline(always))]
 #[allow(clippy::too_many_arguments)]
-pub fn yuv_420_to_bgr_row(
+pub fn yuv_420_to_rgb_row(
   y: &[u8],
   u_half: &[u8],
   v_half: &[u8],
-  bgr_out: &mut [u8],
+  rgb_out: &mut [u8],
   width: usize,
   matrix: ColorMatrix,
   full_range: bool,
@@ -60,7 +60,7 @@ pub fn yuv_420_to_bgr_row(
           // (same contract as the scalar reference); they are checked
           // with `debug_assert` in debug builds.
           unsafe {
-            arch::neon::yuv_420_to_bgr_row_neon(y, u_half, v_half, bgr_out, width, matrix, full_range);
+            arch::neon::yuv_420_to_rgb_row(y, u_half, v_half, rgb_out, width, matrix, full_range);
           }
           return;
         }
@@ -70,8 +70,8 @@ pub fn yuv_420_to_bgr_row(
           // SAFETY: `avx512_available()` verified AVX‑512BW is present.
           // Bounds / parity invariants are the caller's obligation.
           unsafe {
-            arch::x86_avx512::yuv_420_to_bgr_row_avx512(
-              y, u_half, v_half, bgr_out, width, matrix, full_range,
+            arch::x86_avx512::yuv_420_to_rgb_row(
+              y, u_half, v_half, rgb_out, width, matrix, full_range,
             );
           }
           return;
@@ -82,8 +82,8 @@ pub fn yuv_420_to_bgr_row(
           // (same contract as the scalar reference); they are checked
           // with `debug_assert` in debug builds.
           unsafe {
-            arch::x86_avx2::yuv_420_to_bgr_row_avx2(
-              y, u_half, v_half, bgr_out, width, matrix, full_range,
+            arch::x86_avx2::yuv_420_to_rgb_row(
+              y, u_half, v_half, rgb_out, width, matrix, full_range,
             );
           }
           return;
@@ -93,8 +93,8 @@ pub fn yuv_420_to_bgr_row(
           // Bounds / parity invariants are the caller's obligation
           // (same contract as the scalar reference).
           unsafe {
-            arch::x86_sse41::yuv_420_to_bgr_row_sse41(
-              y, u_half, v_half, bgr_out, width, matrix, full_range,
+            arch::x86_sse41::yuv_420_to_rgb_row(
+              y, u_half, v_half, rgb_out, width, matrix, full_range,
             );
           }
           return;
@@ -111,8 +111,8 @@ pub fn yuv_420_to_bgr_row(
           // support is fixed at produce‑time. Bounds / parity
           // invariants are the caller's obligation.
           unsafe {
-            arch::wasm_simd128::yuv_420_to_bgr_row_wasm_simd128(
-              y, u_half, v_half, bgr_out, width, matrix, full_range,
+            arch::wasm_simd128::yuv_420_to_rgb_row(
+              y, u_half, v_half, rgb_out, width, matrix, full_range,
             );
           }
           return;
@@ -125,20 +125,122 @@ pub fn yuv_420_to_bgr_row(
     }
   }
 
-  scalar::yuv_420_to_bgr_row_scalar(y, u_half, v_half, bgr_out, width, matrix, full_range);
+  scalar::yuv_420_to_rgb_row(y, u_half, v_half, rgb_out, width, matrix, full_range);
 }
 
-/// Converts one row of packed BGR to planar HSV (OpenCV 8‑bit
-/// encoding). See [`scalar::bgr_to_hsv_row_scalar`] for semantics.
+/// Converts one row of packed RGB to planar HSV (OpenCV 8‑bit
+/// encoding). See [`scalar::rgb_to_hsv_row`] for semantics.
+///
+/// `use_simd = false` forces the scalar reference path, bypassing any
+/// SIMD backend (same semantics as `yuv_420_to_rgb_row`).
 #[cfg_attr(not(tarpaulin), inline(always))]
-pub fn bgr_to_hsv_row(
-  bgr: &[u8],
+pub fn rgb_to_hsv_row(
+  rgb: &[u8],
   h_out: &mut [u8],
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
+  use_simd: bool,
 ) {
-  scalar::bgr_to_hsv_row_scalar(bgr, h_out, s_out, v_out, width);
+  if use_simd {
+    cfg_select! {
+      target_arch = "aarch64" => {
+        if neon_available() {
+          // SAFETY: `neon_available()` verified NEON is present on this
+          // CPU. Bounds invariants are the caller's obligation,
+          // checked with `debug_assert` in debug builds.
+          unsafe {
+            arch::neon::rgb_to_hsv_row(rgb, h_out, s_out, v_out, width);
+          }
+          return;
+        }
+      },
+      _ => {
+        // Other targets currently fall through to scalar until HSV
+        // SIMD backends land for them (x86 cascade and wasm_simd128 are
+        // follow‑ups to the NEON kernel).
+      }
+    }
+  }
+
+  scalar::rgb_to_hsv_row(rgb, h_out, s_out, v_out, width);
+}
+
+/// Rewrites a row of packed BGR to packed RGB by swapping the outer
+/// two channels (byte 0 ↔ byte 2) of every triple. `input` and
+/// `output` must not alias.
+///
+/// The underlying transformation is self‑inverse, so
+/// [`rgb_to_bgr_row`] shares the same implementation — use whichever
+/// name reads more naturally at the call site.
+///
+/// `use_simd = false` forces the scalar reference path.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub fn bgr_to_rgb_row(bgr: &[u8], rgb_out: &mut [u8], width: usize, use_simd: bool) {
+  swap_rb_channels_row(bgr, rgb_out, width, use_simd);
+}
+
+/// Rewrites a row of packed RGB to packed BGR by swapping the outer
+/// two channels. See [`bgr_to_rgb_row`] — this is an alias that reads
+/// more naturally for the opposite direction.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub fn rgb_to_bgr_row(rgb: &[u8], bgr_out: &mut [u8], width: usize, use_simd: bool) {
+  swap_rb_channels_row(rgb, bgr_out, width, use_simd);
+}
+
+/// Shared dispatcher behind `bgr_to_rgb_row` / `rgb_to_bgr_row`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+fn swap_rb_channels_row(input: &[u8], output: &mut [u8], width: usize, use_simd: bool) {
+  if use_simd {
+    cfg_select! {
+      target_arch = "aarch64" => {
+        if neon_available() {
+          // SAFETY: `neon_available()` verified NEON is present.
+          unsafe {
+            arch::neon::bgr_rgb_swap_row(input, output, width);
+          }
+          return;
+        }
+      },
+      target_arch = "x86_64" => {
+        if avx512_available() {
+          // SAFETY: `avx512_available()` verified AVX‑512BW is present.
+          unsafe {
+            arch::x86_avx512::bgr_rgb_swap_row(input, output, width);
+          }
+          return;
+        }
+        if avx2_available() {
+          // SAFETY: AVX2 just verified.
+          unsafe {
+            arch::x86_avx2::bgr_rgb_swap_row(input, output, width);
+          }
+          return;
+        }
+        if sse41_available() {
+          // SAFETY: SSE4.1 just verified.
+          unsafe {
+            arch::x86_sse41::bgr_rgb_swap_row(input, output, width);
+          }
+          return;
+        }
+      },
+      target_arch = "wasm32" => {
+        if simd128_available() {
+          // SAFETY: simd128 compile‑time verified.
+          unsafe {
+            arch::wasm_simd128::bgr_rgb_swap_row(input, output, width);
+          }
+          return;
+        }
+      },
+      _ => {
+        // Targets without a SIMD backend fall through to scalar.
+      }
+    }
+  }
+
+  scalar::bgr_rgb_swap_row(input, output, width);
 }
 
 // ---- runtime CPU feature detection -----------------------------------

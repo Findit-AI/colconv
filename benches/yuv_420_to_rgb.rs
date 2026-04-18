@@ -1,4 +1,4 @@
-//! Per‑row YUV 4:2:0 → packed BGR throughput baseline.
+//! Per‑row YUV 4:2:0 → packed RGB throughput baseline.
 //!
 //! Each iteration converts one row of the given width. Two variants
 //! per width — `simd=true` (NEON on aarch64, scalar elsewhere) and
@@ -8,7 +8,7 @@
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;
 
-use colconv::{ColorMatrix, row::yuv_420_to_bgr_row};
+use colconv::{ColorMatrix, row::yuv_420_to_rgb_row};
 
 /// Fills a buffer with a deterministic pseudo‑random byte sequence so
 /// the measurement isn't inflated by cache‑friendly uniform data.
@@ -28,7 +28,7 @@ fn bench(c: &mut Criterion) {
   const MATRIX: ColorMatrix = ColorMatrix::Bt709;
   const FULL_RANGE: bool = false;
 
-  let mut group = c.benchmark_group("yuv_420_to_bgr_row");
+  let mut group = c.benchmark_group("yuv_420_to_rgb_row");
 
   for &w in WIDTHS {
     let mut y = std::vec![0u8; w];
@@ -37,7 +37,7 @@ fn bench(c: &mut Criterion) {
     fill_pseudo_random(&mut y, 0x1111);
     fill_pseudo_random(&mut u, 0x2222);
     fill_pseudo_random(&mut v, 0x3333);
-    let mut bgr = std::vec![0u8; w * 3];
+    let mut rgb = std::vec![0u8; w * 3];
 
     // Throughput reported in output bytes so `MB/s` numbers are
     // comparable across widths.
@@ -47,11 +47,11 @@ fn bench(c: &mut Criterion) {
       let label = if use_simd { "simd" } else { "scalar" };
       group.bench_with_input(BenchmarkId::new(label, w), &w, |b, &w| {
         b.iter(|| {
-          yuv_420_to_bgr_row(
+          yuv_420_to_rgb_row(
             black_box(&y),
             black_box(&u),
             black_box(&v),
-            black_box(&mut bgr),
+            black_box(&mut rgb),
             w,
             MATRIX,
             FULL_RANGE,

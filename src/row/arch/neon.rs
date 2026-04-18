@@ -12,7 +12,7 @@
 //!
 //! The kernel uses i32 widening multiplies and the same
 //! `(prod + (1 << 14)) >> 15` Q15 rounding as
-//! [`crate::row::scalar::yuv_420_to_bgr_row_scalar`], so output is
+//! [`crate::row::scalar::yuv_420_to_rgb_row`], so output is
 //! **byte‑identical** to the scalar reference for every input. This is
 //! asserted by the equivalence tests below.
 //!
@@ -33,16 +33,19 @@
 //! 8. Saturate‑narrow to u8x16 and interleave with `vst3q_u8`.
 
 use core::arch::aarch64::{
-  int16x8_t, int32x4_t, uint8x16x3_t, vaddq_s32, vcombine_s16, vcombine_u8, vdupq_n_s16,
-  vdupq_n_s32, vget_high_s16, vget_high_u8, vget_low_s16, vget_low_u8, vld1_u8, vld1q_u8,
-  vmovl_s16, vmovl_u8, vmulq_s32, vqaddq_s16, vqmovn_s32, vqmovun_s16, vreinterpretq_s16_u16,
-  vshrq_n_s32, vst3q_u8, vsubq_s16, vzip1q_s16, vzip2q_s16,
+  float32x4_t, int16x8_t, int32x4_t, uint8x16_t, uint8x16x3_t, vaddq_f32, vaddq_s32, vbslq_f32,
+  vceqq_f32, vcltq_f32, vcombine_s16, vcombine_u8, vcombine_u16, vcvtq_f32_u32, vcvtq_u32_f32,
+  vdivq_f32, vdupq_n_f32, vdupq_n_s16, vdupq_n_s32, vget_high_s16, vget_high_u8, vget_high_u16,
+  vget_low_s16, vget_low_u8, vget_low_u16, vld1_u8, vld1q_u8, vld3q_u8, vmaxq_f32, vminq_f32,
+  vmovl_s16, vmovl_u8, vmovl_u16, vmovn_u16, vmovn_u32, vmulq_f32, vmulq_s32, vmvnq_u32,
+  vqaddq_s16, vqmovn_s32, vqmovun_s16, vreinterpretq_s16_u16, vshrq_n_s32, vst1q_u8, vst3q_u8,
+  vsubq_f32, vsubq_s16, vzip1q_s16, vzip2q_s16,
 };
 
 use crate::{ColorMatrix, row::scalar};
 
-/// NEON YUV 4:2:0 → packed BGR. Semantics match
-/// [`scalar::yuv_420_to_bgr_row_scalar`] byte‑identically.
+/// NEON YUV 4:2:0 → packed RGB. Semantics match
+/// [`scalar::yuv_420_to_rgb_row`] byte‑identically.
 ///
 /// # Safety
 ///
@@ -59,18 +62,18 @@ use crate::{ColorMatrix, row::scalar};
 /// 3. `y.len() >= width`.
 /// 4. `u_half.len() >= width / 2`.
 /// 5. `v_half.len() >= width / 2`.
-/// 6. `bgr_out.len() >= 3 * width`.
+/// 6. `rgb_out.len() >= 3 * width`.
 ///
 /// Bounds are verified by `debug_assert` in debug builds; release
 /// builds trust the caller because the kernel relies on unchecked
 /// pointer arithmetic (`vld1q_u8`, `vld1_u8`, `vst3q_u8`).
 #[inline]
 #[target_feature(enable = "neon")]
-pub(crate) unsafe fn yuv_420_to_bgr_row_neon(
+pub(crate) unsafe fn yuv_420_to_rgb_row(
   y: &[u8],
   u_half: &[u8],
   v_half: &[u8],
-  bgr_out: &mut [u8],
+  rgb_out: &mut [u8],
   width: usize,
   matrix: ColorMatrix,
   full_range: bool,
@@ -79,7 +82,7 @@ pub(crate) unsafe fn yuv_420_to_bgr_row_neon(
   debug_assert!(y.len() >= width);
   debug_assert!(u_half.len() >= width / 2);
   debug_assert!(v_half.len() >= width / 2);
-  debug_assert!(bgr_out.len() >= width * 3);
+  debug_assert!(rgb_out.len() >= width * 3);
 
   let coeffs = scalar::Coefficients::for_matrix(matrix);
   let (y_off, y_scale, c_scale) = scalar::range_params(full_range);
@@ -163,9 +166,9 @@ pub(crate) unsafe fn yuv_420_to_bgr_row_neon(
         vqmovun_s16(vqaddq_s16(y_scaled_hi, r_dup_hi)),
       );
 
-      // vst3q_u8 writes 48 bytes as interleaved B, G, R triples.
-      let bgr = uint8x16x3_t(b_u8, g_u8, r_u8);
-      vst3q_u8(bgr_out.as_mut_ptr().add(x * 3), bgr);
+      // vst3q_u8 writes 48 bytes as interleaved R, G, B triples.
+      let rgb = uint8x16x3_t(r_u8, g_u8, b_u8);
+      vst3q_u8(rgb_out.as_mut_ptr().add(x * 3), rgb);
 
       x += 16;
     }
@@ -173,11 +176,11 @@ pub(crate) unsafe fn yuv_420_to_bgr_row_neon(
     // Scalar tail for the 0..14 leftover pixels (always even, 4:2:0
     // requires even width so x/2 and width/2 are well‑defined).
     if x < width {
-      scalar::yuv_420_to_bgr_row_scalar(
+      scalar::yuv_420_to_rgb_row(
         &y[x..width],
         &u_half[x / 2..width / 2],
         &v_half[x / 2..width / 2],
-        &mut bgr_out[x * 3..width * 3],
+        &mut rgb_out[x * 3..width * 3],
         width - x,
         matrix,
         full_range,
@@ -194,7 +197,7 @@ pub(crate) unsafe fn yuv_420_to_bgr_row_neon(
 // intrinsics are marked `unsafe fn` in the standard library.
 //
 // `#[inline(always)]` guarantees these are inlined into the NEON‑
-// enabled caller (`yuv_420_to_bgr_row_neon` has
+// enabled caller (`yuv_420_to_rgb_row` has
 // `#[target_feature(enable = "neon")]`), so the intrinsics execute in
 // a context where NEON is explicitly enabled — not just implicitly
 // via the aarch64 target's default feature set.
@@ -253,6 +256,264 @@ fn scale_y(
   }
 }
 
+// ===== RGB → HSV =========================================================
+
+/// NEON RGB → planar HSV. Semantics match
+/// [`scalar::rgb_to_hsv_row`] byte‑identically.
+///
+/// # Safety
+///
+/// The caller must uphold **all** of the following. Violating any
+/// causes undefined behavior:
+///
+/// 1. **NEON must be available on the current CPU** (same obligation
+///    as `yuv_420_to_rgb_row`; the dispatcher checks this via
+///    `is_aarch64_feature_detected!("neon")`).
+/// 2. `rgb.len() >= 3 * width`.
+/// 3. `h_out.len() >= width`.
+/// 4. `s_out.len() >= width`.
+/// 5. `v_out.len() >= width`.
+///
+/// Bounds are verified by `debug_assert` in debug builds. The kernel
+/// relies on unchecked pointer arithmetic (`vld3q_u8`, `vst1q_u8`).
+///
+/// # Numerical contract
+///
+/// Bit‑identical to the scalar reference. Every scalar op has the
+/// same SIMD counterpart in the same order: `vmaxq_f32` / `vminq_f32`
+/// mirror `f32::max` / `f32::min`; `vdivq_f32` is true f32 division
+/// (not reciprocal estimate); branch cascade uses `vbslq_f32` in the
+/// same `delta == 0 → v == r → v == g → v == b` priority.
+#[inline]
+#[target_feature(enable = "neon")]
+pub(crate) unsafe fn rgb_to_hsv_row(
+  rgb: &[u8],
+  h_out: &mut [u8],
+  s_out: &mut [u8],
+  v_out: &mut [u8],
+  width: usize,
+) {
+  debug_assert!(rgb.len() >= width * 3, "rgb row too short");
+  debug_assert!(h_out.len() >= width, "H row too short");
+  debug_assert!(s_out.len() >= width, "S row too short");
+  debug_assert!(v_out.len() >= width, "V row too short");
+
+  // SAFETY: NEON availability is the caller's obligation per the
+  // `# Safety` section. All pointer adds below are bounded by the
+  // `while x + 16 <= width` loop condition and the caller‑promised
+  // slice lengths.
+  unsafe {
+    let mut x = 0usize;
+    while x + 16 <= width {
+      // Deinterleave 16 RGB pixels → three u8x16 channel vectors.
+      let rgb_vec = vld3q_u8(rgb.as_ptr().add(x * 3));
+      let r_u8 = rgb_vec.0;
+      let g_u8 = rgb_vec.1;
+      let b_u8 = rgb_vec.2;
+
+      // Widen each u8x16 to four f32x4 (16 values split into four
+      // 4‑pixel groups) for the f32 HSV math.
+      let (b0, b1, b2, b3) = u8x16_to_f32x4_quad(b_u8);
+      let (g0, g1, g2, g3) = u8x16_to_f32x4_quad(g_u8);
+      let (r0, r1, r2, r3) = u8x16_to_f32x4_quad(r_u8);
+
+      // HSV per 4‑pixel group. Each returns (h_quant, s_quant, v_quant)
+      // as f32x4 values already in [0, 179] / [0, 255] / [0, 255].
+      let (h0, s0, v0) = hsv_group(b0, g0, r0);
+      let (h1, s1, v1) = hsv_group(b1, g1, r1);
+      let (h2, s2, v2) = hsv_group(b2, g2, r2);
+      let (h3, s3, v3) = hsv_group(b3, g3, r3);
+
+      // Truncate f32 → u8 via u32 intermediate, matching scalar `as u8`
+      // (which saturates then truncates; values are pre‑clamped so the
+      // narrow is safe).
+      let h_u8 = f32x4_quad_to_u8x16(h0, h1, h2, h3);
+      let s_u8 = f32x4_quad_to_u8x16(s0, s1, s2, s3);
+      let v_u8 = f32x4_quad_to_u8x16(v0, v1, v2, v3);
+
+      vst1q_u8(h_out.as_mut_ptr().add(x), h_u8);
+      vst1q_u8(s_out.as_mut_ptr().add(x), s_u8);
+      vst1q_u8(v_out.as_mut_ptr().add(x), v_u8);
+
+      x += 16;
+    }
+
+    // Scalar tail for the 0..15 leftover pixels.
+    if x < width {
+      scalar::rgb_to_hsv_row(
+        &rgb[x * 3..width * 3],
+        &mut h_out[x..width],
+        &mut s_out[x..width],
+        &mut v_out[x..width],
+        width - x,
+      );
+    }
+  }
+}
+
+/// Widens a u8x16 to four f32x4 groups (covering lanes 0..3, 4..7,
+/// 8..11, 12..15 respectively). Lanes are zero‑extended at each
+/// widening step, so f32 values land exactly in `[0.0, 255.0]`.
+#[inline(always)]
+fn u8x16_to_f32x4_quad(v: uint8x16_t) -> (float32x4_t, float32x4_t, float32x4_t, float32x4_t) {
+  unsafe {
+    let u16_lo = vmovl_u8(vget_low_u8(v)); // u16x8 = lanes 0..7
+    let u16_hi = vmovl_u8(vget_high_u8(v)); // u16x8 = lanes 8..15
+    let u32_0 = vmovl_u16(vget_low_u16(u16_lo)); // lanes 0..3
+    let u32_1 = vmovl_u16(vget_high_u16(u16_lo)); // lanes 4..7
+    let u32_2 = vmovl_u16(vget_low_u16(u16_hi)); // lanes 8..11
+    let u32_3 = vmovl_u16(vget_high_u16(u16_hi)); // lanes 12..15
+    (
+      vcvtq_f32_u32(u32_0),
+      vcvtq_f32_u32(u32_1),
+      vcvtq_f32_u32(u32_2),
+      vcvtq_f32_u32(u32_3),
+    )
+  }
+}
+
+/// Computes HSV for 4 pixels. Mirrors the scalar `rgb_to_hsv_pixel`
+/// op‑for‑op. Returns `(h_quant, s_quant, v_quant)` — each already
+/// clamped to the scalar's output range (`h ≤ 179`, `s ≤ 255`,
+/// `v ≤ 255`), still as f32 awaiting u8 conversion in the caller.
+#[inline(always)]
+fn hsv_group(
+  b: float32x4_t,
+  g: float32x4_t,
+  r: float32x4_t,
+) -> (float32x4_t, float32x4_t, float32x4_t) {
+  unsafe {
+    let zero = vdupq_n_f32(0.0);
+    let half = vdupq_n_f32(0.5);
+    let sixty = vdupq_n_f32(60.0);
+    let one_twenty = vdupq_n_f32(120.0);
+    let two_forty = vdupq_n_f32(240.0);
+    let three_sixty = vdupq_n_f32(360.0);
+    let one_seventy_nine = vdupq_n_f32(179.0);
+    let two_fifty_five = vdupq_n_f32(255.0);
+
+    // V = max(b, g, r); min = min(b, g, r); delta = V - min.
+    // vmaxq_f32 / vminq_f32 are NaN‑tolerant, matching f32::max / f32::min.
+    let v = vmaxq_f32(vmaxq_f32(b, g), r);
+    let min_bgr = vminq_f32(vminq_f32(b, g), r);
+    let delta = vsubq_f32(v, min_bgr);
+
+    // S = if v == 0 { 0 } else { 255 * delta / v }.
+    let mask_v_nonzero = vmvnq_u32(vceqq_f32(v, zero));
+    let s_nonzero = vdivq_f32(vmulq_f32(two_fifty_five, delta), v);
+    let s = vbslq_f32(mask_v_nonzero, s_nonzero, zero);
+
+    // Hue — compute all three candidate formulas then select.
+    let mask_delta_zero = vceqq_f32(delta, zero);
+    let mask_v_is_r = vceqq_f32(v, r);
+    let mask_v_is_g = vceqq_f32(v, g);
+
+    // Branch 1 (v == r): 60 * (g - b) / delta, wrap negatives by +360.
+    let h_r = {
+      let raw = vdivq_f32(vmulq_f32(sixty, vsubq_f32(g, b)), delta);
+      let mask_neg = vcltq_f32(raw, zero);
+      vbslq_f32(mask_neg, vaddq_f32(raw, three_sixty), raw)
+    };
+    // Branch 2 (v == g): 60 * (b - r) / delta + 120.
+    let h_g = vaddq_f32(
+      vdivq_f32(vmulq_f32(sixty, vsubq_f32(b, r)), delta),
+      one_twenty,
+    );
+    // Branch 3 (v == b, implicit): 60 * (r - g) / delta + 240.
+    let h_b = vaddq_f32(
+      vdivq_f32(vmulq_f32(sixty, vsubq_f32(r, g)), delta),
+      two_forty,
+    );
+
+    // Cascade: if delta == 0 → 0; else if v == r → h_r; else if v == g
+    // → h_g; else → h_b. Same priority order as the scalar.
+    let hue_g_or_b = vbslq_f32(mask_v_is_g, h_g, h_b);
+    let hue_nonzero_delta = vbslq_f32(mask_v_is_r, h_r, hue_g_or_b);
+    let hue = vbslq_f32(mask_delta_zero, zero, hue_nonzero_delta);
+
+    // Quantize to the scalar's output ranges. Scalar:
+    //   h_quant = (hue * 0.5 + 0.5).clamp(0, 179)
+    //   s_quant = (s + 0.5).clamp(0, 255)
+    //   v_quant = (v + 0.5).clamp(0, 255)
+    // clamp → vminq(vmaxq(v, lo), hi). Inputs are all finite so NaN
+    // handling is irrelevant here.
+    let h_quant = vminq_f32(
+      vmaxq_f32(vaddq_f32(vmulq_f32(hue, half), half), zero),
+      one_seventy_nine,
+    );
+    let s_quant = vminq_f32(vmaxq_f32(vaddq_f32(s, half), zero), two_fifty_five);
+    let v_quant = vminq_f32(vmaxq_f32(vaddq_f32(v, half), zero), two_fifty_five);
+
+    (h_quant, s_quant, v_quant)
+  }
+}
+
+/// Converts four f32x4 vectors (16 values in [0, 255]) to one u8x16.
+/// Truncates f32 → u32 via `vcvtq_u32_f32` (matches scalar `as u8`
+/// which saturates‑then‑truncates; values are pre‑clamped so the
+/// narrowing steps below are exact).
+#[inline(always)]
+fn f32x4_quad_to_u8x16(
+  a: float32x4_t,
+  b: float32x4_t,
+  c: float32x4_t,
+  d: float32x4_t,
+) -> uint8x16_t {
+  unsafe {
+    let a_u32 = vcvtq_u32_f32(a);
+    let b_u32 = vcvtq_u32_f32(b);
+    let c_u32 = vcvtq_u32_f32(c);
+    let d_u32 = vcvtq_u32_f32(d);
+    let ab_u16 = vcombine_u16(vmovn_u32(a_u32), vmovn_u32(b_u32));
+    let cd_u16 = vcombine_u16(vmovn_u32(c_u32), vmovn_u32(d_u32));
+    vcombine_u8(vmovn_u16(ab_u16), vmovn_u16(cd_u16))
+  }
+}
+
+// ===== BGR ↔ RGB byte swap ==============================================
+
+/// Swaps the outer two channels of each packed 3‑byte triple. Drives
+/// both `bgr_to_rgb_row` and `rgb_to_bgr_row` since the transformation
+/// is self‑inverse.
+///
+/// NEON makes this almost free: `vld3q_u8` deinterleaves 16 pixels into
+/// three channel vectors `(ch0, ch1, ch2)`, and `vst3q_u8` re‑interleaves
+/// them — passing the deinterleaved vectors back in reversed order
+/// `(ch2, ch1, ch0)` swaps the outer channels in a single store.
+///
+/// # Safety
+///
+/// 1. NEON must be available (same obligation as the other NEON kernels).
+/// 2. `input.len() >= 3 * width`.
+/// 3. `output.len() >= 3 * width`.
+#[inline]
+#[target_feature(enable = "neon")]
+pub(crate) unsafe fn bgr_rgb_swap_row(input: &[u8], output: &mut [u8], width: usize) {
+  debug_assert!(input.len() >= width * 3, "input row too short");
+  debug_assert!(output.len() >= width * 3, "output row too short");
+
+  // SAFETY: NEON availability is the caller's obligation per the
+  // `# Safety` section. All pointer adds are bounded by the
+  // `while x + 16 <= width` condition and the caller‑promised
+  // slice lengths.
+  unsafe {
+    let mut x = 0usize;
+    while x + 16 <= width {
+      let triple = vld3q_u8(input.as_ptr().add(x * 3));
+      let swapped = uint8x16x3_t(triple.2, triple.1, triple.0);
+      vst3q_u8(output.as_mut_ptr().add(x * 3), swapped);
+      x += 16;
+    }
+    if x < width {
+      scalar::bgr_rgb_swap_row(
+        &input[x * 3..width * 3],
+        &mut output[x * 3..width * 3],
+        width - x,
+      );
+    }
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -270,9 +531,9 @@ mod tests {
     let mut bgr_scalar = std::vec![0u8; width * 3];
     let mut bgr_neon = std::vec![0u8; width * 3];
 
-    scalar::yuv_420_to_bgr_row_scalar(&y, &u, &v, &mut bgr_scalar, width, matrix, full_range);
+    scalar::yuv_420_to_rgb_row(&y, &u, &v, &mut bgr_scalar, width, matrix, full_range);
     unsafe {
-      yuv_420_to_bgr_row_neon(&y, &u, &v, &mut bgr_neon, width, matrix, full_range);
+      yuv_420_to_rgb_row(&y, &u, &v, &mut bgr_neon, width, matrix, full_range);
     }
 
     if bgr_scalar != bgr_neon {
@@ -322,5 +583,145 @@ mod tests {
     for w in [18usize, 30, 34, 1922] {
       check_equivalence(w, ColorMatrix::Bt601, false);
     }
+  }
+
+  // ---- rgb_to_hsv_row equivalence ------------------------------------
+
+  fn check_hsv_equivalence(rgb: &[u8], width: usize) {
+    let mut h_scalar = std::vec![0u8; width];
+    let mut s_scalar = std::vec![0u8; width];
+    let mut v_scalar = std::vec![0u8; width];
+    let mut h_neon = std::vec![0u8; width];
+    let mut s_neon = std::vec![0u8; width];
+    let mut v_neon = std::vec![0u8; width];
+
+    scalar::rgb_to_hsv_row(rgb, &mut h_scalar, &mut s_scalar, &mut v_scalar, width);
+    unsafe {
+      rgb_to_hsv_row(rgb, &mut h_neon, &mut s_neon, &mut v_neon, width);
+    }
+
+    for (i, (a, b)) in h_scalar.iter().zip(h_neon.iter()).enumerate() {
+      assert_eq!(a, b, "H divergence at pixel {i}: scalar={a} neon={b}");
+    }
+    for (i, (a, b)) in s_scalar.iter().zip(s_neon.iter()).enumerate() {
+      assert_eq!(a, b, "S divergence at pixel {i}: scalar={a} neon={b}");
+    }
+    for (i, (a, b)) in v_scalar.iter().zip(v_neon.iter()).enumerate() {
+      assert_eq!(a, b, "V divergence at pixel {i}: scalar={a} neon={b}");
+    }
+  }
+
+  fn pseudo_random_bgr(width: usize) -> std::vec::Vec<u8> {
+    let n = width * 3;
+    let mut out = std::vec::Vec::with_capacity(n);
+    let mut state: u32 = 0x9E37_79B9;
+    for _ in 0..n {
+      state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+      out.push((state >> 8) as u8);
+    }
+    out
+  }
+
+  #[test]
+  fn hsv_neon_matches_scalar_pseudo_random_16() {
+    let rgb = pseudo_random_bgr(16);
+    check_hsv_equivalence(&rgb, 16);
+  }
+
+  #[test]
+  fn hsv_neon_matches_scalar_pseudo_random_1920() {
+    let rgb = pseudo_random_bgr(1920);
+    check_hsv_equivalence(&rgb, 1920);
+  }
+
+  #[test]
+  fn hsv_neon_matches_scalar_tail_widths() {
+    // Widths that force a non‑trivial scalar tail (non‑multiple of 16).
+    for w in [1usize, 7, 15, 17, 31, 1921] {
+      let rgb = pseudo_random_bgr(w);
+      check_hsv_equivalence(&rgb, w);
+    }
+  }
+
+  #[test]
+  fn hsv_neon_matches_scalar_primaries_and_edges() {
+    // Primary colors, grays, near‑saturation — exercise each hue branch
+    // and the v==0, delta==0, h<0 wrap paths.
+    let rgb: std::vec::Vec<u8> = [
+      (0, 0, 0),       // black: v = 0 → s = 0, h = 0
+      (255, 255, 255), // white: delta = 0 → s = 0, h = 0
+      (128, 128, 128), // gray: delta = 0
+      (0, 0, 255),     // pure red: v == r path
+      (0, 255, 0),     // pure green: v == g path
+      (255, 0, 0),     // pure blue: v == b path
+      (0, 127, 255),   // red→yellow transition
+      (255, 127, 0),   // blue→cyan
+      (127, 0, 255),   // red→magenta
+      (1, 2, 3),       // near black: small delta
+      (254, 253, 252), // near white
+      (10, 200, 150),  // arbitrary: v == g path, h > 0
+      (200, 10, 150),  // arbitrary: v == b path
+      (150, 200, 10),  // arbitrary: v == g
+      (50, 100, 200),  // arbitrary: v == r
+      (128, 64, 0),    // arbitrary: v == b
+    ]
+    .iter()
+    .flat_map(|&(b, g, r)| [b, g, r])
+    .collect();
+    check_hsv_equivalence(&rgb, 16);
+  }
+
+  // ---- bgr_rgb_swap_row equivalence -----------------------------------
+
+  fn check_swap_equivalence(width: usize) {
+    let input = pseudo_random_bgr(width);
+    let mut out_scalar = std::vec![0u8; width * 3];
+    let mut out_neon = std::vec![0u8; width * 3];
+
+    scalar::bgr_rgb_swap_row(&input, &mut out_scalar, width);
+    unsafe {
+      bgr_rgb_swap_row(&input, &mut out_neon, width);
+    }
+
+    assert_eq!(out_scalar, out_neon, "NEON swap diverges from scalar");
+
+    // Byte 0 ↔ byte 2 should be swapped, byte 1 unchanged. Verify
+    // the semantic directly.
+    for x in 0..width {
+      assert_eq!(
+        out_scalar[x * 3],
+        input[x * 3 + 2],
+        "byte 0 != input byte 2"
+      );
+      assert_eq!(
+        out_scalar[x * 3 + 1],
+        input[x * 3 + 1],
+        "middle byte changed"
+      );
+      assert_eq!(
+        out_scalar[x * 3 + 2],
+        input[x * 3],
+        "byte 2 != input byte 0"
+      );
+    }
+  }
+
+  #[test]
+  fn swap_neon_matches_scalar_widths() {
+    for w in [1usize, 15, 16, 17, 31, 32, 1920, 1921] {
+      check_swap_equivalence(w);
+    }
+  }
+
+  #[test]
+  fn swap_is_self_inverse() {
+    let input = pseudo_random_bgr(64);
+    let mut round_trip = std::vec![0u8; 64 * 3];
+    let mut back = std::vec![0u8; 64 * 3];
+
+    scalar::bgr_rgb_swap_row(&input, &mut round_trip, 64);
+    scalar::bgr_rgb_swap_row(&round_trip, &mut back, 64);
+
+    assert_eq!(input, back, "swap is not self-inverse");
   }
 }
