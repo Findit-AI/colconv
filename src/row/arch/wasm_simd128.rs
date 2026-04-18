@@ -570,7 +570,7 @@ fn hsv_group(r: v128, g: v128, b: v128) -> (v128, v128, v128) {
   (h_quant, s_quant, v_quant)
 }
 
-#[cfg(all(test, target_feature = "simd128"))]
+#[cfg(all(test, feature = "std", target_feature = "simd128"))]
 mod tests {
   use super::*;
 

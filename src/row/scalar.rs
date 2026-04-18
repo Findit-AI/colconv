@@ -333,7 +333,7 @@ pub(crate) fn bgr_rgb_swap_row(input: &[u8], output: &mut [u8], width: usize) {
   }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod tests {
   use super::*;
 

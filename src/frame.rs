@@ -251,7 +251,7 @@ pub enum Yuv420pFrameError {
   },
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 #[cfg(any(feature = "std", feature = "alloc"))]
 mod tests {
   use super::*;

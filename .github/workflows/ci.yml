@@ -189,10 +189,16 @@ jobs:
         uses: petarpetrovt/setup-sde@v2.4
         with:
           sdeVersion: 9.33.0
+          environmentVariableName: SDE_PATH
       - name: Run tests under SDE (-icx, Ice Lake AVX-512)
-        env:
-          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER: "sde64 -icx --"
-        run: cargo test --all-features
+        # The `petarpetrovt/setup-sde` action exports `SDE_PATH` but
+        # does not add the extracted directory to `PATH`, so `sde64`
+        # isn't on PATH directly. Resolve the full path via shell
+        # expansion before handing it to cargo as the runner.
+        shell: bash
+        run: |
+          export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER="$SDE_PATH/sde64 -icx --"
+          cargo test --all-features
 
   sanitizer:
     name: sanitizer

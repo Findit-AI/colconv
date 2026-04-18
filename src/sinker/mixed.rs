@@ -240,7 +240,7 @@ impl PixelSink for MixedSinker<'_, Yuv420p> {
 
 impl Yuv420pSink for MixedSinker<'_, Yuv420p> {}
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod tests {
   use super::*;
   use crate::{ColorMatrix, frame::Yuv420pFrame, yuv::yuv420p_to};

@@ -427,7 +427,7 @@ pub(crate) unsafe fn rgb_to_hsv_row(
   }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod tests {
   use super::*;
 
