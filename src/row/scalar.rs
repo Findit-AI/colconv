@@ -340,7 +340,7 @@ mod tests {
   // ---- yuv_420_to_rgb_row ----------------------------------------------
 
   #[test]
-  fn yuv420_bgr_black() {
+  fn yuv420_rgb_black() {
     // Full-range Y=0, neutral chroma → black.
     let y = [0u8; 4];
     let u = [128u8; 2];
@@ -351,7 +351,7 @@ mod tests {
   }
 
   #[test]
-  fn yuv420_bgr_white_full_range() {
+  fn yuv420_rgb_white_full_range() {
     let y = [255u8; 4];
     let u = [128u8; 2];
     let v = [128u8; 2];
@@ -361,22 +361,22 @@ mod tests {
   }
 
   #[test]
-  fn yuv420_bgr_gray_is_gray() {
+  fn yuv420_rgb_gray_is_gray() {
     let y = [128u8; 4];
     let u = [128u8; 2];
     let v = [128u8; 2];
     let mut rgb = [0u8; 12];
     yuv_420_to_rgb_row(&y, &u, &v, &mut rgb, 4, ColorMatrix::Bt601, true);
     for x in 0..4 {
-      let (b, g, r) = (rgb[x * 3], rgb[x * 3 + 1], rgb[x * 3 + 2]);
-      assert_eq!(b, g);
-      assert_eq!(g, r);
-      assert!(b.abs_diff(128) <= 1, "got {b}");
+      let (r, g, b) = (rgb[x * 3], rgb[x * 3 + 1], rgb[x * 3 + 2]);
+      assert_eq!(r, g);
+      assert_eq!(g, b);
+      assert!(r.abs_diff(128) <= 1, "got {r}");
     }
   }
 
   #[test]
-  fn yuv420_bgr_chroma_shared_across_pair() {
+  fn yuv420_rgb_chroma_shared_across_pair() {
     // Two Y values with same chroma: differing Y produces differing
     // luminance but same chroma-driven offsets. Validates that pixel x
     // and x+1 share the upsampled chroma sample.
@@ -393,7 +393,7 @@ mod tests {
   }
 
   #[test]
-  fn yuv420_bgr_limited_range_black_and_white() {
+  fn yuv420_rgb_limited_range_black_and_white() {
     // Y=16 → black, Y=235 → white in limited range.
     let y = [16u8, 16, 235, 235];
     let u = [128u8; 2];
@@ -401,13 +401,13 @@ mod tests {
     let mut rgb = [0u8; 12];
     yuv_420_to_rgb_row(&y, &u, &v, &mut rgb, 4, ColorMatrix::Bt601, false);
     for x in 0..2 {
-      let (b, g, r) = (rgb[x * 3], rgb[x * 3 + 1], rgb[x * 3 + 2]);
-      assert_eq!((b, g, r), (0, 0, 0), "limited-range Y=16 should be black");
+      let (r, g, b) = (rgb[x * 3], rgb[x * 3 + 1], rgb[x * 3 + 2]);
+      assert_eq!((r, g, b), (0, 0, 0), "limited-range Y=16 should be black");
     }
     for x in 2..4 {
-      let (b, g, r) = (rgb[x * 3], rgb[x * 3 + 1], rgb[x * 3 + 2]);
+      let (r, g, b) = (rgb[x * 3], rgb[x * 3 + 1], rgb[x * 3 + 2]);
       assert_eq!(
-        (b, g, r),
+        (r, g, b),
         (255, 255, 255),
         "limited-range Y=235 should be white"
       );
@@ -415,7 +415,7 @@ mod tests {
   }
 
   #[test]
-  fn yuv420_bgr_ycgco_neutral_is_gray() {
+  fn yuv420_rgb_ycgco_neutral_is_gray() {
     // Y=128, Cg=128 (U), Co=128 (V) — neutral chroma → gray.
     let y = [128u8; 2];
     let u = [128u8; 1]; // Cg
@@ -472,7 +472,7 @@ mod tests {
   }
 
   #[test]
-  fn yuv420_bgr_bt601_vs_bt709_differ_for_chroma() {
+  fn yuv420_rgb_bt601_vs_bt709_differ_for_chroma() {
     // Moderate chroma (V=200) so the red channel doesn't saturate on
     // either matrix — saturating both and then diffing gives zero.
     let y = [128u8; 2];

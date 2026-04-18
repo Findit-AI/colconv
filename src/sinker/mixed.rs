@@ -188,7 +188,13 @@ impl PixelSink for MixedSinker<'_, Yuv420p> {
 
     // Luma — YUV420p luma *is* the Y plane. Just copy.
     if let Some(luma) = luma.as_deref_mut() {
-      luma[idx * w..(idx + 1) * w].copy_from_slice(&row.y()[..w]);
+      let end = (idx + 1) * w;
+      assert!(
+        luma.len() >= end,
+        "MixedSinker luma buffer too short: need >= {end} bytes for row {idx} (width {w}), got {}",
+        luma.len()
+      );
+      luma[idx * w..end].copy_from_slice(&row.y()[..w]);
     }
 
     let want_rgb = rgb.is_some();
@@ -202,7 +208,15 @@ impl PixelSink for MixedSinker<'_, Yuv420p> {
     // Either way, the slice we hold is `&mut [u8]` that we then
     // reborrow as `&[u8]` for the HSV step.
     let rgb_row: &mut [u8] = match rgb.as_deref_mut() {
-      Some(buf) => &mut buf[idx * w * 3..(idx + 1) * w * 3],
+      Some(buf) => {
+        let end = (idx + 1) * w * 3;
+        assert!(
+          buf.len() >= end,
+          "MixedSinker rgb buffer too short: need >= {end} bytes for row {idx} (width {w}), got {}",
+          buf.len()
+        );
+        &mut buf[idx * w * 3..end]
+      }
       None => {
         if rgb_scratch.len() < w * 3 {
           rgb_scratch.resize(w * 3, 0);
@@ -226,11 +240,20 @@ impl PixelSink for MixedSinker<'_, Yuv420p> {
 
     // HSV from the RGB row we just wrote.
     if let Some(hsv) = hsv.as_mut() {
+      let end = (idx + 1) * w;
+      assert!(
+        hsv.h.len() >= end && hsv.s.len() >= end && hsv.v.len() >= end,
+        "MixedSinker hsv plane too short: need >= {end} bytes per plane for row {idx} \
+         (width {w}), got h={}, s={}, v={}",
+        hsv.h.len(),
+        hsv.s.len(),
+        hsv.v.len()
+      );
       rgb_to_hsv_row(
         rgb_row,
-        &mut hsv.h[idx * w..(idx + 1) * w],
-        &mut hsv.s[idx * w..(idx + 1) * w],
-        &mut hsv.v[idx * w..(idx + 1) * w],
+        &mut hsv.h[idx * w..end],
+        &mut hsv.s[idx * w..end],
+        &mut hsv.v[idx * w..end],
         w,
         use_simd,
       );
@@ -276,7 +299,7 @@ mod tests {
   }
 
   #[test]
-  fn bgr_only_converts_gray_to_gray() {
+  fn rgb_only_converts_gray_to_gray() {
     // Neutral chroma → gray RGB; solid Y=128 → ~128 in every RGB byte.
     let (yp, up, vp) = solid_yuv420p_frame(16, 8, 128, 128, 128);
     let src = Yuv420pFrame::new(&yp, &up, &vp, 16, 8, 16, 8, 8);
@@ -338,7 +361,7 @@ mod tests {
   }
 
   #[test]
-  fn bgr_with_hsv_uses_user_buffer_not_scratch() {
+  fn rgb_with_hsv_uses_user_buffer_not_scratch() {
     // When caller provides RGB, the scratch should remain empty (Vec len 0).
     let (yp, up, vp) = solid_yuv420p_frame(16, 8, 100, 128, 128);
     let src = Yuv420pFrame::new(&yp, &up, &vp, 16, 8, 16, 8, 8);
@@ -377,12 +400,12 @@ mod tests {
       (w / 2) as u32,
     );
 
-    let mut bgr_simd = std::vec![0u8; w * h * 3];
-    let mut bgr_scalar = std::vec![0u8; w * h * 3];
+    let mut rgb_simd = std::vec![0u8; w * h * 3];
+    let mut rgb_scalar = std::vec![0u8; w * h * 3];
 
-    let mut sink_simd = MixedSinker::<Yuv420p>::new(w).with_rgb(&mut bgr_simd);
+    let mut sink_simd = MixedSinker::<Yuv420p>::new(w).with_rgb(&mut rgb_simd);
     let mut sink_scalar = MixedSinker::<Yuv420p>::new(w)
-      .with_rgb(&mut bgr_scalar)
+      .with_rgb(&mut rgb_scalar)
       .with_simd(false);
     assert!(sink_simd.simd());
     assert!(!sink_scalar.simd());
@@ -390,7 +413,7 @@ mod tests {
     yuv420p_to(&src, false, ColorMatrix::Bt709, &mut sink_simd);
     yuv420p_to(&src, false, ColorMatrix::Bt709, &mut sink_scalar);
 
-    assert_eq!(bgr_simd, bgr_scalar);
+    assert_eq!(rgb_simd, rgb_scalar);
   }
 
   #[test]
