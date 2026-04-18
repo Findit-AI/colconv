@@ -51,4 +51,11 @@ single_use_lifetimes = "warn"
 unexpected_cfgs = { level = "warn", check-cfg = [
   'cfg(all_tests)',
   'cfg(tarpaulin)',
+  # Testing / coverage helpers. These are set via `RUSTFLAGS='--cfg ...'`
+  # in CI to force the dispatcher down a specific path so lower‑tier
+  # kernels and the scalar fallback get coverage on runners that would
+  # otherwise always pick the top tier.
+  'cfg(colconv_force_scalar)',
+  'cfg(colconv_disable_avx512)',
+  'cfg(colconv_disable_avx2)',
 ] }

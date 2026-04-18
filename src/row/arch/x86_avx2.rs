@@ -49,7 +49,7 @@ use core::arch::x86_64::{
 use crate::{
   ColorMatrix,
   row::{
-    arch::x86_common::{swap_rb_16_pixels, write_rgb_16},
+    arch::x86_common::{rgb_to_hsv_16_pixels, swap_rb_16_pixels, write_rgb_16},
     scalar,
   },
 };
@@ -372,6 +372,61 @@ pub(crate) unsafe fn bgr_rgb_swap_row(input: &[u8], output: &mut [u8], width: us
   }
 }
 
+// ===== RGB → HSV =========================================================
+
+/// AVX2 RGB → planar HSV. 32 pixels per iteration via two calls to the
+/// shared [`super::x86_common::rgb_to_hsv_16_pixels`] helper (SSE4.1
+/// level compute, memory‑bandwidth‑bound — wider f32 registers would
+/// help if we restructured, but the current structure already wins
+/// versus scalar).
+///
+/// # Safety
+///
+/// 1. AVX2 must be available (dispatcher obligation).
+/// 2. `rgb.len() >= 3 * width`; each output plane `>= width`.
+#[inline]
+#[target_feature(enable = "avx2")]
+pub(crate) unsafe fn rgb_to_hsv_row(
+  rgb: &[u8],
+  h_out: &mut [u8],
+  s_out: &mut [u8],
+  v_out: &mut [u8],
+  width: usize,
+) {
+  debug_assert!(rgb.len() >= width * 3);
+  debug_assert!(h_out.len() >= width);
+  debug_assert!(s_out.len() >= width);
+  debug_assert!(v_out.len() >= width);
+
+  unsafe {
+    let mut x = 0usize;
+    while x + 32 <= width {
+      rgb_to_hsv_16_pixels(
+        rgb.as_ptr().add(x * 3),
+        h_out.as_mut_ptr().add(x),
+        s_out.as_mut_ptr().add(x),
+        v_out.as_mut_ptr().add(x),
+      );
+      rgb_to_hsv_16_pixels(
+        rgb.as_ptr().add(x * 3 + 48),
+        h_out.as_mut_ptr().add(x + 16),
+        s_out.as_mut_ptr().add(x + 16),
+        v_out.as_mut_ptr().add(x + 16),
+      );
+      x += 32;
+    }
+    if x < width {
+      scalar::rgb_to_hsv_row(
+        &rgb[x * 3..width * 3],
+        &mut h_out[x..width],
+        &mut s_out[x..width],
+        &mut v_out[x..width],
+        width - x,
+      );
+    }
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -476,6 +531,52 @@ mod tests {
     }
     for w in [1usize, 15, 31, 32, 33, 47, 48, 63, 64, 1920, 1921] {
       check_swap_equivalence(w);
+    }
+  }
+
+  // ---- rgb_to_hsv_row equivalence --------------------------------------
+
+  fn check_hsv_equivalence(rgb: &[u8], width: usize) {
+    let mut h_s = std::vec![0u8; width];
+    let mut s_s = std::vec![0u8; width];
+    let mut v_s = std::vec![0u8; width];
+    let mut h_k = std::vec![0u8; width];
+    let mut s_k = std::vec![0u8; width];
+    let mut v_k = std::vec![0u8; width];
+    scalar::rgb_to_hsv_row(rgb, &mut h_s, &mut s_s, &mut v_s, width);
+    unsafe {
+      rgb_to_hsv_row(rgb, &mut h_k, &mut s_k, &mut v_k, width);
+    }
+    for (i, (a, b)) in h_s.iter().zip(h_k.iter()).enumerate() {
+      assert!(
+        a.abs_diff(*b) <= 1,
+        "H divergence at pixel {i}: scalar={a} simd={b}"
+      );
+    }
+    for (i, (a, b)) in s_s.iter().zip(s_k.iter()).enumerate() {
+      assert!(
+        a.abs_diff(*b) <= 1,
+        "S divergence at pixel {i}: scalar={a} simd={b}"
+      );
+    }
+    for (i, (a, b)) in v_s.iter().zip(v_k.iter()).enumerate() {
+      assert!(
+        a.abs_diff(*b) <= 1,
+        "V divergence at pixel {i}: scalar={a} simd={b}"
+      );
+    }
+  }
+
+  #[test]
+  fn avx2_hsv_matches_scalar() {
+    if !std::arch::is_x86_feature_detected!("avx2") {
+      return;
+    }
+    let rgb: std::vec::Vec<u8> = (0..1921 * 3)
+      .map(|i| ((i * 37 + 11) & 0xFF) as u8)
+      .collect();
+    for w in [1usize, 31, 32, 33, 63, 64, 1920, 1921] {
+      check_hsv_equivalence(&rgb[..w * 3], w);
     }
   }
 }

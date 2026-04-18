@@ -30,46 +30,72 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # aarch64 — exercises the NEON SIMD backend (vld3q_u8 deinterleave,
-          # vabdq_u8 / vpaddlq mean-abs-diff, NEON Sobel).
+          # aarch64 NEON — runtime dispatcher picks NEON; scalar variant in
+          # each bench exercised via `use_simd=false`.
           - os: macos-latest
             arch: aarch64
             tier: neon
             rustflags: ''
             label: macos-aarch64-neon
 
-          # x86_64 default: the runtime dispatcher (`is_x86_feature_detected!`)
-          # picks AVX2 on modern GH runners, falls back to SSSE3 otherwise.
-          # This exercises the x86 dispatch code path as shipped.
+          # aarch64 with NEON short-circuited via `colconv_force_scalar`:
+          # dispatcher takes the scalar path on every call, producing a
+          # scalar baseline that matches the one measured inside the
+          # `use_simd=false` bench variant but with dispatcher branches
+          # also uncovered-then-covered for coverage fidelity.
+          - os: macos-latest
+            arch: aarch64
+            tier: scalar
+            rustflags: '--cfg colconv_force_scalar'
+            label: macos-aarch64-scalar
+
+          # x86_64 default — runtime dispatcher picks whichever x86 tier
+          # the runner supports (AVX-512 on Ice/Cascade Lake, AVX2 on
+          # older, SSE4.1 fallback).
           - os: ubuntu-latest
             arch: x86_64
             tier: default
             rustflags: ''
             label: ubuntu-x86_64-default
 
-          # x86_64 with `-C target-cpu=native`: lets LLVM auto-vectorize the
-          # scalar paths (YUV→BGR row kernels, HSV conversions, chroma
-          # upsample loops) with the full feature set of the runner's CPU.
-          # Complements the default tier to show the ceiling of scalar wins.
+          # x86_64 with AVX-512 disabled: forces the AVX2 dispatch branch
+          # on runners that would otherwise always pick AVX-512. Gives
+          # explicit AVX2-tier numbers regardless of runner CPU.
+          - os: ubuntu-latest
+            arch: x86_64
+            tier: avx2-max
+            rustflags: '--cfg colconv_disable_avx512'
+            label: ubuntu-x86_64-avx2-max
+
+          # x86_64 with AVX-512 and AVX2 both disabled: forces the SSE4.1
+          # dispatch branch. Every x86_64 CPU since ~2008 has SSE4.1, so
+          # this tier exercises the SSE4.1 kernel on every runner.
+          - os: ubuntu-latest
+            arch: x86_64
+            tier: sse41-max
+            rustflags: '--cfg colconv_disable_avx512 --cfg colconv_disable_avx2'
+            label: ubuntu-x86_64-sse41-max
+
+          # x86_64 with every SIMD backend short-circuited: scalar-only
+          # baseline. Complements `use_simd=false` variants inside each
+          # bench (this tier also routes the dispatcher itself to scalar).
+          - os: ubuntu-latest
+            arch: x86_64
+            tier: scalar
+            rustflags: '--cfg colconv_force_scalar'
+            label: ubuntu-x86_64-scalar
+
+          # x86_64 with `-C target-cpu=native`: enables the full feature
+          # set of the runner's build-time CPU for LLVM auto-vectorization
+          # of scalar paths and maximum codegen quality for SIMD kernels.
           - os: ubuntu-latest
             arch: x86_64
             tier: native
             rustflags: '-C target-cpu=native'
             label: ubuntu-x86_64-native
 
-          # x86_64 with SSSE3 forced on at compile time and AVX/AVX2 off:
-          # exercises the SSSE3 dispatch path even when the runner CPU
-          # supports AVX2. With the `std` feature enabled the dispatcher
-          # uses `is_x86_feature_detected!`, so this tier primarily guards
-          # that the SSSE3 modules *compile* without AVX2.
-          - os: ubuntu-latest
-            arch: x86_64
-            tier: ssse3-only
-            rustflags: '-C target-feature=+ssse3,-avx,-avx2,-fma'
-            label: ubuntu-x86_64-ssse3-only
-
-          # Windows x86_64 — same dispatcher as Linux but validates the MSVC
-          # toolchain handles the intrinsics-heavy modules.
+          # Windows x86_64 — same dispatcher as Linux but validates the
+          # MSVC toolchain handles the intrinsics-heavy modules.
           - os: windows-latest
             arch: x86_64
             tier: default

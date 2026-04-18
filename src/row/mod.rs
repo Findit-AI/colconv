@@ -146,19 +146,47 @@ pub fn rgb_to_hsv_row(
     cfg_select! {
       target_arch = "aarch64" => {
         if neon_available() {
-          // SAFETY: `neon_available()` verified NEON is present on this
-          // CPU. Bounds invariants are the caller's obligation,
-          // checked with `debug_assert` in debug builds.
+          // SAFETY: `neon_available()` verified NEON is present.
           unsafe {
             arch::neon::rgb_to_hsv_row(rgb, h_out, s_out, v_out, width);
           }
           return;
         }
       },
+      target_arch = "x86_64" => {
+        if avx512_available() {
+          // SAFETY: AVX‑512BW verified.
+          unsafe {
+            arch::x86_avx512::rgb_to_hsv_row(rgb, h_out, s_out, v_out, width);
+          }
+          return;
+        }
+        if avx2_available() {
+          // SAFETY: AVX2 verified.
+          unsafe {
+            arch::x86_avx2::rgb_to_hsv_row(rgb, h_out, s_out, v_out, width);
+          }
+          return;
+        }
+        if sse41_available() {
+          // SAFETY: SSE4.1 verified.
+          unsafe {
+            arch::x86_sse41::rgb_to_hsv_row(rgb, h_out, s_out, v_out, width);
+          }
+          return;
+        }
+      },
+      target_arch = "wasm32" => {
+        if simd128_available() {
+          // SAFETY: simd128 compile‑time verified.
+          unsafe {
+            arch::wasm_simd128::rgb_to_hsv_row(rgb, h_out, s_out, v_out, width);
+          }
+          return;
+        }
+      },
       _ => {
-        // Other targets currently fall through to scalar until HSV
-        // SIMD backends land for them (x86 cascade and wasm_simd128 are
-        // follow‑ups to the NEON kernel).
+        // Targets without a SIMD HSV backend fall through to scalar.
       }
     }
   }
@@ -252,10 +280,22 @@ fn swap_rb_channels_row(input: &[u8], output: &mut [u8], width: usize, use_simd:
 // which is resolved at compile time. Helpers are only compiled for
 // targets where the corresponding feature exists.
 
+// The `colconv_force_scalar` cfg, when set, short‑circuits every
+// `*_available()` helper to `false` so the dispatcher always falls
+// through to the scalar reference path. CI uses this via
+// `RUSTFLAGS='--cfg colconv_force_scalar'` to benchmark / measure
+// coverage of the scalar baseline. `colconv_disable_avx512` /
+// `colconv_disable_avx2` similarly force lower‑tier x86 paths for
+// per‑tier coverage on runners that would otherwise always pick
+// AVX‑512.
+
 /// NEON availability on aarch64.
 #[cfg(all(target_arch = "aarch64", feature = "std"))]
 #[cfg_attr(not(tarpaulin), inline(always))]
 fn neon_available() -> bool {
+  if cfg!(colconv_force_scalar) {
+    return false;
+  }
   std::arch::is_aarch64_feature_detected!("neon")
 }
 
@@ -263,13 +303,16 @@ fn neon_available() -> bool {
 #[cfg(all(target_arch = "aarch64", not(feature = "std")))]
 #[cfg_attr(not(tarpaulin), inline(always))]
 const fn neon_available() -> bool {
-  cfg!(target_feature = "neon")
+  !cfg!(colconv_force_scalar) && cfg!(target_feature = "neon")
 }
 
 /// AVX2 availability on x86_64.
 #[cfg(all(target_arch = "x86_64", feature = "std"))]
 #[cfg_attr(not(tarpaulin), inline(always))]
 fn avx2_available() -> bool {
+  if cfg!(colconv_force_scalar) || cfg!(colconv_disable_avx2) {
+    return false;
+  }
   std::arch::is_x86_feature_detected!("avx2")
 }
 
@@ -277,13 +320,16 @@ fn avx2_available() -> bool {
 #[cfg(all(target_arch = "x86_64", not(feature = "std")))]
 #[cfg_attr(not(tarpaulin), inline(always))]
 const fn avx2_available() -> bool {
-  cfg!(target_feature = "avx2")
+  !cfg!(colconv_force_scalar) && !cfg!(colconv_disable_avx2) && cfg!(target_feature = "avx2")
 }
 
 /// SSE4.1 availability on x86_64.
 #[cfg(all(target_arch = "x86_64", feature = "std"))]
 #[cfg_attr(not(tarpaulin), inline(always))]
 fn sse41_available() -> bool {
+  if cfg!(colconv_force_scalar) {
+    return false;
+  }
   std::arch::is_x86_feature_detected!("sse4.1")
 }
 
@@ -291,13 +337,16 @@ fn sse41_available() -> bool {
 #[cfg(all(target_arch = "x86_64", not(feature = "std")))]
 #[cfg_attr(not(tarpaulin), inline(always))]
 const fn sse41_available() -> bool {
-  cfg!(target_feature = "sse4.1")
+  !cfg!(colconv_force_scalar) && cfg!(target_feature = "sse4.1")
 }
 
 /// AVX‑512 (F + BW) availability on x86_64.
 #[cfg(all(target_arch = "x86_64", feature = "std"))]
 #[cfg_attr(not(tarpaulin), inline(always))]
 fn avx512_available() -> bool {
+  if cfg!(colconv_force_scalar) || cfg!(colconv_disable_avx512) {
+    return false;
+  }
   std::arch::is_x86_feature_detected!("avx512bw")
 }
 
@@ -306,7 +355,7 @@ fn avx512_available() -> bool {
 #[cfg(all(target_arch = "x86_64", not(feature = "std")))]
 #[cfg_attr(not(tarpaulin), inline(always))]
 const fn avx512_available() -> bool {
-  cfg!(target_feature = "avx512bw")
+  !cfg!(colconv_force_scalar) && !cfg!(colconv_disable_avx512) && cfg!(target_feature = "avx512bw")
 }
 
 /// simd128 availability on wasm32. WASM has no runtime CPU detection
@@ -315,5 +364,5 @@ const fn avx512_available() -> bool {
 #[cfg(target_arch = "wasm32")]
 #[cfg_attr(not(tarpaulin), inline(always))]
 const fn simd128_available() -> bool {
-  cfg!(target_feature = "simd128")
+  !cfg!(colconv_force_scalar) && cfg!(target_feature = "simd128")
 }
