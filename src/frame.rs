@@ -37,7 +37,7 @@ impl<'a> Yuv420pFrame<'a> {
   /// - `y_stride < width`, `u_stride < (width + 1) / 2`, or
   ///   `v_stride < (width + 1) / 2`,
   /// - any plane is too short to cover its declared rows.
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   // The 3-plane × (slice, stride, dim) shape is intrinsic to YUV 4:2:0;
   // `div_ceil` on u32 isn't const-stable yet, so the `(x + 1) / 2`
   // idiom stays.
@@ -112,7 +112,7 @@ impl<'a> Yuv420pFrame<'a> {
 
   /// Constructs a new [`Yuv420pFrame`], panicking on invalid inputs.
   /// Prefer [`Self::try_new`] when inputs may be invalid at runtime.
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   #[allow(clippy::too_many_arguments)]
   pub const fn new(
     y: &'a [u8],
@@ -131,50 +131,50 @@ impl<'a> Yuv420pFrame<'a> {
   }
 
   /// Y (luma) plane bytes. Row `r` starts at byte offset `r * y_stride()`.
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn y(&self) -> &'a [u8] {
     self.y
   }
 
   /// U (Cb) plane bytes. Row `r` starts at byte offset `r * u_stride()`.
   /// U has half the width and half the height of the frame.
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn u(&self) -> &'a [u8] {
     self.u
   }
 
   /// V (Cr) plane bytes. Row `r` starts at byte offset `r * v_stride()`.
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn v(&self) -> &'a [u8] {
     self.v
   }
 
   /// Frame width in pixels. Always even.
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn width(&self) -> u32 {
     self.width
   }
 
   /// Frame height in pixels. Always even.
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn height(&self) -> u32 {
     self.height
   }
 
   /// Byte stride of the Y plane (`>= width`).
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn y_stride(&self) -> u32 {
     self.y_stride
   }
 
   /// Byte stride of the U plane (`>= width / 2`).
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn u_stride(&self) -> u32 {
     self.u_stride
   }
 
   /// Byte stride of the V plane (`>= width / 2`).
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn v_stride(&self) -> u32 {
     self.v_stride
   }

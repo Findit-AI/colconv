@@ -1,12 +1,9 @@
-//! Crate-internal row-level primitives.
+//! Scalar reference implementations of the row primitives.
 //!
-//! These are the composable units that Sinks call on each row handed
-//! to them by a source kernel. Source kernels are pure row walkers;
-//! the actual arithmetic lives here.
-//!
-//! v0.1 ships scalar implementations of everything; SIMD backends
-//! (NEON / SSSE3 / wasm-simd128) land in subsequent commits with
-//! scalar-equivalence tests in each backend.
+//! Always compiled. SIMD backends live in [`super::arch`] and dispatch
+//! to these as their tail fallback. Per-call dispatch in
+//! [`super`]`::{yuv_420_to_bgr_row, bgr_to_hsv_row}` picks the best
+//! backend at the module boundary.
 
 use crate::ColorMatrix;
 
@@ -29,8 +26,8 @@ use crate::ColorMatrix;
 /// - `width` must be even (4:2:0 pairs pixel columns).
 /// - `y.len() >= width`, `u_half.len() >= width / 2`,
 ///   `v_half.len() >= width / 2`, `bgr_out.len() >= 3 * width`.
-#[inline]
-pub(crate) fn yuv_420_to_bgr_row(
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn yuv_420_to_bgr_row_scalar(
   y: &[u8],
   u_half: &[u8],
   v_half: &[u8],
@@ -64,9 +61,9 @@ pub(crate) fn yuv_420_to_bgr_row(
     // matrix multiply. All six coefficients are used; standard
     // matrices (BT.601 / 709 / 2020) have `r_u = b_v = 0` so those
     // terms vanish. YCgCo uses all six.
-    let r_chroma = (coeffs.r_u * u_d + coeffs.r_v * v_d + RND) >> 15;
-    let g_chroma = (coeffs.g_u * u_d + coeffs.g_v * v_d + RND) >> 15;
-    let b_chroma = (coeffs.b_u * u_d + coeffs.b_v * v_d + RND) >> 15;
+    let r_chroma = (coeffs.r_u() * u_d + coeffs.r_v() * v_d + RND) >> 15;
+    let g_chroma = (coeffs.g_u() * u_d + coeffs.g_v() * v_d + RND) >> 15;
+    let b_chroma = (coeffs.b_u() * u_d + coeffs.b_v() * v_d + RND) >> 15;
 
     // Pixel x.
     let y0 = ((y[x] as i32 - y_off) * y_scale + RND) >> 15;
@@ -84,7 +81,7 @@ pub(crate) fn yuv_420_to_bgr_row(
   }
 }
 
-#[inline]
+#[cfg_attr(not(tarpaulin), inline(always))]
 fn clamp_u8(v: i32) -> u8 {
   v.clamp(0, 255) as u8
 }
@@ -96,8 +93,8 @@ fn clamp_u8(v: i32) -> u8 {
 /// Limited range: map Y from `[16, 235]` to `[0, 255]` via
 /// `y_scaled = (y - 16) * (255 / 219)`; map chroma from `[16, 240]`
 /// to `[0, 255]` via `c_scaled = (c - 128) * (255 / 224)`.
-#[inline]
-const fn range_params(full_range: bool) -> (i32, i32, i32) {
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(super) const fn range_params(full_range: bool) -> (i32, i32, i32) {
   if full_range {
     (0, 1 << 15, 1 << 15)
   } else {
@@ -117,7 +114,7 @@ const fn range_params(full_range: bool) -> (i32, i32, i32) {
 /// where `u_d = U - 128`, `v_d = V - 128`. Standard matrices
 /// (BT.601, BT.709, BT.2020-NCL, SMPTE 240M, FCC) have sparse layout
 /// with `r_u = b_v = 0`; YCgCo uses all six entries.
-struct Coefficients {
+pub(super) struct Coefficients {
   r_u: i32,
   r_v: i32,
   g_u: i32,
@@ -127,8 +124,8 @@ struct Coefficients {
 }
 
 impl Coefficients {
-  #[inline]
-  const fn for_matrix(m: ColorMatrix) -> Self {
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub(super) const fn for_matrix(m: ColorMatrix) -> Self {
     match m {
       // BT.601: r_v=1.402, g_u=-0.344136, g_v=-0.714136, b_u=1.772.
       ColorMatrix::Bt601 | ColorMatrix::Fcc => Self {
@@ -182,14 +179,39 @@ impl Coefficients {
       },
     }
   }
+
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub(super) const fn r_u(&self) -> i32 {
+    self.r_u
+  }
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub(super) const fn r_v(&self) -> i32 {
+    self.r_v
+  }
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub(super) const fn g_u(&self) -> i32 {
+    self.g_u
+  }
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub(super) const fn g_v(&self) -> i32 {
+    self.g_v
+  }
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub(super) const fn b_u(&self) -> i32 {
+    self.b_u
+  }
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub(super) const fn b_v(&self) -> i32 {
+    self.b_v
+  }
 }
 
 // ---- BGR → HSV ----------------------------------------------------------
 
 /// Converts one row of packed BGR to three planar HSV bytes matching
 /// OpenCV `cv2.COLOR_BGR2HSV` semantics: `H ∈ [0, 179]`, `S, V ∈ [0, 255]`.
-#[inline]
-pub(crate) fn bgr_to_hsv_row(
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn bgr_to_hsv_row_scalar(
   bgr: &[u8],
   h_out: &mut [u8],
   s_out: &mut [u8],
@@ -211,7 +233,7 @@ pub(crate) fn bgr_to_hsv_row(
   }
 }
 
-#[inline]
+#[cfg_attr(not(tarpaulin), inline(always))]
 fn bgr_to_hsv_pixel(b: f32, g: f32, r: f32) -> (u8, u8, u8) {
   let v = b.max(g).max(r);
   let min = b.min(g).min(r);
@@ -248,7 +270,7 @@ mod tests {
     let u = [128u8; 2];
     let v = [128u8; 2];
     let mut bgr = [0u8; 12];
-    yuv_420_to_bgr_row(&y, &u, &v, &mut bgr, 4, ColorMatrix::Bt601, true);
+    yuv_420_to_bgr_row_scalar(&y, &u, &v, &mut bgr, 4, ColorMatrix::Bt601, true);
     assert!(bgr.iter().all(|&c| c == 0), "got {bgr:?}");
   }
 
@@ -258,7 +280,7 @@ mod tests {
     let u = [128u8; 2];
     let v = [128u8; 2];
     let mut bgr = [0u8; 12];
-    yuv_420_to_bgr_row(&y, &u, &v, &mut bgr, 4, ColorMatrix::Bt601, true);
+    yuv_420_to_bgr_row_scalar(&y, &u, &v, &mut bgr, 4, ColorMatrix::Bt601, true);
     assert!(bgr.iter().all(|&c| c == 255), "got {bgr:?}");
   }
 
@@ -268,7 +290,7 @@ mod tests {
     let u = [128u8; 2];
     let v = [128u8; 2];
     let mut bgr = [0u8; 12];
-    yuv_420_to_bgr_row(&y, &u, &v, &mut bgr, 4, ColorMatrix::Bt601, true);
+    yuv_420_to_bgr_row_scalar(&y, &u, &v, &mut bgr, 4, ColorMatrix::Bt601, true);
     for x in 0..4 {
       let (b, g, r) = (bgr[x * 3], bgr[x * 3 + 1], bgr[x * 3 + 2]);
       assert_eq!(b, g);
@@ -286,7 +308,7 @@ mod tests {
     let u = [128u8; 2];
     let v = [128u8; 2];
     let mut bgr = [0u8; 12];
-    yuv_420_to_bgr_row(&y, &u, &v, &mut bgr, 4, ColorMatrix::Bt601, true);
+    yuv_420_to_bgr_row_scalar(&y, &u, &v, &mut bgr, 4, ColorMatrix::Bt601, true);
     // With neutral chroma, output is gray = Y.
     assert_eq!(bgr[0], 50);
     assert_eq!(bgr[3], 200);
@@ -301,7 +323,7 @@ mod tests {
     let u = [128u8; 2];
     let v = [128u8; 2];
     let mut bgr = [0u8; 12];
-    yuv_420_to_bgr_row(&y, &u, &v, &mut bgr, 4, ColorMatrix::Bt601, false);
+    yuv_420_to_bgr_row_scalar(&y, &u, &v, &mut bgr, 4, ColorMatrix::Bt601, false);
     for x in 0..2 {
       let (b, g, r) = (bgr[x * 3], bgr[x * 3 + 1], bgr[x * 3 + 2]);
       assert_eq!((b, g, r), (0, 0, 0), "limited-range Y=16 should be black");
@@ -323,7 +345,7 @@ mod tests {
     let u = [128u8; 1]; // Cg
     let v = [128u8; 1]; // Co
     let mut bgr = [0u8; 6];
-    yuv_420_to_bgr_row(&y, &u, &v, &mut bgr, 2, ColorMatrix::YCgCo, true);
+    yuv_420_to_bgr_row_scalar(&y, &u, &v, &mut bgr, 2, ColorMatrix::YCgCo, true);
     for px in bgr.chunks(3) {
       assert!(px[0].abs_diff(128) <= 1, "BGR should be gray, got {bgr:?}");
       assert_eq!(px[0], px[1]);
@@ -343,7 +365,7 @@ mod tests {
     let u = [200u8; 1]; // Cg = 200 (green-ward)
     let v = [128u8; 1]; // Co neutral
     let mut bgr = [0u8; 6];
-    yuv_420_to_bgr_row(&y, &u, &v, &mut bgr, 2, ColorMatrix::YCgCo, true);
+    yuv_420_to_bgr_row_scalar(&y, &u, &v, &mut bgr, 2, ColorMatrix::YCgCo, true);
     for px in bgr.chunks(3) {
       // Allow ±1 for Q15 rounding.
       assert!(px[0].abs_diff(56) <= 1, "expected B≈56, got {bgr:?}");
@@ -364,7 +386,7 @@ mod tests {
     let u = [128u8; 1]; // Cg neutral
     let v = [200u8; 1]; // Co = 200 (orange-ward)
     let mut bgr = [0u8; 6];
-    yuv_420_to_bgr_row(&y, &u, &v, &mut bgr, 2, ColorMatrix::YCgCo, true);
+    yuv_420_to_bgr_row_scalar(&y, &u, &v, &mut bgr, 2, ColorMatrix::YCgCo, true);
     for px in bgr.chunks(3) {
       assert!(px[0].abs_diff(56) <= 1, "expected B≈56, got {bgr:?}");
       assert!(px[1].abs_diff(128) <= 1, "expected G≈128, got {bgr:?}");
@@ -381,8 +403,8 @@ mod tests {
     let v = [200u8; 1];
     let mut b601 = [0u8; 6];
     let mut b709 = [0u8; 6];
-    yuv_420_to_bgr_row(&y, &u, &v, &mut b601, 2, ColorMatrix::Bt601, true);
-    yuv_420_to_bgr_row(&y, &u, &v, &mut b709, 2, ColorMatrix::Bt709, true);
+    yuv_420_to_bgr_row_scalar(&y, &u, &v, &mut b601, 2, ColorMatrix::Bt601, true);
+    yuv_420_to_bgr_row_scalar(&y, &u, &v, &mut b709, 2, ColorMatrix::Bt709, true);
     // Sum of per-channel absolute differences — robust to which
     // particular channel the two matrices disagree on.
     let sad: i32 = b601
@@ -402,7 +424,7 @@ mod tests {
   fn hsv_gray_has_no_hue_no_sat() {
     let bgr = [128u8; 3];
     let (mut h, mut s, mut v) = ([0u8; 1], [0u8; 1], [0u8; 1]);
-    bgr_to_hsv_row(&bgr, &mut h, &mut s, &mut v, 1);
+    bgr_to_hsv_row_scalar(&bgr, &mut h, &mut s, &mut v, 1);
     assert_eq!((h[0], s[0], v[0]), (0, 0, 128));
   }
 
@@ -411,7 +433,7 @@ mod tests {
     // OpenCV BGR2HSV: red = (0, 0, 255) → H = 0, S = 255, V = 255.
     let bgr = [0u8, 0, 255];
     let (mut h, mut s, mut v) = ([0u8; 1], [0u8; 1], [0u8; 1]);
-    bgr_to_hsv_row(&bgr, &mut h, &mut s, &mut v, 1);
+    bgr_to_hsv_row_scalar(&bgr, &mut h, &mut s, &mut v, 1);
     assert_eq!((h[0], s[0], v[0]), (0, 255, 255));
   }
 
@@ -420,7 +442,7 @@ mod tests {
     // Green → H = 60 in OpenCV 8-bit (120° / 2).
     let bgr = [0u8, 255, 0];
     let (mut h, mut s, mut v) = ([0u8; 1], [0u8; 1], [0u8; 1]);
-    bgr_to_hsv_row(&bgr, &mut h, &mut s, &mut v, 1);
+    bgr_to_hsv_row_scalar(&bgr, &mut h, &mut s, &mut v, 1);
     assert_eq!((h[0], s[0], v[0]), (60, 255, 255));
   }
 
@@ -429,7 +451,7 @@ mod tests {
     // Blue → H = 120 (240° / 2).
     let bgr = [255u8, 0, 0];
     let (mut h, mut s, mut v) = ([0u8; 1], [0u8; 1], [0u8; 1]);
-    bgr_to_hsv_row(&bgr, &mut h, &mut s, &mut v, 1);
+    bgr_to_hsv_row_scalar(&bgr, &mut h, &mut s, &mut v, 1);
     assert_eq!((h[0], s[0], v[0]), (120, 255, 255));
   }
 }

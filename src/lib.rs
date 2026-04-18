@@ -36,7 +36,7 @@ extern crate alloc as std;
 extern crate std;
 
 pub mod frame;
-pub(crate) mod row;
+pub mod row;
 pub mod sinker;
 pub mod yuv;
 
@@ -44,7 +44,7 @@ pub mod yuv;
 ///
 /// Consumers (`LumaSinker`, `BgrSinker`, the application's own reducers,
 /// etc.) implement this once per source format they want to accept. The
-/// source kernel calls [`Self::process_row`] for every output row of
+/// source kernel calls [`Self::process`] for every output row of
 /// the frame.
 ///
 /// # Input type
@@ -57,14 +57,15 @@ pub mod yuv;
 /// `SourceFormat` type-parameter pattern demonstrated by
 /// [`sinker::MixedSinker`].
 pub trait PixelSink {
-  /// The shape of one row of source data, chosen by the per-format
-  /// subtrait (e.g. [`yuv::Yuv420pRow`] for YUV 4:2:0).
+  /// The shape of one input unit chosen by the per-format subtrait —
+  /// e.g. [`yuv::Yuv420pRow`] for YUV 4:2:0, one row at a time.
   type Input<'a>;
 
-  /// Consume one row. Called by the kernel once per output row, in
-  /// ascending row order. The row borrows may be invalidated after the
-  /// call returns — implementations must not retain them.
-  fn process_row(&mut self, input: Self::Input<'_>);
+  /// Consume one input unit. Called by the kernel once per unit (one
+  /// row, for the row-granular kernels v0.1 ships). Input borrows may
+  /// be invalidated after the call returns — implementations must not
+  /// retain them.
+  fn process(&mut self, input: Self::Input<'_>);
 }
 
 /// YUV → RGB conversion matrix.
@@ -128,4 +129,12 @@ pub trait SourceFormat: sealed::Sealed {}
 
 pub(crate) mod sealed {
   pub trait Sealed {}
+}
+
+/// The three output planes for HSV, bundled so `MixedSinker` stores a
+/// single `Option<HsvBuffers>` rather than three independent options.
+struct HsvBuffers<'a> {
+  h: &'a mut [u8],
+  s: &'a mut [u8],
+  v: &'a mut [u8],
 }

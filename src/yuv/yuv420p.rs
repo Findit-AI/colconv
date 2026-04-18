@@ -18,35 +18,90 @@ impl SourceFormat for Yuv420p {}
 
 /// One output row of a YUV 4:2:0 source handed to a [`Yuv420pSink`].
 ///
-/// - `y` is full-width (`width` bytes).
-/// - `u_half` and `v_half` are **half-width** (`width / 2` bytes) — the
-///   chroma samples for this row as they appear in the source, without
-///   upsampling. Sinks that need full-width chroma upsample inline via
-///   the crate's fused row primitives (e.g. the MixedSinker for YUV
-///   does nearest-neighbor upsample inside `yuv_420_to_bgr_row`).
-/// - `row` is the output row index (`0 ..= frame.height() - 1`).
-/// - `matrix` and `full_range` are carried through from the kernel
-///   call so the Sink can use them when calling row primitives.
+/// Accessors:
+/// - [`y`](Self::y) — full-width Y row (`width` bytes).
+/// - [`u_half`](Self::u_half), [`v_half`](Self::v_half) — **half-width**
+///   (`width / 2` bytes) chroma samples as they appear in the source,
+///   without upsampling. Sinks that need full-width chroma upsample
+///   inline via the crate's fused row primitives (e.g. the MixedSinker
+///   for YUV does nearest-neighbor upsample inside `yuv_420_to_bgr_row`).
+/// - [`row`](Self::row) — output row index (`0 ..= frame.height() - 1`).
+/// - [`matrix`](Self::matrix), [`full_range`](Self::full_range) — carried
+///   through from the kernel call so the Sink can use them when calling
+///   row primitives.
 #[derive(Debug, Clone, Copy)]
 pub struct Yuv420pRow<'a> {
+  y: &'a [u8],
+  u_half: &'a [u8],
+  v_half: &'a [u8],
+  row: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+}
+
+impl<'a> Yuv420pRow<'a> {
+  /// Bundles one row of a 4:2:0 source for a [`Yuv420pSink`].
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  #[allow(clippy::too_many_arguments)]
+  pub(crate) fn new(
+    y: &'a [u8],
+    u_half: &'a [u8],
+    v_half: &'a [u8],
+    row: usize,
+    matrix: ColorMatrix,
+    full_range: bool,
+  ) -> Self {
+    Self {
+      y,
+      u_half,
+      v_half,
+      row,
+      matrix,
+      full_range,
+    }
+  }
+
   /// Full-width Y (luma) row — `width` bytes.
-  pub y: &'a [u8],
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn y(&self) -> &'a [u8] {
+    self.y
+  }
+
   /// Half-width U (Cb) row — `width / 2` bytes.
-  pub u_half: &'a [u8],
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn u_half(&self) -> &'a [u8] {
+    self.u_half
+  }
+
   /// Half-width V (Cr) row — `width / 2` bytes.
-  pub v_half: &'a [u8],
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn v_half(&self) -> &'a [u8] {
+    self.v_half
+  }
+
   /// Output row index within the frame.
-  pub row: usize,
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn row(&self) -> usize {
+    self.row
+  }
+
   /// YUV → RGB matrix carried through from the kernel call.
-  pub matrix: ColorMatrix,
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn matrix(&self) -> ColorMatrix {
+    self.matrix
+  }
+
   /// `true` iff Y ∈ `[0, 255]` (full range); `false` for limited.
-  pub full_range: bool,
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn full_range(&self) -> bool {
+    self.full_range
+  }
 }
 
 /// Sinks that consume YUV 4:2:0 rows.
 ///
 /// A subtrait of [`PixelSink`] that pins the row shape to
-/// [`Yuv420pRow`]. Implementors get `process_row(&mut self, row: Yuv420pRow<'_>)`
+/// [`Yuv420pRow`]. Implementors get `process(&mut self, row: Yuv420pRow<'_>)`
 /// via the supertrait.
 pub trait Yuv420pSink: for<'a> PixelSink<Input<'a> = Yuv420pRow<'a>> {}
 
@@ -89,13 +144,6 @@ pub fn yuv420p_to<S: Yuv420pSink>(
     let u_half = &u_plane[u_start..u_start + chroma_width];
     let v_half = &v_plane[v_start..v_start + chroma_width];
 
-    sink.process_row(Yuv420pRow {
-      y,
-      u_half,
-      v_half,
-      row,
-      matrix,
-      full_range,
-    });
+    sink.process(Yuv420pRow::new(y, u_half, v_half, row, matrix, full_range));
   }
 }

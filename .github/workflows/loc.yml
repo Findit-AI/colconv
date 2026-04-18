@@ -41,7 +41,7 @@ jobs:
         run: |
           tokeit --lang rust
       - name: Upload total loc to GitHub Gist
-        uses: actions/github-script@v9
+        uses: actions/github-script@v8
         with:
           github-token: ${{ secrets.GIST_PAT }}
           script: |
@@ -51,7 +51,7 @@ jobs:
             await github.rest.gists.update({
               gist_id: gistId,
               files: {
-                "template-rs": {
+                "colconv": {
                   content: output
                 }
               }

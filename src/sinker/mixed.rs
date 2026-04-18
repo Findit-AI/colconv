@@ -10,7 +10,7 @@ use core::marker::PhantomData;
 use std::vec::Vec;
 
 use crate::{
-  PixelSink, SourceFormat,
+  HsvBuffers, PixelSink, SourceFormat,
   row::{bgr_to_hsv_row, yuv_420_to_bgr_row},
   yuv::{Yuv420p, Yuv420pRow, Yuv420pSink},
 };
@@ -20,7 +20,7 @@ use crate::{
 ///
 /// Each output is optional — provide `Some(buffer)` to have that
 /// channel written, leave it `None` to skip. Providing no outputs is
-/// legal (the kernel still walks the source and calls `process_row`
+/// legal (the kernel still walks the source and calls `process`
 /// for each row, but nothing is written).
 ///
 /// When HSV is requested **without** BGR, `MixedSinker` keeps a single
@@ -42,26 +42,18 @@ pub struct MixedSinker<'a, F: SourceFormat> {
   /// Lazily grown to `3 * width` bytes when HSV is requested without a
   /// user BGR buffer. Empty otherwise.
   bgr_scratch: Vec<u8>,
+  /// Whether row primitives dispatch to their SIMD backend. Defaults
+  /// to `true`; benchmarks flip this with [`Self::with_simd`] /
+  /// [`Self::set_simd`] to A/B test scalar vs SIMD on the same frame.
+  simd: bool,
   _fmt: PhantomData<F>,
-}
-
-/// The three output planes for HSV, bundled so `MixedSinker` stores a
-/// single `Option<HsvBuffers>` rather than three independent options.
-pub struct HsvBuffers<'a> {
-  /// Hue plane (OpenCV 8-bit: `H ∈ [0, 179]`), at least
-  /// `width * height` bytes.
-  pub h: &'a mut [u8],
-  /// Saturation plane (`S ∈ [0, 255]`), at least `width * height` bytes.
-  pub s: &'a mut [u8],
-  /// Value plane (`V ∈ [0, 255]`), at least `width * height` bytes.
-  pub v: &'a mut [u8],
 }
 
 impl<F: SourceFormat> MixedSinker<'_, F> {
   /// Creates an empty [`MixedSinker`] for the given output width in
   /// pixels. No outputs are requested until `with_bgr` / `with_luma` /
   /// `with_hsv` are called on the builder.
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub fn new(width: usize) -> Self {
     Self {
       bgr: None,
@@ -69,57 +61,106 @@ impl<F: SourceFormat> MixedSinker<'_, F> {
       hsv: None,
       width,
       bgr_scratch: Vec::new(),
+      simd: true,
       _fmt: PhantomData,
     }
   }
 
   /// Returns `true` iff the sinker will write BGR.
-  #[inline]
-  pub fn produces_bgr(&self) -> bool {
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn produces_bgr(&self) -> bool {
     self.bgr.is_some()
   }
 
   /// Returns `true` iff the sinker will write luma.
-  #[inline]
-  pub fn produces_luma(&self) -> bool {
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn produces_luma(&self) -> bool {
     self.luma.is_some()
   }
 
   /// Returns `true` iff the sinker will write HSV.
-  #[inline]
-  pub fn produces_hsv(&self) -> bool {
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn produces_hsv(&self) -> bool {
     self.hsv.is_some()
   }
 
   /// Frame width in pixels. Output buffers are expected to be at
   /// least `width * height * bytes_per_pixel` bytes.
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn width(&self) -> usize {
     self.width
+  }
+
+  /// Returns `true` iff row primitives dispatch to their SIMD backend.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn simd(&self) -> bool {
+    self.simd
+  }
+
+  /// Toggles the SIMD dispatch in place. See [`Self::with_simd`] for the
+  /// consuming builder variant.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn set_simd(&mut self, simd: bool) -> &mut Self {
+    self.simd = simd;
+    self
+  }
+
+  /// Sets whether row primitives dispatch to their SIMD backend.
+  /// Defaults to `true` — pass `false` to force the scalar reference
+  /// path (intended for benchmarks, fuzzing, and differential
+  /// testing). See [`Self::set_simd`] for the in‑place variant.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn with_simd(mut self, simd: bool) -> Self {
+    self.set_simd(simd);
+    self
   }
 }
 
 impl<'a, F: SourceFormat> MixedSinker<'a, F> {
   /// Attaches a packed 24-bit BGR output buffer.
   /// `buf.len()` must be `>= width * height * 3`.
-  #[inline]
-  pub fn with_bgr(mut self, buf: &'a mut [u8]) -> Self {
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn with_bgr(mut self, buf: &'a mut [u8]) -> Self {
+    self.set_bgr(buf);
+    self
+  }
+
+  /// Attaches a packed 24-bit BGR output buffer.
+  /// `buf.len()` must be `>= width * height * 3`.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn set_bgr(&mut self, buf: &'a mut [u8]) -> &mut Self {
     self.bgr = Some(buf);
     self
   }
 
   /// Attaches a single-plane luma output buffer.
   /// `buf.len()` must be `>= width * height`.
-  #[inline]
-  pub fn with_luma(mut self, buf: &'a mut [u8]) -> Self {
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn with_luma(mut self, buf: &'a mut [u8]) -> Self {
+    self.set_luma(buf);
+    self
+  }
+
+  /// Attaches a single-plane luma output buffer.
+  /// `buf.len()` must be `>= width * height`.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn set_luma(&mut self, buf: &'a mut [u8]) -> &mut Self {
     self.luma = Some(buf);
     self
   }
 
   /// Attaches three HSV output planes.
   /// Each plane's length must be `>= width * height`.
-  #[inline]
-  pub fn with_hsv(mut self, h: &'a mut [u8], s: &'a mut [u8], v: &'a mut [u8]) -> Self {
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn with_hsv(mut self, h: &'a mut [u8], s: &'a mut [u8], v: &'a mut [u8]) -> Self {
+    self.set_hsv(h, s, v);
+    self
+  }
+
+  /// Attaches three HSV output planes.
+  /// Each plane's length must be `>= width * height`.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn set_hsv(&mut self, h: &'a mut [u8], s: &'a mut [u8], v: &'a mut [u8]) -> &mut Self {
     self.hsv = Some(HsvBuffers { h, s, v });
     self
   }
@@ -130,9 +171,10 @@ impl<'a, F: SourceFormat> MixedSinker<'a, F> {
 impl PixelSink for MixedSinker<'_, Yuv420p> {
   type Input<'r> = Yuv420pRow<'r>;
 
-  fn process_row(&mut self, row: Yuv420pRow<'_>) {
+  fn process(&mut self, row: Yuv420pRow<'_>) {
     let w = self.width;
-    let idx = row.row;
+    let idx = row.row();
+    let use_simd = self.simd;
 
     // Split-borrow so the `bgr_scratch` path and the `hsv` write don't
     // collide with the `bgr` read-after-write chain below.
@@ -146,7 +188,7 @@ impl PixelSink for MixedSinker<'_, Yuv420p> {
 
     // Luma — YUV420p luma *is* the Y plane. Just copy.
     if let Some(luma) = luma.as_deref_mut() {
-      luma[idx * w..(idx + 1) * w].copy_from_slice(&row.y[..w]);
+      luma[idx * w..(idx + 1) * w].copy_from_slice(&row.y()[..w]);
     }
 
     let want_bgr = bgr.is_some();
@@ -172,13 +214,14 @@ impl PixelSink for MixedSinker<'_, Yuv420p> {
     // Fused YUV→BGR: upsample chroma in registers inside the row
     // primitive, no intermediate memory.
     yuv_420_to_bgr_row(
-      row.y,
-      row.u_half,
-      row.v_half,
+      row.y(),
+      row.u_half(),
+      row.v_half(),
       bgr_row,
       w,
-      row.matrix,
-      row.full_range,
+      row.matrix(),
+      row.full_range(),
+      use_simd,
     );
 
     // HSV from the BGR row we just wrote.
@@ -313,6 +356,40 @@ mod tests {
       0,
       "scratch should stay unallocated when BGR buffer is provided"
     );
+  }
+
+  #[test]
+  fn with_simd_false_matches_with_simd_true() {
+    // A/B test: same frame, one sinker forces scalar, the other uses
+    // SIMD. NEON is bit‑exact to scalar so outputs must match.
+    let w = 32usize;
+    let h = 16usize;
+    let (yp, up, vp) = solid_yuv420p_frame(w as u32, h as u32, 180, 60, 200);
+    let src = Yuv420pFrame::new(
+      &yp,
+      &up,
+      &vp,
+      w as u32,
+      h as u32,
+      w as u32,
+      (w / 2) as u32,
+      (w / 2) as u32,
+    );
+
+    let mut bgr_simd = std::vec![0u8; w * h * 3];
+    let mut bgr_scalar = std::vec![0u8; w * h * 3];
+
+    let mut sink_simd = MixedSinker::<Yuv420p>::new(w).with_bgr(&mut bgr_simd);
+    let mut sink_scalar = MixedSinker::<Yuv420p>::new(w)
+      .with_bgr(&mut bgr_scalar)
+      .with_simd(false);
+    assert!(sink_simd.simd());
+    assert!(!sink_scalar.simd());
+
+    yuv420p_to(&src, false, ColorMatrix::Bt709, &mut sink_simd);
+    yuv420p_to(&src, false, ColorMatrix::Bt709, &mut sink_scalar);
+
+    assert_eq!(bgr_simd, bgr_scalar);
   }
 
   #[test]
