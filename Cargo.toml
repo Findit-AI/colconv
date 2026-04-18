@@ -1,13 +1,13 @@
 [package]
-name = "template-rs"
+name = "colconv"
 version = "0.0.0"
-edition = "2021"
-repository = "https://github.com/al8n/template-rs"
-homepage = "https://github.com/al8n/template-rs"
-documentation = "https://docs.rs/template-rs"
-description = "A template for creating Rust open-source repo on GitHub"
+edition = "2024"
+repository = "https://github.com/findit-ai/colconv"
+homepage = "https://github.com/findit-ai/colconv"
+documentation = "https://docs.rs/colconv"
+description = "SIMD-dispatched per-row color-conversion kernels covering the FFmpeg AVPixelFormat space, with a Sink-based API so consumers pick which derived outputs (BGR / Luma / HSV / custom) they want without paying for the ones they don't."
 license = "MIT OR Apache-2.0"
-rust-version = "1.73"
+rust-version = "1.95.0"
 
 [[bench]]
 path = "benches/foo.rs"
@@ -16,10 +16,13 @@ harness = false
 
 [features]
 default = ["std"]
-alloc = []
-std = []
+alloc = ["libm"]
+std = ["thiserror/default"]
 
 [dependencies]
+derive_more = { version = "2", default-features = false, features = ["display", "is_variant"] }
+thiserror = { version = "2", default-features = false }
+libm = { version = "0.2", optional = true }
 
 [dev-dependencies]
 criterion = "0.8"
