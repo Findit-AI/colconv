@@ -23,6 +23,15 @@ env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
 
+# Needed by `aggregate-results` to POST a summary comment on PRs via the
+# issues API. Default GITHUB_TOKEN is read-only in repos that inherit
+# the org's restricted default permissions, so we grant the minimum set
+# explicitly.
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
 jobs:
   benchmark:
     name: ${{ matrix.label }}
@@ -257,7 +266,10 @@ jobs:
           retention-days: 90
 
       - name: Comment PR with benchmark results
-        if: github.event_name == 'pull_request'
+        # Only on PRs from within the same repo — GITHUB_TOKEN in
+        # forked-PR runs is hard-limited to read-only regardless of
+        # `permissions:`, so attempting the comment would always 403.
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
         uses: actions/github-script@v9
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -273,4 +285,7 @@ jobs:
               repo: context.repo.repo,
               body: comment
             });
-        continue-on-error: false
+        # Keep soft-failing: if org policy ever tightens further, a
+        # failed PR comment shouldn't red-X the workflow (the artifacts
+        # and inline job logs already have the numbers).
+        continue-on-error: true
