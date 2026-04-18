@@ -5,6 +5,9 @@
 //! validates strides vs. widths and that each plane covers its
 //! declared area.
 
+use derive_more::IsVariant;
+use thiserror::Error;
+
 /// A validated YUV 4:2:0 planar frame.
 ///
 /// Three planes:
@@ -181,7 +184,7 @@ impl<'a> Yuv420pFrame<'a> {
 }
 
 /// Errors returned by [`Yuv420pFrame::try_new`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Error)]
 #[non_exhaustive]
 pub enum Yuv420pFrameError {
   /// `width` or `height` was zero.

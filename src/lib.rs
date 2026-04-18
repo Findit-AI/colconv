@@ -32,6 +32,8 @@
 #![cfg_attr(docsrs, allow(unused_attributes))]
 #![deny(missing_docs)]
 
+use derive_more::IsVariant;
+
 #[cfg(all(not(feature = "std"), feature = "alloc"))]
 extern crate alloc as std;
 
@@ -102,7 +104,7 @@ pub trait PixelSink {
 /// `SMPTE2085`, `IPT_C2`, `CHROMA_DERIVED_NCL/CL`, and
 /// `YCGCO_RE`/`YCGCO_RO`. The enum is `#[non_exhaustive]` so variants
 /// can be added without a breaking change when a real use case arrives.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant)]
 #[non_exhaustive]
 pub enum ColorMatrix {
   /// ITU-R BT.601 (SDTV). `R' = Y + 1.402·(V - 128)` etc. in 8-bit space.
