@@ -157,6 +157,43 @@ jobs:
     - name: Run test
       run: cargo hack test --feature-powerset
 
+  # Run the x86_64 test suite under Intel SDE with Ice Lake (`-icx`)
+  # emulation. The standard ubuntu-latest runner is AMD Milan (no
+  # native AVX-512), so without SDE the AVX-512 kernel's
+  # `is_x86_feature_detected!("avx512bw")` gate returns false and the
+  # AVX-512 equivalence tests short-circuit. With SDE, `-icx` reports
+  # AVX-512F/BW/DQ/VL/VNNI/BF16 via its CPUID intercept, so every x86
+  # kernel (SSE4.1, AVX2, AVX-512) actually executes and compares
+  # against the scalar LUT reference.
+  #
+  # SDE slowdown is ~5-10×, so the lib test suite runs in ~30-60s
+  # instead of ~1s — still well within the free-runner budget.
+  test-sde:
+    name: test-sde-avx512
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Cache cargo build and registry
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-test-sde-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-test-sde-
+      - name: Install Rust
+        run: rustup update stable --no-self-update && rustup default stable
+      - name: Install Intel SDE
+        uses: petarpetrovt/setup-sde@v2.4
+        with:
+          sdeVersion: 9.33.0
+      - name: Run tests under SDE (-icx, Ice Lake AVX-512)
+        env:
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER: "sde64 -icx --"
+        run: cargo test --all-features
+
   sanitizer:
     name: sanitizer
     runs-on: ubuntu-latest

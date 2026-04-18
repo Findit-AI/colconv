@@ -58,13 +58,21 @@ jobs:
             label: macos-aarch64-scalar
 
           # x86_64 default — runtime dispatcher picks whichever x86 tier
-          # the runner supports (AVX-512 on Ice/Cascade Lake, AVX2 on
-          # older, SSE4.1 fallback).
+          # the runner supports. Standard ubuntu-latest is AMD EPYC 7763
+          # (Milan) which has AVX2 but NOT AVX-512, so this tier ends up
+          # exercising the AVX2 kernel in practice. Use the -avx512 row
+          # below for actual AVX-512 coverage.
           - os: ubuntu-latest
             arch: x86_64
             tier: default
             rustflags: ''
             label: ubuntu-x86_64-default
+
+          # Note: no AVX-512 bench tier. GitHub-hosted free runners are
+          # AMD Milan (no AVX-512), and emulated numbers from Intel SDE
+          # are ~5-10× off real hardware — not worth measuring. Test
+          # correctness of the AVX-512 kernel is covered by the
+          # `test-sde` job in ci.yml instead.
 
           # x86_64 with AVX-512 disabled: forces the AVX2 dispatch branch
           # on runners that would otherwise always pick AVX-512. Gives
@@ -157,10 +165,10 @@ jobs:
 
       - name: Run benchmarks
         shell: bash
-        # `--benches` limits cargo to the registered bench targets. Without
-        # it, `cargo bench` also runs the library's `#[test]` harness in
-        # release mode, and the lib test harness rejects `--output-format
-        # bencher` with "Unrecognized option: 'output-format'".
+        # `--benches` limits cargo to the registered bench targets.
+        # Without it, `cargo bench` also runs the library's `#[test]`
+        # harness in release mode, and the lib test harness rejects
+        # `--output-format bencher` with "Unrecognized option".
         run: cargo bench --benches -- --output-format bencher | tee benchmark-all-${{ matrix.label }}.txt
         continue-on-error: false
 

@@ -73,10 +73,20 @@ jobs:
             exclude_arch: "--exclude-files 'src/**/arch/x86_*.rs' --exclude-files 'src/**/arch/wasm_*.rs'"
 
           # ---- x86_64 (Linux) ----
+          # Standard ubuntu-latest is AMD EPYC (no AVX-512), so the
+          # default tier exercises AVX2 at runtime. The avx512 tier
+          # below uses a GitHub-hosted larger runner (Intel Ice Lake
+          # with AVX-512BW) to actually cover the AVX-512 dispatcher
+          # branch and kernel.
           - os: ubuntu-latest
             label: linux-x86_64
             rustflags: ''
             exclude_arch: "--exclude-files 'src/**/arch/neon*.rs' --exclude-files 'src/**/arch/wasm_*.rs'"
+          # Note: no AVX-512 coverage tier. Free GH runners are AMD
+          # Milan (no AVX-512); the AVX-512 kernel is exercised under
+          # Intel SDE via the `test-sde` job in ci.yml, which proves
+          # correctness without needing to spill coverage-through-SDE
+          # complexity into this workflow.
           - os: ubuntu-latest
             label: linux-x86_64-avx2-max
             rustflags: '--cfg colconv_disable_avx512'
