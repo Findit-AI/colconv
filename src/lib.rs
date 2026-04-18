@@ -42,13 +42,8 @@ extern crate std;
 
 pub mod frame;
 
-#[cfg(any(feature = "std", feature = "alloc"))]
-#[cfg_attr(docsrs, doc(cfg(any(feature = "std", feature = "alloc"))))]
 pub mod row;
 pub mod sinker;
-
-#[cfg(any(feature = "std", feature = "alloc"))]
-#[cfg_attr(docsrs, doc(cfg(any(feature = "std", feature = "alloc"))))]
 pub mod yuv;
 
 /// A per-row sink for color-converted pixel data.
@@ -138,7 +133,13 @@ pub enum ColorMatrix {
 /// zero-sized markers in [`yuv`], [`rgb`](sinker) etc.
 pub trait SourceFormat: sealed::Sealed {}
 
+/// Internal module implementing the sealed‑trait pattern for
+/// [`SourceFormat`]. External crates cannot name `Sealed`, so they
+/// cannot implement [`SourceFormat`] themselves — the variant list
+/// stays closed.
 pub(crate) mod sealed {
+  /// Crate‑private marker trait used to prevent downstream
+  /// implementations of [`super::SourceFormat`].
   pub trait Sealed {}
 }
 

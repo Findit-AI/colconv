@@ -528,23 +528,23 @@ mod tests {
     let v: std::vec::Vec<u8> = (0..width / 2)
       .map(|i| ((i * 71 + 91) & 0xFF) as u8)
       .collect();
-    let mut bgr_scalar = std::vec![0u8; width * 3];
-    let mut bgr_neon = std::vec![0u8; width * 3];
+    let mut rgb_scalar = std::vec![0u8; width * 3];
+    let mut rgb_neon = std::vec![0u8; width * 3];
 
-    scalar::yuv_420_to_rgb_row(&y, &u, &v, &mut bgr_scalar, width, matrix, full_range);
+    scalar::yuv_420_to_rgb_row(&y, &u, &v, &mut rgb_scalar, width, matrix, full_range);
     unsafe {
-      yuv_420_to_rgb_row(&y, &u, &v, &mut bgr_neon, width, matrix, full_range);
+      yuv_420_to_rgb_row(&y, &u, &v, &mut rgb_neon, width, matrix, full_range);
     }
 
-    if bgr_scalar != bgr_neon {
-      let first_diff = bgr_scalar
+    if rgb_scalar != rgb_neon {
+      let first_diff = rgb_scalar
         .iter()
-        .zip(bgr_neon.iter())
+        .zip(rgb_neon.iter())
         .position(|(a, b)| a != b)
         .unwrap();
       panic!(
         "NEON diverges from scalar at byte {first_diff} (width={width}, matrix={matrix:?}, full_range={full_range}): scalar={} neon={}",
-        bgr_scalar[first_diff], bgr_neon[first_diff]
+        rgb_scalar[first_diff], rgb_neon[first_diff]
       );
     }
   }
@@ -666,22 +666,22 @@ mod tests {
       (0, 0, 0),       // black: v = 0 → s = 0, h = 0
       (255, 255, 255), // white: delta = 0 → s = 0, h = 0
       (128, 128, 128), // gray: delta = 0
-      (0, 0, 255),     // pure red: v == r path
+      (255, 0, 0),     // pure red: v == r path
       (0, 255, 0),     // pure green: v == g path
-      (255, 0, 0),     // pure blue: v == b path
-      (0, 127, 255),   // red→yellow transition
-      (255, 127, 0),   // blue→cyan
-      (127, 0, 255),   // red→magenta
+      (0, 0, 255),     // pure blue: v == b path
+      (255, 127, 0),   // red→yellow transition
+      (0, 127, 255),   // blue→cyan
+      (255, 0, 127),   // red→magenta
       (1, 2, 3),       // near black: small delta
       (254, 253, 252), // near white
-      (10, 200, 150),  // arbitrary: v == g path, h > 0
-      (200, 10, 150),  // arbitrary: v == b path
-      (150, 200, 10),  // arbitrary: v == g
-      (50, 100, 200),  // arbitrary: v == r
-      (128, 64, 0),    // arbitrary: v == b
+      (150, 200, 10),  // arbitrary: v == g path, h > 0
+      (150, 10, 200),  // arbitrary: v == b path
+      (10, 200, 150),  // arbitrary: v == g
+      (200, 100, 50),  // arbitrary: v == r
+      (0, 64, 128),    // arbitrary: v == b
     ]
     .iter()
-    .flat_map(|&(b, g, r)| [b, g, r])
+    .flat_map(|&(r, g, b)| [r, g, b])
     .collect();
     check_hsv_equivalence(&rgb, 16);
   }

@@ -339,23 +339,23 @@ mod tests {
     let v: std::vec::Vec<u8> = (0..width / 2)
       .map(|i| ((i * 71 + 91) & 0xFF) as u8)
       .collect();
-    let mut bgr_scalar = std::vec![0u8; width * 3];
-    let mut bgr_sse41 = std::vec![0u8; width * 3];
+    let mut rgb_scalar = std::vec![0u8; width * 3];
+    let mut rgb_sse41 = std::vec![0u8; width * 3];
 
-    scalar::yuv_420_to_rgb_row(&y, &u, &v, &mut bgr_scalar, width, matrix, full_range);
+    scalar::yuv_420_to_rgb_row(&y, &u, &v, &mut rgb_scalar, width, matrix, full_range);
     unsafe {
-      yuv_420_to_rgb_row(&y, &u, &v, &mut bgr_sse41, width, matrix, full_range);
+      yuv_420_to_rgb_row(&y, &u, &v, &mut rgb_sse41, width, matrix, full_range);
     }
 
-    if bgr_scalar != bgr_sse41 {
-      let first_diff = bgr_scalar
+    if rgb_scalar != rgb_sse41 {
+      let first_diff = rgb_scalar
         .iter()
-        .zip(bgr_sse41.iter())
+        .zip(rgb_sse41.iter())
         .position(|(a, b)| a != b)
         .unwrap();
       panic!(
         "SSE4.1 diverges from scalar at byte {first_diff} (width={width}, matrix={matrix:?}, full_range={full_range}): scalar={} sse41={}",
-        bgr_scalar[first_diff], bgr_sse41[first_diff]
+        rgb_scalar[first_diff], rgb_sse41[first_diff]
       );
     }
   }

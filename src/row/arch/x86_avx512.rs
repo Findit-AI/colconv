@@ -454,23 +454,23 @@ mod tests {
     let v: std::vec::Vec<u8> = (0..width / 2)
       .map(|i| ((i * 71 + 91) & 0xFF) as u8)
       .collect();
-    let mut bgr_scalar = std::vec![0u8; width * 3];
-    let mut bgr_avx512 = std::vec![0u8; width * 3];
+    let mut rgb_scalar = std::vec![0u8; width * 3];
+    let mut rgb_avx512 = std::vec![0u8; width * 3];
 
-    scalar::yuv_420_to_rgb_row(&y, &u, &v, &mut bgr_scalar, width, matrix, full_range);
+    scalar::yuv_420_to_rgb_row(&y, &u, &v, &mut rgb_scalar, width, matrix, full_range);
     unsafe {
-      yuv_420_to_rgb_row(&y, &u, &v, &mut bgr_avx512, width, matrix, full_range);
+      yuv_420_to_rgb_row(&y, &u, &v, &mut rgb_avx512, width, matrix, full_range);
     }
 
-    if bgr_scalar != bgr_avx512 {
-      let first_diff = bgr_scalar
+    if rgb_scalar != rgb_avx512 {
+      let first_diff = rgb_scalar
         .iter()
-        .zip(bgr_avx512.iter())
+        .zip(rgb_avx512.iter())
         .position(|(a, b)| a != b)
         .unwrap();
       panic!(
         "AVX‑512 diverges from scalar at byte {first_diff} (width={width}, matrix={matrix:?}, full_range={full_range}): scalar={} avx512={}",
-        bgr_scalar[first_diff], bgr_avx512[first_diff]
+        rgb_scalar[first_diff], rgb_avx512[first_diff]
       );
     }
   }

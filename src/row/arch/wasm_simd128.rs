@@ -582,15 +582,15 @@ mod tests {
     let v: std::vec::Vec<u8> = (0..width / 2)
       .map(|i| ((i * 71 + 91) & 0xFF) as u8)
       .collect();
-    let mut bgr_scalar = std::vec![0u8; width * 3];
-    let mut bgr_wasm = std::vec![0u8; width * 3];
+    let mut rgb_scalar = std::vec![0u8; width * 3];
+    let mut rgb_wasm = std::vec![0u8; width * 3];
 
-    scalar::yuv_420_to_rgb_row(&y, &u, &v, &mut bgr_scalar, width, matrix, full_range);
+    scalar::yuv_420_to_rgb_row(&y, &u, &v, &mut rgb_scalar, width, matrix, full_range);
     unsafe {
-      yuv_420_to_rgb_row(&y, &u, &v, &mut bgr_wasm, width, matrix, full_range);
+      yuv_420_to_rgb_row(&y, &u, &v, &mut rgb_wasm, width, matrix, full_range);
     }
 
-    assert_eq!(bgr_scalar, bgr_wasm, "simd128 diverges from scalar");
+    assert_eq!(rgb_scalar, rgb_wasm, "simd128 diverges from scalar");
   }
 
   #[test]
