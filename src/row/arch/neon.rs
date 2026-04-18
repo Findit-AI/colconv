@@ -1,8 +1,12 @@
 //! aarch64 NEON backend for the row primitives.
 //!
-//! NEON is mandatory baseline on aarch64 in Rust, so no runtime
-//! feature detection is needed — the dispatcher in [`crate::row`]
-//! selects this backend unconditionally when `target_arch = "aarch64"`.
+//! Selected by [`crate::row`]'s dispatcher after
+//! `is_aarch64_feature_detected!("neon")` returns true (runtime,
+//! std‑gated) or `cfg!(target_feature = "neon")` evaluates true
+//! (compile‑time, no‑std). The kernel itself carries
+//! `#[target_feature(enable = "neon")]` so its intrinsics execute in
+//! an explicitly NEON‑enabled context rather than one merely inherited
+//! from the aarch64 target's default feature set.
 //!
 //! # Numerical contract
 //!
@@ -81,8 +85,9 @@ pub(crate) unsafe fn yuv_420_to_bgr_row_neon(
   let (y_off, y_scale, c_scale) = scalar::range_params(full_range);
   const RND: i32 = 1 << 14;
 
-  // SAFETY: NEON is mandatory baseline on aarch64 (no feature
-  // detection needed). All pointer adds below are bounded by the
+  // SAFETY: NEON availability is the caller's obligation per the
+  // `# Safety` section above; the dispatcher in `crate::row` checks
+  // it. All pointer adds below are bounded by the
   // `while x + 16 <= width` loop condition and the caller‑promised
   // slice lengths checked above.
   unsafe {

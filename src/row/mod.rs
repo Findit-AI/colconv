@@ -52,21 +52,37 @@ pub fn yuv_420_to_bgr_row(
   use_simd: bool,
 ) {
   if use_simd {
-    #[cfg(target_arch = "aarch64")]
-    if neon_available() {
-      // SAFETY: `neon_available()` verified NEON is present on this
-      // CPU. Bounds / parity invariants are the caller's obligation
-      // (same contract as the scalar reference); they are checked
-      // with `debug_assert` in debug builds.
-      unsafe {
-        arch::neon::yuv_420_to_bgr_row_neon(y, u_half, v_half, bgr_out, width, matrix, full_range);
-      }
-      return;
+    cfg_select! {
+      target_arch = "aarch64" => {
+        if neon_available() {
+          // SAFETY: `neon_available()` verified NEON is present on this
+          // CPU. Bounds / parity invariants are the caller's obligation
+          // (same contract as the scalar reference); they are checked
+          // with `debug_assert` in debug builds.
+          unsafe {
+            arch::neon::yuv_420_to_bgr_row_neon(y, u_half, v_half, bgr_out, width, matrix, full_range);
+          }
+          return;
+        }
+      },
+      target_arch = "x86_64" => {
+        if avx2_available() {
+          // SAFETY: `avx2_available()` verified AVX2 is present on this
+          // CPU. Bounds / parity invariants are the caller's obligation
+          // (same contract as the scalar reference); they are checked
+          // with `debug_assert` in debug builds.
+          unsafe {
+            arch::x86_avx2::yuv_420_to_bgr_row_avx2(
+              y, u_half, v_half, bgr_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+      },
+      // Future x86_64 fallback cascade (avx512 promoted above, sse4.1 →
+      // ssse3 below) slots in here, each branch guarded by the matching
+      // `is_x86_feature_detected!` / `cfg!(target_feature = ...)` pair.
     }
-
-    // Future x86_64 cascade (avx512 → avx2 → sse4.1 → ssse3) slots in
-    // here, each branch guarded by the matching `is_x86_feature_detected!`
-    // / `cfg!(target_feature = ...)` pair.
   }
 
   scalar::yuv_420_to_bgr_row_scalar(y, u_half, v_half, bgr_out, width, matrix, full_range);
@@ -106,4 +122,18 @@ fn neon_available() -> bool {
 #[cfg_attr(not(tarpaulin), inline(always))]
 const fn neon_available() -> bool {
   cfg!(target_feature = "neon")
+}
+
+/// AVX2 availability on x86_64.
+#[cfg(all(target_arch = "x86_64", feature = "std"))]
+#[cfg_attr(not(tarpaulin), inline(always))]
+fn avx2_available() -> bool {
+  std::arch::is_x86_feature_detected!("avx2")
+}
+
+/// AVX2 availability on x86_64 — no‑std variant (compile‑time).
+#[cfg(all(target_arch = "x86_64", not(feature = "std")))]
+#[cfg_attr(not(tarpaulin), inline(always))]
+const fn avx2_available() -> bool {
+  cfg!(target_feature = "avx2")
 }
