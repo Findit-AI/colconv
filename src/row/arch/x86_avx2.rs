@@ -39,15 +39,17 @@
 //! element order. Every fixup is called out inline.
 
 use core::arch::x86_64::{
-  __m128i, __m256i, _mm_loadu_si128, _mm_or_si128, _mm_setr_epi8, _mm_shuffle_epi8,
-  _mm_storeu_si128, _mm256_add_epi32, _mm256_adds_epi16, _mm256_castsi256_si128,
+  __m256i, _mm_loadu_si128, _mm256_add_epi32, _mm256_adds_epi16, _mm256_castsi256_si128,
   _mm256_cvtepi16_epi32, _mm256_cvtepu8_epi16, _mm256_extracti128_si256, _mm256_loadu_si256,
   _mm256_mullo_epi32, _mm256_packs_epi32, _mm256_packus_epi16, _mm256_permute2x128_si256,
   _mm256_permute4x64_epi64, _mm256_set1_epi16, _mm256_set1_epi32, _mm256_srai_epi32,
   _mm256_sub_epi16, _mm256_unpackhi_epi16, _mm256_unpacklo_epi16,
 };
 
-use crate::{ColorMatrix, row::scalar};
+use crate::{
+  ColorMatrix,
+  row::{arch::x86_common::write_bgr_16, scalar},
+};
 
 /// AVX2 YUV 4:2:0 → packed BGR. Semantics match
 /// [`scalar::yuv_420_to_bgr_row_scalar`] byte‑identically.
@@ -306,11 +308,14 @@ fn narrow_u8x32(lo: __m256i, hi: __m256i) -> __m256i {
 }
 
 /// Writes 32 pixels of packed BGR (96 bytes) by interleaving three
-/// u8x32 B/G/R channel vectors. Processed as two 16‑pixel halves;
-/// each half uses the classic SSSE3 `_mm_shuffle_epi8` 3‑way interleave
-/// (three shuffle masks per channel, combined with `_mm_or_si128`).
+/// u8x32 B/G/R channel vectors. Processed as two 16‑pixel halves via
+/// the shared [`write_bgr_16`](super::x86_common::write_bgr_16) helper.
+///
+/// # Safety
+///
+/// `ptr` must point to at least 96 writable bytes.
 #[inline(always)]
-fn write_bgr_32(b: __m256i, g: __m256i, r: __m256i, ptr: *mut u8) {
+unsafe fn write_bgr_32(b: __m256i, g: __m256i, r: __m256i, ptr: *mut u8) {
   unsafe {
     let b_lo = _mm256_castsi256_si128(b);
     let b_hi = _mm256_extracti128_si256::<1>(b);
@@ -321,69 +326,6 @@ fn write_bgr_32(b: __m256i, g: __m256i, r: __m256i, ptr: *mut u8) {
 
     write_bgr_16(b_lo, g_lo, r_lo, ptr);
     write_bgr_16(b_hi, g_hi, r_hi, ptr.add(48));
-  }
-}
-
-/// Writes 16 pixels of packed BGR (48 bytes) from three u8x16 channel
-/// vectors.
-///
-/// Three output blocks of 16 bytes each interleave B, G, R triples.
-/// Each channel contributes specific bytes to each block; the shuffle
-/// masks below assign those bytes (with `-1` = 0x80 = "zero the lane,
-/// to be OR'd in by another channel's contribution").
-///
-/// Conceptually, block 0 (bytes 0..16) takes:
-/// `B0, G0, R0, B1, G1, R1, B2, G2, R2, B3, G3, R3, B4, G4, R4, B5`.
-/// Block 1 (bytes 16..32):
-/// `G5, R5, B6, G6, R6, B7, G7, R7, B8, G8, R8, B9, G9, R9, B10, G10`.
-/// Block 2 (bytes 32..48):
-/// `R10, B11, G11, R11, ..., B15, G15, R15`.
-///
-/// Each of the three 16‑byte stores is the OR of three shuffles of
-/// the B, G, R inputs. This is the well‑known SSSE3 3‑way interleave
-/// pattern from libyuv / OpenCV.
-#[inline(always)]
-fn write_bgr_16(b: __m128i, g: __m128i, r: __m128i, ptr: *mut u8) {
-  unsafe {
-    // Shuffle masks for block 0 (first 16 output bytes).
-    //   dst byte i gets source byte mask[i] from the corresponding
-    //   input channel (B for b_mask, G for g_mask, R for r_mask).
-    //   0x80 (`-1` as i8) zeroes that output lane.
-    let b0 = _mm_setr_epi8(0, -1, -1, 1, -1, -1, 2, -1, -1, 3, -1, -1, 4, -1, -1, 5);
-    let g0 = _mm_setr_epi8(-1, 0, -1, -1, 1, -1, -1, 2, -1, -1, 3, -1, -1, 4, -1, -1);
-    let r0 = _mm_setr_epi8(-1, -1, 0, -1, -1, 1, -1, -1, 2, -1, -1, 3, -1, -1, 4, -1);
-    let out0 = _mm_or_si128(
-      _mm_or_si128(_mm_shuffle_epi8(b, b0), _mm_shuffle_epi8(g, g0)),
-      _mm_shuffle_epi8(r, r0),
-    );
-
-    // Block 1 (bytes 16..32).
-    let b1 = _mm_setr_epi8(-1, -1, 6, -1, -1, 7, -1, -1, 8, -1, -1, 9, -1, -1, 10, -1);
-    let g1 = _mm_setr_epi8(5, -1, -1, 6, -1, -1, 7, -1, -1, 8, -1, -1, 9, -1, -1, 10);
-    let r1 = _mm_setr_epi8(-1, 5, -1, -1, 6, -1, -1, 7, -1, -1, 8, -1, -1, 9, -1, -1);
-    let out1 = _mm_or_si128(
-      _mm_or_si128(_mm_shuffle_epi8(b, b1), _mm_shuffle_epi8(g, g1)),
-      _mm_shuffle_epi8(r, r1),
-    );
-
-    // Block 2 (bytes 32..48).
-    let b2 = _mm_setr_epi8(
-      -1, 11, -1, -1, 12, -1, -1, 13, -1, -1, 14, -1, -1, 15, -1, -1,
-    );
-    let g2 = _mm_setr_epi8(
-      -1, -1, 11, -1, -1, 12, -1, -1, 13, -1, -1, 14, -1, -1, 15, -1,
-    );
-    let r2 = _mm_setr_epi8(
-      10, -1, -1, 11, -1, -1, 12, -1, -1, 13, -1, -1, 14, -1, -1, 15,
-    );
-    let out2 = _mm_or_si128(
-      _mm_or_si128(_mm_shuffle_epi8(b, b2), _mm_shuffle_epi8(g, g2)),
-      _mm_shuffle_epi8(r, r2),
-    );
-
-    _mm_storeu_si128(ptr.cast(), out0);
-    _mm_storeu_si128(ptr.add(16).cast(), out1);
-    _mm_storeu_si128(ptr.add(32).cast(), out2);
   }
 }
 

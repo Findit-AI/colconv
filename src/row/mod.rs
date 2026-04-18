@@ -66,6 +66,16 @@ pub fn yuv_420_to_bgr_row(
         }
       },
       target_arch = "x86_64" => {
+        if avx512_available() {
+          // SAFETY: `avx512_available()` verified AVX‑512BW is present.
+          // Bounds / parity invariants are the caller's obligation.
+          unsafe {
+            arch::x86_avx512::yuv_420_to_bgr_row_avx512(
+              y, u_half, v_half, bgr_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
         if avx2_available() {
           // SAFETY: `avx2_available()` verified AVX2 is present on this
           // CPU. Bounds / parity invariants are the caller's obligation
@@ -78,13 +88,39 @@ pub fn yuv_420_to_bgr_row(
           }
           return;
         }
+        if sse41_available() {
+          // SAFETY: `sse41_available()` verified SSE4.1 is present.
+          // Bounds / parity invariants are the caller's obligation
+          // (same contract as the scalar reference).
+          unsafe {
+            arch::x86_sse41::yuv_420_to_bgr_row_sse41(
+              y, u_half, v_half, bgr_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
       },
-      // Future x86_64 fallback cascade (avx512 promoted above, sse4.1 →
-      // ssse3 below) slots in here, each branch guarded by the matching
+      // Future x86_64 tiers (avx512 promoted above AVX2, ssse3 below
+      // SSE4.1) slot in here, each branch guarded by the matching
       // `is_x86_feature_detected!` / `cfg!(target_feature = ...)` pair.
+      target_arch = "wasm32" => {
+        if simd128_available() {
+          // SAFETY: `simd128_available()` (compile‑time
+          // `cfg!(target_feature = "simd128")`) verified that simd128
+          // is on. WASM has no runtime detection — the module's SIMD
+          // support is fixed at produce‑time. Bounds / parity
+          // invariants are the caller's obligation.
+          unsafe {
+            arch::wasm_simd128::yuv_420_to_bgr_row_wasm_simd128(
+              y, u_half, v_half, bgr_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+      },
       _ => {
-        // Targets without a SIMD backend (wasm32, riscv64, powerpc, …)
-        // fall through to the scalar path below.
+        // Targets without a SIMD backend (riscv64, powerpc, …) fall
+        // through to the scalar path below.
       }
     }
   }
@@ -140,4 +176,42 @@ fn avx2_available() -> bool {
 #[cfg_attr(not(tarpaulin), inline(always))]
 const fn avx2_available() -> bool {
   cfg!(target_feature = "avx2")
+}
+
+/// SSE4.1 availability on x86_64.
+#[cfg(all(target_arch = "x86_64", feature = "std"))]
+#[cfg_attr(not(tarpaulin), inline(always))]
+fn sse41_available() -> bool {
+  std::arch::is_x86_feature_detected!("sse4.1")
+}
+
+/// SSE4.1 availability on x86_64 — no‑std variant (compile‑time).
+#[cfg(all(target_arch = "x86_64", not(feature = "std")))]
+#[cfg_attr(not(tarpaulin), inline(always))]
+const fn sse41_available() -> bool {
+  cfg!(target_feature = "sse4.1")
+}
+
+/// AVX‑512 (F + BW) availability on x86_64.
+#[cfg(all(target_arch = "x86_64", feature = "std"))]
+#[cfg_attr(not(tarpaulin), inline(always))]
+fn avx512_available() -> bool {
+  std::arch::is_x86_feature_detected!("avx512bw")
+}
+
+/// AVX‑512 (F + BW) availability on x86_64 — no‑std variant
+/// (compile‑time).
+#[cfg(all(target_arch = "x86_64", not(feature = "std")))]
+#[cfg_attr(not(tarpaulin), inline(always))]
+const fn avx512_available() -> bool {
+  cfg!(target_feature = "avx512bw")
+}
+
+/// simd128 availability on wasm32. WASM has no runtime CPU detection
+/// (SIMD support is fixed at module produce time), so this is always
+/// a compile‑time check regardless of the `std` feature.
+#[cfg(target_arch = "wasm32")]
+#[cfg_attr(not(tarpaulin), inline(always))]
+const fn simd128_available() -> bool {
+  cfg!(target_feature = "simd128")
 }
