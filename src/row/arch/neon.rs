@@ -189,24 +189,12 @@ pub(crate) unsafe fn yuv_420_to_rgb_row(
   }
 }
 
-/// NEON NV12 → packed RGB. Identical math to [`yuv_420_to_rgb_row`];
-/// the only difference is UV ingestion — `vld2_u8` deinterleaves 16
-/// interleaved UV bytes into u8x8 U and u8x8 V vectors in one
-/// instruction, matching the shape expected by the rest of the
-/// chroma→RGB pipeline.
+/// NEON NV12 → packed RGB (UV-ordered chroma). Thin wrapper over the
+/// shared [`nv12_or_nv21_to_rgb_row_impl`] with `SWAP_UV = false`.
 ///
 /// # Safety
 ///
-/// 1. **NEON must be available on the current CPU.** The dispatcher
-///    verifies this; direct callers are responsible.
-/// 2. `width & 1 == 0`.
-/// 3. `y.len() >= width`.
-/// 4. `uv_half.len() >= width` (`2 * (width / 2)` interleaved bytes).
-/// 5. `rgb_out.len() >= 3 * width`.
-///
-/// Bounds are `debug_assert`‑checked; release builds trust the caller
-/// because the kernel uses unchecked pointer arithmetic (`vld1q_u8`,
-/// `vld2_u8`, `vst3q_u8`).
+/// Same as [`nv12_or_nv21_to_rgb_row_impl`].
 #[inline]
 #[target_feature(enable = "neon")]
 pub(crate) unsafe fn nv12_to_rgb_row(
@@ -217,9 +205,65 @@ pub(crate) unsafe fn nv12_to_rgb_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  debug_assert_eq!(width & 1, 0, "NV12 requires even width");
+  // SAFETY: caller obligations forwarded to the shared impl.
+  unsafe {
+    nv12_or_nv21_to_rgb_row_impl::<false>(y, uv_half, rgb_out, width, matrix, full_range);
+  }
+}
+
+/// NEON NV21 → packed RGB (VU-ordered chroma). Thin wrapper over
+/// [`nv12_or_nv21_to_rgb_row_impl`] with `SWAP_UV = true`.
+///
+/// # Safety
+///
+/// Same as [`nv12_or_nv21_to_rgb_row_impl`].
+#[inline]
+#[target_feature(enable = "neon")]
+pub(crate) unsafe fn nv21_to_rgb_row(
+  y: &[u8],
+  vu_half: &[u8],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  // SAFETY: caller obligations forwarded to the shared impl.
+  unsafe {
+    nv12_or_nv21_to_rgb_row_impl::<true>(y, vu_half, rgb_out, width, matrix, full_range);
+  }
+}
+
+/// Shared NEON NV12/NV21 kernel. `SWAP_UV = false` selects NV12
+/// (even byte = U, odd = V); `SWAP_UV = true` selects NV21 (even =
+/// V, odd = U). The const generic drives monomorphization — the
+/// branch is eliminated in each instantiation and both wrappers
+/// produce byte‑identical output to the scalar reference.
+///
+/// # Safety
+///
+/// 1. **NEON must be available on the current CPU.** The dispatcher
+///    verifies this; direct callers are responsible.
+/// 2. `width & 1 == 0`.
+/// 3. `y.len() >= width`.
+/// 4. `uv_or_vu_half.len() >= width` (2 × (width / 2) interleaved bytes).
+/// 5. `rgb_out.len() >= 3 * width`.
+///
+/// Bounds are `debug_assert`-checked; release builds trust the caller
+/// because the kernel uses unchecked pointer arithmetic (`vld1q_u8`,
+/// `vld2_u8`, `vst3q_u8`).
+#[inline]
+#[target_feature(enable = "neon")]
+unsafe fn nv12_or_nv21_to_rgb_row_impl<const SWAP_UV: bool>(
+  y: &[u8],
+  uv_or_vu_half: &[u8],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  debug_assert_eq!(width & 1, 0, "NV12/NV21 require even width");
   debug_assert!(y.len() >= width);
-  debug_assert!(uv_half.len() >= width);
+  debug_assert!(uv_or_vu_half.len() >= width);
   debug_assert!(rgb_out.len() >= width * 3);
 
   let coeffs = scalar::Coefficients::for_matrix(matrix);
@@ -245,13 +289,17 @@ pub(crate) unsafe fn nv12_to_rgb_row(
     let mut x = 0usize;
     while x + 16 <= width {
       let y_vec = vld1q_u8(y.as_ptr().add(x));
-      // 16 Y pixels → 8 chroma pairs. `vld2_u8` loads 16 UV bytes
-      // starting at offset `x` (= `x / 2 * 2`) and deinterleaves them
-      // into (u8x8 U, u8x8 V) — the shape the rest of the pipeline
-      // expects.
-      let uv_pair = vld2_u8(uv_half.as_ptr().add(x));
-      let u_vec = uv_pair.0;
-      let v_vec = uv_pair.1;
+      // 16 Y pixels → 8 chroma pairs. `vld2_u8` loads 16 interleaved
+      // bytes and splits into (even-offset bytes, odd-offset bytes).
+      // For NV12: even=U, odd=V. For NV21: even=V, odd=U, so we
+      // swap which lane becomes `u_vec`. The `const SWAP_UV` makes
+      // this a compile-time choice — no runtime branch.
+      let uv_pair = vld2_u8(uv_or_vu_half.as_ptr().add(x));
+      let (u_vec, v_vec) = if SWAP_UV {
+        (uv_pair.1, uv_pair.0)
+      } else {
+        (uv_pair.0, uv_pair.1)
+      };
 
       let y_lo = vreinterpretq_s16_u16(vmovl_u8(vget_low_u8(y_vec)));
       let y_hi = vreinterpretq_s16_u16(vmovl_u8(vget_high_u8(y_vec)));
@@ -302,17 +350,28 @@ pub(crate) unsafe fn nv12_to_rgb_row(
       x += 16;
     }
 
-    // Scalar NV12 tail. UV slice stride matches Y stride (`width` each,
-    // with `x` already consumed from both).
+    // Scalar tail for the 0..14 leftover pixels. Dispatch to the
+    // matching scalar kernel based on SWAP_UV.
     if x < width {
-      scalar::nv12_to_rgb_row(
-        &y[x..width],
-        &uv_half[x..width],
-        &mut rgb_out[x * 3..width * 3],
-        width - x,
-        matrix,
-        full_range,
-      );
+      if SWAP_UV {
+        scalar::nv21_to_rgb_row(
+          &y[x..width],
+          &uv_or_vu_half[x..width],
+          &mut rgb_out[x * 3..width * 3],
+          width - x,
+          matrix,
+          full_range,
+        );
+      } else {
+        scalar::nv12_to_rgb_row(
+          &y[x..width],
+          &uv_or_vu_half[x..width],
+          &mut rgb_out[x * 3..width * 3],
+          width - x,
+          matrix,
+          full_range,
+        );
+      }
     }
   }
 }
@@ -808,6 +867,106 @@ mod tests {
     for w in [16usize, 30, 64, 1920] {
       check_nv12_matches_yuv420p(w, ColorMatrix::Bt709, false);
       check_nv12_matches_yuv420p(w, ColorMatrix::YCgCo, true);
+    }
+  }
+
+  // ---- nv21_to_rgb_row equivalence ------------------------------------
+
+  /// Scalar-equivalence for NV21. Same pseudo-random byte stream as
+  /// the NV12 fixture, just handed to the VU-ordered kernel.
+  fn check_nv21_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+    let y: std::vec::Vec<u8> = (0..width).map(|i| ((i * 37 + 11) & 0xFF) as u8).collect();
+    let vu: std::vec::Vec<u8> = (0..width / 2)
+      .flat_map(|i| {
+        [
+          ((i * 53 + 23) & 0xFF) as u8, // V_i
+          ((i * 71 + 91) & 0xFF) as u8, // U_i
+        ]
+      })
+      .collect();
+    let mut rgb_scalar = std::vec![0u8; width * 3];
+    let mut rgb_neon = std::vec![0u8; width * 3];
+
+    scalar::nv21_to_rgb_row(&y, &vu, &mut rgb_scalar, width, matrix, full_range);
+    unsafe {
+      nv21_to_rgb_row(&y, &vu, &mut rgb_neon, width, matrix, full_range);
+    }
+
+    if rgb_scalar != rgb_neon {
+      let first_diff = rgb_scalar
+        .iter()
+        .zip(rgb_neon.iter())
+        .position(|(a, b)| a != b)
+        .unwrap();
+      panic!(
+        "NEON NV21 diverges from scalar at byte {first_diff} (width={width}, matrix={matrix:?}, full_range={full_range}): scalar={} neon={}",
+        rgb_scalar[first_diff], rgb_neon[first_diff]
+      );
+    }
+  }
+
+  /// Cross-format invariant: NV21 kernel on a VU-swapped byte stream
+  /// must produce byte-identical output to the NV12 kernel on the
+  /// UV-ordered original — proves the const-generic `SWAP_UV` path
+  /// actually inverts the byte order.
+  fn check_nv21_matches_nv12_with_swapped_uv(width: usize, matrix: ColorMatrix, full_range: bool) {
+    let y: std::vec::Vec<u8> = (0..width).map(|i| ((i * 37 + 11) & 0xFF) as u8).collect();
+    // Build the UV stream (NV12 order), then the VU stream as the
+    // same pairs byte-swapped.
+    let uv: std::vec::Vec<u8> = (0..width / 2)
+      .flat_map(|i| {
+        [
+          ((i * 53 + 23) & 0xFF) as u8, // U_i
+          ((i * 71 + 91) & 0xFF) as u8, // V_i
+        ]
+      })
+      .collect();
+    let mut vu = std::vec![0u8; width];
+    for i in 0..width / 2 {
+      vu[2 * i] = uv[2 * i + 1]; // V_i
+      vu[2 * i + 1] = uv[2 * i]; // U_i
+    }
+
+    let mut rgb_nv12 = std::vec![0u8; width * 3];
+    let mut rgb_nv21 = std::vec![0u8; width * 3];
+    unsafe {
+      nv12_to_rgb_row(&y, &uv, &mut rgb_nv12, width, matrix, full_range);
+      nv21_to_rgb_row(&y, &vu, &mut rgb_nv21, width, matrix, full_range);
+    }
+    assert_eq!(
+      rgb_nv12, rgb_nv21,
+      "NV21 should produce identical output to NV12 with byte-swapped chroma (width={width}, matrix={matrix:?})"
+    );
+  }
+
+  #[test]
+  fn nv21_neon_matches_scalar_all_matrices_16() {
+    for m in [
+      ColorMatrix::Bt601,
+      ColorMatrix::Bt709,
+      ColorMatrix::Bt2020Ncl,
+      ColorMatrix::Smpte240m,
+      ColorMatrix::Fcc,
+      ColorMatrix::YCgCo,
+    ] {
+      for full in [true, false] {
+        check_nv21_equivalence(16, m, full);
+      }
+    }
+  }
+
+  #[test]
+  fn nv21_neon_matches_scalar_widths() {
+    for w in [32usize, 1920, 18, 30, 34, 1922] {
+      check_nv21_equivalence(w, ColorMatrix::Bt709, false);
+    }
+  }
+
+  #[test]
+  fn nv21_neon_matches_nv12_swapped() {
+    for w in [16usize, 30, 64, 1920] {
+      check_nv21_matches_nv12_with_swapped_uv(w, ColorMatrix::Bt709, false);
+      check_nv21_matches_nv12_with_swapped_uv(w, ColorMatrix::YCgCo, true);
     }
   }
 

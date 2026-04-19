@@ -81,15 +81,8 @@ pub(crate) fn yuv_420_to_rgb_row(
   }
 }
 
-/// NV12 (semi‑planar 4:2:0) → packed RGB. Identical math and numerical
-/// contract to [`yuv_420_to_rgb_row`]; the only difference is UV source:
-/// `uv_half[2 * c_idx]` is U (Cb), `uv_half[2 * c_idx + 1]` is V (Cr).
-///
-/// # Panics (debug builds)
-///
-/// - `width` must be even (4:2:0 pairs pixel columns).
-/// - `y.len() >= width`, `uv_half.len() >= width` (`= 2 * (width / 2)`),
-///   `rgb_out.len() >= 3 * width`.
+/// NV12 (semi‑planar 4:2:0, UV-ordered) → packed RGB. Thin wrapper
+/// over [`nv12_or_nv21_to_rgb_row_impl`] with `SWAP_UV = false`.
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn nv12_to_rgb_row(
   y: &[u8],
@@ -99,9 +92,47 @@ pub(crate) fn nv12_to_rgb_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  debug_assert_eq!(width & 1, 0, "NV12 requires even width");
+  nv12_or_nv21_to_rgb_row_impl::<false>(y, uv_half, rgb_out, width, matrix, full_range);
+}
+
+/// NV21 (semi‑planar 4:2:0, VU-ordered) → packed RGB. Thin wrapper
+/// over [`nv12_or_nv21_to_rgb_row_impl`] with `SWAP_UV = true`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn nv21_to_rgb_row(
+  y: &[u8],
+  vu_half: &[u8],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  nv12_or_nv21_to_rgb_row_impl::<true>(y, vu_half, rgb_out, width, matrix, full_range);
+}
+
+/// Shared scalar kernel for NV12 (SWAP_UV=false) and NV21
+/// (SWAP_UV=true). Identical math and numerical contract to
+/// [`yuv_420_to_rgb_row`]; the only difference is chroma byte order
+/// in the interleaved plane. `const` generic drives compile-time
+/// monomorphization — each wrapper is inlined with the branch
+/// eliminated.
+///
+/// # Panics (debug builds)
+///
+/// - `width` must be even (4:2:0 pairs pixel columns).
+/// - `y.len() >= width`, `uv_or_vu_half.len() >= width`,
+///   `rgb_out.len() >= 3 * width`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+fn nv12_or_nv21_to_rgb_row_impl<const SWAP_UV: bool>(
+  y: &[u8],
+  uv_or_vu_half: &[u8],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  debug_assert_eq!(width & 1, 0, "NV12/NV21 require even width");
   debug_assert!(y.len() >= width, "y row too short");
-  debug_assert!(uv_half.len() >= width, "uv_half row too short");
+  debug_assert!(uv_or_vu_half.len() >= width, "chroma row too short");
   debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
 
   let coeffs = Coefficients::for_matrix(matrix);
@@ -111,8 +142,15 @@ pub(crate) fn nv12_to_rgb_row(
   let mut x = 0;
   while x < width {
     let c_idx = x / 2;
-    let u_d = ((uv_half[c_idx * 2] as i32 - 128) * c_scale + RND) >> 15;
-    let v_d = ((uv_half[c_idx * 2 + 1] as i32 - 128) * c_scale + RND) >> 15;
+    // NV12: even byte = U, odd byte = V.
+    // NV21: even byte = V, odd byte = U.
+    let (u_byte, v_byte) = if SWAP_UV {
+      (uv_or_vu_half[c_idx * 2 + 1], uv_or_vu_half[c_idx * 2])
+    } else {
+      (uv_or_vu_half[c_idx * 2], uv_or_vu_half[c_idx * 2 + 1])
+    };
+    let u_d = ((u_byte as i32 - 128) * c_scale + RND) >> 15;
+    let v_d = ((v_byte as i32 - 128) * c_scale + RND) >> 15;
 
     let r_chroma = (coeffs.r_u() * u_d + coeffs.r_v() * v_d + RND) >> 15;
     let g_chroma = (coeffs.g_u() * u_d + coeffs.g_v() * v_d + RND) >> 15;

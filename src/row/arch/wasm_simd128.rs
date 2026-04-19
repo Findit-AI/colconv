@@ -188,20 +188,12 @@ pub(crate) unsafe fn yuv_420_to_rgb_row(
   }
 }
 
-/// WASM simd128 NV12 → packed RGB. Identical math to
-/// [`yuv_420_to_rgb_row`]; the only difference is UV ingestion — a
-/// single 16‑byte `v128_load` plus two compile‑time `i8x16_shuffle`
-/// calls extract the 8 U bytes and 8 V bytes into the low half of two
-/// v128s, matching what `u16x8_extend_low_u8x16` expects downstream.
+/// WASM simd128 NV12 → packed RGB (UV-ordered chroma). Thin wrapper
+/// over [`nv12_or_nv21_to_rgb_row_impl`] with `SWAP_UV = false`.
 ///
 /// # Safety
 ///
-/// 1. **simd128 must be enabled at compile time** (same obligation as
-///    [`yuv_420_to_rgb_row`]).
-/// 2. `width & 1 == 0`.
-/// 3. `y.len() >= width`.
-/// 4. `uv_half.len() >= width` (16 interleaved bytes per 16 Y pixels).
-/// 5. `rgb_out.len() >= 3 * width`.
+/// Same as [`nv12_or_nv21_to_rgb_row_impl`].
 #[inline]
 #[target_feature(enable = "simd128")]
 pub(crate) unsafe fn nv12_to_rgb_row(
@@ -212,9 +204,58 @@ pub(crate) unsafe fn nv12_to_rgb_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  debug_assert_eq!(width & 1, 0, "NV12 requires even width");
+  // SAFETY: caller obligations forwarded to the shared impl.
+  unsafe {
+    nv12_or_nv21_to_rgb_row_impl::<false>(y, uv_half, rgb_out, width, matrix, full_range);
+  }
+}
+
+/// WASM simd128 NV21 → packed RGB (VU-ordered chroma). Thin wrapper
+/// over [`nv12_or_nv21_to_rgb_row_impl`] with `SWAP_UV = true`.
+///
+/// # Safety
+///
+/// Same as [`nv12_or_nv21_to_rgb_row_impl`].
+#[inline]
+#[target_feature(enable = "simd128")]
+pub(crate) unsafe fn nv21_to_rgb_row(
+  y: &[u8],
+  vu_half: &[u8],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  // SAFETY: caller obligations forwarded to the shared impl.
+  unsafe {
+    nv12_or_nv21_to_rgb_row_impl::<true>(y, vu_half, rgb_out, width, matrix, full_range);
+  }
+}
+
+/// Shared wasm simd128 NV12/NV21 kernel. `SWAP_UV` selects chroma
+/// byte order at compile time.
+///
+/// # Safety
+///
+/// 1. **simd128 must be enabled at compile time** (same obligation as
+///    [`yuv_420_to_rgb_row`]).
+/// 2. `width & 1 == 0`.
+/// 3. `y.len() >= width`.
+/// 4. `uv_or_vu_half.len() >= width` (16 interleaved bytes per 16 Y pixels).
+/// 5. `rgb_out.len() >= 3 * width`.
+#[inline]
+#[target_feature(enable = "simd128")]
+unsafe fn nv12_or_nv21_to_rgb_row_impl<const SWAP_UV: bool>(
+  y: &[u8],
+  uv_or_vu_half: &[u8],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  debug_assert_eq!(width & 1, 0, "NV12/NV21 require even width");
   debug_assert!(y.len() >= width);
-  debug_assert!(uv_half.len() >= width);
+  debug_assert!(uv_or_vu_half.len() >= width);
   debug_assert!(rgb_out.len() >= width * 3);
 
   let coeffs = scalar::Coefficients::for_matrix(matrix);
@@ -241,15 +282,14 @@ pub(crate) unsafe fn nv12_to_rgb_row(
     let mut x = 0usize;
     while x + 16 <= width {
       let y_vec = v128_load(y.as_ptr().add(x).cast());
-      // 16 Y pixels → 8 chroma pairs = 16 interleaved UV bytes at
-      // offset `x` in the UV row.
-      let uv_vec = v128_load(uv_half.as_ptr().add(x).cast());
+      // 16 Y pixels → 8 chroma pairs = 16 interleaved bytes at
+      // offset `x` in the chroma row.
+      let uv_vec = v128_load(uv_or_vu_half.as_ptr().add(x).cast());
 
-      // Deinterleave: pack U bytes (even offsets) into low 8 of a
-      // v128, V bytes (odd offsets) into low 8 of a second v128. The
-      // high 8 bytes are don't‑care since `u16x8_extend_low_u8x16`
-      // ignores them.
-      let u_bytes = i8x16_shuffle::<
+      // Deinterleave: `even_bytes` pulls even-offset bytes into low
+      // 8, `odd_bytes` pulls odd-offset bytes. For NV12 that's
+      // (U, V); for NV21 the roles swap.
+      let even_bytes = i8x16_shuffle::<
         0,
         2,
         4,
@@ -267,7 +307,7 @@ pub(crate) unsafe fn nv12_to_rgb_row(
         12,
         14, //
       >(uv_vec, uv_vec);
-      let v_bytes = i8x16_shuffle::<
+      let odd_bytes = i8x16_shuffle::<
         1,
         3,
         5,
@@ -285,6 +325,11 @@ pub(crate) unsafe fn nv12_to_rgb_row(
         13,
         15, //
       >(uv_vec, uv_vec);
+      let (u_bytes, v_bytes) = if SWAP_UV {
+        (odd_bytes, even_bytes)
+      } else {
+        (even_bytes, odd_bytes)
+      };
       let u_i16_zero = u16x8_extend_low_u8x16(u_bytes);
       let v_i16_zero = u16x8_extend_low_u8x16(v_bytes);
 
@@ -334,14 +379,25 @@ pub(crate) unsafe fn nv12_to_rgb_row(
     }
 
     if x < width {
-      scalar::nv12_to_rgb_row(
-        &y[x..width],
-        &uv_half[x..width],
-        &mut rgb_out[x * 3..width * 3],
-        width - x,
-        matrix,
-        full_range,
-      );
+      if SWAP_UV {
+        scalar::nv21_to_rgb_row(
+          &y[x..width],
+          &uv_or_vu_half[x..width],
+          &mut rgb_out[x * 3..width * 3],
+          width - x,
+          matrix,
+          full_range,
+        );
+      } else {
+        scalar::nv12_to_rgb_row(
+          &y[x..width],
+          &uv_or_vu_half[x..width],
+          &mut rgb_out[x * 3..width * 3],
+          width - x,
+          matrix,
+          full_range,
+        );
+      }
     }
   }
 }
@@ -837,6 +893,79 @@ mod tests {
     }
   }
 
+  // ---- nv21_to_rgb_row equivalence ------------------------------------
+
+  fn check_nv21_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+    let y: std::vec::Vec<u8> = (0..width).map(|i| ((i * 37 + 11) & 0xFF) as u8).collect();
+    let vu: std::vec::Vec<u8> = (0..width / 2)
+      .flat_map(|i| [((i * 53 + 23) & 0xFF) as u8, ((i * 71 + 91) & 0xFF) as u8])
+      .collect();
+    let mut rgb_scalar = std::vec![0u8; width * 3];
+    let mut rgb_wasm = std::vec![0u8; width * 3];
+
+    scalar::nv21_to_rgb_row(&y, &vu, &mut rgb_scalar, width, matrix, full_range);
+    unsafe {
+      nv21_to_rgb_row(&y, &vu, &mut rgb_wasm, width, matrix, full_range);
+    }
+    assert_eq!(
+      rgb_scalar, rgb_wasm,
+      "simd128 NV21 ≠ scalar (width={width}, matrix={matrix:?})"
+    );
+  }
+
+  fn check_nv21_matches_nv12_swapped(width: usize, matrix: ColorMatrix, full_range: bool) {
+    let y: std::vec::Vec<u8> = (0..width).map(|i| ((i * 37 + 11) & 0xFF) as u8).collect();
+    let uv: std::vec::Vec<u8> = (0..width / 2)
+      .flat_map(|i| [((i * 53 + 23) & 0xFF) as u8, ((i * 71 + 91) & 0xFF) as u8])
+      .collect();
+    let mut vu = std::vec![0u8; width];
+    for i in 0..width / 2 {
+      vu[2 * i] = uv[2 * i + 1];
+      vu[2 * i + 1] = uv[2 * i];
+    }
+
+    let mut rgb_nv12 = std::vec![0u8; width * 3];
+    let mut rgb_nv21 = std::vec![0u8; width * 3];
+    unsafe {
+      nv12_to_rgb_row(&y, &uv, &mut rgb_nv12, width, matrix, full_range);
+      nv21_to_rgb_row(&y, &vu, &mut rgb_nv21, width, matrix, full_range);
+    }
+    assert_eq!(
+      rgb_nv12, rgb_nv21,
+      "simd128 NV21 ≠ NV12 with byte-swapped chroma"
+    );
+  }
+
+  #[test]
+  fn nv21_wasm_matches_scalar_all_matrices_16() {
+    for m in [
+      ColorMatrix::Bt601,
+      ColorMatrix::Bt709,
+      ColorMatrix::Bt2020Ncl,
+      ColorMatrix::Smpte240m,
+      ColorMatrix::Fcc,
+      ColorMatrix::YCgCo,
+    ] {
+      for full in [true, false] {
+        check_nv21_equivalence(16, m, full);
+      }
+    }
+  }
+
+  #[test]
+  fn nv21_wasm_matches_scalar_widths() {
+    for w in [32usize, 1920, 18, 30, 34, 1922] {
+      check_nv21_equivalence(w, ColorMatrix::Bt709, false);
+    }
+  }
+
+  #[test]
+  fn nv21_wasm_matches_nv12_swapped() {
+    for w in [16usize, 30, 64, 1920] {
+      check_nv21_matches_nv12_swapped(w, ColorMatrix::Bt709, false);
+      check_nv21_matches_nv12_swapped(w, ColorMatrix::YCgCo, true);
+    }
+  }
   // ---- rgb_to_hsv_row equivalence --------------------------------------
 
   fn check_hsv_equivalence(rgb: &[u8], width: usize) {

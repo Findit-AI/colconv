@@ -207,21 +207,12 @@ pub(crate) unsafe fn yuv_420_to_rgb_row(
   }
 }
 
-/// AVX2 NV12 → packed RGB. Identical math to [`yuv_420_to_rgb_row`];
-/// the only difference is UV ingestion — a single 32‑byte load from
-/// the interleaved UV row, followed by a per‑lane `_mm256_shuffle_epi8`
-/// and a `_mm256_permute4x64_epi64::<0xD8>` fixup, produces `u8x16` U
-/// and `u8x16` V bytes in lane order matching what the downstream
-/// `_mm256_cvtepu8_epi16` widenings expect.
+/// AVX2 NV12 → packed RGB (UV-ordered chroma). Thin wrapper over
+/// [`nv12_or_nv21_to_rgb_row_impl`] with `SWAP_UV = false`.
 ///
 /// # Safety
 ///
-/// 1. **AVX2 must be available on the current CPU** (same obligation
-///    as [`yuv_420_to_rgb_row`]).
-/// 2. `width & 1 == 0`.
-/// 3. `y.len() >= width`.
-/// 4. `uv_half.len() >= width` (32 interleaved bytes per 32 Y pixels).
-/// 5. `rgb_out.len() >= 3 * width`.
+/// Same as [`nv12_or_nv21_to_rgb_row_impl`].
 #[inline]
 #[target_feature(enable = "avx2")]
 pub(crate) unsafe fn nv12_to_rgb_row(
@@ -232,9 +223,58 @@ pub(crate) unsafe fn nv12_to_rgb_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  debug_assert_eq!(width & 1, 0, "NV12 requires even width");
+  // SAFETY: caller obligations forwarded to the shared impl.
+  unsafe {
+    nv12_or_nv21_to_rgb_row_impl::<false>(y, uv_half, rgb_out, width, matrix, full_range);
+  }
+}
+
+/// AVX2 NV21 → packed RGB (VU-ordered chroma). Thin wrapper over
+/// [`nv12_or_nv21_to_rgb_row_impl`] with `SWAP_UV = true`.
+///
+/// # Safety
+///
+/// Same as [`nv12_or_nv21_to_rgb_row_impl`].
+#[inline]
+#[target_feature(enable = "avx2")]
+pub(crate) unsafe fn nv21_to_rgb_row(
+  y: &[u8],
+  vu_half: &[u8],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  // SAFETY: caller obligations forwarded to the shared impl.
+  unsafe {
+    nv12_or_nv21_to_rgb_row_impl::<true>(y, vu_half, rgb_out, width, matrix, full_range);
+  }
+}
+
+/// Shared AVX2 NV12/NV21 kernel. `SWAP_UV` selects chroma byte order
+/// at compile time.
+///
+/// # Safety
+///
+/// 1. **AVX2 must be available on the current CPU** (same obligation
+///    as [`yuv_420_to_rgb_row`]).
+/// 2. `width & 1 == 0`.
+/// 3. `y.len() >= width`.
+/// 4. `uv_or_vu_half.len() >= width` (32 interleaved bytes per 32 Y pixels).
+/// 5. `rgb_out.len() >= 3 * width`.
+#[inline]
+#[target_feature(enable = "avx2")]
+unsafe fn nv12_or_nv21_to_rgb_row_impl<const SWAP_UV: bool>(
+  y: &[u8],
+  uv_or_vu_half: &[u8],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  debug_assert_eq!(width & 1, 0, "NV12/NV21 require even width");
   debug_assert!(y.len() >= width);
-  debug_assert!(uv_half.len() >= width);
+  debug_assert!(uv_or_vu_half.len() >= width);
   debug_assert!(rgb_out.len() >= width * 3);
 
   let coeffs = scalar::Coefficients::for_matrix(matrix);
@@ -269,18 +309,27 @@ pub(crate) unsafe fn nv12_to_rgb_row(
     let mut x = 0usize;
     while x + 32 <= width {
       let y_vec = _mm256_loadu_si256(y.as_ptr().add(x).cast());
-      // 32 Y pixels → 16 chroma pairs = 32 interleaved UV bytes at
-      // offset `x` in the UV row.
-      let uv_vec = _mm256_loadu_si256(uv_half.as_ptr().add(x).cast());
+      // 32 Y pixels → 16 chroma pairs = 32 interleaved bytes at
+      // offset `x` in the chroma row.
+      let uv_vec = _mm256_loadu_si256(uv_or_vu_half.as_ptr().add(x).cast());
 
-      // Per‑lane deinterleave → `[u0..u7, v0..v7 | u8..u15, v8..v15]`.
+      // Per‑lane deinterleave: even-offset bytes → low 8, odd-offset
+      // bytes → high 8 (per 128-bit lane). After the 64-bit permute,
+      // low 128 = even bytes, high 128 = odd bytes. For NV12 that
+      // means low=U, high=V; for NV21 the roles swap.
       let deint = _mm256_shuffle_epi8(uv_vec, deint_mask);
-      // Permute 64‑bit lanes with 0xD8 = 0b11_01_10_00 to reorder as
-      // `[u0..u7, u8..u15 | v0..v7, v8..v15]`, i.e. low‑128 = U,
-      // high‑128 = V.
       let uv_fixed = _mm256_permute4x64_epi64::<0xD8>(deint);
-      let u_vec_128 = _mm256_castsi256_si128(uv_fixed);
-      let v_vec_128 = _mm256_extracti128_si256::<1>(uv_fixed);
+      let (u_vec_128, v_vec_128) = if SWAP_UV {
+        (
+          _mm256_extracti128_si256::<1>(uv_fixed),
+          _mm256_castsi256_si128(uv_fixed),
+        )
+      } else {
+        (
+          _mm256_castsi256_si128(uv_fixed),
+          _mm256_extracti128_si256::<1>(uv_fixed),
+        )
+      };
 
       let u_i16 = _mm256_sub_epi16(_mm256_cvtepu8_epi16(u_vec_128), mid128);
       let v_i16 = _mm256_sub_epi16(_mm256_cvtepu8_epi16(v_vec_128), mid128);
@@ -337,14 +386,25 @@ pub(crate) unsafe fn nv12_to_rgb_row(
     }
 
     if x < width {
-      scalar::nv12_to_rgb_row(
-        &y[x..width],
-        &uv_half[x..width],
-        &mut rgb_out[x * 3..width * 3],
-        width - x,
-        matrix,
-        full_range,
-      );
+      if SWAP_UV {
+        scalar::nv21_to_rgb_row(
+          &y[x..width],
+          &uv_or_vu_half[x..width],
+          &mut rgb_out[x * 3..width * 3],
+          width - x,
+          matrix,
+          full_range,
+        );
+      } else {
+        scalar::nv12_to_rgb_row(
+          &y[x..width],
+          &uv_or_vu_half[x..width],
+          &mut rgb_out[x * 3..width * 3],
+          width - x,
+          matrix,
+          full_range,
+        );
+      }
     }
   }
 }
@@ -759,6 +819,88 @@ mod tests {
     }
   }
 
+  // ---- nv21_to_rgb_row equivalence ------------------------------------
+
+  fn check_nv21_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+    let y: std::vec::Vec<u8> = (0..width).map(|i| ((i * 37 + 11) & 0xFF) as u8).collect();
+    let vu: std::vec::Vec<u8> = (0..width / 2)
+      .flat_map(|i| [((i * 53 + 23) & 0xFF) as u8, ((i * 71 + 91) & 0xFF) as u8])
+      .collect();
+    let mut rgb_scalar = std::vec![0u8; width * 3];
+    let mut rgb_avx2 = std::vec![0u8; width * 3];
+
+    scalar::nv21_to_rgb_row(&y, &vu, &mut rgb_scalar, width, matrix, full_range);
+    unsafe {
+      nv21_to_rgb_row(&y, &vu, &mut rgb_avx2, width, matrix, full_range);
+    }
+    assert_eq!(
+      rgb_scalar, rgb_avx2,
+      "AVX2 NV21 ≠ scalar (width={width}, matrix={matrix:?})"
+    );
+  }
+
+  fn check_nv21_matches_nv12_swapped(width: usize, matrix: ColorMatrix, full_range: bool) {
+    let y: std::vec::Vec<u8> = (0..width).map(|i| ((i * 37 + 11) & 0xFF) as u8).collect();
+    let uv: std::vec::Vec<u8> = (0..width / 2)
+      .flat_map(|i| [((i * 53 + 23) & 0xFF) as u8, ((i * 71 + 91) & 0xFF) as u8])
+      .collect();
+    let mut vu = std::vec![0u8; width];
+    for i in 0..width / 2 {
+      vu[2 * i] = uv[2 * i + 1];
+      vu[2 * i + 1] = uv[2 * i];
+    }
+
+    let mut rgb_nv12 = std::vec![0u8; width * 3];
+    let mut rgb_nv21 = std::vec![0u8; width * 3];
+    unsafe {
+      nv12_to_rgb_row(&y, &uv, &mut rgb_nv12, width, matrix, full_range);
+      nv21_to_rgb_row(&y, &vu, &mut rgb_nv21, width, matrix, full_range);
+    }
+    assert_eq!(
+      rgb_nv12, rgb_nv21,
+      "AVX2 NV21 ≠ NV12 with byte-swapped chroma"
+    );
+  }
+
+  #[test]
+  fn nv21_avx2_matches_scalar_all_matrices_16() {
+    if !std::arch::is_x86_feature_detected!("avx2") {
+      return;
+    }
+    for m in [
+      ColorMatrix::Bt601,
+      ColorMatrix::Bt709,
+      ColorMatrix::Bt2020Ncl,
+      ColorMatrix::Smpte240m,
+      ColorMatrix::Fcc,
+      ColorMatrix::YCgCo,
+    ] {
+      for full in [true, false] {
+        check_nv21_equivalence(16, m, full);
+      }
+    }
+  }
+
+  #[test]
+  fn nv21_avx2_matches_scalar_widths() {
+    if !std::arch::is_x86_feature_detected!("avx2") {
+      return;
+    }
+    for w in [32usize, 1920, 18, 30, 34, 1922] {
+      check_nv21_equivalence(w, ColorMatrix::Bt709, false);
+    }
+  }
+
+  #[test]
+  fn nv21_avx2_matches_nv12_swapped() {
+    if !std::arch::is_x86_feature_detected!("avx2") {
+      return;
+    }
+    for w in [16usize, 30, 64, 1920] {
+      check_nv21_matches_nv12_swapped(w, ColorMatrix::Bt709, false);
+      check_nv21_matches_nv12_swapped(w, ColorMatrix::YCgCo, true);
+    }
+  }
   // ---- rgb_to_hsv_row equivalence --------------------------------------
 
   fn check_hsv_equivalence(rgb: &[u8], width: usize) {

@@ -463,6 +463,229 @@ pub enum Nv12FrameError {
   },
 }
 
+/// A validated NV21 (semi‑planar 4:2:0) frame.
+///
+/// Structurally identical to [`Nv12Frame`] — one full-size luma plane
+/// plus one interleaved chroma plane at half width and half height —
+/// but the chroma bytes are **VU-ordered** instead of UV-ordered:
+/// each row is `V0, U0, V1, U1, …, V_{w/2-1}, U_{w/2-1}`. This is
+/// Android MediaCodec's default output for 8-bit decoded frames and
+/// shows up in iOS camera capture under specific configurations.
+///
+/// Dimension / stride validation is identical to [`Nv12Frame`]:
+/// `width` must be even, `height` may be odd (chroma row sizing uses
+/// `height.div_ceil(2)`).
+#[derive(Debug, Clone, Copy)]
+pub struct Nv21Frame<'a> {
+  y: &'a [u8],
+  vu: &'a [u8],
+  width: u32,
+  height: u32,
+  y_stride: u32,
+  vu_stride: u32,
+}
+
+impl<'a> Nv21Frame<'a> {
+  /// Constructs a new [`Nv21Frame`], validating dimensions and plane
+  /// lengths.
+  ///
+  /// Returns [`Nv21FrameError`] if any of:
+  /// - `width` or `height` is zero,
+  /// - `width` is odd (4:2:0 subsamples chroma 2:1 in width; odd
+  ///   height is allowed and handled via `height.div_ceil(2)`),
+  /// - `y_stride < width`,
+  /// - `vu_stride < width` (the VU row holds `width / 2` interleaved
+  ///   pairs = `width` bytes of payload),
+  /// - either plane is too short to cover its declared rows.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn try_new(
+    y: &'a [u8],
+    vu: &'a [u8],
+    width: u32,
+    height: u32,
+    y_stride: u32,
+    vu_stride: u32,
+  ) -> Result<Self, Nv21FrameError> {
+    if width == 0 || height == 0 {
+      return Err(Nv21FrameError::ZeroDimension { width, height });
+    }
+    if width & 1 != 0 {
+      return Err(Nv21FrameError::OddWidth { width });
+    }
+    if y_stride < width {
+      return Err(Nv21FrameError::YStrideTooSmall { width, y_stride });
+    }
+    let vu_row_bytes = width;
+    if vu_stride < vu_row_bytes {
+      return Err(Nv21FrameError::VuStrideTooSmall {
+        vu_row_bytes,
+        vu_stride,
+      });
+    }
+
+    let y_min = match (y_stride as usize).checked_mul(height as usize) {
+      Some(v) => v,
+      None => {
+        return Err(Nv21FrameError::GeometryOverflow {
+          stride: y_stride,
+          rows: height,
+        });
+      }
+    };
+    if y.len() < y_min {
+      return Err(Nv21FrameError::YPlaneTooShort {
+        expected: y_min,
+        actual: y.len(),
+      });
+    }
+    let chroma_height = height.div_ceil(2);
+    let vu_min = match (vu_stride as usize).checked_mul(chroma_height as usize) {
+      Some(v) => v,
+      None => {
+        return Err(Nv21FrameError::GeometryOverflow {
+          stride: vu_stride,
+          rows: chroma_height,
+        });
+      }
+    };
+    if vu.len() < vu_min {
+      return Err(Nv21FrameError::VuPlaneTooShort {
+        expected: vu_min,
+        actual: vu.len(),
+      });
+    }
+
+    Ok(Self {
+      y,
+      vu,
+      width,
+      height,
+      y_stride,
+      vu_stride,
+    })
+  }
+
+  /// Constructs a new [`Nv21Frame`], panicking on invalid inputs.
+  /// Prefer [`Self::try_new`] when inputs may be invalid at runtime.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn new(
+    y: &'a [u8],
+    vu: &'a [u8],
+    width: u32,
+    height: u32,
+    y_stride: u32,
+    vu_stride: u32,
+  ) -> Self {
+    match Self::try_new(y, vu, width, height, y_stride, vu_stride) {
+      Ok(frame) => frame,
+      Err(_) => panic!("invalid Nv21Frame dimensions or plane lengths"),
+    }
+  }
+
+  /// Y (luma) plane bytes. Row `r` starts at byte offset `r * y_stride()`.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn y(&self) -> &'a [u8] {
+    self.y
+  }
+
+  /// Interleaved VU plane. Each chroma row starts at offset
+  /// `chroma_row * vu_stride()` and contains `width` bytes of payload
+  /// laid out as `V0, U0, V1, U1, …, V_{w/2-1}, U_{w/2-1}` — the
+  /// chroma bytes are **VU-ordered**, the opposite of NV12. The
+  /// chroma row index for an output row `r` is `r / 2` (4:2:0).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn vu(&self) -> &'a [u8] {
+    self.vu
+  }
+
+  /// Frame width in pixels. Always even.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn width(&self) -> u32 {
+    self.width
+  }
+
+  /// Frame height in pixels.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn height(&self) -> u32 {
+    self.height
+  }
+
+  /// Byte stride of the Y plane (`>= width`).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn y_stride(&self) -> u32 {
+    self.y_stride
+  }
+
+  /// Byte stride of the interleaved VU plane (`>= width`).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn vu_stride(&self) -> u32 {
+    self.vu_stride
+  }
+}
+
+/// Errors returned by [`Nv21Frame::try_new`]. Variant shape is
+/// identical to [`Nv12FrameError`] — only the "UV" → "VU" naming
+/// changes to match the plane's byte order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Error)]
+#[non_exhaustive]
+pub enum Nv21FrameError {
+  /// `width` or `height` was zero.
+  #[error("width ({width}) or height ({height}) is zero")]
+  ZeroDimension {
+    /// The supplied width.
+    width: u32,
+    /// The supplied height.
+    height: u32,
+  },
+  /// `width` was odd. Same rationale as [`Nv12FrameError::OddWidth`].
+  #[error("width ({width}) is odd; 4:2:0 requires even width")]
+  OddWidth {
+    /// The supplied width.
+    width: u32,
+  },
+  /// `y_stride < width`.
+  #[error("y_stride ({y_stride}) is smaller than width ({width})")]
+  YStrideTooSmall {
+    /// Declared frame width in pixels.
+    width: u32,
+    /// The supplied Y‑plane stride.
+    y_stride: u32,
+  },
+  /// `vu_stride` is smaller than the `width` bytes of interleaved VU
+  /// payload one chroma row must hold.
+  #[error("vu_stride ({vu_stride}) is smaller than VU row payload ({vu_row_bytes} bytes)")]
+  VuStrideTooSmall {
+    /// Required minimum VU‑plane stride (`= width`).
+    vu_row_bytes: u32,
+    /// The supplied VU‑plane stride.
+    vu_stride: u32,
+  },
+  /// Y plane is shorter than `y_stride * height` bytes.
+  #[error("Y plane has {actual} bytes but at least {expected} are required")]
+  YPlaneTooShort {
+    /// Minimum bytes required.
+    expected: usize,
+    /// Actual bytes supplied.
+    actual: usize,
+  },
+  /// VU plane is shorter than `vu_stride * ceil(height / 2)` bytes.
+  #[error("VU plane has {actual} bytes but at least {expected} are required")]
+  VuPlaneTooShort {
+    /// Minimum bytes required.
+    expected: usize,
+    /// Actual bytes supplied.
+    actual: usize,
+  },
+  /// `stride * rows` does not fit in `usize`.
+  #[error("declared geometry overflows usize: stride={stride} * rows={rows}")]
+  GeometryOverflow {
+    /// Stride of the plane whose size overflowed.
+    stride: u32,
+    /// Row count that overflowed against the stride.
+    rows: u32,
+  },
+}
+
 /// Errors returned by [`Yuv420pFrame::try_new`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Error)]
 #[non_exhaustive]
@@ -756,5 +979,82 @@ mod tests {
     let uv: [u8; 0] = [];
     let e = Nv12Frame::try_new(&y, &uv, big, big, big, big).unwrap_err();
     assert!(matches!(e, Nv12FrameError::GeometryOverflow { .. }));
+  }
+
+  // ---- Nv21Frame ---------------------------------------------------------
+  //
+  // NV21 is structurally identical to NV12 (same plane count, same
+  // stride/size math) — only the byte order within the chroma plane
+  // differs. Validation tests mirror the NV12 set. Kernel-level
+  // equivalence with NV12-swapped-UV is tested in `src/row/arch/*`.
+
+  fn nv21_planes() -> (std::vec::Vec<u8>, std::vec::Vec<u8>) {
+    // 16×8 frame → VU is 16 bytes × 4 chroma rows.
+    (std::vec![0u8; 16 * 8], std::vec![128u8; 16 * 4])
+  }
+
+  #[test]
+  fn nv21_try_new_accepts_valid_tight() {
+    let (y, vu) = nv21_planes();
+    let f = Nv21Frame::try_new(&y, &vu, 16, 8, 16, 16).expect("valid");
+    assert_eq!(f.width(), 16);
+    assert_eq!(f.height(), 8);
+    assert_eq!(f.vu_stride(), 16);
+  }
+
+  #[test]
+  fn nv21_try_new_accepts_odd_height() {
+    // Same concrete case as NV12 — 640x481.
+    let y = std::vec![0u8; 640 * 481];
+    let vu = std::vec![128u8; 640 * 241];
+    let f = Nv21Frame::try_new(&y, &vu, 640, 481, 640, 640).expect("odd height valid");
+    assert_eq!(f.height(), 481);
+  }
+
+  #[test]
+  fn nv21_try_new_rejects_odd_width() {
+    let (y, vu) = nv21_planes();
+    let e = Nv21Frame::try_new(&y, &vu, 15, 8, 16, 16).unwrap_err();
+    assert!(matches!(e, Nv21FrameError::OddWidth { width: 15 }));
+  }
+
+  #[test]
+  fn nv21_try_new_rejects_zero_dim() {
+    let (y, vu) = nv21_planes();
+    let e = Nv21Frame::try_new(&y, &vu, 0, 8, 16, 16).unwrap_err();
+    assert!(matches!(e, Nv21FrameError::ZeroDimension { .. }));
+  }
+
+  #[test]
+  fn nv21_try_new_rejects_vu_stride_under_width() {
+    let (y, vu) = nv21_planes();
+    let e = Nv21Frame::try_new(&y, &vu, 16, 8, 16, 8).unwrap_err();
+    assert!(matches!(e, Nv21FrameError::VuStrideTooSmall { .. }));
+  }
+
+  #[test]
+  fn nv21_try_new_rejects_short_vu_plane() {
+    let y = std::vec![0u8; 16 * 8];
+    let vu = std::vec![128u8; 8];
+    let e = Nv21Frame::try_new(&y, &vu, 16, 8, 16, 16).unwrap_err();
+    assert!(matches!(e, Nv21FrameError::VuPlaneTooShort { .. }));
+  }
+
+  #[test]
+  #[should_panic(expected = "invalid Nv21Frame")]
+  fn nv21_new_panics_on_invalid() {
+    let y = std::vec![0u8; 10];
+    let vu = std::vec![128u8; 16 * 4];
+    let _ = Nv21Frame::new(&y, &vu, 16, 8, 16, 16);
+  }
+
+  #[cfg(target_pointer_width = "32")]
+  #[test]
+  fn nv21_try_new_rejects_geometry_overflow() {
+    let big: u32 = 0x1_0000;
+    let y: [u8; 0] = [];
+    let vu: [u8; 0] = [];
+    let e = Nv21Frame::try_new(&y, &vu, big, big, big, big).unwrap_err();
+    assert!(matches!(e, Nv21FrameError::GeometryOverflow { .. }));
   }
 }
