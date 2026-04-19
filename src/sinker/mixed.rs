@@ -12,6 +12,7 @@ use core::marker::PhantomData;
 
 use std::vec::Vec;
 
+use derive_more::IsVariant;
 use thiserror::Error;
 
 use crate::{
@@ -87,6 +88,41 @@ pub enum MixedSinkerError {
     /// Channel count the overflowing product was computed with.
     channels: usize,
   },
+
+  /// A row handed directly to [`PixelSink::process`] has a slice
+  /// length that doesn't match the sink's configured width. Returned
+  /// by `process` as a defense-in-depth check — [`PixelSink::begin_frame`]
+  /// already validates frame-level dimensions, but this catches
+  /// direct `process` callers that bypass the walker (hand-crafted
+  /// rows, replayed rows, etc.) before a wrong-shaped slice reaches
+  /// an unsafe SIMD kernel.
+  #[error(
+    "MixedSinker row shape mismatch at row {row}: {which:?} slice has {actual} bytes, expected {expected}"
+  )]
+  RowShapeMismatch {
+    /// Which slice mismatched. See [`RowSlice`] for variants.
+    which: RowSlice,
+    /// Row index reported by the offending row.
+    row: usize,
+    /// Expected slice length in bytes (given the sink's configured width).
+    expected: usize,
+    /// Actual slice length supplied by the row.
+    actual: usize,
+  },
+
+  /// A row handed to [`PixelSink::process`] has `row.row() >=
+  /// configured_height`. The walker bounds `idx < height` via its
+  /// `for row in 0..h` loop combined with the `begin_frame`
+  /// dimension check, but a direct caller could pass any value.
+  /// Returning an error instead of slice-indexing past the end keeps
+  /// the no-panic contract intact.
+  #[error("MixedSinker row index {row} is out of range for configured height {configured_height}")]
+  RowIndexOutOfRange {
+    /// Row index reported by the offending row.
+    row: usize,
+    /// Sink's configured height.
+    configured_height: usize,
+  },
 }
 
 /// Identifies which of the three HSV planes a
@@ -99,6 +135,28 @@ pub enum HsvPlane {
   S,
   /// Value plane.
   V,
+}
+
+/// Identifies which slice of a multi‑plane source row mismatched in
+/// [`MixedSinkerError::RowShapeMismatch`].
+///
+/// `#[non_exhaustive]` because each new source format the crate grows
+/// support for — NV21 (VU instead of UV), YUV422p / YUV444p (full‑width
+/// chroma), P010 / P016 (10/16‑bit planes), etc. — will add its own
+/// variant. Pattern matches from downstream code should include a
+/// `_ => …` arm.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant)]
+#[non_exhaustive]
+pub enum RowSlice {
+  /// Y (luma) plane — every 4:2:0 / 4:2:2 / 4:4:4 source.
+  Y,
+  /// Half‑width U (Cb) plane in a planar 4:2:0 source ([`Yuv420p`]).
+  UHalf,
+  /// Half‑width V (Cr) plane in a planar 4:2:0 source ([`Yuv420p`]).
+  VHalf,
+  /// Half‑width interleaved UV plane in a semi‑planar 4:2:0 source
+  /// ([`Nv12`]). Each row is `U0, V0, U1, V1, …` for `width / 2` pairs.
+  UvHalf,
 }
 
 /// A sink that writes any subset of `{RGB, Luma, HSV}` into
@@ -343,14 +401,39 @@ impl PixelSink for MixedSinker<'_, Yuv420p> {
 
     // Defense in depth: `begin_frame` already validated frame‑level
     // dimensions, so these checks are unreachable from the walker.
-    // They guard direct `process` callers from handing a
-    // wrong-shaped row to unsafe SIMD kernels.
-    if row.y().len() != w || row.u_half().len() != w / 2 || row.v_half().len() != w / 2 {
-      return Err(MixedSinkerError::DimensionMismatch {
-        configured_w: self.width,
-        configured_h: self.height,
-        frame_w: row.y().len() as u32,
-        frame_h: idx as u32,
+    // They guard direct `process` callers (hand-crafted rows, row
+    // replay) from handing a wrong-shaped row or out-of-range index
+    // to unsafe SIMD kernels. Report the offending slice length and
+    // row index directly — don't reuse `DimensionMismatch`, whose
+    // `frame_w` / `frame_h` fields would be meaningless here.
+    if row.y().len() != w {
+      return Err(MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::Y,
+        row: idx,
+        expected: w,
+        actual: row.y().len(),
+      });
+    }
+    if row.u_half().len() != w / 2 {
+      return Err(MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::UHalf,
+        row: idx,
+        expected: w / 2,
+        actual: row.u_half().len(),
+      });
+    }
+    if row.v_half().len() != w / 2 {
+      return Err(MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::VHalf,
+        row: idx,
+        expected: w / 2,
+        actual: row.v_half().len(),
+      });
+    }
+    if idx >= self.height {
+      return Err(MixedSinkerError::RowIndexOutOfRange {
+        row: idx,
+        configured_height: self.height,
       });
     }
 
@@ -443,13 +526,29 @@ impl PixelSink for MixedSinker<'_, Nv12> {
     let idx = row.row();
     let use_simd = self.simd;
 
-    // Defense-in-depth shape check (see Yuv420p impl above).
-    if row.y().len() != w || row.uv_half().len() != w {
-      return Err(MixedSinkerError::DimensionMismatch {
-        configured_w: self.width,
-        configured_h: self.height,
-        frame_w: row.y().len() as u32,
-        frame_h: idx as u32,
+    // Defense-in-depth shape check (see Yuv420p impl above). An NV12
+    // UV row is `width` bytes of interleaved U / V payload — same
+    // length as Y — so both slices must equal `self.width`.
+    if row.y().len() != w {
+      return Err(MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::Y,
+        row: idx,
+        expected: w,
+        actual: row.y().len(),
+      });
+    }
+    if row.uv_half().len() != w {
+      return Err(MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::UvHalf,
+        row: idx,
+        expected: w,
+        actual: row.uv_half().len(),
+      });
+    }
+    if idx >= self.height {
+      return Err(MixedSinkerError::RowIndexOutOfRange {
+        row: idx,
+        configured_height: self.height,
       });
     }
 
@@ -1083,6 +1182,118 @@ mod tests {
     // uninhabited, so `.unwrap()` here is free and infallible.
     yuv420p_to(&src, true, ColorMatrix::Bt601, &mut counter).unwrap();
     assert_eq!(counter.0, 8);
+  }
+
+  // ---- direct process() bypass paths ----------------------------------
+  //
+  // The walker normally guarantees (a) begin_frame runs first and
+  // validates frame dimensions, (b) row.y()/u/v/uv slices have the
+  // right length, (c) `idx < height`. A direct `process` call can
+  // break any of these. The defense-in-depth checks in `process`
+  // must return a specific error variant, not panic — verified here
+  // by constructing rows manually and calling `process`.
+
+  #[test]
+  fn yuv420p_process_rejects_short_y_slice() {
+    let mut rgb = std::vec![0u8; 16 * 8 * 3];
+    let mut sink = MixedSinker::<Yuv420p>::new(16, 8)
+      .with_rgb(&mut rgb)
+      .unwrap();
+    // Build a row with a 15-byte Y slice (wrong — sink configured for 16).
+    let y = [0u8; 15];
+    let u = [128u8; 8];
+    let v = [128u8; 8];
+    let row = Yuv420pRow::new(&y, &u, &v, 0, ColorMatrix::Bt601, true);
+    let err = sink.process(row).err().unwrap();
+    assert_eq!(
+      err,
+      MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::Y,
+        row: 0,
+        expected: 16,
+        actual: 15,
+      }
+    );
+  }
+
+  #[test]
+  fn yuv420p_process_rejects_short_u_half() {
+    let mut rgb = std::vec![0u8; 16 * 8 * 3];
+    let mut sink = MixedSinker::<Yuv420p>::new(16, 8)
+      .with_rgb(&mut rgb)
+      .unwrap();
+    let y = [0u8; 16];
+    let u = [128u8; 7]; // expected 8
+    let v = [128u8; 8];
+    let row = Yuv420pRow::new(&y, &u, &v, 0, ColorMatrix::Bt601, true);
+    let err = sink.process(row).err().unwrap();
+    assert_eq!(
+      err,
+      MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::UHalf,
+        row: 0,
+        expected: 8,
+        actual: 7,
+      }
+    );
+  }
+
+  #[test]
+  fn yuv420p_process_rejects_out_of_range_row_idx() {
+    let mut rgb = std::vec![0u8; 16 * 8 * 3];
+    let mut sink = MixedSinker::<Yuv420p>::new(16, 8)
+      .with_rgb(&mut rgb)
+      .unwrap();
+    let y = [0u8; 16];
+    let u = [128u8; 8];
+    let v = [128u8; 8];
+    // idx = 8 exceeds configured height 8 — would otherwise panic on
+    // `rgb[idx * w * 3 ..]` indexing.
+    let row = Yuv420pRow::new(&y, &u, &v, 8, ColorMatrix::Bt601, true);
+    let err = sink.process(row).err().unwrap();
+    assert_eq!(
+      err,
+      MixedSinkerError::RowIndexOutOfRange {
+        row: 8,
+        configured_height: 8,
+      }
+    );
+  }
+
+  #[test]
+  fn nv12_process_rejects_short_uv_slice() {
+    let mut rgb = std::vec![0u8; 16 * 8 * 3];
+    let mut sink = MixedSinker::<Nv12>::new(16, 8).with_rgb(&mut rgb).unwrap();
+    let y = [0u8; 16];
+    let uv = [128u8; 15]; // expected 16
+    let row = Nv12Row::new(&y, &uv, 0, ColorMatrix::Bt601, true);
+    let err = sink.process(row).err().unwrap();
+    assert_eq!(
+      err,
+      MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::UvHalf,
+        row: 0,
+        expected: 16,
+        actual: 15,
+      }
+    );
+  }
+
+  #[test]
+  fn nv12_process_rejects_out_of_range_row_idx() {
+    let mut rgb = std::vec![0u8; 16 * 8 * 3];
+    let mut sink = MixedSinker::<Nv12>::new(16, 8).with_rgb(&mut rgb).unwrap();
+    let y = [0u8; 16];
+    let uv = [128u8; 16];
+    let row = Nv12Row::new(&y, &uv, 8, ColorMatrix::Bt601, true);
+    let err = sink.process(row).err().unwrap();
+    assert_eq!(
+      err,
+      MixedSinkerError::RowIndexOutOfRange {
+        row: 8,
+        configured_height: 8,
+      }
+    );
   }
 
   #[test]

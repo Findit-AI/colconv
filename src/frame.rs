@@ -471,10 +471,12 @@ pub enum Yuv420pFrameError {
     /// The supplied height.
     height: u32,
   },
-  /// `width` was odd. Same rationale as [`Yuv420pFrameError::OddWidth`]
-  /// — NV12 subsamples chroma 2:1 in width, and height is allowed to
-  /// be odd (chroma‑row sizing uses `height.div_ceil(2)`).
-  #[error("width ({width}) is odd; NV12 requires even width")]
+  /// `width` was odd. YUV420p / 4:2:0 subsamples chroma 2:1 in width,
+  /// so each chroma column pairs two Y columns — odd widths leave the
+  /// last Y column without a paired chroma sample, and the SIMD
+  /// kernels assume `width & 1 == 0`. Height is allowed to be odd
+  /// (handled by `height.div_ceil(2)` in chroma‑row sizing).
+  #[error("width ({width}) is odd; YUV420p / 4:2:0 requires even width")]
   OddWidth {
     /// The supplied width.
     width: u32,
