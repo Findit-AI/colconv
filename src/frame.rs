@@ -716,14 +716,15 @@ pub enum Nv21FrameError {
 /// **Output for out‑of‑range samples is equivalent to pre‑masking
 /// every sample to the low `BITS` bits.** Every kernel (scalar + all
 /// 5 SIMD tiers) AND‑masks each `u16` load to `(1 << BITS) - 1`
-/// before the Q15 path, so a sample like `0xFC00` (p010 white =
-/// `1023 << 6`) is treated identically to `0x0000` on every backend.
-/// This gives deterministic, backend‑independent output for
-/// mispacked input — feeding `p010` data into a `yuv420p10le`‑shaped
-/// frame produces mostly‑black pixels across scalar / NEON /
-/// SSE4.1 / AVX2 / AVX‑512 / wasm simd128, which is an obvious
-/// signal for downstream diffing. The mask is a single AND per
-/// load and a no‑op on valid input (upper bits already zero).
+/// before the Q15 path, so a sample like `0xFFC0` (p010 white =
+/// `1023 << 6`) is treated identically to `0x03C0` on every backend
+/// when `BITS == 10`. This gives deterministic, backend‑independent
+/// output for mispacked input — feeding `p010` data into a
+/// `yuv420p10le`‑shaped frame produces severely distorted, but stable,
+/// pixel values across scalar / NEON / SSE4.1 / AVX2 / AVX‑512 /
+/// wasm simd128, which is an obvious signal for downstream diffing.
+/// The mask is a single AND per load and a no‑op on valid input
+/// (upper bits already zero).
 ///
 /// Callers who want the mispacking to surface as a loud error
 /// instead of silent color corruption should use
@@ -766,8 +767,8 @@ impl<'a, const BITS: u32> Yuv420pFrame16<'a, BITS> {
   /// lengths, and the `BITS` parameter.
   ///
   /// Returns [`Yuv420pFrame16Error`] if any of:
-  /// - `BITS` is not 10, 12, or 14 (Ship 2 additionally rejects 12/14
-  ///   at the type alias layer — see [`Yuv420p10Frame`]),
+  /// - `BITS` is not 10, 12, or 14 (colconv v0.2 additionally rejects
+  ///   12/14 at the type alias layer — see [`Yuv420p10Frame`]),
   /// - `width` or `height` is zero,
   /// - `width` is odd,
   /// - any stride is smaller than the plane's declared pixel width,
