@@ -39,11 +39,11 @@
 //! element order. Every fixup is called out inline.
 
 use core::arch::x86_64::{
-  __m256i, _mm_loadu_si128, _mm256_add_epi32, _mm256_adds_epi16, _mm256_castsi256_si128,
-  _mm256_cvtepi16_epi32, _mm256_cvtepu8_epi16, _mm256_extracti128_si256, _mm256_loadu_si256,
-  _mm256_max_epi16, _mm256_min_epi16, _mm256_mullo_epi32, _mm256_packs_epi32, _mm256_packus_epi16,
-  _mm256_permute2x128_si256, _mm256_permute4x64_epi64, _mm256_set1_epi16, _mm256_set1_epi32,
-  _mm256_setr_epi8, _mm256_shuffle_epi8, _mm256_srai_epi32, _mm256_sub_epi16,
+  __m256i, _mm_loadu_si128, _mm256_add_epi32, _mm256_adds_epi16, _mm256_and_si256,
+  _mm256_castsi256_si128, _mm256_cvtepi16_epi32, _mm256_cvtepu8_epi16, _mm256_extracti128_si256,
+  _mm256_loadu_si256, _mm256_max_epi16, _mm256_min_epi16, _mm256_mullo_epi32, _mm256_packs_epi32,
+  _mm256_packus_epi16, _mm256_permute2x128_si256, _mm256_permute4x64_epi64, _mm256_set1_epi16,
+  _mm256_set1_epi32, _mm256_setr_epi8, _mm256_shuffle_epi8, _mm256_srai_epi32, _mm256_sub_epi16,
   _mm256_unpackhi_epi16, _mm256_unpacklo_epi16,
 };
 
@@ -261,6 +261,7 @@ pub(crate) unsafe fn yuv420p10_to_rgb_row(
     let y_scale_v = _mm256_set1_epi32(y_scale);
     let c_scale_v = _mm256_set1_epi32(c_scale);
     let bias_v = _mm256_set1_epi16(bias as i16);
+    let mask_v = _mm256_set1_epi16(scalar::bits_mask::<10>() as i16);
     let cru = _mm256_set1_epi32(coeffs.r_u());
     let crv = _mm256_set1_epi32(coeffs.r_v());
     let cgu = _mm256_set1_epi32(coeffs.g_u());
@@ -271,11 +272,18 @@ pub(crate) unsafe fn yuv420p10_to_rgb_row(
     let mut x = 0usize;
     while x + 32 <= width {
       // 32 Y = two `_mm256_loadu_si256` (16 u16 each). U/V each = one
-      // load of 16 u16.
-      let y_low_i16 = _mm256_loadu_si256(y.as_ptr().add(x).cast());
-      let y_high_i16 = _mm256_loadu_si256(y.as_ptr().add(x + 16).cast());
-      let u_vec = _mm256_loadu_si256(u_half.as_ptr().add(x / 2).cast());
-      let v_vec = _mm256_loadu_si256(v_half.as_ptr().add(x / 2).cast());
+      // load of 16 u16. AND‑mask each load to the low 10 bits — see
+      // matching comment in [`crate::row::scalar::yuv_420p_n_to_rgb_row`].
+      let y_low_i16 = _mm256_and_si256(_mm256_loadu_si256(y.as_ptr().add(x).cast()), mask_v);
+      let y_high_i16 = _mm256_and_si256(_mm256_loadu_si256(y.as_ptr().add(x + 16).cast()), mask_v);
+      let u_vec = _mm256_and_si256(
+        _mm256_loadu_si256(u_half.as_ptr().add(x / 2).cast()),
+        mask_v,
+      );
+      let v_vec = _mm256_and_si256(
+        _mm256_loadu_si256(v_half.as_ptr().add(x / 2).cast()),
+        mask_v,
+      );
 
       let u_i16 = _mm256_sub_epi16(u_vec, bias_v);
       let v_i16 = _mm256_sub_epi16(v_vec, bias_v);
@@ -395,6 +403,7 @@ pub(crate) unsafe fn yuv420p10_to_rgb_u16_row(
     let y_scale_v = _mm256_set1_epi32(y_scale);
     let c_scale_v = _mm256_set1_epi32(c_scale);
     let bias_v = _mm256_set1_epi16(bias as i16);
+    let mask_v = _mm256_set1_epi16(scalar::bits_mask::<10>() as i16);
     let max_v = _mm256_set1_epi16(OUT_MAX_10);
     let zero_v = _mm256_set1_epi16(0);
     let cru = _mm256_set1_epi32(coeffs.r_u());
@@ -406,10 +415,18 @@ pub(crate) unsafe fn yuv420p10_to_rgb_u16_row(
 
     let mut x = 0usize;
     while x + 32 <= width {
-      let y_low_i16 = _mm256_loadu_si256(y.as_ptr().add(x).cast());
-      let y_high_i16 = _mm256_loadu_si256(y.as_ptr().add(x + 16).cast());
-      let u_vec = _mm256_loadu_si256(u_half.as_ptr().add(x / 2).cast());
-      let v_vec = _mm256_loadu_si256(v_half.as_ptr().add(x / 2).cast());
+      // AND‑mask loads to the low 10 bits so `chroma_i16x16`'s
+      // `_mm256_packs_epi32` narrow stays lossless.
+      let y_low_i16 = _mm256_and_si256(_mm256_loadu_si256(y.as_ptr().add(x).cast()), mask_v);
+      let y_high_i16 = _mm256_and_si256(_mm256_loadu_si256(y.as_ptr().add(x + 16).cast()), mask_v);
+      let u_vec = _mm256_and_si256(
+        _mm256_loadu_si256(u_half.as_ptr().add(x / 2).cast()),
+        mask_v,
+      );
+      let v_vec = _mm256_and_si256(
+        _mm256_loadu_si256(v_half.as_ptr().add(x / 2).cast()),
+        mask_v,
+      );
 
       let u_i16 = _mm256_sub_epi16(u_vec, bias_v);
       let v_i16 = _mm256_sub_epi16(v_vec, bias_v);

@@ -54,12 +54,13 @@
 
 use core::arch::x86_64::{
   __m128i, __m512i, _mm_setr_epi8, _mm256_loadu_si256, _mm512_add_epi32, _mm512_adds_epi16,
-  _mm512_broadcast_i32x4, _mm512_castsi512_si128, _mm512_castsi512_si256, _mm512_cvtepi16_epi32,
-  _mm512_cvtepu8_epi16, _mm512_extracti32x4_epi32, _mm512_extracti64x4_epi64, _mm512_loadu_si512,
-  _mm512_max_epi16, _mm512_min_epi16, _mm512_mullo_epi32, _mm512_packs_epi32, _mm512_packus_epi16,
-  _mm512_permutex2var_epi64, _mm512_permutexvar_epi64, _mm512_set1_epi16, _mm512_set1_epi32,
-  _mm512_setr_epi64, _mm512_shuffle_epi8, _mm512_srai_epi32, _mm512_sub_epi16,
-  _mm512_unpackhi_epi16, _mm512_unpacklo_epi16,
+  _mm512_and_si512, _mm512_broadcast_i32x4, _mm512_castsi512_si128, _mm512_castsi512_si256,
+  _mm512_cvtepi16_epi32, _mm512_cvtepu8_epi16, _mm512_extracti32x4_epi32,
+  _mm512_extracti64x4_epi64, _mm512_loadu_si512, _mm512_max_epi16, _mm512_min_epi16,
+  _mm512_mullo_epi32, _mm512_packs_epi32, _mm512_packus_epi16, _mm512_permutex2var_epi64,
+  _mm512_permutexvar_epi64, _mm512_set1_epi16, _mm512_set1_epi32, _mm512_setr_epi64,
+  _mm512_shuffle_epi8, _mm512_srai_epi32, _mm512_sub_epi16, _mm512_unpackhi_epi16,
+  _mm512_unpacklo_epi16,
 };
 
 use crate::{
@@ -277,6 +278,7 @@ pub(crate) unsafe fn yuv420p10_to_rgb_row(
     let y_scale_v = _mm512_set1_epi32(y_scale);
     let c_scale_v = _mm512_set1_epi32(c_scale);
     let bias_v = _mm512_set1_epi16(bias as i16);
+    let mask_v = _mm512_set1_epi16(scalar::bits_mask::<10>() as i16);
     let cru = _mm512_set1_epi32(coeffs.r_u());
     let crv = _mm512_set1_epi32(coeffs.r_v());
     let cgu = _mm512_set1_epi32(coeffs.g_u());
@@ -290,10 +292,18 @@ pub(crate) unsafe fn yuv420p10_to_rgb_row(
 
     let mut x = 0usize;
     while x + 64 <= width {
-      let y_low_i16 = _mm512_loadu_si512(y.as_ptr().add(x).cast());
-      let y_high_i16 = _mm512_loadu_si512(y.as_ptr().add(x + 32).cast());
-      let u_vec = _mm512_loadu_si512(u_half.as_ptr().add(x / 2).cast());
-      let v_vec = _mm512_loadu_si512(v_half.as_ptr().add(x / 2).cast());
+      // AND‑mask every load to the low 10 bits — see matching
+      // comment in [`crate::row::scalar::yuv_420p_n_to_rgb_row`].
+      let y_low_i16 = _mm512_and_si512(_mm512_loadu_si512(y.as_ptr().add(x).cast()), mask_v);
+      let y_high_i16 = _mm512_and_si512(_mm512_loadu_si512(y.as_ptr().add(x + 32).cast()), mask_v);
+      let u_vec = _mm512_and_si512(
+        _mm512_loadu_si512(u_half.as_ptr().add(x / 2).cast()),
+        mask_v,
+      );
+      let v_vec = _mm512_and_si512(
+        _mm512_loadu_si512(v_half.as_ptr().add(x / 2).cast()),
+        mask_v,
+      );
 
       let u_i16 = _mm512_sub_epi16(u_vec, bias_v);
       let v_i16 = _mm512_sub_epi16(v_vec, bias_v);
@@ -409,6 +419,7 @@ pub(crate) unsafe fn yuv420p10_to_rgb_u16_row(
     let y_scale_v = _mm512_set1_epi32(y_scale);
     let c_scale_v = _mm512_set1_epi32(c_scale);
     let bias_v = _mm512_set1_epi16(bias as i16);
+    let mask_v = _mm512_set1_epi16(scalar::bits_mask::<10>() as i16);
     let max_v = _mm512_set1_epi16(OUT_MAX_10);
     let zero_v = _mm512_set1_epi16(0);
     let cru = _mm512_set1_epi32(coeffs.r_u());
@@ -424,10 +435,18 @@ pub(crate) unsafe fn yuv420p10_to_rgb_u16_row(
 
     let mut x = 0usize;
     while x + 64 <= width {
-      let y_low_i16 = _mm512_loadu_si512(y.as_ptr().add(x).cast());
-      let y_high_i16 = _mm512_loadu_si512(y.as_ptr().add(x + 32).cast());
-      let u_vec = _mm512_loadu_si512(u_half.as_ptr().add(x / 2).cast());
-      let v_vec = _mm512_loadu_si512(v_half.as_ptr().add(x / 2).cast());
+      // AND‑mask loads to the low 10 bits so `chroma_i16x32`'s
+      // `_mm512_packs_epi32` narrow stays lossless.
+      let y_low_i16 = _mm512_and_si512(_mm512_loadu_si512(y.as_ptr().add(x).cast()), mask_v);
+      let y_high_i16 = _mm512_and_si512(_mm512_loadu_si512(y.as_ptr().add(x + 32).cast()), mask_v);
+      let u_vec = _mm512_and_si512(
+        _mm512_loadu_si512(u_half.as_ptr().add(x / 2).cast()),
+        mask_v,
+      );
+      let v_vec = _mm512_and_si512(
+        _mm512_loadu_si512(v_half.as_ptr().add(x / 2).cast()),
+        mask_v,
+      );
 
       let u_i16 = _mm512_sub_epi16(u_vec, bias_v);
       let v_i16 = _mm512_sub_epi16(v_vec, bias_v);

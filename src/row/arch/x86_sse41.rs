@@ -36,8 +36,8 @@
 //!    `super::x86_common::write_rgb_16`.
 
 use core::arch::x86_64::{
-  __m128i, _mm_add_epi32, _mm_adds_epi16, _mm_cvtepi16_epi32, _mm_cvtepu8_epi16, _mm_loadl_epi64,
-  _mm_loadu_si128, _mm_max_epi16, _mm_min_epi16, _mm_mullo_epi32, _mm_packs_epi32,
+  __m128i, _mm_add_epi32, _mm_adds_epi16, _mm_and_si128, _mm_cvtepi16_epi32, _mm_cvtepu8_epi16,
+  _mm_loadl_epi64, _mm_loadu_si128, _mm_max_epi16, _mm_min_epi16, _mm_mullo_epi32, _mm_packs_epi32,
   _mm_packus_epi16, _mm_set1_epi16, _mm_set1_epi32, _mm_setr_epi8, _mm_shuffle_epi8,
   _mm_srai_epi32, _mm_srli_si128, _mm_sub_epi16, _mm_unpackhi_epi16, _mm_unpacklo_epi16,
 };
@@ -250,6 +250,7 @@ pub(crate) unsafe fn yuv420p10_to_rgb_row(
     let y_scale_v = _mm_set1_epi32(y_scale);
     let c_scale_v = _mm_set1_epi32(c_scale);
     let bias_v = _mm_set1_epi16(bias as i16);
+    let mask_v = _mm_set1_epi16(scalar::bits_mask::<10>() as i16);
     let cru = _mm_set1_epi32(coeffs.r_u());
     let crv = _mm_set1_epi32(coeffs.r_v());
     let cgu = _mm_set1_epi32(coeffs.g_u());
@@ -259,12 +260,14 @@ pub(crate) unsafe fn yuv420p10_to_rgb_row(
 
     let mut x = 0usize;
     while x + 16 <= width {
-      // 16 Y = two `u16x8` loads; 8 U + 8 V = one load each. 10‑bit
-      // samples fit i16 directly (max 1023 < 32768).
-      let y_low_i16 = _mm_loadu_si128(y.as_ptr().add(x).cast());
-      let y_high_i16 = _mm_loadu_si128(y.as_ptr().add(x + 8).cast());
-      let u_vec = _mm_loadu_si128(u_half.as_ptr().add(x / 2).cast());
-      let v_vec = _mm_loadu_si128(v_half.as_ptr().add(x / 2).cast());
+      // 16 Y = two `u16x8` loads; 8 U + 8 V = one load each. Each
+      // load is AND‑masked to the low 10 bits (see matching comment
+      // in [`crate::row::scalar::yuv_420p_n_to_rgb_row`]). Valid
+      // 10‑bit samples ≤ 1023 pass through unchanged.
+      let y_low_i16 = _mm_and_si128(_mm_loadu_si128(y.as_ptr().add(x).cast()), mask_v);
+      let y_high_i16 = _mm_and_si128(_mm_loadu_si128(y.as_ptr().add(x + 8).cast()), mask_v);
+      let u_vec = _mm_and_si128(_mm_loadu_si128(u_half.as_ptr().add(x / 2).cast()), mask_v);
+      let v_vec = _mm_and_si128(_mm_loadu_si128(v_half.as_ptr().add(x / 2).cast()), mask_v);
 
       let u_i16 = _mm_sub_epi16(u_vec, bias_v);
       let v_i16 = _mm_sub_epi16(v_vec, bias_v);
@@ -373,6 +376,7 @@ pub(crate) unsafe fn yuv420p10_to_rgb_u16_row(
     let y_scale_v = _mm_set1_epi32(y_scale);
     let c_scale_v = _mm_set1_epi32(c_scale);
     let bias_v = _mm_set1_epi16(bias as i16);
+    let mask_v = _mm_set1_epi16(scalar::bits_mask::<10>() as i16);
     let max_v = _mm_set1_epi16(OUT_MAX_10);
     let zero_v = _mm_set1_epi16(0);
     let cru = _mm_set1_epi32(coeffs.r_u());
@@ -384,10 +388,16 @@ pub(crate) unsafe fn yuv420p10_to_rgb_u16_row(
 
     let mut x = 0usize;
     while x + 16 <= width {
-      let y_low_i16 = _mm_loadu_si128(y.as_ptr().add(x).cast());
-      let y_high_i16 = _mm_loadu_si128(y.as_ptr().add(x + 8).cast());
-      let u_vec = _mm_loadu_si128(u_half.as_ptr().add(x / 2).cast());
-      let v_vec = _mm_loadu_si128(v_half.as_ptr().add(x / 2).cast());
+      // AND‑mask each load to the low 10 bits — critical for the
+      // u16 output path since its larger `y_scale` / `c_scale`
+      // (32768 for 10→10 full range) would let an out‑of‑range
+      // sample push a `coeff * v_d` product past i16 range,
+      // triggering information loss in the subsequent
+      // `_mm_packs_epi32` narrow step inside `chroma_i16x8`.
+      let y_low_i16 = _mm_and_si128(_mm_loadu_si128(y.as_ptr().add(x).cast()), mask_v);
+      let y_high_i16 = _mm_and_si128(_mm_loadu_si128(y.as_ptr().add(x + 8).cast()), mask_v);
+      let u_vec = _mm_and_si128(_mm_loadu_si128(u_half.as_ptr().add(x / 2).cast()), mask_v);
+      let v_vec = _mm_and_si128(_mm_loadu_si128(v_half.as_ptr().add(x / 2).cast()), mask_v);
 
       let u_i16 = _mm_sub_epi16(u_vec, bias_v);
       let v_i16 = _mm_sub_epi16(v_vec, bias_v);

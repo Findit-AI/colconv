@@ -713,22 +713,22 @@ pub enum Nv21FrameError {
 /// validates geometry only and the contract falls on the caller.
 /// Decoders and FFmpeg output satisfy this by construction.
 ///
-/// **Output is wrong‑but‑consistent for samples outside that
-/// range.** Every backend (scalar + all 5 SIMD tiers) treats the
-/// `u16` lane as **signed `i16`** before the Q15 path, so a sample
-/// with bit 15 set is interpreted as a negative value. The scalar
-/// kernel uses `sample as i16 as i32`; the SIMD kernels use the
-/// corresponding intrinsics (`vreinterpretq_s16_u16`,
-/// `_mm_cvtepi16_epi32`, `i32x4_extend_low_i16x8`, etc.). The
-/// output is bit‑identical across backends, so mispacking — e.g.
-/// feeding a `p010`‑packed buffer (`sample << 6`) into a
-/// `yuv420p10le`‑shaped frame — produces visibly‑wrong colors that
-/// show up immediately in diffs, rather than silent
-/// architecture‑dependent drift.
+/// **Output for out‑of‑range samples is equivalent to pre‑masking
+/// every sample to the low `BITS` bits.** Every kernel (scalar + all
+/// 5 SIMD tiers) AND‑masks each `u16` load to `(1 << BITS) - 1`
+/// before the Q15 path, so a sample like `0xFC00` (p010 white =
+/// `1023 << 6`) is treated identically to `0x0000` on every backend.
+/// This gives deterministic, backend‑independent output for
+/// mispacked input — feeding `p010` data into a `yuv420p10le`‑shaped
+/// frame produces mostly‑black pixels across scalar / NEON /
+/// SSE4.1 / AVX2 / AVX‑512 / wasm simd128, which is an obvious
+/// signal for downstream diffing. The mask is a single AND per
+/// load and a no‑op on valid input (upper bits already zero).
 ///
-/// Callers holding untrusted buffers can use [`Self::try_new_checked`]
-/// to reject out‑of‑range samples up front with a plane‑specific
-/// diagnostic, or mask (`sample & ((1 << BITS) - 1)`) upstream.
+/// Callers who want the mispacking to surface as a loud error
+/// instead of silent color corruption should use
+/// [`Self::try_new_checked`] — it scans every sample and returns
+/// [`Yuv420pFrame16Error::SampleOutOfRange`] on the first violation.
 ///
 /// colconv v0.2 ships `BITS == 10` only (the use‑case keystone for
 /// HDR and 10‑bit SDR). 12 and 14 are mechanical follow‑ups that

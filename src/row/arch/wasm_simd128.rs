@@ -41,8 +41,8 @@ use core::arch::wasm32::{
   i16x8_narrow_i32x4, i16x8_splat, i16x8_sub, i32x4_add, i32x4_extend_high_i16x8,
   i32x4_extend_low_i16x8, i32x4_mul, i32x4_shr, i32x4_splat, i32x4_trunc_sat_f32x4,
   u8x16_narrow_i16x8, u8x16_swizzle, u16x8_extend_high_u8x16, u16x8_extend_low_u8x16,
-  u16x8_load_extend_u8x8, u32x4_extend_high_u16x8, u32x4_extend_low_u16x8, v128, v128_bitselect,
-  v128_load, v128_or, v128_store,
+  u16x8_load_extend_u8x8, u16x8_splat, u32x4_extend_high_u16x8, u32x4_extend_low_u16x8, v128,
+  v128_and, v128_bitselect, v128_load, v128_or, v128_store,
 };
 
 use crate::{ColorMatrix, row::scalar};
@@ -242,6 +242,7 @@ pub(crate) unsafe fn yuv420p10_to_rgb_row(
     let y_scale_v = i32x4_splat(y_scale);
     let c_scale_v = i32x4_splat(c_scale);
     let bias_v = i16x8_splat(bias as i16);
+    let mask_v = u16x8_splat(scalar::bits_mask::<10>());
     let cru = i32x4_splat(coeffs.r_u());
     let crv = i32x4_splat(coeffs.r_v());
     let cgu = i32x4_splat(coeffs.g_u());
@@ -251,10 +252,12 @@ pub(crate) unsafe fn yuv420p10_to_rgb_row(
 
     let mut x = 0usize;
     while x + 16 <= width {
-      let y_low_i16 = v128_load(y.as_ptr().add(x).cast());
-      let y_high_i16 = v128_load(y.as_ptr().add(x + 8).cast());
-      let u_vec = v128_load(u_half.as_ptr().add(x / 2).cast());
-      let v_vec = v128_load(v_half.as_ptr().add(x / 2).cast());
+      // AND‑mask each load to the low 10 bits — see matching comment
+      // in [`crate::row::scalar::yuv_420p_n_to_rgb_row`].
+      let y_low_i16 = v128_and(v128_load(y.as_ptr().add(x).cast()), mask_v);
+      let y_high_i16 = v128_and(v128_load(y.as_ptr().add(x + 8).cast()), mask_v);
+      let u_vec = v128_and(v128_load(u_half.as_ptr().add(x / 2).cast()), mask_v);
+      let v_vec = v128_and(v128_load(v_half.as_ptr().add(x / 2).cast()), mask_v);
 
       let u_i16 = i16x8_sub(u_vec, bias_v);
       let v_i16 = i16x8_sub(v_vec, bias_v);
@@ -360,6 +363,7 @@ pub(crate) unsafe fn yuv420p10_to_rgb_u16_row(
     let y_scale_v = i32x4_splat(y_scale);
     let c_scale_v = i32x4_splat(c_scale);
     let bias_v = i16x8_splat(bias as i16);
+    let mask_v = u16x8_splat(scalar::bits_mask::<10>());
     let max_v = i16x8_splat(OUT_MAX_10);
     let zero_v = i16x8_splat(0);
     let cru = i32x4_splat(coeffs.r_u());
@@ -371,10 +375,12 @@ pub(crate) unsafe fn yuv420p10_to_rgb_u16_row(
 
     let mut x = 0usize;
     while x + 16 <= width {
-      let y_low_i16 = v128_load(y.as_ptr().add(x).cast());
-      let y_high_i16 = v128_load(y.as_ptr().add(x + 8).cast());
-      let u_vec = v128_load(u_half.as_ptr().add(x / 2).cast());
-      let v_vec = v128_load(v_half.as_ptr().add(x / 2).cast());
+      // AND‑mask loads to the low 10 bits so `chroma_i16x8`'s
+      // `i16x8_narrow_i32x4` stays lossless.
+      let y_low_i16 = v128_and(v128_load(y.as_ptr().add(x).cast()), mask_v);
+      let y_high_i16 = v128_and(v128_load(y.as_ptr().add(x + 8).cast()), mask_v);
+      let u_vec = v128_and(v128_load(u_half.as_ptr().add(x / 2).cast()), mask_v);
+      let v_vec = v128_and(v128_load(v_half.as_ptr().add(x / 2).cast()), mask_v);
 
       let u_i16 = i16x8_sub(u_vec, bias_v);
       let v_i16 = i16x8_sub(v_vec, bias_v);
