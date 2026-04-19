@@ -104,10 +104,22 @@ jobs:
           # x86_64 with `-C target-cpu=native`: enables the full feature
           # set of the runner's build-time CPU for LLVM auto-vectorization
           # of scalar paths and maximum codegen quality for SIMD kernels.
+          #
+          # `native` uses `target_rustflags` (routed via the per-target
+          # `CARGO_TARGET_*_RUSTFLAGS` env var) instead of the global
+          # `rustflags` field. The global `RUSTFLAGS` applies to *every*
+          # rustc invocation, including proc macro dylibs built for the
+          # host (`thiserror_impl`, etc.), which then get codegen'd with
+          # host-CPU-specific instructions and SIGILL when rustc loads
+          # them in a different execution context. The per-target var
+          # scopes `-C target-cpu=native` to the target crate only, so
+          # proc macros stay generic and we still get maximum codegen
+          # quality for the benchmark build.
           - os: ubuntu-latest
             arch: x86_64
             tier: native
-            rustflags: '-C target-cpu=native'
+            rustflags: ''
+            target_rustflags: '-C target-cpu=native'
             label: ubuntu-x86_64-native
 
           # Windows x86_64 — same dispatcher as Linux but validates the
@@ -121,6 +133,13 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       RUSTFLAGS: ${{ matrix.rustflags }}
+      # Per-target rustflags: only affects compilation of crates built
+      # for the named triple, never build-dependencies (proc macros,
+      # build scripts). The `native` tier uses this instead of
+      # `RUSTFLAGS` to avoid SIGILL when rustc loads host-compiled
+      # proc-macro dylibs that were codegen'd with `target-cpu=native`.
+      # Empty for tiers that don't opt in — cargo treats empty as unset.
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: ${{ matrix.target_rustflags }}
     steps:
       - uses: actions/checkout@v6
 
@@ -185,6 +204,9 @@ jobs:
           echo "- Runner: ${{ runner.name }}" >> "$summary"
           echo "- Runner arch (GH): ${{ runner.arch }}" >> "$summary"
           echo "- RUSTFLAGS: \`${{ matrix.rustflags }}\`" >> "$summary"
+          if [ -n "${{ matrix.target_rustflags }}" ]; then
+            echo "- CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: \`${{ matrix.target_rustflags }}\`" >> "$summary"
+          fi
           echo "- Date: $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> "$summary"
           echo "" >> "$summary"
 
