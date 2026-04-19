@@ -116,17 +116,24 @@ pub enum MixedSinkerError {
   /// direct `process` callers that bypass the walker (hand-crafted
   /// rows, replayed rows, etc.) before a wrong-shaped slice reaches
   /// an unsafe SIMD kernel.
+  ///
+  /// Lengths are expressed in **slice elements** — `u8` bytes for
+  /// the 8‑bit source rows (Y, U/V half, UV/VU half) and `u16`
+  /// elements for the 10‑bit source rows (Y10, U/V half 10). The
+  /// message deliberately says "elements" rather than "bytes" so the
+  /// same variant can serve both the `u8` and `u16` row families.
   #[error(
-    "MixedSinker row shape mismatch at row {row}: {which} slice has {actual} bytes, expected {expected}"
+    "MixedSinker row shape mismatch at row {row}: {which} slice has {actual} elements, expected {expected}"
   )]
   RowShapeMismatch {
     /// Which slice mismatched. See [`RowSlice`] for variants.
     which: RowSlice,
     /// Row index reported by the offending row.
     row: usize,
-    /// Expected slice length in bytes (given the sink's configured width).
+    /// Expected slice length in elements of the slice's element type
+    /// (`u8` for 8‑bit source rows; `u16` for 10‑bit source rows).
     expected: usize,
-    /// Actual slice length supplied by the row.
+    /// Actual slice length in the same unit as `expected`.
     actual: usize,
   },
 
@@ -381,43 +388,13 @@ impl<'a, F: SourceFormat> MixedSinker<'a, F> {
     Ok(self)
   }
 
-  /// Attaches a packed **`u16`** RGB output buffer sized in elements,
-  /// not bytes. For the 10‑bit source path
-  /// ([`Yuv420p10`](crate::yuv::Yuv420p10)) each element carries a
-  /// 10‑bit value in the **low** 10 bits (upper 6 bits zero), matching
-  /// FFmpeg's `yuv420p10le` convention. This is **not** the `p010`
-  /// layout (which stores samples in the high 10 bits); callers
-  /// feeding a p010 consumer must shift the output left by 6.
-  ///
-  /// Returns `Err(RgbU16BufferTooShort)` if
-  /// `buf.len() < width × height × 3` `u16` elements, or
-  /// `Err(GeometryOverflow)` on 32‑bit targets when the product
-  /// overflows.
-  #[cfg_attr(not(tarpaulin), inline(always))]
-  pub fn with_rgb_u16(mut self, buf: &'a mut [u16]) -> Result<Self, MixedSinkerError> {
-    self.set_rgb_u16(buf)?;
-    Ok(self)
-  }
-
-  /// In-place variant of [`with_rgb_u16`](Self::with_rgb_u16). The
-  /// required length is measured in `u16` **elements**, not bytes.
-  #[cfg_attr(not(tarpaulin), inline(always))]
-  pub fn set_rgb_u16(&mut self, buf: &'a mut [u16]) -> Result<&mut Self, MixedSinkerError> {
-    // Packed RGB requires `width × height × 3` channel values —
-    // that's the same count whether the element type is `u8` or
-    // `u16`, so the [`Self::frame_bytes`] helper (named for the u8
-    // RGB path's byte count) gives the element count here too. No
-    // size conversion needed.
-    let expected_elements = self.frame_bytes(3)?;
-    if buf.len() < expected_elements {
-      return Err(MixedSinkerError::RgbU16BufferTooShort {
-        expected: expected_elements,
-        actual: buf.len(),
-      });
-    }
-    self.rgb_u16 = Some(buf);
-    Ok(self)
-  }
+  // NOTE: `with_rgb_u16` / `set_rgb_u16` are **not** declared here.
+  // They live on a format‑specific impl block further down (currently
+  // [`MixedSinker<Yuv420p10>`]) so the buffer can only be attached to
+  // sink types whose `PixelSink` impl actually writes it. Attaching a
+  // `u16` RGB buffer to a [`Yuv420p`] / [`Nv12`] / [`Nv21`] sink is a
+  // compile error, not a silent stale‑state bug. Future high‑bit‑depth
+  // markers (12‑bit, 14‑bit, P010) will add their own impl blocks.
 
   /// Attaches a single-plane luma output buffer.
   /// Returns `Err(LumaBufferTooShort)` if `buf.len() < width × height`,
@@ -917,6 +894,50 @@ impl PixelSink for MixedSinker<'_, Nv21> {
 }
 
 // ---- Yuv420p10 impl -----------------------------------------------------
+
+impl<'a> MixedSinker<'a, Yuv420p10> {
+  /// Attaches a packed **`u16`** RGB output buffer. Only available on
+  /// sinkers whose source format populates native‑depth `u16` RGB —
+  /// calling `with_rgb_u16` on an 8‑bit source sinker (e.g.
+  /// [`MixedSinker<Yuv420p>`]) is a compile error rather than a
+  /// silent no‑op that would leave the caller's buffer stale.
+  ///
+  /// Length is measured in `u16` **elements** (not bytes): minimum
+  /// `width × height × 3`. Each element carries a 10‑bit value in
+  /// the **low** 10 bits (upper 6 bits zero), matching FFmpeg's
+  /// `yuv420p10le` convention. This is **not** the `p010` layout
+  /// (which stores samples in the high 10 bits); callers feeding a
+  /// p010 consumer must shift the output left by 6.
+  ///
+  /// Returns `Err(RgbU16BufferTooShort)` if
+  /// `buf.len() < width × height × 3`, or `Err(GeometryOverflow)`
+  /// on 32‑bit targets when the product overflows.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn with_rgb_u16(mut self, buf: &'a mut [u16]) -> Result<Self, MixedSinkerError> {
+    self.set_rgb_u16(buf)?;
+    Ok(self)
+  }
+
+  /// In-place variant of [`with_rgb_u16`](Self::with_rgb_u16). The
+  /// required length is measured in `u16` **elements**, not bytes.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn set_rgb_u16(&mut self, buf: &'a mut [u16]) -> Result<&mut Self, MixedSinkerError> {
+    // Packed RGB requires `width × height × 3` channel values —
+    // that's the same count whether the element type is `u8` or
+    // `u16`, so the [`Self::frame_bytes`] helper (named for the u8
+    // RGB path's byte count) gives the element count here too. No
+    // size conversion needed.
+    let expected_elements = self.frame_bytes(3)?;
+    if buf.len() < expected_elements {
+      return Err(MixedSinkerError::RgbU16BufferTooShort {
+        expected: expected_elements,
+        actual: buf.len(),
+      });
+    }
+    self.rgb_u16 = Some(buf);
+    Ok(self)
+  }
+}
 
 impl Yuv420p10Sink for MixedSinker<'_, Yuv420p10> {}
 

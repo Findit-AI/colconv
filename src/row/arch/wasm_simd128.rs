@@ -1314,4 +1314,115 @@ mod tests {
       check_hsv_equivalence(&rgb[..w * 3], w);
     }
   }
+
+  // ---- yuv420p10 scalar-equivalence -----------------------------------
+  //
+  // These tests compile only for `target_arch = "wasm32"` (via the
+  // outer `target_feature = "simd128"` gate on the module). CI today
+  // builds the wasm target but does not execute its tests — running
+  // them requires a wasm runtime (wasmtime with wasi‑test‑runner, or
+  // `wasm-pack test --node`). The test code is written so it drops
+  // in cleanly once that runtime is wired.
+
+  fn p10_plane(n: usize, seed: usize) -> std::vec::Vec<u16> {
+    (0..n)
+      .map(|i| ((i * seed + seed * 3) & 0x3FF) as u16)
+      .collect()
+  }
+
+  fn check_p10_u8_simd128_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+    let y = p10_plane(width, 37);
+    let u = p10_plane(width / 2, 53);
+    let v = p10_plane(width / 2, 71);
+    let mut rgb_scalar = std::vec![0u8; width * 3];
+    let mut rgb_simd = std::vec![0u8; width * 3];
+
+    scalar::yuv_420p_n_to_rgb_row::<10>(&y, &u, &v, &mut rgb_scalar, width, matrix, full_range);
+    unsafe {
+      yuv420p10_to_rgb_row(&y, &u, &v, &mut rgb_simd, width, matrix, full_range);
+    }
+
+    if rgb_scalar != rgb_simd {
+      let first_diff = rgb_scalar
+        .iter()
+        .zip(rgb_simd.iter())
+        .position(|(a, b)| a != b)
+        .unwrap();
+      panic!(
+        "simd128 10→u8 diverges at byte {first_diff} (width={width}, matrix={matrix:?}, full_range={full_range}): scalar={} simd={}",
+        rgb_scalar[first_diff], rgb_simd[first_diff]
+      );
+    }
+  }
+
+  fn check_p10_u16_simd128_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+    let y = p10_plane(width, 37);
+    let u = p10_plane(width / 2, 53);
+    let v = p10_plane(width / 2, 71);
+    let mut rgb_scalar = std::vec![0u16; width * 3];
+    let mut rgb_simd = std::vec![0u16; width * 3];
+
+    scalar::yuv_420p_n_to_rgb_u16_row::<10>(&y, &u, &v, &mut rgb_scalar, width, matrix, full_range);
+    unsafe {
+      yuv420p10_to_rgb_u16_row(&y, &u, &v, &mut rgb_simd, width, matrix, full_range);
+    }
+
+    if rgb_scalar != rgb_simd {
+      let first_diff = rgb_scalar
+        .iter()
+        .zip(rgb_simd.iter())
+        .position(|(a, b)| a != b)
+        .unwrap();
+      panic!(
+        "simd128 10→u16 diverges at elem {first_diff} (width={width}, matrix={matrix:?}, full_range={full_range}): scalar={} simd={}",
+        rgb_scalar[first_diff], rgb_simd[first_diff]
+      );
+    }
+  }
+
+  #[test]
+  fn simd128_p10_u8_matches_scalar_all_matrices() {
+    for m in [
+      ColorMatrix::Bt601,
+      ColorMatrix::Bt709,
+      ColorMatrix::Bt2020Ncl,
+      ColorMatrix::Smpte240m,
+      ColorMatrix::Fcc,
+      ColorMatrix::YCgCo,
+    ] {
+      for full in [true, false] {
+        check_p10_u8_simd128_equivalence(16, m, full);
+      }
+    }
+  }
+
+  #[test]
+  fn simd128_p10_u16_matches_scalar_all_matrices() {
+    for m in [
+      ColorMatrix::Bt601,
+      ColorMatrix::Bt709,
+      ColorMatrix::Bt2020Ncl,
+      ColorMatrix::Smpte240m,
+      ColorMatrix::Fcc,
+      ColorMatrix::YCgCo,
+    ] {
+      for full in [true, false] {
+        check_p10_u16_simd128_equivalence(16, m, full);
+      }
+    }
+  }
+
+  #[test]
+  fn simd128_p10_matches_scalar_tail_widths() {
+    for w in [18usize, 30, 34, 1922] {
+      check_p10_u8_simd128_equivalence(w, ColorMatrix::Bt601, false);
+      check_p10_u16_simd128_equivalence(w, ColorMatrix::Bt709, true);
+    }
+  }
+
+  #[test]
+  fn simd128_p10_matches_scalar_1920() {
+    check_p10_u8_simd128_equivalence(1920, ColorMatrix::Bt709, false);
+    check_p10_u16_simd128_equivalence(1920, ColorMatrix::Bt2020Ncl, false);
+  }
 }
