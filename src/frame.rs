@@ -494,16 +494,30 @@ pub enum Nv12FrameError {
 /// types); `height` may be odd (handled via `height.div_ceil(2)` in
 /// chroma‑row sizing).
 ///
-/// # Input sample range
+/// # Input sample range and packing sanity
 ///
 /// Each `u16` sample's 10 active bits live in the high 10 positions;
 /// the low 6 bits are expected to be zero. [`Self::try_new`] validates
-/// geometry only; [`Self::try_new_checked`] scans every sample and
-/// rejects any with non‑zero low 6 bits. Kernels mask each load to the
-/// high 10 bits (equivalently, shift right by 6 at load) so mispacked
-/// input (e.g. a `yuv420p10le` buffer handed to the P010 kernel)
-/// produces deterministic, backend‑independent output instead of
-/// silent architecture‑dependent drift.
+/// geometry only.
+///
+/// [`Self::try_new_checked`] additionally scans every sample and
+/// rejects any with non‑zero low 6 bits — a **necessary but not
+/// sufficient** packing sanity check. It catches mispacked
+/// `yuv420p10le` buffers as long as **at least one** sample has
+/// low‑bit content (the usual case for noisy real‑world image data),
+/// but it **cannot distinguish** P010 from a `yuv420p10le` buffer
+/// whose samples all happen to be multiples of 64. Values like
+/// `Y = 64` (limited‑range black) and `UV = 512` (neutral chroma)
+/// both have low 6 bits zero and so pass the check, even though the
+/// buffer layout is wrong. For strict provenance, callers must rely
+/// on their source format metadata and pick the right frame type
+/// ([`P010Frame`] vs [`Yuv420p10Frame`]) at construction.
+///
+/// Kernels shift each load right by 6 to extract the 10‑bit value,
+/// so mispacked input (e.g. a `yuv420p10le` buffer handed to the
+/// P010 kernel) produces deterministic, backend‑independent output
+/// — wrong colors, but consistently wrong across scalar + every
+/// SIMD backend, which is visible in any output diff.
 #[derive(Debug, Clone, Copy)]
 pub struct P010Frame<'a> {
   y: &'a [u16],
@@ -612,10 +626,22 @@ impl<'a> P010Frame<'a> {
   }
 
   /// Like [`Self::try_new`] but additionally scans every sample and
-  /// rejects any whose **low 6 bits** are non‑zero — a valid P010
+  /// rejects any whose **low 6 bits** are non‑zero. A valid P010
   /// sample has its 10 active bits in the high 10 positions and zero
-  /// below. Use on untrusted input (e.g. a `u16` buffer of unknown
-  /// provenance that might be `yuv420p10le`‑packed instead of P010).
+  /// below, so non‑zero low bits is evidence the buffer isn't P010.
+  ///
+  /// **This is a packing sanity check, not a provenance validator.**
+  /// The check catches noisy `yuv420p10le` data (where most samples
+  /// have low‑bit content), but it **cannot** distinguish P010 from
+  /// a `yuv420p10le` buffer whose samples all happen to be multiples
+  /// of 64. Common flat‑region values like `Y = 64` (limited‑range
+  /// black) or `UV = 512` (neutral chroma) are multiples of 64 in
+  /// both layouts, so a yuv420p10le buffer of flat content will
+  /// silently pass this check. Callers who need strict provenance
+  /// must rely on their source format metadata and pick the right
+  /// frame type at construction ([`P010Frame`] vs [`Yuv420p10Frame`]);
+  /// no runtime check on opaque `u16` data can reliably tell the two
+  /// layouts apart.
   ///
   /// Cost: one O(plane_size) scan per plane. The default
   /// [`Self::try_new`] skips this so the hot path stays O(1).
@@ -781,6 +807,12 @@ pub enum P010FrameError {
   /// bits in the high 10 of each `u16`, so valid samples are always
   /// multiples of 64 (`value << 6`). Only
   /// [`P010Frame::try_new_checked`] can produce this error.
+  ///
+  /// Note: the absence of this error does **not** prove the buffer
+  /// is P010. A `yuv420p10le` buffer of samples that all happen to
+  /// be multiples of 64 (e.g. `Y = 64`, `UV = 512`) passes the
+  /// check silently. See [`P010Frame::try_new_checked`] for the
+  /// full discussion.
   #[error(
     "sample {value:#06x} on plane {plane} at element {index} has non-zero low 6 bits (not a valid P010 sample)"
   )]
@@ -2237,5 +2269,35 @@ mod tests {
     let uv = std::vec![0x8000u16; 16 * 4];
     let e = P010Frame::try_new_checked(&y, &uv, 16, 8, 16, 16).unwrap_err();
     assert!(matches!(e, P010FrameError::YPlaneTooShort { .. }));
+  }
+
+  /// Regression documenting a **known limitation** of
+  /// [`P010Frame::try_new_checked`]: the low‑6‑bits‑zero check is a
+  /// packing sanity check, not a provenance validator. A
+  /// `yuv420p10le` buffer whose samples all happen to be multiples
+  /// of 64 — e.g. `Y = 64` (limited‑range black, `0x0040`) and
+  /// `UV = 512` (neutral chroma, `0x0200`) — passes the check
+  /// silently, even though the layout is wrong and downstream P010
+  /// kernels will produce incorrect output.
+  ///
+  /// The test asserts the check accepts these values so the limit
+  /// is visible in the test log; any future attempt to tighten the
+  /// constructor into a real provenance validator will need to
+  /// update or replace this test.
+  #[test]
+  fn p010_try_new_checked_accepts_ambiguous_yuv420p10le_samples() {
+    // `yuv420p10le`-style samples, all multiples of 64: low 6 bits
+    // are zero, so they pass the P010 sanity check even though this
+    // is wrong data for a P010 frame.
+    let y = std::vec![0x0040u16; 16 * 8]; // limited-range black in 10-bit low-packed
+    let uv = std::vec![0x0200u16; 16 * 4]; // neutral chroma in 10-bit low-packed
+    let f = P010Frame::try_new_checked(&y, &uv, 16, 8, 16, 16)
+      .expect("known limitation: low-6-bits-zero check cannot tell yuv420p10le from P010");
+    assert_eq!(f.width(), 16);
+    // Downstream decoding of this frame would produce wrong colors
+    // (every `>> 6` extracts 1 from Y=0x0040 and 8 from UV=0x0200,
+    // which P010 kernels then bias/scale as if those were the 10-bit
+    // source values). That's accepted behavior — the type system,
+    // not `try_new_checked`, is what keeps yuv420p10le out of P010.
   }
 }
