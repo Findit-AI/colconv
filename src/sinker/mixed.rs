@@ -12,7 +12,7 @@ use core::marker::PhantomData;
 
 use std::vec::Vec;
 
-use derive_more::IsVariant;
+use derive_more::{Display, IsVariant};
 use thiserror::Error;
 
 use crate::{
@@ -97,7 +97,7 @@ pub enum MixedSinkerError {
   /// rows, replayed rows, etc.) before a wrong-shaped slice reaches
   /// an unsafe SIMD kernel.
   #[error(
-    "MixedSinker row shape mismatch at row {row}: {which:?} slice has {actual} bytes, expected {expected}"
+    "MixedSinker row shape mismatch at row {row}: {which} slice has {actual} bytes, expected {expected}"
   )]
   RowShapeMismatch {
     /// Which slice mismatched. See [`RowSlice`] for variants.
@@ -145,17 +145,21 @@ pub enum HsvPlane {
 /// chroma), P010 / P016 (10/16‑bit planes), etc. — will add its own
 /// variant. Pattern matches from downstream code should include a
 /// `_ => …` arm.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant)]
+#[derive(Debug, Display, Clone, Copy, PartialEq, Eq, Hash, IsVariant)]
 #[non_exhaustive]
 pub enum RowSlice {
   /// Y (luma) plane — every 4:2:0 / 4:2:2 / 4:4:4 source.
+  #[display("Y")]
   Y,
   /// Half‑width U (Cb) plane in a planar 4:2:0 source ([`Yuv420p`]).
+  #[display("U Half")]
   UHalf,
   /// Half‑width V (Cr) plane in a planar 4:2:0 source ([`Yuv420p`]).
+  #[display("V Half")]
   VHalf,
   /// Half‑width interleaved UV plane in a semi‑planar 4:2:0 source
   /// ([`Nv12`]). Each row is `U0, V0, U1, V1, …` for `width / 2` pairs.
+  #[display("UV Half")]
   UvHalf,
 }
 
