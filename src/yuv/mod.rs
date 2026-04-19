@@ -20,6 +20,9 @@
 //!   per sample (HEVC Main 12 / VP9 Profile 3 software decode).
 //! - [`Yuv420p14`](crate::yuv::Yuv420p14) — 4:2:0 planar at 14 bits
 //!   per sample (grading / mastering pipelines).
+//! - [`Yuv420p16`](crate::yuv::Yuv420p16) — 4:2:0 planar at 16 bits
+//!   per sample (reference / intermediate HDR, runs on the parallel
+//!   i64 kernel family).
 //!
 //! # Shipped (high-bit-depth 4:2:0, high-bit-packed semi-planar)
 //!
@@ -29,15 +32,24 @@
 //! - [`P012`](crate::yuv::P012) — 4:2:0 semi‑planar at 12 bits per
 //!   sample, high‑bit‑packed (HEVC Main 12 / VP9 Profile 3 hardware
 //!   decode).
+//! - [`P016`](crate::yuv::P016) — 4:2:0 semi‑planar at 16 bits per
+//!   sample (reference). At 16 bits the high‑vs‑low packing
+//!   distinction degenerates — every bit is active.
+//!
+//! # Kernel families
+//!
+//! - **Q15 i32 family** covers 8‑bit (non-generic `yuv_420_to_rgb_row`
+//!   + siblings) and 10/12/14‑bit (const-generic `yuv_420p_n_to_rgb_*
+//!   <BITS>` + siblings). Hot path for SDR + most HDR workflows.
+//! - **i64 chroma-widened family** covers 16‑bit
+//!   (`yuv_420p16_to_rgb_*` + `p16_to_rgb_*`). The chroma matrix
+//!   multiply `c_u * u_d + c_v * v_d` overflows i32 at 16 bits, so
+//!   the 16‑bit kernels widen that specific step to i64 and narrow
+//!   back after the `>> 15`. Scalar stays free; SIMD pays a ~2×
+//!   chroma compute tax in exchange for i32 overflow safety.
 //!
 //! # Not yet shipped
 //!
-//! - **16‑bit** (`Yuv420p16` / `P016`) — blocked on a separate
-//!   kernel family. At `BITS == 16` the Q15 chroma_sum overflows
-//!   i32, so this needs either i64 intermediates or a lower‑Q
-//!   coefficient format. The scalar and SIMD kernels here
-//!   deliberately gate `BITS` to `{10, 12, 14}` (planar) and
-//!   `{10, 12}` (semi‑planar) via `debug_assert!`.
 //! - **4:2:2 / 4:4:4** (`Yuv422p`, `Yuv444p`, `Nv16`, `Nv24`,
 //!   `Nv42`) — follow‑up, not yet started. They share the scalar
 //!   Q15 math but need their own row walkers (different chroma
@@ -50,16 +62,20 @@ mod nv12;
 mod nv21;
 mod p010;
 mod p012;
+mod p016;
 mod yuv420p;
 mod yuv420p10;
 mod yuv420p12;
 mod yuv420p14;
+mod yuv420p16;
 
 pub use nv12::{Nv12, Nv12Row, Nv12Sink, nv12_to};
 pub use nv21::{Nv21, Nv21Row, Nv21Sink, nv21_to};
 pub use p010::{P010, P010Row, P010Sink, p010_to};
 pub use p012::{P012, P012Row, P012Sink, p012_to};
+pub use p016::{P016, P016Row, P016Sink, p016_to};
 pub use yuv420p::{Yuv420p, Yuv420pRow, Yuv420pSink, yuv420p_to};
 pub use yuv420p10::{Yuv420p10, Yuv420p10Row, Yuv420p10Sink, yuv420p10_to};
 pub use yuv420p12::{Yuv420p12, Yuv420p12Row, Yuv420p12Sink, yuv420p12_to};
 pub use yuv420p14::{Yuv420p14, Yuv420p14Row, Yuv420p14Sink, yuv420p14_to};
+pub use yuv420p16::{Yuv420p16, Yuv420p16Row, Yuv420p16Sink, yuv420p16_to};

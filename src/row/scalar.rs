@@ -357,6 +357,256 @@ pub(crate) fn yuv_420p_n_to_rgb_u16_row<const BITS: u32>(
   }
 }
 
+// ---- 16-bit YUV 4:2:0 → RGB (parallel kernel family) -------------------
+//
+// At 16 bits the chroma multiply-add `c_u * u_d + c_v * v_d` splits
+// into two regimes by output target:
+//
+// - **16 → u8**: the Q15 scale knocks `u_d` / `v_d` down to u8 range
+//   (max ±150 at limited range, ±128 at full). Products like
+//   `60808 * 150 = 9.1M` and their sums stay well within i32, so the
+//   i32 pipeline used by 10/12/14 works unchanged at BITS = 16 — the
+//   kernels below reuse that structure without widening.
+// - **16 → u16**: the Q15 scale is a near-identity (32768 at full
+//   range), so `u_d` / `v_d` can reach ±32768. `coeff * u_d` alone
+//   reaches ~1.99·10⁹ (close to i32 max); the full chroma sum
+//   reaches ~3.68·10⁹ — overflows i32. The u16 kernels below widen
+//   the chroma multiply-add to i64 (via [`q15_chroma64`]) and narrow
+//   back after the `>> 15`.
+//
+// All four functions are dedicated 16-bit entry points (not
+// const-generic) so each monomorphization picks the right precision
+// path without a runtime branch.
+
+/// `(c_u * u_d + c_v * v_d + RND) >> 15` computed in i64. Chroma sum
+/// max ≈ 4.3·10⁹ at 16-bit limited range — above i32 but well within
+/// i64. Result after the shift is bounded by ~130 000 so the final
+/// `as i32` narrow is lossless.
+#[cfg_attr(not(tarpaulin), inline(always))]
+fn q15_chroma64(c_u: i32, u_d: i32, c_v: i32, v_d: i32) -> i32 {
+  let sum = (c_u as i64) * (u_d as i64) + (c_v as i64) * (v_d as i64);
+  ((sum + (1 << 14)) >> 15) as i32
+}
+
+/// Converts one row of **16-bit** YUV 4:2:0 (samples in the full
+/// `u16` range) to **8-bit** packed RGB. At 16 → u8 the Q15 scale
+/// confines chroma to u8 range, so the i32 chroma pipeline used by
+/// 10/12/14 applies unchanged here — this kernel is structurally
+/// identical to [`yuv_420p_n_to_rgb_row`] at a hypothetical
+/// `BITS = 16`, just without the AND-mask (no upper-bit-zero
+/// guarantee to enforce at 16 bits).
+///
+/// # Panics (debug builds)
+///
+/// - `width` must be even.
+/// - `y.len() >= width`, `u_half.len() >= width / 2`,
+///   `v_half.len() >= width / 2`, `rgb_out.len() >= 3 * width`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn yuv_420p16_to_rgb_row(
+  y: &[u16],
+  u_half: &[u16],
+  v_half: &[u16],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  debug_assert_eq!(width & 1, 0, "YUV 4:2:0 requires even width");
+  debug_assert!(y.len() >= width, "y row too short");
+  debug_assert!(u_half.len() >= width / 2, "u_half row too short");
+  debug_assert!(v_half.len() >= width / 2, "v_half row too short");
+  debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
+
+  let coeffs = Coefficients::for_matrix(matrix);
+  let (y_off, y_scale, c_scale) = range_params_n::<16, 8>(full_range);
+  let bias = chroma_bias::<16>();
+
+  // No AND-mask needed at 16-bit — every u16 is already a valid
+  // sample. `q15_chroma` (i32) is enough for u8 output because the
+  // output-target scaling keeps `u_d * coeff` well within i32.
+  let mut x = 0;
+  while x < width {
+    let c_idx = x / 2;
+    let u_d = q15_scale(u_half[c_idx] as i32 - bias, c_scale);
+    let v_d = q15_scale(v_half[c_idx] as i32 - bias, c_scale);
+
+    let r_chroma = q15_chroma(coeffs.r_u(), u_d, coeffs.r_v(), v_d);
+    let g_chroma = q15_chroma(coeffs.g_u(), u_d, coeffs.g_v(), v_d);
+    let b_chroma = q15_chroma(coeffs.b_u(), u_d, coeffs.b_v(), v_d);
+
+    let y0 = q15_scale(y[x] as i32 - y_off, y_scale);
+    rgb_out[x * 3] = clamp_u8(y0 + r_chroma);
+    rgb_out[x * 3 + 1] = clamp_u8(y0 + g_chroma);
+    rgb_out[x * 3 + 2] = clamp_u8(y0 + b_chroma);
+
+    let y1 = q15_scale(y[x + 1] as i32 - y_off, y_scale);
+    rgb_out[(x + 1) * 3] = clamp_u8(y1 + r_chroma);
+    rgb_out[(x + 1) * 3 + 1] = clamp_u8(y1 + g_chroma);
+    rgb_out[(x + 1) * 3 + 2] = clamp_u8(y1 + b_chroma);
+
+    x += 2;
+  }
+}
+
+/// Converts one row of **16-bit** YUV 4:2:0 to **native-depth `u16`**
+/// packed RGB — full-range output in `[0, 65535]`. **Runs the
+/// chroma matrix multiply in i64** to accommodate the wider
+/// `coeff × u_d` product at 16 → 16-bit scaling.
+///
+/// # Panics (debug builds)
+///
+/// Same contract as [`yuv_420p16_to_rgb_row`] plus `rgb_out` is
+/// measured in `u16` elements.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn yuv_420p16_to_rgb_u16_row(
+  y: &[u16],
+  u_half: &[u16],
+  v_half: &[u16],
+  rgb_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  debug_assert_eq!(width & 1, 0, "YUV 4:2:0 requires even width");
+  debug_assert!(y.len() >= width, "y row too short");
+  debug_assert!(u_half.len() >= width / 2, "u_half row too short");
+  debug_assert!(v_half.len() >= width / 2, "v_half row too short");
+  debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
+
+  let coeffs = Coefficients::for_matrix(matrix);
+  let (y_off, y_scale, c_scale) = range_params_n::<16, 16>(full_range);
+  let bias = chroma_bias::<16>();
+  let out_max: i32 = 0xFFFF;
+
+  let mut x = 0;
+  while x < width {
+    let c_idx = x / 2;
+    let u_d = q15_scale(u_half[c_idx] as i32 - bias, c_scale);
+    let v_d = q15_scale(v_half[c_idx] as i32 - bias, c_scale);
+
+    let r_chroma = q15_chroma64(coeffs.r_u(), u_d, coeffs.r_v(), v_d);
+    let g_chroma = q15_chroma64(coeffs.g_u(), u_d, coeffs.g_v(), v_d);
+    let b_chroma = q15_chroma64(coeffs.b_u(), u_d, coeffs.b_v(), v_d);
+
+    let y0 = q15_scale(y[x] as i32 - y_off, y_scale);
+    rgb_out[x * 3] = (y0 + r_chroma).clamp(0, out_max) as u16;
+    rgb_out[x * 3 + 1] = (y0 + g_chroma).clamp(0, out_max) as u16;
+    rgb_out[x * 3 + 2] = (y0 + b_chroma).clamp(0, out_max) as u16;
+
+    let y1 = q15_scale(y[x + 1] as i32 - y_off, y_scale);
+    rgb_out[(x + 1) * 3] = (y1 + r_chroma).clamp(0, out_max) as u16;
+    rgb_out[(x + 1) * 3 + 1] = (y1 + g_chroma).clamp(0, out_max) as u16;
+    rgb_out[(x + 1) * 3 + 2] = (y1 + b_chroma).clamp(0, out_max) as u16;
+
+    x += 2;
+  }
+}
+
+/// Converts one row of **P016** (semi-planar 4:2:0 with UV
+/// interleaved, full `u16` samples) to **8-bit** packed RGB. At 16
+/// bits there is no "high-bit-packed" vs "low-bit-packed" distinction
+/// (every bit is active), so this kernel matches
+/// [`yuv_420p16_to_rgb_row`] semantically — only the chroma plane
+/// layout differs (interleaved vs. two half-width planes). Uses the
+/// i32 chroma pipeline (same reasoning as the planar u8 kernel).
+///
+/// # Panics (debug builds)
+///
+/// - `width` must be even.
+/// - `y.len() >= width`, `uv_half.len() >= width`,
+///   `rgb_out.len() >= 3 * width`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn p16_to_rgb_row(
+  y: &[u16],
+  uv_half: &[u16],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  debug_assert_eq!(width & 1, 0, "semi-planar 4:2:0 requires even width");
+  debug_assert!(y.len() >= width, "y row too short");
+  debug_assert!(uv_half.len() >= width, "uv row too short");
+  debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
+
+  let coeffs = Coefficients::for_matrix(matrix);
+  let (y_off, y_scale, c_scale) = range_params_n::<16, 8>(full_range);
+  let bias = chroma_bias::<16>();
+
+  let mut x = 0;
+  while x < width {
+    let c_idx = x / 2;
+    let u_sample = uv_half[c_idx * 2];
+    let v_sample = uv_half[c_idx * 2 + 1];
+    let u_d = q15_scale(u_sample as i32 - bias, c_scale);
+    let v_d = q15_scale(v_sample as i32 - bias, c_scale);
+
+    let r_chroma = q15_chroma(coeffs.r_u(), u_d, coeffs.r_v(), v_d);
+    let g_chroma = q15_chroma(coeffs.g_u(), u_d, coeffs.g_v(), v_d);
+    let b_chroma = q15_chroma(coeffs.b_u(), u_d, coeffs.b_v(), v_d);
+
+    let y0 = q15_scale(y[x] as i32 - y_off, y_scale);
+    rgb_out[x * 3] = clamp_u8(y0 + r_chroma);
+    rgb_out[x * 3 + 1] = clamp_u8(y0 + g_chroma);
+    rgb_out[x * 3 + 2] = clamp_u8(y0 + b_chroma);
+
+    let y1 = q15_scale(y[x + 1] as i32 - y_off, y_scale);
+    rgb_out[(x + 1) * 3] = clamp_u8(y1 + r_chroma);
+    rgb_out[(x + 1) * 3 + 1] = clamp_u8(y1 + g_chroma);
+    rgb_out[(x + 1) * 3 + 2] = clamp_u8(y1 + b_chroma);
+
+    x += 2;
+  }
+}
+
+/// Converts one row of **P016** to **native-depth `u16`** packed
+/// RGB — full-range output in `[0, 65535]`. Chroma matrix multiply
+/// runs in i64 (same reasoning as [`yuv_420p16_to_rgb_u16_row`]).
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn p16_to_rgb_u16_row(
+  y: &[u16],
+  uv_half: &[u16],
+  rgb_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  debug_assert_eq!(width & 1, 0, "semi-planar 4:2:0 requires even width");
+  debug_assert!(y.len() >= width, "y row too short");
+  debug_assert!(uv_half.len() >= width, "uv row too short");
+  debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
+
+  let coeffs = Coefficients::for_matrix(matrix);
+  let (y_off, y_scale, c_scale) = range_params_n::<16, 16>(full_range);
+  let bias = chroma_bias::<16>();
+  let out_max: i32 = 0xFFFF;
+
+  let mut x = 0;
+  while x < width {
+    let c_idx = x / 2;
+    let u_sample = uv_half[c_idx * 2];
+    let v_sample = uv_half[c_idx * 2 + 1];
+    let u_d = q15_scale(u_sample as i32 - bias, c_scale);
+    let v_d = q15_scale(v_sample as i32 - bias, c_scale);
+
+    let r_chroma = q15_chroma64(coeffs.r_u(), u_d, coeffs.r_v(), v_d);
+    let g_chroma = q15_chroma64(coeffs.g_u(), u_d, coeffs.g_v(), v_d);
+    let b_chroma = q15_chroma64(coeffs.b_u(), u_d, coeffs.b_v(), v_d);
+
+    let y0 = q15_scale(y[x] as i32 - y_off, y_scale);
+    rgb_out[x * 3] = (y0 + r_chroma).clamp(0, out_max) as u16;
+    rgb_out[x * 3 + 1] = (y0 + g_chroma).clamp(0, out_max) as u16;
+    rgb_out[x * 3 + 2] = (y0 + b_chroma).clamp(0, out_max) as u16;
+
+    let y1 = q15_scale(y[x + 1] as i32 - y_off, y_scale);
+    rgb_out[(x + 1) * 3] = (y1 + r_chroma).clamp(0, out_max) as u16;
+    rgb_out[(x + 1) * 3 + 1] = (y1 + g_chroma).clamp(0, out_max) as u16;
+    rgb_out[(x + 1) * 3 + 2] = (y1 + b_chroma).clamp(0, out_max) as u16;
+
+    x += 2;
+  }
+}
+
 // ---- P010 (semi-planar 10-bit, high-bit-packed) → RGB ------------------
 
 /// Converts one row of P010 (semi‑planar 4:2:0 with UV interleaved,

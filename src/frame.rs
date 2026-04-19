@@ -549,11 +549,13 @@ impl<'a, const BITS: u32> PnFrame<'a, BITS> {
     y_stride: u32,
     uv_stride: u32,
   ) -> Result<Self, PnFrameError> {
-    // Guard the `BITS` parameter at the top — 10 and 12 are the only
-    // high-bit-packed depths supported by the Q15 kernel family. 14
-    // exists in the planar `yuv420p14le` family but not as a Pn
-    // hardware output; 16 would need i64 intermediates.
-    if BITS != 10 && BITS != 12 {
+    // Guard the `BITS` parameter at the top. 10 and 12 use the Q15
+    // i32 kernel family (`p_n_to_rgb_*<BITS>`); 16 uses the parallel
+    // i64 kernel family (`p16_to_rgb_*`). 14 has no high-bit-packed
+    // hardware format. All three supported depths funnel through the
+    // same `PnFrame` struct; kernel selection is at the public
+    // dispatcher boundary.
+    if BITS != 10 && BITS != 12 && BITS != 16 {
       return Err(PnFrameError::UnsupportedBits { bits: BITS });
     }
     if width == 0 || height == 0 {
@@ -757,7 +759,7 @@ impl<'a, const BITS: u32> PnFrame<'a, BITS> {
     self.uv_stride
   }
 
-  /// Active bit depth — 10 or 12. Mirrors the `BITS` const parameter
+  /// Active bit depth — 10, 12, or 16. Mirrors the `BITS` const parameter
   /// so generic code can read it without naming the type.
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn bits(&self) -> u32 {
@@ -773,6 +775,21 @@ pub type P010Frame<'a> = PnFrame<'a, 10>;
 /// Same layout as [`P010Frame`] but with 12 active bits in the high
 /// 12 of each `u16` (`sample = value << 4`, low 4 bits zero).
 pub type P012Frame<'a> = PnFrame<'a, 12>;
+
+/// Type alias for a validated P016 frame (16‑bit, no high-vs-low
+/// distinction — the full `u16` range is active). Tight wrapper over
+/// [`PnFrame`] with `BITS == 16`.
+///
+/// **Uses a parallel i64 kernel family** — scalar + SIMD kernels
+/// named `p16_to_rgb_*` instead of the `p_n_to_rgb_*<BITS>` family
+/// that covers 10/12. The chroma multiply-add (`c_u * u_d + c_v *
+/// v_d`) overflows i32 at 16 bits for standard matrices (e.g.,
+/// BT.709 `b_u = 60808` × `u_d ≈ 32768` alone is within 1 bit of
+/// i32 max; summing both chroma terms exceeds it). The 16-bit path
+/// runs those multiplies as i64 and shifts i64 right by 15 before
+/// narrowing back. The 10/12 paths stay on the i32 pipeline
+/// unchanged.
+pub type P016Frame<'a> = PnFrame<'a, 16>;
 
 /// Identifies which plane of a [`PnFrame`] a
 /// [`PnFrameError::SampleLowBitsSet`] refers to.
@@ -796,7 +813,7 @@ pub enum PnFrameError {
   /// (10, 12). 14 exists in the planar `yuv420p14le` family but not
   /// as a Pn hardware output; 16 would need a different kernel
   /// family.
-  #[error("unsupported BITS ({bits}) for PnFrame; must be 10 or 12")]
+  #[error("unsupported BITS ({bits}) for PnFrame; must be 10, 12, or 16")]
   UnsupportedBits {
     /// The unsupported value of the `BITS` const parameter.
     bits: u32,
@@ -1113,7 +1130,7 @@ pub enum Nv21FrameError {
 /// Structurally identical to [`Yuv420pFrame`] — three planes, half‑
 /// size chroma — but sample storage is **`u16`** so every pixel
 /// carries up to 16 bits of payload. `BITS` is the active bit depth
-/// (10, 12, or 14). Callers are **expected** to store each sample in
+/// (10, 12, 14, or 16). Callers are **expected** to store each sample in
 /// the **low** `BITS` bits of its `u16` (upper `16 - BITS` bits zero),
 /// matching FFmpeg's little‑endian `yuv420p10le` / `yuv420p12le` /
 /// `yuv420p14le` convention, where each plane is a byte buffer
@@ -1153,18 +1170,23 @@ pub enum Nv21FrameError {
 /// [`Self::try_new_checked`] — it scans every sample and returns
 /// [`Yuv420pFrame16Error::SampleOutOfRange`] on the first violation.
 ///
-/// All three supported depths — `BITS == 10` (HDR10 / 10‑bit SDR
-/// keystone), `BITS == 12` (HEVC Main 12 / VP9 Profile 3), and
-/// `BITS == 14` (grading / mastering pipelines) — share the same
-/// scalar + SIMD kernel family. The Q15 coefficients + i32
-/// intermediates work unchanged across all three, derived at
-/// compile time from `BITS`; the constructor validates the `BITS`
-/// value against the set `{10, 12, 14}` up front.
+/// All four supported depths — `BITS == 10` (HDR10 / 10‑bit SDR
+/// keystone), `BITS == 12` (HEVC Main 12 / VP9 Profile 3),
+/// `BITS == 14` (grading / mastering pipelines), and `BITS == 16`
+/// (reference / intermediate HDR) — share this frame struct but
+/// **use two kernel families**:
 ///
-/// 16‑bit input (which would overflow the i32 chroma sum in the
-/// Q15 path) is **not** represented by this type — it needs a
-/// separate kernel family with i64 intermediates or a lower Q
-/// coefficient format. That lands in a later ship.
+/// - 10 / 12 / 14 run on a single const-generic Q15 i32 pipeline
+///   (`scalar::yuv_420p_n_to_rgb_*<BITS>` + matching SIMD kernels
+///   across NEON / SSE4.1 / AVX2 / AVX-512 / wasm simd128).
+/// - 16 runs on a parallel i64 kernel family
+///   (`scalar::yuv_420p16_to_rgb_*` + matching SIMD) because the
+///   Q15 chroma multiply-add overflows i32 at 16 bits.
+///
+/// The constructor validates `BITS ∈ {10, 12, 14, 16}` up front;
+/// kernel selection is at the public dispatcher boundary
+/// (`yuv420pNN_to_rgb_*`). The selection is free — each dispatcher
+/// is a dedicated function that knows which family to call.
 ///
 /// Stride is in **samples** (`u16` elements), not bytes. Users
 /// holding a byte buffer from FFmpeg should cast via
@@ -1191,9 +1213,10 @@ impl<'a, const BITS: u32> Yuv420pFrame16<'a, BITS> {
   /// lengths, and the `BITS` parameter.
   ///
   /// Returns [`Yuv420pFrame16Error`] if any of:
-  /// - `BITS` is not 10, 12, or 14 — use [`Yuv420p10Frame`],
-  ///   [`Yuv420p12Frame`], or [`Yuv420p14Frame`] at call sites for
-  ///   readability, all three are type aliases over this struct,
+  /// - `BITS` is not 10, 12, 14, or 16 — use [`Yuv420p10Frame`],
+  ///   [`Yuv420p12Frame`], [`Yuv420p14Frame`], or [`Yuv420p16Frame`]
+  ///   at call sites for readability, all four are type aliases
+  ///   over this struct,
   /// - `width` or `height` is zero,
   /// - `width` is odd,
   /// - any stride is smaller than the plane's declared pixel width,
@@ -1213,12 +1236,11 @@ impl<'a, const BITS: u32> Yuv420pFrame16<'a, BITS> {
     u_stride: u32,
     v_stride: u32,
   ) -> Result<Self, Yuv420pFrame16Error> {
-    // Guard the `BITS` parameter at the top so users who accidentally
-    // monomorphize on e.g. `BITS == 8` (which would work numerically
-    // but should go through [`Yuv420pFrame`] instead) or `BITS == 16`
-    // (which would overflow the i32 chroma sum in the Q15 kernel)
-    // get a clear error rather than silently wrong output.
-    if BITS != 10 && BITS != 12 && BITS != 14 {
+    // Guard the `BITS` parameter at the top. 10/12/14 share the Q15
+    // i32 kernel family; 16 uses a parallel i64 kernel family (see
+    // [`Yuv420p16Frame`] and `yuv_420p16_to_rgb_*`). 8 has its own
+    // (non-generic) 8-bit kernels in [`Yuv420pFrame`].
+    if BITS != 10 && BITS != 12 && BITS != 14 && BITS != 16 {
       return Err(Yuv420pFrame16Error::UnsupportedBits { bits: BITS });
     }
     if width == 0 || height == 0 {
@@ -1459,7 +1481,7 @@ impl<'a, const BITS: u32> Yuv420pFrame16<'a, BITS> {
     self.v_stride
   }
 
-  /// Active bit depth — 10, 12, or 14. Mirrors the `BITS` const
+  /// Active bit depth — 10, 12, 14, or 16. Mirrors the `BITS` const
   /// parameter so generic code can read it without naming the type.
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn bits(&self) -> u32 {
@@ -1487,6 +1509,16 @@ pub type Yuv420p12Frame<'a> = Yuv420pFrame16<'a, 12>;
 /// low 14 of each element (upper 2 bits zero).
 pub type Yuv420p14Frame<'a> = Yuv420pFrame16<'a, 14>;
 
+/// Type alias for a validated YUV 4:2:0 planar frame at 16 bits per
+/// sample (`AV_PIX_FMT_YUV420P16LE`). Tight wrapper over
+/// [`Yuv420pFrame16`] with `BITS == 16` — the full `u16` range is
+/// active (no upper-bit zero guarantee). **Uses a parallel i64
+/// kernel family** because the Q15 chroma sum overflows i32 at
+/// 16 bits; scalar + SIMD kernels named `yuv_420p16_to_rgb_*`
+/// instead of the `yuv_420p_n_to_rgb_*<BITS>` family that covers
+/// 10/12/14.
+pub type Yuv420p16Frame<'a> = Yuv420pFrame16<'a, 16>;
+
 /// Errors returned by [`Yuv420pFrame16::try_new`]. Variant shape
 /// mirrors [`Yuv420pFrameError`], with `UnsupportedBits` added for
 /// the new `BITS` parameter and all sizes expressed in **samples**
@@ -1497,7 +1529,7 @@ pub enum Yuv420pFrame16Error {
   /// `BITS` was not one of the supported depths (10, 12, 14). 8‑bit
   /// frames should use [`Yuv420pFrame`]; 16‑bit needs a separate
   /// kernel family (see [`Yuv420pFrame16`] docs).
-  #[error("unsupported BITS ({bits}) for Yuv420pFrame16; must be 10, 12, or 14")]
+  #[error("unsupported BITS ({bits}) for Yuv420pFrame16; must be 10, 12, 14, or 16")]
   UnsupportedBits {
     /// The unsupported value of the `BITS` const parameter.
     bits: u32,
@@ -2052,10 +2084,8 @@ mod tests {
 
   #[test]
   fn yuv420p16_try_new_rejects_unsupported_bits() {
-    // BITS == 9 is not in {10, 12, 14}; the constructor must reject it
-    // before any plane math runs. This also exercises the 12/14 path
-    // at the validation layer even though Ship 2 only ships a 10-bit
-    // alias.
+    // BITS must be in {10, 12, 14, 16}. 9 (and any other value) is
+    // rejected before any plane math runs.
     let y = std::vec![0u16; 16 * 8];
     let u = std::vec![128u16; 8 * 4];
     let v = std::vec![128u16; 8 * 4];
@@ -2064,18 +2094,15 @@ mod tests {
       e,
       Yuv420pFrame16Error::UnsupportedBits { bits: 9 }
     ));
-
-    let e16 = Yuv420pFrame16::<16>::try_new(&y, &u, &v, 16, 8, 16, 8, 8).unwrap_err();
+    let e15 = Yuv420pFrame16::<15>::try_new(&y, &u, &v, 16, 8, 16, 8, 8).unwrap_err();
     assert!(matches!(
-      e16,
-      Yuv420pFrame16Error::UnsupportedBits { bits: 16 }
+      e15,
+      Yuv420pFrame16Error::UnsupportedBits { bits: 15 }
     ));
   }
 
   #[test]
-  fn yuv420p16_try_new_accepts_12_and_14() {
-    // The constructor admits 12 and 14 — Ship 2 doesn't ship kernels
-    // for them but the geometry validator shouldn't block the types.
+  fn yuv420p16_try_new_accepts_12_14_and_16() {
     let y = std::vec![0u16; 16 * 8];
     let u = std::vec![2048u16; 8 * 4];
     let v = std::vec![2048u16; 8 * 4];
@@ -2083,6 +2110,50 @@ mod tests {
     assert_eq!(f12.bits(), 12);
     let f14 = Yuv420pFrame16::<14>::try_new(&y, &u, &v, 16, 8, 16, 8, 8).expect("14-bit valid");
     assert_eq!(f14.bits(), 14);
+    let f16 = Yuv420p16Frame::try_new(&y, &u, &v, 16, 8, 16, 8, 8).expect("16-bit valid");
+    assert_eq!(f16.bits(), 16);
+  }
+
+  #[test]
+  fn yuv420p16_try_new_checked_accepts_full_u16_range() {
+    // At 16 bits the full u16 range is valid — max sample = 65535.
+    let y = std::vec![65535u16; 16 * 8];
+    let u = std::vec![32768u16; 8 * 4];
+    let v = std::vec![32768u16; 8 * 4];
+    Yuv420p16Frame::try_new_checked(&y, &u, &v, 16, 8, 16, 8, 8)
+      .expect("every u16 value is in range at 16 bits");
+  }
+
+  #[test]
+  fn p016_try_new_accepts_16bit() {
+    let y = std::vec![0xFFFFu16; 16 * 8];
+    let uv = std::vec![0x8000u16; 16 * 4];
+    let f = P016Frame::try_new(&y, &uv, 16, 8, 16, 16).expect("P016 valid");
+    assert_eq!(f.bits(), 16);
+  }
+
+  #[test]
+  fn p016_try_new_checked_is_a_noop() {
+    // At BITS == 16 there are zero "low" bits to check — every u16
+    // value is a valid P016 sample because `16 - BITS == 0`. The
+    // checked constructor therefore accepts everything. This pins
+    // that behavior in a test: at 16 bits the semantic distinction
+    // between P016 and yuv420p16le **cannot be detected** from
+    // sample values at all (no bit pattern is packing-specific).
+    let y = std::vec![0x1234u16; 16 * 8];
+    let uv = std::vec![0x5678u16; 16 * 4];
+    P016Frame::try_new_checked(&y, &uv, 16, 8, 16, 16)
+      .expect("every u16 passes the low-bits check at BITS == 16");
+  }
+
+  #[test]
+  fn pn_try_new_rejects_bits_other_than_10_12_16() {
+    let y = std::vec![0u16; 16 * 8];
+    let uv = std::vec![0u16; 16 * 4];
+    let e14 = PnFrame::<14>::try_new(&y, &uv, 16, 8, 16, 16).unwrap_err();
+    assert!(matches!(e14, PnFrameError::UnsupportedBits { bits: 14 }));
+    let e11 = PnFrame::<11>::try_new(&y, &uv, 16, 8, 16, 16).unwrap_err();
+    assert!(matches!(e11, PnFrameError::UnsupportedBits { bits: 11 }));
   }
 
   #[test]
