@@ -37,15 +37,15 @@
 
 use core::arch::x86_64::{
   __m128i, _mm_add_epi32, _mm_adds_epi16, _mm_cvtepi16_epi32, _mm_cvtepu8_epi16, _mm_loadl_epi64,
-  _mm_loadu_si128, _mm_mullo_epi32, _mm_packs_epi32, _mm_packus_epi16, _mm_set1_epi16,
-  _mm_set1_epi32, _mm_setr_epi8, _mm_shuffle_epi8, _mm_srai_epi32, _mm_srli_si128, _mm_sub_epi16,
-  _mm_unpackhi_epi16, _mm_unpacklo_epi16,
+  _mm_loadu_si128, _mm_max_epi16, _mm_min_epi16, _mm_mullo_epi32, _mm_packs_epi32,
+  _mm_packus_epi16, _mm_set1_epi16, _mm_set1_epi32, _mm_setr_epi8, _mm_shuffle_epi8,
+  _mm_srai_epi32, _mm_srli_si128, _mm_sub_epi16, _mm_unpackhi_epi16, _mm_unpacklo_epi16,
 };
 
 use crate::{
   ColorMatrix,
   row::{
-    arch::x86_common::{rgb_to_hsv_16_pixels, swap_rb_16_pixels, write_rgb_16},
+    arch::x86_common::{rgb_to_hsv_16_pixels, swap_rb_16_pixels, write_rgb_16, write_rgb_u16_8},
     scalar,
   },
 };
@@ -197,9 +197,20 @@ pub(crate) unsafe fn yuv_420_to_rgb_row(
 ///
 /// # Safety
 ///
-/// SSE4.1 YUV 4:2:0 10‑bit → packed **8‑bit** RGB. **Stub**: currently
-/// delegates to scalar. Replaced with a real SSE4.1 implementation in
-/// the Ship 2 rollout.
+/// SSE4.1 YUV 4:2:0 10‑bit → packed **8‑bit** RGB.
+///
+/// Block size 16 Y pixels / 8 chroma pairs per iteration. Mirrors
+/// [`yuv_420_to_rgb_row`] with three structural differences:
+/// - Two `_mm_loadu_si128` loads for Y (each pulls 8 `u16` = 16 bytes);
+///   U/V each load 8 `u16` via one `_mm_loadu_si128`. No u8 widening —
+///   the samples already occupy 16‑bit lanes.
+/// - Chroma bias is 512 (10‑bit center).
+/// - `range_params_n::<10, 8>` calibrates `y_scale` / `c_scale` to
+///   map 10‑bit input directly to 8‑bit output in one Q15 shift.
+///
+/// # Numerical contract
+///
+/// Byte‑identical to [`scalar::yuv_420p_n_to_rgb_row::<10>`].
 ///
 /// # Safety
 ///
@@ -218,10 +229,113 @@ pub(crate) unsafe fn yuv420p10_to_rgb_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  scalar::yuv_420p_n_to_rgb_row::<10>(y, u_half, v_half, rgb_out, width, matrix, full_range);
+  debug_assert_eq!(width & 1, 0);
+  debug_assert!(y.len() >= width);
+  debug_assert!(u_half.len() >= width / 2);
+  debug_assert!(v_half.len() >= width / 2);
+  debug_assert!(rgb_out.len() >= width * 3);
+
+  let coeffs = scalar::Coefficients::for_matrix(matrix);
+  let (y_off, y_scale, c_scale) = scalar::range_params_n::<10, 8>(full_range);
+  let bias = scalar::chroma_bias::<10>();
+  const RND: i32 = 1 << 14;
+
+  // SAFETY: SSE4.1 availability is the caller's obligation; the
+  // dispatcher in `crate::row` verifies it. Pointer adds are bounded
+  // by the `while x + 16 <= width` loop condition and the caller‑
+  // promised slice lengths.
+  unsafe {
+    let rnd_v = _mm_set1_epi32(RND);
+    let y_off_v = _mm_set1_epi16(y_off as i16);
+    let y_scale_v = _mm_set1_epi32(y_scale);
+    let c_scale_v = _mm_set1_epi32(c_scale);
+    let bias_v = _mm_set1_epi16(bias as i16);
+    let cru = _mm_set1_epi32(coeffs.r_u());
+    let crv = _mm_set1_epi32(coeffs.r_v());
+    let cgu = _mm_set1_epi32(coeffs.g_u());
+    let cgv = _mm_set1_epi32(coeffs.g_v());
+    let cbu = _mm_set1_epi32(coeffs.b_u());
+    let cbv = _mm_set1_epi32(coeffs.b_v());
+
+    let mut x = 0usize;
+    while x + 16 <= width {
+      // 16 Y = two `u16x8` loads; 8 U + 8 V = one load each. 10‑bit
+      // samples fit i16 directly (max 1023 < 32768).
+      let y_low_i16 = _mm_loadu_si128(y.as_ptr().add(x).cast());
+      let y_high_i16 = _mm_loadu_si128(y.as_ptr().add(x + 8).cast());
+      let u_vec = _mm_loadu_si128(u_half.as_ptr().add(x / 2).cast());
+      let v_vec = _mm_loadu_si128(v_half.as_ptr().add(x / 2).cast());
+
+      let u_i16 = _mm_sub_epi16(u_vec, bias_v);
+      let v_i16 = _mm_sub_epi16(v_vec, bias_v);
+
+      let u_lo_i32 = _mm_cvtepi16_epi32(u_i16);
+      let u_hi_i32 = _mm_cvtepi16_epi32(_mm_srli_si128::<8>(u_i16));
+      let v_lo_i32 = _mm_cvtepi16_epi32(v_i16);
+      let v_hi_i32 = _mm_cvtepi16_epi32(_mm_srli_si128::<8>(v_i16));
+
+      let u_d_lo = q15_shift(_mm_add_epi32(_mm_mullo_epi32(u_lo_i32, c_scale_v), rnd_v));
+      let u_d_hi = q15_shift(_mm_add_epi32(_mm_mullo_epi32(u_hi_i32, c_scale_v), rnd_v));
+      let v_d_lo = q15_shift(_mm_add_epi32(_mm_mullo_epi32(v_lo_i32, c_scale_v), rnd_v));
+      let v_d_hi = q15_shift(_mm_add_epi32(_mm_mullo_epi32(v_hi_i32, c_scale_v), rnd_v));
+
+      let r_chroma = chroma_i16x8(cru, crv, u_d_lo, v_d_lo, u_d_hi, v_d_hi, rnd_v);
+      let g_chroma = chroma_i16x8(cgu, cgv, u_d_lo, v_d_lo, u_d_hi, v_d_hi, rnd_v);
+      let b_chroma = chroma_i16x8(cbu, cbv, u_d_lo, v_d_lo, u_d_hi, v_d_hi, rnd_v);
+
+      let r_dup_lo = _mm_unpacklo_epi16(r_chroma, r_chroma);
+      let r_dup_hi = _mm_unpackhi_epi16(r_chroma, r_chroma);
+      let g_dup_lo = _mm_unpacklo_epi16(g_chroma, g_chroma);
+      let g_dup_hi = _mm_unpackhi_epi16(g_chroma, g_chroma);
+      let b_dup_lo = _mm_unpacklo_epi16(b_chroma, b_chroma);
+      let b_dup_hi = _mm_unpackhi_epi16(b_chroma, b_chroma);
+
+      let y_scaled_lo = scale_y(y_low_i16, y_off_v, y_scale_v, rnd_v);
+      let y_scaled_hi = scale_y(y_high_i16, y_off_v, y_scale_v, rnd_v);
+
+      let b_lo = _mm_adds_epi16(y_scaled_lo, b_dup_lo);
+      let b_hi = _mm_adds_epi16(y_scaled_hi, b_dup_hi);
+      let g_lo = _mm_adds_epi16(y_scaled_lo, g_dup_lo);
+      let g_hi = _mm_adds_epi16(y_scaled_hi, g_dup_hi);
+      let r_lo = _mm_adds_epi16(y_scaled_lo, r_dup_lo);
+      let r_hi = _mm_adds_epi16(y_scaled_hi, r_dup_hi);
+
+      let b_u8 = _mm_packus_epi16(b_lo, b_hi);
+      let g_u8 = _mm_packus_epi16(g_lo, g_hi);
+      let r_u8 = _mm_packus_epi16(r_lo, r_hi);
+
+      write_rgb_16(r_u8, g_u8, b_u8, rgb_out.as_mut_ptr().add(x * 3));
+
+      x += 16;
+    }
+
+    if x < width {
+      scalar::yuv_420p_n_to_rgb_row::<10>(
+        &y[x..width],
+        &u_half[x / 2..width / 2],
+        &v_half[x / 2..width / 2],
+        &mut rgb_out[x * 3..width * 3],
+        width - x,
+        matrix,
+        full_range,
+      );
+    }
+  }
 }
 
-/// SSE4.1 YUV 4:2:0 10‑bit → packed **10‑bit `u16`** RGB. **Stub**.
+/// SSE4.1 YUV 4:2:0 10‑bit → packed **10‑bit `u16`** RGB.
+///
+/// Block size 16 Y pixels per iteration; writes two 8‑pixel u16 RGB
+/// chunks via [`write_rgb_u16_8`]. Shares all pre‑write math with the
+/// u8 output path; the key differences:
+/// - `range_params_n::<10, 10>` → `y_scale` / `c_scale` target the
+///   10‑bit output range (values in `[0, 1023]` at Q15 exit).
+/// - Clamp is explicit min/max to `[0, 1023]` — `_mm_packus_epi16`
+///   would clip to u8, so we can't reuse it here.
+///
+/// # Numerical contract
+///
+/// Identical to [`scalar::yuv_420p_n_to_rgb_u16_row::<10>`].
 ///
 /// # Safety
 ///
@@ -240,7 +354,103 @@ pub(crate) unsafe fn yuv420p10_to_rgb_u16_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  scalar::yuv_420p_n_to_rgb_u16_row::<10>(y, u_half, v_half, rgb_out, width, matrix, full_range);
+  debug_assert_eq!(width & 1, 0);
+  debug_assert!(y.len() >= width);
+  debug_assert!(u_half.len() >= width / 2);
+  debug_assert!(v_half.len() >= width / 2);
+  debug_assert!(rgb_out.len() >= width * 3);
+
+  let coeffs = scalar::Coefficients::for_matrix(matrix);
+  let (y_off, y_scale, c_scale) = scalar::range_params_n::<10, 10>(full_range);
+  let bias = scalar::chroma_bias::<10>();
+  const RND: i32 = 1 << 14;
+  const OUT_MAX_10: i16 = 1023;
+
+  // SAFETY: SSE4.1 availability is the caller's obligation.
+  unsafe {
+    let rnd_v = _mm_set1_epi32(RND);
+    let y_off_v = _mm_set1_epi16(y_off as i16);
+    let y_scale_v = _mm_set1_epi32(y_scale);
+    let c_scale_v = _mm_set1_epi32(c_scale);
+    let bias_v = _mm_set1_epi16(bias as i16);
+    let max_v = _mm_set1_epi16(OUT_MAX_10);
+    let zero_v = _mm_set1_epi16(0);
+    let cru = _mm_set1_epi32(coeffs.r_u());
+    let crv = _mm_set1_epi32(coeffs.r_v());
+    let cgu = _mm_set1_epi32(coeffs.g_u());
+    let cgv = _mm_set1_epi32(coeffs.g_v());
+    let cbu = _mm_set1_epi32(coeffs.b_u());
+    let cbv = _mm_set1_epi32(coeffs.b_v());
+
+    let mut x = 0usize;
+    while x + 16 <= width {
+      let y_low_i16 = _mm_loadu_si128(y.as_ptr().add(x).cast());
+      let y_high_i16 = _mm_loadu_si128(y.as_ptr().add(x + 8).cast());
+      let u_vec = _mm_loadu_si128(u_half.as_ptr().add(x / 2).cast());
+      let v_vec = _mm_loadu_si128(v_half.as_ptr().add(x / 2).cast());
+
+      let u_i16 = _mm_sub_epi16(u_vec, bias_v);
+      let v_i16 = _mm_sub_epi16(v_vec, bias_v);
+
+      let u_lo_i32 = _mm_cvtepi16_epi32(u_i16);
+      let u_hi_i32 = _mm_cvtepi16_epi32(_mm_srli_si128::<8>(u_i16));
+      let v_lo_i32 = _mm_cvtepi16_epi32(v_i16);
+      let v_hi_i32 = _mm_cvtepi16_epi32(_mm_srli_si128::<8>(v_i16));
+
+      let u_d_lo = q15_shift(_mm_add_epi32(_mm_mullo_epi32(u_lo_i32, c_scale_v), rnd_v));
+      let u_d_hi = q15_shift(_mm_add_epi32(_mm_mullo_epi32(u_hi_i32, c_scale_v), rnd_v));
+      let v_d_lo = q15_shift(_mm_add_epi32(_mm_mullo_epi32(v_lo_i32, c_scale_v), rnd_v));
+      let v_d_hi = q15_shift(_mm_add_epi32(_mm_mullo_epi32(v_hi_i32, c_scale_v), rnd_v));
+
+      let r_chroma = chroma_i16x8(cru, crv, u_d_lo, v_d_lo, u_d_hi, v_d_hi, rnd_v);
+      let g_chroma = chroma_i16x8(cgu, cgv, u_d_lo, v_d_lo, u_d_hi, v_d_hi, rnd_v);
+      let b_chroma = chroma_i16x8(cbu, cbv, u_d_lo, v_d_lo, u_d_hi, v_d_hi, rnd_v);
+
+      let r_dup_lo = _mm_unpacklo_epi16(r_chroma, r_chroma);
+      let r_dup_hi = _mm_unpackhi_epi16(r_chroma, r_chroma);
+      let g_dup_lo = _mm_unpacklo_epi16(g_chroma, g_chroma);
+      let g_dup_hi = _mm_unpackhi_epi16(g_chroma, g_chroma);
+      let b_dup_lo = _mm_unpacklo_epi16(b_chroma, b_chroma);
+      let b_dup_hi = _mm_unpackhi_epi16(b_chroma, b_chroma);
+
+      let y_scaled_lo = scale_y(y_low_i16, y_off_v, y_scale_v, rnd_v);
+      let y_scaled_hi = scale_y(y_high_i16, y_off_v, y_scale_v, rnd_v);
+
+      // Per‑channel sum + clamp to [0, 1023].
+      let r_lo = clamp_u10(_mm_adds_epi16(y_scaled_lo, r_dup_lo), zero_v, max_v);
+      let r_hi = clamp_u10(_mm_adds_epi16(y_scaled_hi, r_dup_hi), zero_v, max_v);
+      let g_lo = clamp_u10(_mm_adds_epi16(y_scaled_lo, g_dup_lo), zero_v, max_v);
+      let g_hi = clamp_u10(_mm_adds_epi16(y_scaled_hi, g_dup_hi), zero_v, max_v);
+      let b_lo = clamp_u10(_mm_adds_epi16(y_scaled_lo, b_dup_lo), zero_v, max_v);
+      let b_hi = clamp_u10(_mm_adds_epi16(y_scaled_hi, b_dup_hi), zero_v, max_v);
+
+      // Two 8‑pixel u16 writes cover the 16‑pixel block.
+      write_rgb_u16_8(r_lo, g_lo, b_lo, rgb_out.as_mut_ptr().add(x * 3));
+      write_rgb_u16_8(r_hi, g_hi, b_hi, rgb_out.as_mut_ptr().add(x * 3 + 24));
+
+      x += 16;
+    }
+
+    if x < width {
+      scalar::yuv_420p_n_to_rgb_u16_row::<10>(
+        &y[x..width],
+        &u_half[x / 2..width / 2],
+        &v_half[x / 2..width / 2],
+        &mut rgb_out[x * 3..width * 3],
+        width - x,
+        matrix,
+        full_range,
+      );
+    }
+  }
+}
+
+/// Clamps an i16x8 vector to `[0, max]` for the 10‑bit u16 output
+/// path. `_mm_packus_epi16` would clip to u8, so we use explicit
+/// min/max.
+#[inline(always)]
+fn clamp_u10(v: __m128i, zero_v: __m128i, max_v: __m128i) -> __m128i {
+  unsafe { _mm_min_epi16(_mm_max_epi16(v, zero_v), max_v) }
 }
 
 /// Same as [`nv12_or_nv21_to_rgb_row_impl`].
@@ -881,5 +1091,115 @@ mod tests {
     for w in [1usize, 15, 16, 17, 31, 1920, 1921] {
       check_hsv_equivalence(&rgb[..w * 3], w);
     }
+  }
+
+  // ---- yuv420p10 scalar-equivalence -----------------------------------
+
+  fn p10_plane(n: usize, seed: usize) -> std::vec::Vec<u16> {
+    (0..n)
+      .map(|i| ((i * seed + seed * 3) & 0x3FF) as u16)
+      .collect()
+  }
+
+  fn check_p10_u8_sse41_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+    if !std::arch::is_x86_feature_detected!("sse4.1") {
+      return;
+    }
+    let y = p10_plane(width, 37);
+    let u = p10_plane(width / 2, 53);
+    let v = p10_plane(width / 2, 71);
+    let mut rgb_scalar = std::vec![0u8; width * 3];
+    let mut rgb_simd = std::vec![0u8; width * 3];
+
+    scalar::yuv_420p_n_to_rgb_row::<10>(&y, &u, &v, &mut rgb_scalar, width, matrix, full_range);
+    unsafe {
+      yuv420p10_to_rgb_row(&y, &u, &v, &mut rgb_simd, width, matrix, full_range);
+    }
+
+    if rgb_scalar != rgb_simd {
+      let first_diff = rgb_scalar
+        .iter()
+        .zip(rgb_simd.iter())
+        .position(|(a, b)| a != b)
+        .unwrap();
+      panic!(
+        "SSE4.1 10→u8 diverges at byte {first_diff} (width={width}, matrix={matrix:?}, full_range={full_range}): scalar={} simd={}",
+        rgb_scalar[first_diff], rgb_simd[first_diff]
+      );
+    }
+  }
+
+  fn check_p10_u16_sse41_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+    if !std::arch::is_x86_feature_detected!("sse4.1") {
+      return;
+    }
+    let y = p10_plane(width, 37);
+    let u = p10_plane(width / 2, 53);
+    let v = p10_plane(width / 2, 71);
+    let mut rgb_scalar = std::vec![0u16; width * 3];
+    let mut rgb_simd = std::vec![0u16; width * 3];
+
+    scalar::yuv_420p_n_to_rgb_u16_row::<10>(&y, &u, &v, &mut rgb_scalar, width, matrix, full_range);
+    unsafe {
+      yuv420p10_to_rgb_u16_row(&y, &u, &v, &mut rgb_simd, width, matrix, full_range);
+    }
+
+    if rgb_scalar != rgb_simd {
+      let first_diff = rgb_scalar
+        .iter()
+        .zip(rgb_simd.iter())
+        .position(|(a, b)| a != b)
+        .unwrap();
+      panic!(
+        "SSE4.1 10→u16 diverges at elem {first_diff} (width={width}, matrix={matrix:?}, full_range={full_range}): scalar={} simd={}",
+        rgb_scalar[first_diff], rgb_simd[first_diff]
+      );
+    }
+  }
+
+  #[test]
+  fn sse41_p10_u8_matches_scalar_all_matrices() {
+    for m in [
+      ColorMatrix::Bt601,
+      ColorMatrix::Bt709,
+      ColorMatrix::Bt2020Ncl,
+      ColorMatrix::Smpte240m,
+      ColorMatrix::Fcc,
+      ColorMatrix::YCgCo,
+    ] {
+      for full in [true, false] {
+        check_p10_u8_sse41_equivalence(16, m, full);
+      }
+    }
+  }
+
+  #[test]
+  fn sse41_p10_u16_matches_scalar_all_matrices() {
+    for m in [
+      ColorMatrix::Bt601,
+      ColorMatrix::Bt709,
+      ColorMatrix::Bt2020Ncl,
+      ColorMatrix::Smpte240m,
+      ColorMatrix::Fcc,
+      ColorMatrix::YCgCo,
+    ] {
+      for full in [true, false] {
+        check_p10_u16_sse41_equivalence(16, m, full);
+      }
+    }
+  }
+
+  #[test]
+  fn sse41_p10_matches_scalar_odd_tail_widths() {
+    for w in [18usize, 30, 34, 1922] {
+      check_p10_u8_sse41_equivalence(w, ColorMatrix::Bt601, false);
+      check_p10_u16_sse41_equivalence(w, ColorMatrix::Bt709, true);
+    }
+  }
+
+  #[test]
+  fn sse41_p10_matches_scalar_1920() {
+    check_p10_u8_sse41_equivalence(1920, ColorMatrix::Bt709, false);
+    check_p10_u16_sse41_equivalence(1920, ColorMatrix::Bt2020Ncl, false);
   }
 }

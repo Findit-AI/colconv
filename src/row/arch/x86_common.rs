@@ -84,6 +84,74 @@ pub(super) unsafe fn write_rgb_16(r: __m128i, g: __m128i, b: __m128i, ptr: *mut 
   }
 }
 
+/// Writes 8 pixels of packed **`u16`** RGB (48 bytes = 24 `u16`)
+/// from three `u16x8` channel vectors. Drives the SSE4.1 / AVX2 /
+/// AVX‑512 high‑bit‑depth kernels' u16 output path.
+///
+/// Three output blocks of 16 bytes (8 `u16`) each hold:
+/// - Block 0: `R0, G0, B0, R1, G1, B1, R2, G2` (u16 indices 0..7)
+/// - Block 1: `B2, R3, G3, B3, R4, G4, B4, R5`
+/// - Block 2: `G5, B5, R6, G6, B6, R7, G7, B7`
+///
+/// Each block is the OR of three `_mm_shuffle_epi8` gathers — one
+/// from each of R, G, B — with the byte mask picking a pair of
+/// adjacent bytes (lo, hi) for every `u16` sourced from that
+/// channel. 0x80 (`-1` as i8) zeros the lane, to be OR'd in by
+/// another channel's contribution.
+///
+/// # Safety
+///
+/// - `ptr` must point to at least 48 writable bytes (aligned or
+///   unaligned — we use `storeu`).
+/// - The calling function must have SSSE3 available (via SSE4.1 or
+///   a superset like AVX2 / AVX‑512BW).
+#[inline(always)]
+pub(super) unsafe fn write_rgb_u16_8(r: __m128i, g: __m128i, b: __m128i, ptr: *mut u16) {
+  unsafe {
+    // Block 0 = [R0 G0 B0 R1 G1 B1 R2 G2] — 8 `u16` = 16 bytes.
+    // R contributes pairs (0,1), (6,7), (12,13); G pairs (2,3), (8,9),
+    // (14,15); B pairs (4,5), (10,11).
+    let r0 = _mm_setr_epi8(0, 1, -1, -1, -1, -1, 2, 3, -1, -1, -1, -1, 4, 5, -1, -1);
+    let g0 = _mm_setr_epi8(-1, -1, 0, 1, -1, -1, -1, -1, 2, 3, -1, -1, -1, -1, 4, 5);
+    let b0 = _mm_setr_epi8(-1, -1, -1, -1, 0, 1, -1, -1, -1, -1, 2, 3, -1, -1, -1, -1);
+    let out0 = _mm_or_si128(
+      _mm_or_si128(_mm_shuffle_epi8(r, r0), _mm_shuffle_epi8(g, g0)),
+      _mm_shuffle_epi8(b, b0),
+    );
+
+    // Block 1 = [B2 R3 G3 B3 R4 G4 B4 R5]. R pairs (6,7), (8,9),
+    // (10,11); G pairs (6,7), (8,9); B pairs (4,5), (6,7), (8,9).
+    let r1 = _mm_setr_epi8(-1, -1, 6, 7, -1, -1, -1, -1, 8, 9, -1, -1, -1, -1, 10, 11);
+    let g1 = _mm_setr_epi8(-1, -1, -1, -1, 6, 7, -1, -1, -1, -1, 8, 9, -1, -1, -1, -1);
+    let b1 = _mm_setr_epi8(4, 5, -1, -1, -1, -1, 6, 7, -1, -1, -1, -1, 8, 9, -1, -1);
+    let out1 = _mm_or_si128(
+      _mm_or_si128(_mm_shuffle_epi8(r, r1), _mm_shuffle_epi8(g, g1)),
+      _mm_shuffle_epi8(b, b1),
+    );
+
+    // Block 2 = [G5 B5 R6 G6 B6 R7 G7 B7]. R pairs (12,13), (14,15);
+    // G pairs (10,11), (12,13), (14,15); B pairs (10,11), (12,13),
+    // (14,15).
+    let r2 = _mm_setr_epi8(
+      -1, -1, -1, -1, 12, 13, -1, -1, -1, -1, 14, 15, -1, -1, -1, -1,
+    );
+    let g2 = _mm_setr_epi8(
+      10, 11, -1, -1, -1, -1, 12, 13, -1, -1, -1, -1, 14, 15, -1, -1,
+    );
+    let b2 = _mm_setr_epi8(
+      -1, -1, 10, 11, -1, -1, -1, -1, 12, 13, -1, -1, -1, -1, 14, 15,
+    );
+    let out2 = _mm_or_si128(
+      _mm_or_si128(_mm_shuffle_epi8(r, r2), _mm_shuffle_epi8(g, g2)),
+      _mm_shuffle_epi8(b, b2),
+    );
+
+    _mm_storeu_si128(ptr.cast(), out0);
+    _mm_storeu_si128(ptr.add(8).cast(), out1);
+    _mm_storeu_si128(ptr.add(16).cast(), out2);
+  }
+}
+
 /// Swaps the outer two channels of 16 packed 3‑byte pixels (48 bytes
 /// in, 48 bytes out). Drives both BGR→RGB and RGB→BGR conversions
 /// since the transformation is self‑inverse.

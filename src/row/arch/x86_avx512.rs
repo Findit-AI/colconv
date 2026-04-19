@@ -56,16 +56,16 @@ use core::arch::x86_64::{
   __m128i, __m512i, _mm_setr_epi8, _mm256_loadu_si256, _mm512_add_epi32, _mm512_adds_epi16,
   _mm512_broadcast_i32x4, _mm512_castsi512_si128, _mm512_castsi512_si256, _mm512_cvtepi16_epi32,
   _mm512_cvtepu8_epi16, _mm512_extracti32x4_epi32, _mm512_extracti64x4_epi64, _mm512_loadu_si512,
-  _mm512_mullo_epi32, _mm512_packs_epi32, _mm512_packus_epi16, _mm512_permutex2var_epi64,
-  _mm512_permutexvar_epi64, _mm512_set1_epi16, _mm512_set1_epi32, _mm512_setr_epi64,
-  _mm512_shuffle_epi8, _mm512_srai_epi32, _mm512_sub_epi16, _mm512_unpackhi_epi16,
-  _mm512_unpacklo_epi16,
+  _mm512_max_epi16, _mm512_min_epi16, _mm512_mullo_epi32, _mm512_packs_epi32, _mm512_packus_epi16,
+  _mm512_permutex2var_epi64, _mm512_permutexvar_epi64, _mm512_set1_epi16, _mm512_set1_epi32,
+  _mm512_setr_epi64, _mm512_shuffle_epi8, _mm512_srai_epi32, _mm512_sub_epi16,
+  _mm512_unpackhi_epi16, _mm512_unpacklo_epi16,
 };
 
 use crate::{
   ColorMatrix,
   row::{
-    arch::x86_common::{rgb_to_hsv_16_pixels, swap_rb_16_pixels, write_rgb_16},
+    arch::x86_common::{rgb_to_hsv_16_pixels, swap_rb_16_pixels, write_rgb_16, write_rgb_u16_8},
     scalar,
   },
 };
@@ -223,11 +223,28 @@ pub(crate) unsafe fn yuv_420_to_rgb_row(
   }
 }
 
-/// AVX‑512 YUV 4:2:0 10‑bit → packed **8‑bit** RGB. **Stub**.
+/// AVX‑512 YUV 4:2:0 10‑bit → packed **8‑bit** RGB.
+///
+/// Block size 64 Y pixels / 32 chroma pairs per iteration (matching
+/// the 8‑bit AVX‑512 kernel). Structural differences:
+/// - Two `_mm512_loadu_si512` loads for Y (each 32 `u16` = 64 bytes);
+///   one `_mm512_loadu_si512` each for U / V (32 `u16`).
+/// - No u8→i16 widening — 10‑bit samples already occupy 16‑bit lanes.
+/// - Chroma bias is 512 (10‑bit center).
+/// - `range_params_n::<10, 8>` calibrates scales for 10→8 in one shift.
+///
+/// Reuses [`chroma_i16x32`], [`chroma_dup`], [`scale_y`],
+/// [`narrow_u8x64`], and [`write_rgb_64`] along with the pack / dup
+/// lane‑fixup indices from the 8‑bit path — post‑chroma math is
+/// identical across bit depths.
+///
+/// # Numerical contract
+///
+/// Byte‑identical to [`scalar::yuv_420p_n_to_rgb_row::<10>`].
 ///
 /// # Safety
 ///
-/// 1. **AVX‑512BW must be available on the current CPU.**
+/// 1. **AVX‑512F + AVX‑512BW must be available on the current CPU.**
 /// 2. `width & 1 == 0`.
 /// 3. `y.len() >= width`, `u_half.len() >= width / 2`,
 ///    `v_half.len() >= width / 2`, `rgb_out.len() >= 3 * width`.
@@ -242,14 +259,123 @@ pub(crate) unsafe fn yuv420p10_to_rgb_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  scalar::yuv_420p_n_to_rgb_row::<10>(y, u_half, v_half, rgb_out, width, matrix, full_range);
+  debug_assert_eq!(width & 1, 0);
+  debug_assert!(y.len() >= width);
+  debug_assert!(u_half.len() >= width / 2);
+  debug_assert!(v_half.len() >= width / 2);
+  debug_assert!(rgb_out.len() >= width * 3);
+
+  let coeffs = scalar::Coefficients::for_matrix(matrix);
+  let (y_off, y_scale, c_scale) = scalar::range_params_n::<10, 8>(full_range);
+  let bias = scalar::chroma_bias::<10>();
+  const RND: i32 = 1 << 14;
+
+  // SAFETY: AVX‑512BW availability is the caller's obligation.
+  unsafe {
+    let rnd_v = _mm512_set1_epi32(RND);
+    let y_off_v = _mm512_set1_epi16(y_off as i16);
+    let y_scale_v = _mm512_set1_epi32(y_scale);
+    let c_scale_v = _mm512_set1_epi32(c_scale);
+    let bias_v = _mm512_set1_epi16(bias as i16);
+    let cru = _mm512_set1_epi32(coeffs.r_u());
+    let crv = _mm512_set1_epi32(coeffs.r_v());
+    let cgu = _mm512_set1_epi32(coeffs.g_u());
+    let cgv = _mm512_set1_epi32(coeffs.g_v());
+    let cbu = _mm512_set1_epi32(coeffs.b_u());
+    let cbv = _mm512_set1_epi32(coeffs.b_v());
+
+    let pack_fixup = _mm512_setr_epi64(0, 2, 4, 6, 1, 3, 5, 7);
+    let dup_lo_idx = _mm512_setr_epi64(0, 1, 8, 9, 2, 3, 10, 11);
+    let dup_hi_idx = _mm512_setr_epi64(4, 5, 12, 13, 6, 7, 14, 15);
+
+    let mut x = 0usize;
+    while x + 64 <= width {
+      let y_low_i16 = _mm512_loadu_si512(y.as_ptr().add(x).cast());
+      let y_high_i16 = _mm512_loadu_si512(y.as_ptr().add(x + 32).cast());
+      let u_vec = _mm512_loadu_si512(u_half.as_ptr().add(x / 2).cast());
+      let v_vec = _mm512_loadu_si512(v_half.as_ptr().add(x / 2).cast());
+
+      let u_i16 = _mm512_sub_epi16(u_vec, bias_v);
+      let v_i16 = _mm512_sub_epi16(v_vec, bias_v);
+
+      let u_lo_i32 = _mm512_cvtepi16_epi32(_mm512_castsi512_si256(u_i16));
+      let u_hi_i32 = _mm512_cvtepi16_epi32(_mm512_extracti64x4_epi64::<1>(u_i16));
+      let v_lo_i32 = _mm512_cvtepi16_epi32(_mm512_castsi512_si256(v_i16));
+      let v_hi_i32 = _mm512_cvtepi16_epi32(_mm512_extracti64x4_epi64::<1>(v_i16));
+
+      let u_d_lo = q15_shift(_mm512_add_epi32(
+        _mm512_mullo_epi32(u_lo_i32, c_scale_v),
+        rnd_v,
+      ));
+      let u_d_hi = q15_shift(_mm512_add_epi32(
+        _mm512_mullo_epi32(u_hi_i32, c_scale_v),
+        rnd_v,
+      ));
+      let v_d_lo = q15_shift(_mm512_add_epi32(
+        _mm512_mullo_epi32(v_lo_i32, c_scale_v),
+        rnd_v,
+      ));
+      let v_d_hi = q15_shift(_mm512_add_epi32(
+        _mm512_mullo_epi32(v_hi_i32, c_scale_v),
+        rnd_v,
+      ));
+
+      let r_chroma = chroma_i16x32(cru, crv, u_d_lo, v_d_lo, u_d_hi, v_d_hi, rnd_v, pack_fixup);
+      let g_chroma = chroma_i16x32(cgu, cgv, u_d_lo, v_d_lo, u_d_hi, v_d_hi, rnd_v, pack_fixup);
+      let b_chroma = chroma_i16x32(cbu, cbv, u_d_lo, v_d_lo, u_d_hi, v_d_hi, rnd_v, pack_fixup);
+
+      let (r_dup_lo, r_dup_hi) = chroma_dup(r_chroma, dup_lo_idx, dup_hi_idx);
+      let (g_dup_lo, g_dup_hi) = chroma_dup(g_chroma, dup_lo_idx, dup_hi_idx);
+      let (b_dup_lo, b_dup_hi) = chroma_dup(b_chroma, dup_lo_idx, dup_hi_idx);
+
+      let y_scaled_lo = scale_y(y_low_i16, y_off_v, y_scale_v, rnd_v, pack_fixup);
+      let y_scaled_hi = scale_y(y_high_i16, y_off_v, y_scale_v, rnd_v, pack_fixup);
+
+      let b_lo = _mm512_adds_epi16(y_scaled_lo, b_dup_lo);
+      let b_hi = _mm512_adds_epi16(y_scaled_hi, b_dup_hi);
+      let g_lo = _mm512_adds_epi16(y_scaled_lo, g_dup_lo);
+      let g_hi = _mm512_adds_epi16(y_scaled_hi, g_dup_hi);
+      let r_lo = _mm512_adds_epi16(y_scaled_lo, r_dup_lo);
+      let r_hi = _mm512_adds_epi16(y_scaled_hi, r_dup_hi);
+
+      let b_u8 = narrow_u8x64(b_lo, b_hi, pack_fixup);
+      let g_u8 = narrow_u8x64(g_lo, g_hi, pack_fixup);
+      let r_u8 = narrow_u8x64(r_lo, r_hi, pack_fixup);
+
+      write_rgb_64(r_u8, g_u8, b_u8, rgb_out.as_mut_ptr().add(x * 3));
+
+      x += 64;
+    }
+
+    if x < width {
+      scalar::yuv_420p_n_to_rgb_row::<10>(
+        &y[x..width],
+        &u_half[x / 2..width / 2],
+        &v_half[x / 2..width / 2],
+        &mut rgb_out[x * 3..width * 3],
+        width - x,
+        matrix,
+        full_range,
+      );
+    }
+  }
 }
 
-/// AVX‑512 YUV 4:2:0 10‑bit → packed **10‑bit `u16`** RGB. **Stub**.
+/// AVX‑512 YUV 4:2:0 10‑bit → packed **10‑bit `u16`** RGB.
+///
+/// Block size 64 Y pixels per iteration. Mirrors
+/// [`yuv420p10_to_rgb_row`]'s pre‑write math; output uses explicit
+/// min/max clamp to `[0, 1023]` and 8 calls to [`write_rgb_u16_8`]
+/// per block (each handles 8 pixels). A true AVX‑512 u16 interleave
+/// would cut store count ~8×; left as a follow‑up optimization.
+///
+/// # Numerical contract
+///
+/// Identical to [`scalar::yuv_420p_n_to_rgb_u16_row::<10>`].
 ///
 /// # Safety
 ///
-/// 1. **AVX‑512BW must be available on the current CPU.**
+/// 1. **AVX‑512F + AVX‑512BW must be available on the current CPU.**
 /// 2. `width & 1 == 0`.
 /// 3. `y.len() >= width`, `u_half.len() >= width / 2`,
 ///    `v_half.len() >= width / 2`, `rgb_out.len() >= 3 * width`.
@@ -264,7 +390,167 @@ pub(crate) unsafe fn yuv420p10_to_rgb_u16_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  scalar::yuv_420p_n_to_rgb_u16_row::<10>(y, u_half, v_half, rgb_out, width, matrix, full_range);
+  debug_assert_eq!(width & 1, 0);
+  debug_assert!(y.len() >= width);
+  debug_assert!(u_half.len() >= width / 2);
+  debug_assert!(v_half.len() >= width / 2);
+  debug_assert!(rgb_out.len() >= width * 3);
+
+  let coeffs = scalar::Coefficients::for_matrix(matrix);
+  let (y_off, y_scale, c_scale) = scalar::range_params_n::<10, 10>(full_range);
+  let bias = scalar::chroma_bias::<10>();
+  const RND: i32 = 1 << 14;
+  const OUT_MAX_10: i16 = 1023;
+
+  // SAFETY: AVX‑512BW availability is the caller's obligation.
+  unsafe {
+    let rnd_v = _mm512_set1_epi32(RND);
+    let y_off_v = _mm512_set1_epi16(y_off as i16);
+    let y_scale_v = _mm512_set1_epi32(y_scale);
+    let c_scale_v = _mm512_set1_epi32(c_scale);
+    let bias_v = _mm512_set1_epi16(bias as i16);
+    let max_v = _mm512_set1_epi16(OUT_MAX_10);
+    let zero_v = _mm512_set1_epi16(0);
+    let cru = _mm512_set1_epi32(coeffs.r_u());
+    let crv = _mm512_set1_epi32(coeffs.r_v());
+    let cgu = _mm512_set1_epi32(coeffs.g_u());
+    let cgv = _mm512_set1_epi32(coeffs.g_v());
+    let cbu = _mm512_set1_epi32(coeffs.b_u());
+    let cbv = _mm512_set1_epi32(coeffs.b_v());
+
+    let pack_fixup = _mm512_setr_epi64(0, 2, 4, 6, 1, 3, 5, 7);
+    let dup_lo_idx = _mm512_setr_epi64(0, 1, 8, 9, 2, 3, 10, 11);
+    let dup_hi_idx = _mm512_setr_epi64(4, 5, 12, 13, 6, 7, 14, 15);
+
+    let mut x = 0usize;
+    while x + 64 <= width {
+      let y_low_i16 = _mm512_loadu_si512(y.as_ptr().add(x).cast());
+      let y_high_i16 = _mm512_loadu_si512(y.as_ptr().add(x + 32).cast());
+      let u_vec = _mm512_loadu_si512(u_half.as_ptr().add(x / 2).cast());
+      let v_vec = _mm512_loadu_si512(v_half.as_ptr().add(x / 2).cast());
+
+      let u_i16 = _mm512_sub_epi16(u_vec, bias_v);
+      let v_i16 = _mm512_sub_epi16(v_vec, bias_v);
+
+      let u_lo_i32 = _mm512_cvtepi16_epi32(_mm512_castsi512_si256(u_i16));
+      let u_hi_i32 = _mm512_cvtepi16_epi32(_mm512_extracti64x4_epi64::<1>(u_i16));
+      let v_lo_i32 = _mm512_cvtepi16_epi32(_mm512_castsi512_si256(v_i16));
+      let v_hi_i32 = _mm512_cvtepi16_epi32(_mm512_extracti64x4_epi64::<1>(v_i16));
+
+      let u_d_lo = q15_shift(_mm512_add_epi32(
+        _mm512_mullo_epi32(u_lo_i32, c_scale_v),
+        rnd_v,
+      ));
+      let u_d_hi = q15_shift(_mm512_add_epi32(
+        _mm512_mullo_epi32(u_hi_i32, c_scale_v),
+        rnd_v,
+      ));
+      let v_d_lo = q15_shift(_mm512_add_epi32(
+        _mm512_mullo_epi32(v_lo_i32, c_scale_v),
+        rnd_v,
+      ));
+      let v_d_hi = q15_shift(_mm512_add_epi32(
+        _mm512_mullo_epi32(v_hi_i32, c_scale_v),
+        rnd_v,
+      ));
+
+      let r_chroma = chroma_i16x32(cru, crv, u_d_lo, v_d_lo, u_d_hi, v_d_hi, rnd_v, pack_fixup);
+      let g_chroma = chroma_i16x32(cgu, cgv, u_d_lo, v_d_lo, u_d_hi, v_d_hi, rnd_v, pack_fixup);
+      let b_chroma = chroma_i16x32(cbu, cbv, u_d_lo, v_d_lo, u_d_hi, v_d_hi, rnd_v, pack_fixup);
+
+      let (r_dup_lo, r_dup_hi) = chroma_dup(r_chroma, dup_lo_idx, dup_hi_idx);
+      let (g_dup_lo, g_dup_hi) = chroma_dup(g_chroma, dup_lo_idx, dup_hi_idx);
+      let (b_dup_lo, b_dup_hi) = chroma_dup(b_chroma, dup_lo_idx, dup_hi_idx);
+
+      let y_scaled_lo = scale_y(y_low_i16, y_off_v, y_scale_v, rnd_v, pack_fixup);
+      let y_scaled_hi = scale_y(y_high_i16, y_off_v, y_scale_v, rnd_v, pack_fixup);
+
+      let r_lo = clamp_u10_x32(_mm512_adds_epi16(y_scaled_lo, r_dup_lo), zero_v, max_v);
+      let r_hi = clamp_u10_x32(_mm512_adds_epi16(y_scaled_hi, r_dup_hi), zero_v, max_v);
+      let g_lo = clamp_u10_x32(_mm512_adds_epi16(y_scaled_lo, g_dup_lo), zero_v, max_v);
+      let g_hi = clamp_u10_x32(_mm512_adds_epi16(y_scaled_hi, g_dup_hi), zero_v, max_v);
+      let b_lo = clamp_u10_x32(_mm512_adds_epi16(y_scaled_lo, b_dup_lo), zero_v, max_v);
+      let b_hi = clamp_u10_x32(_mm512_adds_epi16(y_scaled_hi, b_dup_hi), zero_v, max_v);
+
+      // Eight 8‑pixel u16 writes per 64‑pixel block. For each i16x32
+      // channel vector we extract four 128‑bit quarters and hand each
+      // to the shared SSE4.1 u16 interleave helper.
+      let dst = rgb_out.as_mut_ptr().add(x * 3);
+      write_quarter(r_lo, g_lo, b_lo, 0, dst);
+      write_quarter(r_lo, g_lo, b_lo, 1, dst.add(24));
+      write_quarter(r_lo, g_lo, b_lo, 2, dst.add(48));
+      write_quarter(r_lo, g_lo, b_lo, 3, dst.add(72));
+      write_quarter(r_hi, g_hi, b_hi, 0, dst.add(96));
+      write_quarter(r_hi, g_hi, b_hi, 1, dst.add(120));
+      write_quarter(r_hi, g_hi, b_hi, 2, dst.add(144));
+      write_quarter(r_hi, g_hi, b_hi, 3, dst.add(168));
+
+      x += 64;
+    }
+
+    if x < width {
+      scalar::yuv_420p_n_to_rgb_u16_row::<10>(
+        &y[x..width],
+        &u_half[x / 2..width / 2],
+        &v_half[x / 2..width / 2],
+        &mut rgb_out[x * 3..width * 3],
+        width - x,
+        matrix,
+        full_range,
+      );
+    }
+  }
+}
+
+/// Clamps an `i16x32` vector to `[0, max]` via AVX‑512
+/// `_mm512_min_epi16` / `_mm512_max_epi16`. Used by the 10‑bit u16
+/// output path.
+#[inline(always)]
+fn clamp_u10_x32(v: __m512i, zero_v: __m512i, max_v: __m512i) -> __m512i {
+  unsafe { _mm512_min_epi16(_mm512_max_epi16(v, zero_v), max_v) }
+}
+
+/// Writes one 8‑pixel u16 RGB chunk using a 128‑bit quarter of each
+/// `i16x32` channel vector. `idx` ∈ `{0,1,2,3}` selects which of the
+/// four 128‑bit lanes to extract via `_mm512_extracti32x4_epi32`.
+///
+/// # Safety
+///
+/// Same as [`write_rgb_u16_8`] — `ptr` must point to at least 48
+/// writable bytes (24 `u16`). Caller's `target_feature` must include
+/// AVX‑512F + AVX‑512BW (so `_mm512_extracti32x4_epi32` is available)
+/// and SSSE3 (for the underlying `_mm_shuffle_epi8` inside
+/// `write_rgb_u16_8`).
+#[inline(always)]
+unsafe fn write_quarter(r: __m512i, g: __m512i, b: __m512i, idx: u8, ptr: *mut u16) {
+  // SAFETY: caller holds the AVX‑512F + SSSE3 target‑feature context.
+  // Constant generic arg `IDX` picks one of four 128‑bit lanes; `idx`
+  // is bounded to 0..=3 by call sites.
+  unsafe {
+    let (rq, gq, bq) = match idx {
+      0 => (
+        _mm512_extracti32x4_epi32::<0>(r),
+        _mm512_extracti32x4_epi32::<0>(g),
+        _mm512_extracti32x4_epi32::<0>(b),
+      ),
+      1 => (
+        _mm512_extracti32x4_epi32::<1>(r),
+        _mm512_extracti32x4_epi32::<1>(g),
+        _mm512_extracti32x4_epi32::<1>(b),
+      ),
+      2 => (
+        _mm512_extracti32x4_epi32::<2>(r),
+        _mm512_extracti32x4_epi32::<2>(g),
+        _mm512_extracti32x4_epi32::<2>(b),
+      ),
+      _ => (
+        _mm512_extracti32x4_epi32::<3>(r),
+        _mm512_extracti32x4_epi32::<3>(g),
+        _mm512_extracti32x4_epi32::<3>(b),
+      ),
+    };
+    write_rgb_u16_8(rq, gq, bq, ptr);
+  }
 }
 
 /// AVX‑512 NV12 → packed RGB (UV-ordered chroma). Thin wrapper over
@@ -1009,5 +1295,115 @@ mod tests {
     for w in [1usize, 63, 64, 65, 127, 128, 1920, 1921] {
       check_hsv_equivalence(&rgb[..w * 3], w);
     }
+  }
+
+  // ---- yuv420p10 AVX-512 scalar-equivalence ---------------------------
+
+  fn p10_plane(n: usize, seed: usize) -> std::vec::Vec<u16> {
+    (0..n)
+      .map(|i| ((i * seed + seed * 3) & 0x3FF) as u16)
+      .collect()
+  }
+
+  fn check_p10_u8_avx512_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+    if !std::arch::is_x86_feature_detected!("avx512bw") {
+      return;
+    }
+    let y = p10_plane(width, 37);
+    let u = p10_plane(width / 2, 53);
+    let v = p10_plane(width / 2, 71);
+    let mut rgb_scalar = std::vec![0u8; width * 3];
+    let mut rgb_simd = std::vec![0u8; width * 3];
+
+    scalar::yuv_420p_n_to_rgb_row::<10>(&y, &u, &v, &mut rgb_scalar, width, matrix, full_range);
+    unsafe {
+      yuv420p10_to_rgb_row(&y, &u, &v, &mut rgb_simd, width, matrix, full_range);
+    }
+
+    if rgb_scalar != rgb_simd {
+      let first_diff = rgb_scalar
+        .iter()
+        .zip(rgb_simd.iter())
+        .position(|(a, b)| a != b)
+        .unwrap();
+      panic!(
+        "AVX-512 10→u8 diverges at byte {first_diff} (width={width}, matrix={matrix:?}, full_range={full_range}): scalar={} simd={}",
+        rgb_scalar[first_diff], rgb_simd[first_diff]
+      );
+    }
+  }
+
+  fn check_p10_u16_avx512_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+    if !std::arch::is_x86_feature_detected!("avx512bw") {
+      return;
+    }
+    let y = p10_plane(width, 37);
+    let u = p10_plane(width / 2, 53);
+    let v = p10_plane(width / 2, 71);
+    let mut rgb_scalar = std::vec![0u16; width * 3];
+    let mut rgb_simd = std::vec![0u16; width * 3];
+
+    scalar::yuv_420p_n_to_rgb_u16_row::<10>(&y, &u, &v, &mut rgb_scalar, width, matrix, full_range);
+    unsafe {
+      yuv420p10_to_rgb_u16_row(&y, &u, &v, &mut rgb_simd, width, matrix, full_range);
+    }
+
+    if rgb_scalar != rgb_simd {
+      let first_diff = rgb_scalar
+        .iter()
+        .zip(rgb_simd.iter())
+        .position(|(a, b)| a != b)
+        .unwrap();
+      panic!(
+        "AVX-512 10→u16 diverges at elem {first_diff} (width={width}, matrix={matrix:?}, full_range={full_range}): scalar={} simd={}",
+        rgb_scalar[first_diff], rgb_simd[first_diff]
+      );
+    }
+  }
+
+  #[test]
+  fn avx512_p10_u8_matches_scalar_all_matrices() {
+    for m in [
+      ColorMatrix::Bt601,
+      ColorMatrix::Bt709,
+      ColorMatrix::Bt2020Ncl,
+      ColorMatrix::Smpte240m,
+      ColorMatrix::Fcc,
+      ColorMatrix::YCgCo,
+    ] {
+      for full in [true, false] {
+        check_p10_u8_avx512_equivalence(64, m, full);
+      }
+    }
+  }
+
+  #[test]
+  fn avx512_p10_u16_matches_scalar_all_matrices() {
+    for m in [
+      ColorMatrix::Bt601,
+      ColorMatrix::Bt709,
+      ColorMatrix::Bt2020Ncl,
+      ColorMatrix::Smpte240m,
+      ColorMatrix::Fcc,
+      ColorMatrix::YCgCo,
+    ] {
+      for full in [true, false] {
+        check_p10_u16_avx512_equivalence(64, m, full);
+      }
+    }
+  }
+
+  #[test]
+  fn avx512_p10_matches_scalar_odd_tail_widths() {
+    for w in [66usize, 126, 130, 1922] {
+      check_p10_u8_avx512_equivalence(w, ColorMatrix::Bt601, false);
+      check_p10_u16_avx512_equivalence(w, ColorMatrix::Bt709, true);
+    }
+  }
+
+  #[test]
+  fn avx512_p10_matches_scalar_1920() {
+    check_p10_u8_avx512_equivalence(1920, ColorMatrix::Bt709, false);
+    check_p10_u16_avx512_equivalence(1920, ColorMatrix::Bt2020Ncl, false);
   }
 }
