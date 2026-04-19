@@ -696,6 +696,27 @@ pub enum Nv21FrameError {
 /// `yuv420p10le` / `yuv420p12le` / `yuv420p14le` convention, where
 /// each plane is a byte buffer reinterpretable as `u16` little‑endian.
 ///
+/// This is **not** the FFmpeg `p010` layout — `p010` stores samples
+/// in the **high** 10 bits of each `u16` (`sample << 6`). Callers
+/// holding a p010 buffer must shift right by `16 - BITS` before
+/// construction.
+///
+/// # Input sample range
+///
+/// The kernels assume every input sample is in `[0, (1 << BITS) - 1]`
+/// — i.e., upper `16 - BITS` bits zero. Validating this at
+/// construction would require scanning every sample of every plane
+/// (megabytes per frame at video rates); instead the constructor
+/// validates geometry only and the contract falls on the caller.
+/// Decoders and FFmpeg output satisfy this by construction.
+///
+/// **Output is undefined for samples outside that range.** Scalar and
+/// x86 backends treat a 16‑bit `u16` as an unsigned intermediate;
+/// NEON reinterprets it as signed `i16` before the Q15 path, so a
+/// sample with bit 15 set produces architecturally distinct garbage
+/// on aarch64 vs x86. Callers handling potentially dirty buffers
+/// should mask (`sample & ((1 << BITS) - 1)`) upstream.
+///
 /// Ship 2 ships `BITS == 10` only (the use‑case keystone for HDR and
 /// 10‑bit SDR). 12 and 14 are mechanical follow‑ups that just relax
 /// the constructor's `BITS` check and add a tiered aliases — the

@@ -243,10 +243,17 @@ pub(crate) fn yuv_420p_n_to_rgb_row<const BITS: u32>(
 }
 
 /// Converts one row of high‑bit‑depth 4:2:0 YUV to **`u16`** packed
-/// RGB at the **input's native bit depth** (`BITS`). For 10‑bit input
-/// the output lives in `[0, 1023]` with the top 6 bits of each `u16`
-/// zero — the FFmpeg `p010` / `yuv420p10le` convention. 12‑ and
-/// 14‑bit inputs produce `[0, 4095]` / `[0, 16383]` respectively.
+/// RGB at the **input's native bit depth** (`BITS`).
+///
+/// Output is **low‑bit‑packed**: for 10‑bit input each `u16` holds a
+/// value in `[0, 1023]` with the upper 6 bits zero — matching
+/// FFmpeg's `yuv420p10le` convention. 12‑ and 14‑bit inputs produce
+/// `[0, 4095]` / `[0, 16383]` respectively, again in the low bits.
+///
+/// This is **not** the FFmpeg `p010` layout: `p010` puts samples in
+/// the **high** 10 bits of each `u16` (effectively `sample << 6`).
+/// Callers routing this output to a p010 consumer must shift left
+/// by `16 - BITS`.
 ///
 /// This is the fidelity‑preserving path: no bits are shed inside the
 /// conversion, so the output retains the full dynamic range of the

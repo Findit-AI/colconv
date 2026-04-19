@@ -403,12 +403,18 @@ pub fn yuv420p10_to_rgb_row(
 }
 
 /// Converts one row of **10‑bit** YUV 4:2:0 to **native‑depth** packed
-/// RGB `u16` (10‑bit values in the low bits of each `u16`, matching
-/// the FFmpeg `p010` / `yuv420p10le` output convention for lossless
-/// downstream HDR processing).
+/// RGB `u16` (10‑bit values in the **low** 10 bits of each `u16`,
+/// matching FFmpeg's `yuv420p10le` convention). Use this for lossless
+/// downstream HDR processing when the consumer expects low‑bit‑packed
+/// samples.
 ///
 /// Output is packed `R, G, B` triples: `rgb_out[3 * width]` `u16`
 /// elements, each in `[0, 1023]` with the upper 6 bits zero.
+///
+/// This is **not** the FFmpeg `p010` layout — `p010` stores samples
+/// in the **high** 10 bits of each `u16` (`sample << 6`). Callers
+/// feeding this output into a p010 consumer must shift left by 6
+/// before handing off.
 ///
 /// See `scalar::yuv_420p_n_to_rgb_u16_row` for the full semantic
 /// specification. `use_simd = false` forces the scalar reference

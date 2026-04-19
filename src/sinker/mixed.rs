@@ -384,9 +384,10 @@ impl<'a, F: SourceFormat> MixedSinker<'a, F> {
   /// Attaches a packed **`u16`** RGB output buffer sized in elements,
   /// not bytes. For the 10‑bit source path
   /// ([`Yuv420p10`](crate::yuv::Yuv420p10)) each element carries a
-  /// 10‑bit value in the low bits — lossless preservation of the
-  /// source's dynamic range for HDR tone mapping and 10‑bit scene
-  /// analysis.
+  /// 10‑bit value in the **low** 10 bits (upper 6 bits zero), matching
+  /// FFmpeg's `yuv420p10le` convention. This is **not** the `p010`
+  /// layout (which stores samples in the high 10 bits); callers
+  /// feeding a p010 consumer must shift the output left by 6.
   ///
   /// Returns `Err(RgbU16BufferTooShort)` if
   /// `buf.len() < width × height × 3` `u16` elements, or
