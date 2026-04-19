@@ -498,6 +498,158 @@ pub fn yuv420p10_to_rgb_u16_row(
   scalar::yuv_420p_n_to_rgb_u16_row::<10>(y, u_half, v_half, rgb_out, width, matrix, full_range);
 }
 
+/// Converts one row of **P010** (semi‑planar 4:2:0, 10‑bit, high‑bit‑
+/// packed — 10 active bits in the high 10 of each `u16`) to packed
+/// **8‑bit** RGB.
+///
+/// This is the HDR hardware‑decode keystone format: VideoToolbox,
+/// VA‑API, NVDEC, D3D11VA, and Intel QSV all emit P010 for 10‑bit
+/// output. See `scalar::p010_to_rgb_row` for the full semantic
+/// specification. `use_simd = false` forces the scalar reference.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn p010_to_rgb_row(
+  y: &[u16],
+  uv_half: &[u16],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  use_simd: bool,
+) {
+  assert_eq!(width & 1, 0, "P010 requires even width");
+  let rgb_min = rgb_row_bytes(width);
+  assert!(y.len() >= width, "y row too short");
+  assert!(uv_half.len() >= width, "uv_half row too short");
+  assert!(rgb_out.len() >= rgb_min, "rgb_out row too short");
+
+  if use_simd {
+    cfg_select! {
+      target_arch = "aarch64" => {
+        if neon_available() {
+          // SAFETY: NEON verified.
+          unsafe {
+            arch::neon::p010_to_rgb_row(y, uv_half, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+      },
+      target_arch = "x86_64" => {
+        if avx512_available() {
+          // SAFETY: AVX‑512BW verified.
+          unsafe {
+            arch::x86_avx512::p010_to_rgb_row(y, uv_half, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+        if avx2_available() {
+          // SAFETY: AVX2 verified.
+          unsafe {
+            arch::x86_avx2::p010_to_rgb_row(y, uv_half, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+        if sse41_available() {
+          // SAFETY: SSE4.1 verified.
+          unsafe {
+            arch::x86_sse41::p010_to_rgb_row(y, uv_half, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+      },
+      target_arch = "wasm32" => {
+        if simd128_available() {
+          // SAFETY: simd128 compile‑time verified.
+          unsafe {
+            arch::wasm_simd128::p010_to_rgb_row(y, uv_half, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+      },
+      _ => {}
+    }
+  }
+
+  scalar::p010_to_rgb_row(y, uv_half, rgb_out, width, matrix, full_range);
+}
+
+/// Converts one row of **P010** to **native‑depth `u16`** packed RGB
+/// (10 active bits in the **low** 10 of each output `u16`, matching
+/// `yuv420p10le` convention — **not** the P010 high‑bit packing).
+/// Callers feeding this output into a P010 consumer must shift left
+/// by 6.
+///
+/// See `scalar::p010_to_rgb_u16_row` for the full spec.
+/// `use_simd = false` forces the scalar reference.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn p010_to_rgb_u16_row(
+  y: &[u16],
+  uv_half: &[u16],
+  rgb_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  use_simd: bool,
+) {
+  assert_eq!(width & 1, 0, "P010 requires even width");
+  let rgb_min = rgb_row_elems(width);
+  assert!(y.len() >= width, "y row too short");
+  assert!(uv_half.len() >= width, "uv_half row too short");
+  assert!(rgb_out.len() >= rgb_min, "rgb_out row too short");
+
+  if use_simd {
+    cfg_select! {
+      target_arch = "aarch64" => {
+        if neon_available() {
+          // SAFETY: NEON verified.
+          unsafe {
+            arch::neon::p010_to_rgb_u16_row(y, uv_half, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+      },
+      target_arch = "x86_64" => {
+        if avx512_available() {
+          // SAFETY: AVX‑512BW verified.
+          unsafe {
+            arch::x86_avx512::p010_to_rgb_u16_row(y, uv_half, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+        if avx2_available() {
+          // SAFETY: AVX2 verified.
+          unsafe {
+            arch::x86_avx2::p010_to_rgb_u16_row(y, uv_half, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+        if sse41_available() {
+          // SAFETY: SSE4.1 verified.
+          unsafe {
+            arch::x86_sse41::p010_to_rgb_u16_row(y, uv_half, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+      },
+      target_arch = "wasm32" => {
+        if simd128_available() {
+          // SAFETY: simd128 compile‑time verified.
+          unsafe {
+            arch::wasm_simd128::p010_to_rgb_u16_row(
+              y, uv_half, rgb_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+      },
+      _ => {}
+    }
+  }
+
+  scalar::p010_to_rgb_u16_row(y, uv_half, rgb_out, width, matrix, full_range);
+}
+
 /// Converts one row of packed RGB to planar HSV (OpenCV 8‑bit
 /// encoding). See `scalar::rgb_to_hsv_row` for semantics.
 ///
