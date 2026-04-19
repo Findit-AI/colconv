@@ -353,7 +353,7 @@ pub(crate) unsafe fn yuv_420p_n_to_rgb_u16_row<const BITS: u32>(
   let (y_off, y_scale, c_scale) = scalar::range_params_n::<BITS, BITS>(full_range);
   let bias = scalar::chroma_bias::<BITS>();
   const RND: i32 = 1 << 14;
-  const OUT_MAX_10: i16 = 1023;
+  let out_max: i16 = ((1i32 << BITS) - 1) as i16;
 
   // SAFETY: simd128 compile‑time availability is the caller's
   // obligation.
@@ -364,7 +364,7 @@ pub(crate) unsafe fn yuv_420p_n_to_rgb_u16_row<const BITS: u32>(
     let c_scale_v = i32x4_splat(c_scale);
     let bias_v = i16x8_splat(bias as i16);
     let mask_v = u16x8_splat(scalar::bits_mask::<BITS>());
-    let max_v = i16x8_splat(OUT_MAX_10);
+    let max_v = i16x8_splat(out_max);
     let zero_v = i16x8_splat(0);
     let cru = i32x4_splat(coeffs.r_u());
     let crv = i32x4_splat(coeffs.r_v());
@@ -554,13 +554,16 @@ pub(crate) unsafe fn p_n_to_rgb_row<const BITS: u32>(
     let cbu = i32x4_splat(coeffs.b_u());
     let cbv = i32x4_splat(coeffs.b_v());
 
+    // High-bit-packed samples: shift right by `16 - BITS`.
+    let shr = (16 - BITS) as u32;
+
     let mut x = 0usize;
     while x + 16 <= width {
-      let y_low_i16 = u16x8_shr(v128_load(y.as_ptr().add(x).cast()), 6);
-      let y_high_i16 = u16x8_shr(v128_load(y.as_ptr().add(x + 8).cast()), 6);
+      let y_low_i16 = u16x8_shr(v128_load(y.as_ptr().add(x).cast()), shr);
+      let y_high_i16 = u16x8_shr(v128_load(y.as_ptr().add(x + 8).cast()), shr);
       let (u_vec, v_vec) = deinterleave_uv_u16_wasm(uv_half.as_ptr().add(x));
-      let u_vec = u16x8_shr(u_vec, 6);
-      let v_vec = u16x8_shr(v_vec, 6);
+      let u_vec = u16x8_shr(u_vec, shr);
+      let v_vec = u16x8_shr(v_vec, shr);
 
       let u_i16 = i16x8_sub(u_vec, bias_v);
       let v_i16 = i16x8_sub(v_vec, bias_v);
@@ -650,7 +653,7 @@ pub(crate) unsafe fn p_n_to_rgb_u16_row<const BITS: u32>(
   let (y_off, y_scale, c_scale) = scalar::range_params_n::<BITS, BITS>(full_range);
   let bias = scalar::chroma_bias::<BITS>();
   const RND: i32 = 1 << 14;
-  const OUT_MAX_10: i16 = 1023;
+  let out_max: i16 = ((1i32 << BITS) - 1) as i16;
 
   // SAFETY: simd128 compile‑time availability is the caller's
   // obligation.
@@ -660,7 +663,7 @@ pub(crate) unsafe fn p_n_to_rgb_u16_row<const BITS: u32>(
     let y_scale_v = i32x4_splat(y_scale);
     let c_scale_v = i32x4_splat(c_scale);
     let bias_v = i16x8_splat(bias as i16);
-    let max_v = i16x8_splat(OUT_MAX_10);
+    let max_v = i16x8_splat(out_max);
     let zero_v = i16x8_splat(0);
     let cru = i32x4_splat(coeffs.r_u());
     let crv = i32x4_splat(coeffs.r_v());
@@ -669,13 +672,16 @@ pub(crate) unsafe fn p_n_to_rgb_u16_row<const BITS: u32>(
     let cbu = i32x4_splat(coeffs.b_u());
     let cbv = i32x4_splat(coeffs.b_v());
 
+    // High-bit-packed samples: shift right by `16 - BITS`.
+    let shr = (16 - BITS) as u32;
+
     let mut x = 0usize;
     while x + 16 <= width {
-      let y_low_i16 = u16x8_shr(v128_load(y.as_ptr().add(x).cast()), 6);
-      let y_high_i16 = u16x8_shr(v128_load(y.as_ptr().add(x + 8).cast()), 6);
+      let y_low_i16 = u16x8_shr(v128_load(y.as_ptr().add(x).cast()), shr);
+      let y_high_i16 = u16x8_shr(v128_load(y.as_ptr().add(x + 8).cast()), shr);
       let (u_vec, v_vec) = deinterleave_uv_u16_wasm(uv_half.as_ptr().add(x));
-      let u_vec = u16x8_shr(u_vec, 6);
-      let v_vec = u16x8_shr(v_vec, 6);
+      let u_vec = u16x8_shr(u_vec, shr);
+      let v_vec = u16x8_shr(v_vec, shr);
 
       let u_i16 = i16x8_sub(u_vec, bias_v);
       let v_i16 = i16x8_sub(v_vec, bias_v);
@@ -1609,9 +1615,9 @@ mod tests {
     let mut rgb_scalar = std::vec![0u8; width * 3];
     let mut rgb_simd = std::vec![0u8; width * 3];
 
-    scalar::yuv_420p_n_to_rgb_row::<BITS>(&y, &u, &v, &mut rgb_scalar, width, matrix, full_range);
+    scalar::yuv_420p_n_to_rgb_row::<10>(&y, &u, &v, &mut rgb_scalar, width, matrix, full_range);
     unsafe {
-      yuv420p10_to_rgb_row(&y, &u, &v, &mut rgb_simd, width, matrix, full_range);
+      yuv_420p_n_to_rgb_row::<10>(&y, &u, &v, &mut rgb_simd, width, matrix, full_range);
     }
 
     if rgb_scalar != rgb_simd {
@@ -1634,17 +1640,9 @@ mod tests {
     let mut rgb_scalar = std::vec![0u16; width * 3];
     let mut rgb_simd = std::vec![0u16; width * 3];
 
-    scalar::yuv_420p_n_to_rgb_u16_row::<BITS>(
-      &y,
-      &u,
-      &v,
-      &mut rgb_scalar,
-      width,
-      matrix,
-      full_range,
-    );
+    scalar::yuv_420p_n_to_rgb_u16_row::<10>(&y, &u, &v, &mut rgb_scalar, width, matrix, full_range);
     unsafe {
-      yuv420p10_to_rgb_u16_row(&y, &u, &v, &mut rgb_simd, width, matrix, full_range);
+      yuv_420p_n_to_rgb_u16_row::<10>(&y, &u, &v, &mut rgb_simd, width, matrix, full_range);
     }
 
     if rgb_scalar != rgb_simd {
@@ -1732,9 +1730,9 @@ mod tests {
     let uv = p010_uv_interleave(&u, &v);
     let mut rgb_scalar = std::vec![0u8; width * 3];
     let mut rgb_simd = std::vec![0u8; width * 3];
-    scalar::p_n_to_rgb_row::<BITS>(&y, &uv, &mut rgb_scalar, width, matrix, full_range);
+    scalar::p_n_to_rgb_row::<10>(&y, &uv, &mut rgb_scalar, width, matrix, full_range);
     unsafe {
-      p010_to_rgb_row(&y, &uv, &mut rgb_simd, width, matrix, full_range);
+      p_n_to_rgb_row::<10>(&y, &uv, &mut rgb_simd, width, matrix, full_range);
     }
     assert_eq!(rgb_scalar, rgb_simd, "simd128 P010→u8 diverges");
   }
@@ -1746,9 +1744,9 @@ mod tests {
     let uv = p010_uv_interleave(&u, &v);
     let mut rgb_scalar = std::vec![0u16; width * 3];
     let mut rgb_simd = std::vec![0u16; width * 3];
-    scalar::p_n_to_rgb_u16_row::<BITS>(&y, &uv, &mut rgb_scalar, width, matrix, full_range);
+    scalar::p_n_to_rgb_u16_row::<10>(&y, &uv, &mut rgb_scalar, width, matrix, full_range);
     unsafe {
-      p010_to_rgb_u16_row(&y, &uv, &mut rgb_simd, width, matrix, full_range);
+      p_n_to_rgb_u16_row::<10>(&y, &uv, &mut rgb_simd, width, matrix, full_range);
     }
     assert_eq!(rgb_scalar, rgb_simd, "simd128 P010→u16 diverges");
   }

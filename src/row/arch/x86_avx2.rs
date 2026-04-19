@@ -39,12 +39,13 @@
 //! element order. Every fixup is called out inline.
 
 use core::arch::x86_64::{
-  __m256i, _mm_loadu_si128, _mm256_add_epi32, _mm256_adds_epi16, _mm256_and_si256,
-  _mm256_castsi256_si128, _mm256_cvtepi16_epi32, _mm256_cvtepu8_epi16, _mm256_extracti128_si256,
-  _mm256_loadu_si256, _mm256_max_epi16, _mm256_min_epi16, _mm256_mullo_epi32, _mm256_packs_epi32,
-  _mm256_packus_epi16, _mm256_permute2x128_si256, _mm256_permute4x64_epi64, _mm256_set1_epi16,
-  _mm256_set1_epi32, _mm256_setr_epi8, _mm256_shuffle_epi8, _mm256_srai_epi32, _mm256_srli_epi16,
-  _mm256_sub_epi16, _mm256_unpackhi_epi16, _mm256_unpacklo_epi16,
+  __m256i, _mm_cvtsi32_si128, _mm_loadu_si128, _mm256_add_epi32, _mm256_adds_epi16,
+  _mm256_and_si256, _mm256_castsi256_si128, _mm256_cvtepi16_epi32, _mm256_cvtepu8_epi16,
+  _mm256_extracti128_si256, _mm256_loadu_si256, _mm256_max_epi16, _mm256_min_epi16,
+  _mm256_mullo_epi32, _mm256_packs_epi32, _mm256_packus_epi16, _mm256_permute2x128_si256,
+  _mm256_permute4x64_epi64, _mm256_set1_epi16, _mm256_set1_epi32, _mm256_setr_epi8,
+  _mm256_shuffle_epi8, _mm256_srai_epi32, _mm256_srl_epi16, _mm256_sub_epi16,
+  _mm256_unpackhi_epi16, _mm256_unpacklo_epi16,
 };
 
 use crate::{
@@ -394,7 +395,7 @@ pub(crate) unsafe fn yuv_420p_n_to_rgb_u16_row<const BITS: u32>(
   let (y_off, y_scale, c_scale) = scalar::range_params_n::<BITS, BITS>(full_range);
   let bias = scalar::chroma_bias::<BITS>();
   const RND: i32 = 1 << 14;
-  const OUT_MAX_10: i16 = 1023;
+  let out_max: i16 = ((1i32 << BITS) - 1) as i16;
 
   // SAFETY: AVX2 availability is the caller's obligation.
   unsafe {
@@ -404,7 +405,7 @@ pub(crate) unsafe fn yuv_420p_n_to_rgb_u16_row<const BITS: u32>(
     let c_scale_v = _mm256_set1_epi32(c_scale);
     let bias_v = _mm256_set1_epi16(bias as i16);
     let mask_v = _mm256_set1_epi16(scalar::bits_mask::<BITS>() as i16);
-    let max_v = _mm256_set1_epi16(OUT_MAX_10);
+    let max_v = _mm256_set1_epi16(out_max);
     let zero_v = _mm256_set1_epi16(0);
     let cru = _mm256_set1_epi32(coeffs.r_u());
     let crv = _mm256_set1_epi32(coeffs.r_v());
@@ -573,6 +574,8 @@ pub(crate) unsafe fn p_n_to_rgb_row<const BITS: u32>(
     let y_scale_v = _mm256_set1_epi32(y_scale);
     let c_scale_v = _mm256_set1_epi32(c_scale);
     let bias_v = _mm256_set1_epi16(bias as i16);
+    // High-bit-packed samples: shift right by `16 - BITS`.
+    let shr_count = _mm_cvtsi32_si128((16 - BITS) as i32);
     let cru = _mm256_set1_epi32(coeffs.r_u());
     let crv = _mm256_set1_epi32(coeffs.r_v());
     let cgu = _mm256_set1_epi32(coeffs.g_u());
@@ -582,14 +585,15 @@ pub(crate) unsafe fn p_n_to_rgb_row<const BITS: u32>(
 
     let mut x = 0usize;
     while x + 32 <= width {
-      // 32 Y = two u16×16 loads, shifted right by 6.
-      let y_low_i16 = _mm256_srli_epi16::<6>(_mm256_loadu_si256(y.as_ptr().add(x).cast()));
-      let y_high_i16 = _mm256_srli_epi16::<6>(_mm256_loadu_si256(y.as_ptr().add(x + 16).cast()));
+      // 32 Y = two u16×16 loads, shifted right by `16 - BITS`.
+      let y_low_i16 = _mm256_srl_epi16(_mm256_loadu_si256(y.as_ptr().add(x).cast()), shr_count);
+      let y_high_i16 =
+        _mm256_srl_epi16(_mm256_loadu_si256(y.as_ptr().add(x + 16).cast()), shr_count);
 
       // 32 UV (16 pairs) — deinterleave + shift.
       let (u_vec, v_vec) = deinterleave_uv_u16_avx2(uv_half.as_ptr().add(x));
-      let u_vec = _mm256_srli_epi16::<6>(u_vec);
-      let v_vec = _mm256_srli_epi16::<6>(v_vec);
+      let u_vec = _mm256_srl_epi16(u_vec, shr_count);
+      let v_vec = _mm256_srl_epi16(v_vec, shr_count);
 
       let u_i16 = _mm256_sub_epi16(u_vec, bias_v);
       let v_i16 = _mm256_sub_epi16(v_vec, bias_v);
@@ -688,7 +692,7 @@ pub(crate) unsafe fn p_n_to_rgb_u16_row<const BITS: u32>(
   let (y_off, y_scale, c_scale) = scalar::range_params_n::<BITS, BITS>(full_range);
   let bias = scalar::chroma_bias::<BITS>();
   const RND: i32 = 1 << 14;
-  const OUT_MAX_10: i16 = 1023;
+  let out_max: i16 = ((1i32 << BITS) - 1) as i16;
 
   // SAFETY: AVX2 availability is the caller's obligation.
   unsafe {
@@ -697,8 +701,10 @@ pub(crate) unsafe fn p_n_to_rgb_u16_row<const BITS: u32>(
     let y_scale_v = _mm256_set1_epi32(y_scale);
     let c_scale_v = _mm256_set1_epi32(c_scale);
     let bias_v = _mm256_set1_epi16(bias as i16);
-    let max_v = _mm256_set1_epi16(OUT_MAX_10);
+    let max_v = _mm256_set1_epi16(out_max);
     let zero_v = _mm256_set1_epi16(0);
+    // High-bit-packed samples: shift right by `16 - BITS`.
+    let shr_count = _mm_cvtsi32_si128((16 - BITS) as i32);
     let cru = _mm256_set1_epi32(coeffs.r_u());
     let crv = _mm256_set1_epi32(coeffs.r_v());
     let cgu = _mm256_set1_epi32(coeffs.g_u());
@@ -708,11 +714,12 @@ pub(crate) unsafe fn p_n_to_rgb_u16_row<const BITS: u32>(
 
     let mut x = 0usize;
     while x + 32 <= width {
-      let y_low_i16 = _mm256_srli_epi16::<6>(_mm256_loadu_si256(y.as_ptr().add(x).cast()));
-      let y_high_i16 = _mm256_srli_epi16::<6>(_mm256_loadu_si256(y.as_ptr().add(x + 16).cast()));
+      let y_low_i16 = _mm256_srl_epi16(_mm256_loadu_si256(y.as_ptr().add(x).cast()), shr_count);
+      let y_high_i16 =
+        _mm256_srl_epi16(_mm256_loadu_si256(y.as_ptr().add(x + 16).cast()), shr_count);
       let (u_vec, v_vec) = deinterleave_uv_u16_avx2(uv_half.as_ptr().add(x));
-      let u_vec = _mm256_srli_epi16::<6>(u_vec);
-      let v_vec = _mm256_srli_epi16::<6>(v_vec);
+      let u_vec = _mm256_srl_epi16(u_vec, shr_count);
+      let v_vec = _mm256_srl_epi16(v_vec, shr_count);
 
       let u_i16 = _mm256_sub_epi16(u_vec, bias_v);
       let v_i16 = _mm256_sub_epi16(v_vec, bias_v);
@@ -1608,9 +1615,9 @@ mod tests {
     let mut rgb_scalar = std::vec![0u8; width * 3];
     let mut rgb_simd = std::vec![0u8; width * 3];
 
-    scalar::yuv_420p_n_to_rgb_row::<BITS>(&y, &u, &v, &mut rgb_scalar, width, matrix, full_range);
+    scalar::yuv_420p_n_to_rgb_row::<10>(&y, &u, &v, &mut rgb_scalar, width, matrix, full_range);
     unsafe {
-      yuv420p10_to_rgb_row(&y, &u, &v, &mut rgb_simd, width, matrix, full_range);
+      yuv_420p_n_to_rgb_row::<10>(&y, &u, &v, &mut rgb_simd, width, matrix, full_range);
     }
 
     if rgb_scalar != rgb_simd {
@@ -1636,17 +1643,9 @@ mod tests {
     let mut rgb_scalar = std::vec![0u16; width * 3];
     let mut rgb_simd = std::vec![0u16; width * 3];
 
-    scalar::yuv_420p_n_to_rgb_u16_row::<BITS>(
-      &y,
-      &u,
-      &v,
-      &mut rgb_scalar,
-      width,
-      matrix,
-      full_range,
-    );
+    scalar::yuv_420p_n_to_rgb_u16_row::<10>(&y, &u, &v, &mut rgb_scalar, width, matrix, full_range);
     unsafe {
-      yuv420p10_to_rgb_u16_row(&y, &u, &v, &mut rgb_simd, width, matrix, full_range);
+      yuv_420p_n_to_rgb_u16_row::<10>(&y, &u, &v, &mut rgb_simd, width, matrix, full_range);
     }
 
     if rgb_scalar != rgb_simd {
@@ -1737,9 +1736,9 @@ mod tests {
     let uv = p010_uv_interleave(&u, &v);
     let mut rgb_scalar = std::vec![0u8; width * 3];
     let mut rgb_simd = std::vec![0u8; width * 3];
-    scalar::p_n_to_rgb_row::<BITS>(&y, &uv, &mut rgb_scalar, width, matrix, full_range);
+    scalar::p_n_to_rgb_row::<10>(&y, &uv, &mut rgb_scalar, width, matrix, full_range);
     unsafe {
-      p010_to_rgb_row(&y, &uv, &mut rgb_simd, width, matrix, full_range);
+      p_n_to_rgb_row::<10>(&y, &uv, &mut rgb_simd, width, matrix, full_range);
     }
     assert_eq!(rgb_scalar, rgb_simd, "AVX2 P010→u8 diverges");
   }
@@ -1754,9 +1753,9 @@ mod tests {
     let uv = p010_uv_interleave(&u, &v);
     let mut rgb_scalar = std::vec![0u16; width * 3];
     let mut rgb_simd = std::vec![0u16; width * 3];
-    scalar::p_n_to_rgb_u16_row::<BITS>(&y, &uv, &mut rgb_scalar, width, matrix, full_range);
+    scalar::p_n_to_rgb_u16_row::<10>(&y, &uv, &mut rgb_scalar, width, matrix, full_range);
     unsafe {
-      p010_to_rgb_u16_row(&y, &uv, &mut rgb_simd, width, matrix, full_range);
+      p_n_to_rgb_u16_row::<10>(&y, &uv, &mut rgb_simd, width, matrix, full_range);
     }
     assert_eq!(rgb_scalar, rgb_simd, "AVX2 P010→u16 diverges");
   }
