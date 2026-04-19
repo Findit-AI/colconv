@@ -401,7 +401,7 @@ pub(super) const fn range_params_n<const BITS: u32, const OUT_BITS: u32>(
   if full_range {
     // `scale = round((out_max << 15) / in_max)`. For `BITS == OUT_BITS`
     // the quotient is exactly `1 << 15` (no rounding needed); for
-    // 10‑bit→8‑bit it's `(255 << 15) / 1023 ≈ 8167`.
+    // 10‑bit→8‑bit it's `(255 << 15) / 1023 ≈ 8167.5`, which rounds to 8168.
     let scale = ((out_max << 15) + in_max / 2) / in_max;
     (0, scale as i32, scale as i32)
   } else {

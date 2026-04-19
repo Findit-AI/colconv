@@ -903,9 +903,9 @@ impl<'a, const BITS: u32> Yuv420pFrame16<'a, BITS> {
   /// Like [`Self::try_new`] but additionally scans every sample of
   /// every plane and rejects values above `(1 << BITS) - 1`. Use this
   /// on untrusted input (e.g., a `u16` buffer of unknown provenance
-  /// that might be `p010`‑packed or otherwise dirty) where the SIMD
-  /// kernels' architecture‑dependent behavior for out‑of‑range
-  /// samples would be unacceptable.
+  /// that might be `p010`‑packed or otherwise dirty) where accepting
+  /// out-of-range samples would be unacceptable because they violate
+  /// the expected bit-depth contract and can produce invalid results.
   ///
   /// Cost: one O(plane_size) linear scan per plane — a few megabytes
   /// per 1080p frame at 10 bits. The default [`Self::try_new`] skips

@@ -2143,9 +2143,8 @@ mod tests {
 
   #[test]
   fn yuv420p10_with_simd_false_matches_with_simd_true() {
-    // Until real SIMD kernels land, the stubs call into scalar —
-    // but the SIMD toggle still exercises the dispatch path. The
-    // two results must be byte‑identical on both outputs.
+    // The SIMD toggle exercises scalar-vs-SIMD dispatch. Both paths
+    // must produce byte-identical results on both outputs.
     let (yp, up, vp) = solid_yuv420p10_frame(64, 16, 600, 400, 700);
     let src = Yuv420p10Frame::new(&yp, &up, &vp, 64, 16, 64, 32, 32);
 
