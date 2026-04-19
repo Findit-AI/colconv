@@ -463,6 +463,337 @@ pub enum Nv12FrameError {
   },
 }
 
+/// A validated P010 (semi‑planar 4:2:0, 10‑bit `u16`) frame.
+///
+/// The canonical layout emitted by Apple VideoToolbox, VA‑API, NVDEC,
+/// D3D11VA, and Intel QSV for 10‑bit HDR hardware‑decoded output. Same
+/// plane shape as [`Nv12Frame`] — one full‑size luma plane plus one
+/// interleaved UV plane at half width and half height — but sample
+/// width is **`u16`** and the 10 active bits sit in the **high** 10 of
+/// each element (`sample = value << 6`, low 6 bits zero). That matches
+/// Microsoft's P010 convention and FFmpeg's `AV_PIX_FMT_P010LE`.
+///
+/// This is **not** the [`Yuv420p10Frame`] layout — yuv420p10le puts the
+/// 10 bits in the **low** 10 of each `u16`. Callers holding a P010
+/// buffer must use [`P010Frame`]; callers holding yuv420p10le must use
+/// [`Yuv420p10Frame`]. Kernels mask/shift appropriately for each.
+///
+/// Stride is in **samples** (`u16` elements), not bytes. Users holding
+/// an FFmpeg byte buffer should cast via [`bytemuck::cast_slice`] and
+/// divide `linesize[i]` by 2 before constructing.
+///
+/// Two planes:
+/// - `y` — full‑size luma, `y_stride >= width`, length
+///   `>= y_stride * height` (all in `u16` samples).
+/// - `uv` — interleaved chroma (`U0, V0, U1, V1, …`) at half width and
+///   half height, so each UV row carries `2 * ceil(width / 2) = width`
+///   `u16` elements; `uv_stride >= width`, length
+///   `>= uv_stride * ceil(height / 2)`.
+///
+/// `width` must be even (same 4:2:0 rationale as the other frame
+/// types); `height` may be odd (handled via `height.div_ceil(2)` in
+/// chroma‑row sizing).
+///
+/// # Input sample range
+///
+/// Each `u16` sample's 10 active bits live in the high 10 positions;
+/// the low 6 bits are expected to be zero. [`Self::try_new`] validates
+/// geometry only; [`Self::try_new_checked`] scans every sample and
+/// rejects any with non‑zero low 6 bits. Kernels mask each load to the
+/// high 10 bits (equivalently, shift right by 6 at load) so mispacked
+/// input (e.g. a `yuv420p10le` buffer handed to the P010 kernel)
+/// produces deterministic, backend‑independent output instead of
+/// silent architecture‑dependent drift.
+#[derive(Debug, Clone, Copy)]
+pub struct P010Frame<'a> {
+  y: &'a [u16],
+  uv: &'a [u16],
+  width: u32,
+  height: u32,
+  y_stride: u32,
+  uv_stride: u32,
+}
+
+impl<'a> P010Frame<'a> {
+  /// Constructs a new [`P010Frame`], validating dimensions and plane
+  /// lengths. Strides are in `u16` **samples**.
+  ///
+  /// Returns [`P010FrameError`] if any of:
+  /// - `width` or `height` is zero,
+  /// - `width` is odd,
+  /// - `y_stride < width`,
+  /// - `uv_stride < width` (the UV row holds `width / 2` interleaved
+  ///   pairs = `width` `u16` elements),
+  /// - either plane is too short, or
+  /// - `stride * rows` overflows `usize` (32‑bit targets only).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn try_new(
+    y: &'a [u16],
+    uv: &'a [u16],
+    width: u32,
+    height: u32,
+    y_stride: u32,
+    uv_stride: u32,
+  ) -> Result<Self, P010FrameError> {
+    if width == 0 || height == 0 {
+      return Err(P010FrameError::ZeroDimension { width, height });
+    }
+    if width & 1 != 0 {
+      return Err(P010FrameError::OddWidth { width });
+    }
+    if y_stride < width {
+      return Err(P010FrameError::YStrideTooSmall { width, y_stride });
+    }
+    let uv_row_elems = width;
+    if uv_stride < uv_row_elems {
+      return Err(P010FrameError::UvStrideTooSmall {
+        uv_row_elems,
+        uv_stride,
+      });
+    }
+
+    let y_min = match (y_stride as usize).checked_mul(height as usize) {
+      Some(v) => v,
+      None => {
+        return Err(P010FrameError::GeometryOverflow {
+          stride: y_stride,
+          rows: height,
+        });
+      }
+    };
+    if y.len() < y_min {
+      return Err(P010FrameError::YPlaneTooShort {
+        expected: y_min,
+        actual: y.len(),
+      });
+    }
+    let chroma_height = height.div_ceil(2);
+    let uv_min = match (uv_stride as usize).checked_mul(chroma_height as usize) {
+      Some(v) => v,
+      None => {
+        return Err(P010FrameError::GeometryOverflow {
+          stride: uv_stride,
+          rows: chroma_height,
+        });
+      }
+    };
+    if uv.len() < uv_min {
+      return Err(P010FrameError::UvPlaneTooShort {
+        expected: uv_min,
+        actual: uv.len(),
+      });
+    }
+
+    Ok(Self {
+      y,
+      uv,
+      width,
+      height,
+      y_stride,
+      uv_stride,
+    })
+  }
+
+  /// Constructs a new [`P010Frame`], panicking on invalid inputs.
+  /// Prefer [`Self::try_new`] when inputs may be invalid at runtime.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn new(
+    y: &'a [u16],
+    uv: &'a [u16],
+    width: u32,
+    height: u32,
+    y_stride: u32,
+    uv_stride: u32,
+  ) -> Self {
+    match Self::try_new(y, uv, width, height, y_stride, uv_stride) {
+      Ok(frame) => frame,
+      Err(_) => panic!("invalid P010Frame dimensions or plane lengths"),
+    }
+  }
+
+  /// Like [`Self::try_new`] but additionally scans every sample and
+  /// rejects any whose **low 6 bits** are non‑zero — a valid P010
+  /// sample has its 10 active bits in the high 10 positions and zero
+  /// below. Use on untrusted input (e.g. a `u16` buffer of unknown
+  /// provenance that might be `yuv420p10le`‑packed instead of P010).
+  ///
+  /// Cost: one O(plane_size) scan per plane. The default
+  /// [`Self::try_new`] skips this so the hot path stays O(1).
+  ///
+  /// Returns [`P010FrameError::SampleLowBitsSet`] on the first
+  /// offending sample — carries the plane, element index, and
+  /// offending value.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn try_new_checked(
+    y: &'a [u16],
+    uv: &'a [u16],
+    width: u32,
+    height: u32,
+    y_stride: u32,
+    uv_stride: u32,
+  ) -> Result<Self, P010FrameError> {
+    let frame = Self::try_new(y, uv, width, height, y_stride, uv_stride)?;
+    let w = width as usize;
+    let h = height as usize;
+    let uv_w = w; // interleaved: `width / 2` pairs × 2 elements
+    let chroma_h = height.div_ceil(2) as usize;
+    for row in 0..h {
+      let start = row * y_stride as usize;
+      for (col, &s) in y[start..start + w].iter().enumerate() {
+        if s & 0x3F != 0 {
+          return Err(P010FrameError::SampleLowBitsSet {
+            plane: P010FramePlane::Y,
+            index: start + col,
+            value: s,
+          });
+        }
+      }
+    }
+    for row in 0..chroma_h {
+      let start = row * uv_stride as usize;
+      for (col, &s) in uv[start..start + uv_w].iter().enumerate() {
+        if s & 0x3F != 0 {
+          return Err(P010FrameError::SampleLowBitsSet {
+            plane: P010FramePlane::Uv,
+            index: start + col,
+            value: s,
+          });
+        }
+      }
+    }
+    Ok(frame)
+  }
+
+  /// Y (luma) plane samples. Row `r` starts at sample offset
+  /// `r * y_stride()`. Each sample's 10 active bits sit in the **high**
+  /// 10 positions of the `u16` (low 6 bits zero).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn y(&self) -> &'a [u16] {
+    self.y
+  }
+
+  /// Interleaved UV plane samples. Each chroma row starts at sample
+  /// offset `chroma_row * uv_stride()` and contains `width` `u16`
+  /// elements laid out as `U0, V0, U1, V1, …, U_{w/2-1}, V_{w/2-1}`.
+  /// Each element's 10 active bits sit in the high 10 positions.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn uv(&self) -> &'a [u16] {
+    self.uv
+  }
+
+  /// Frame width in pixels. Always even.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn width(&self) -> u32 {
+    self.width
+  }
+
+  /// Frame height in pixels.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn height(&self) -> u32 {
+    self.height
+  }
+
+  /// Sample stride of the Y plane (`>= width`).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn y_stride(&self) -> u32 {
+    self.y_stride
+  }
+
+  /// Sample stride of the interleaved UV plane (`>= width`).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn uv_stride(&self) -> u32 {
+    self.uv_stride
+  }
+}
+
+/// Identifies which plane of a [`P010Frame`] a
+/// [`P010FrameError::SampleLowBitsSet`] refers to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Display)]
+pub enum P010FramePlane {
+  /// Luma plane.
+  Y,
+  /// Interleaved UV plane.
+  Uv,
+}
+
+/// Errors returned by [`P010Frame::try_new`] and
+/// [`P010Frame::try_new_checked`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Error)]
+#[non_exhaustive]
+pub enum P010FrameError {
+  /// `width` or `height` was zero.
+  #[error("width ({width}) or height ({height}) is zero")]
+  ZeroDimension {
+    /// The supplied width.
+    width: u32,
+    /// The supplied height.
+    height: u32,
+  },
+  /// `width` was odd. Same 4:2:0 rationale as the other semi‑planar
+  /// formats.
+  #[error("width ({width}) is odd; 4:2:0 requires even width")]
+  OddWidth {
+    /// The supplied width.
+    width: u32,
+  },
+  /// `y_stride < width` (in `u16` samples).
+  #[error("y_stride ({y_stride}) is smaller than width ({width})")]
+  YStrideTooSmall {
+    /// Declared frame width in pixels.
+    width: u32,
+    /// The supplied Y‑plane stride (samples).
+    y_stride: u32,
+  },
+  /// `uv_stride` is smaller than the `width` `u16` elements of
+  /// interleaved UV payload one chroma row must hold.
+  #[error("uv_stride ({uv_stride}) is smaller than UV row payload ({uv_row_elems} u16 elements)")]
+  UvStrideTooSmall {
+    /// Required minimum UV‑plane stride (`= width`).
+    uv_row_elems: u32,
+    /// The supplied UV‑plane stride (samples).
+    uv_stride: u32,
+  },
+  /// Y plane is shorter than `y_stride * height` samples.
+  #[error("Y plane has {actual} samples but at least {expected} are required")]
+  YPlaneTooShort {
+    /// Minimum samples required.
+    expected: usize,
+    /// Actual samples supplied.
+    actual: usize,
+  },
+  /// UV plane is shorter than `uv_stride * ceil(height / 2)` samples.
+  #[error("UV plane has {actual} samples but at least {expected} are required")]
+  UvPlaneTooShort {
+    /// Minimum samples required.
+    expected: usize,
+    /// Actual samples supplied.
+    actual: usize,
+  },
+  /// `stride * rows` overflows `usize` (32‑bit targets only).
+  #[error("declared geometry overflows usize: stride={stride} * rows={rows}")]
+  GeometryOverflow {
+    /// Stride of the plane whose size overflowed.
+    stride: u32,
+    /// Row count that overflowed against the stride.
+    rows: u32,
+  },
+  /// A sample's low 6 bits were non‑zero — P010 packs its 10 active
+  /// bits in the high 10 of each `u16`, so valid samples are always
+  /// multiples of 64 (`value << 6`). Only
+  /// [`P010Frame::try_new_checked`] can produce this error.
+  #[error(
+    "sample {value:#06x} on plane {plane} at element {index} has non-zero low 6 bits (not a valid P010 sample)"
+  )]
+  SampleLowBitsSet {
+    /// Which plane the offending sample lives on.
+    plane: P010FramePlane,
+    /// Element index within that plane's slice.
+    index: usize,
+    /// The offending sample value.
+    value: u16,
+  },
+}
+
 /// A validated NV21 (semi‑planar 4:2:0) frame.
 ///
 /// Structurally identical to [`Nv12Frame`] — one full-size luma plane
@@ -1763,5 +2094,148 @@ mod tests {
     let v = std::vec![512u16; 8 * 4];
     let e = Yuv420p10Frame::try_new_checked(&y, &u, &v, 16, 8, 16, 8, 8).unwrap_err();
     assert!(matches!(e, Yuv420pFrame16Error::YPlaneTooShort { .. }));
+  }
+
+  // ---- P010Frame ---------------------------------------------------------
+  //
+  // Semi‑planar 10‑bit. Plane shape mirrors Nv12Frame (Y + interleaved
+  // UV) but sample width is `u16` with the 10 active bits in the
+  // **high** 10 of each element (`value << 6`). Strides are in
+  // samples, not bytes.
+
+  fn p010_planes() -> (std::vec::Vec<u16>, std::vec::Vec<u16>) {
+    // 16×8 frame — UV plane carries 16 u16 × 4 chroma rows = 64 u16.
+    // P010 white Y = 1023 << 6 = 0xFFC0; neutral UV = 512 << 6 = 0x8000.
+    (std::vec![0xFFC0u16; 16 * 8], std::vec![0x8000u16; 16 * 4])
+  }
+
+  #[test]
+  fn p010_try_new_accepts_valid_tight() {
+    let (y, uv) = p010_planes();
+    let f = P010Frame::try_new(&y, &uv, 16, 8, 16, 16).expect("valid");
+    assert_eq!(f.width(), 16);
+    assert_eq!(f.height(), 8);
+    assert_eq!(f.uv_stride(), 16);
+  }
+
+  #[test]
+  fn p010_try_new_accepts_odd_height() {
+    // 640×481 — same concrete odd‑height case covered by NV12 / NV21.
+    let y = std::vec![0u16; 640 * 481];
+    let uv = std::vec![0x8000u16; 640 * 241];
+    let f = P010Frame::try_new(&y, &uv, 640, 481, 640, 640).expect("odd height valid");
+    assert_eq!(f.height(), 481);
+  }
+
+  #[test]
+  fn p010_try_new_rejects_odd_width() {
+    let (y, uv) = p010_planes();
+    let e = P010Frame::try_new(&y, &uv, 15, 8, 16, 16).unwrap_err();
+    assert!(matches!(e, P010FrameError::OddWidth { width: 15 }));
+  }
+
+  #[test]
+  fn p010_try_new_rejects_zero_dim() {
+    let (y, uv) = p010_planes();
+    let e = P010Frame::try_new(&y, &uv, 0, 8, 16, 16).unwrap_err();
+    assert!(matches!(e, P010FrameError::ZeroDimension { .. }));
+  }
+
+  #[test]
+  fn p010_try_new_rejects_y_stride_under_width() {
+    let (y, uv) = p010_planes();
+    let e = P010Frame::try_new(&y, &uv, 16, 8, 8, 16).unwrap_err();
+    assert!(matches!(e, P010FrameError::YStrideTooSmall { .. }));
+  }
+
+  #[test]
+  fn p010_try_new_rejects_uv_stride_under_width() {
+    let (y, uv) = p010_planes();
+    let e = P010Frame::try_new(&y, &uv, 16, 8, 16, 8).unwrap_err();
+    assert!(matches!(e, P010FrameError::UvStrideTooSmall { .. }));
+  }
+
+  #[test]
+  fn p010_try_new_rejects_short_y_plane() {
+    let y = std::vec![0u16; 10];
+    let uv = std::vec![0x8000u16; 16 * 4];
+    let e = P010Frame::try_new(&y, &uv, 16, 8, 16, 16).unwrap_err();
+    assert!(matches!(e, P010FrameError::YPlaneTooShort { .. }));
+  }
+
+  #[test]
+  fn p010_try_new_rejects_short_uv_plane() {
+    let y = std::vec![0u16; 16 * 8];
+    let uv = std::vec![0x8000u16; 8];
+    let e = P010Frame::try_new(&y, &uv, 16, 8, 16, 16).unwrap_err();
+    assert!(matches!(e, P010FrameError::UvPlaneTooShort { .. }));
+  }
+
+  #[test]
+  #[should_panic(expected = "invalid P010Frame")]
+  fn p010_new_panics_on_invalid() {
+    let y = std::vec![0u16; 10];
+    let uv = std::vec![0x8000u16; 16 * 4];
+    let _ = P010Frame::new(&y, &uv, 16, 8, 16, 16);
+  }
+
+  #[cfg(target_pointer_width = "32")]
+  #[test]
+  fn p010_try_new_rejects_geometry_overflow() {
+    let big: u32 = 0x1_0000;
+    let y: [u16; 0] = [];
+    let uv: [u16; 0] = [];
+    let e = P010Frame::try_new(&y, &uv, big, big, big, big).unwrap_err();
+    assert!(matches!(e, P010FrameError::GeometryOverflow { .. }));
+  }
+
+  #[test]
+  fn p010_try_new_checked_accepts_shifted_samples() {
+    // Valid P010 samples: low 6 bits zero.
+    let (y, uv) = p010_planes();
+    P010Frame::try_new_checked(&y, &uv, 16, 8, 16, 16).expect("shifted samples valid");
+  }
+
+  #[test]
+  fn p010_try_new_checked_rejects_y_low_bits_set() {
+    // A Y sample with low 6 bits set — characteristic of yuv420p10le
+    // packing (value in low 10 bits) accidentally handed to the P010
+    // constructor. `try_new_checked` catches this; plain `try_new`
+    // would let the kernel mask it down and produce wrong colors.
+    let mut y = std::vec![0xFFC0u16; 16 * 8];
+    y[3 * 16 + 5] = 0x03FF; // 10-bit value in low bits — wrong packing
+    let uv = std::vec![0x8000u16; 16 * 4];
+    let e = P010Frame::try_new_checked(&y, &uv, 16, 8, 16, 16).unwrap_err();
+    match e {
+      P010FrameError::SampleLowBitsSet { plane, value, .. } => {
+        assert_eq!(plane, P010FramePlane::Y);
+        assert_eq!(value, 0x03FF);
+      }
+      other => panic!("expected SampleLowBitsSet, got {other:?}"),
+    }
+  }
+
+  #[test]
+  fn p010_try_new_checked_rejects_uv_plane_sample() {
+    let y = std::vec![0xFFC0u16; 16 * 8];
+    let mut uv = std::vec![0x8000u16; 16 * 4];
+    uv[2 * 16 + 3] = 0x0001; // low bit set
+    let e = P010Frame::try_new_checked(&y, &uv, 16, 8, 16, 16).unwrap_err();
+    assert!(matches!(
+      e,
+      P010FrameError::SampleLowBitsSet {
+        plane: P010FramePlane::Uv,
+        value: 0x0001,
+        ..
+      }
+    ));
+  }
+
+  #[test]
+  fn p010_try_new_checked_reports_geometry_errors_first() {
+    let y = std::vec![0u16; 10]; // Too small.
+    let uv = std::vec![0x8000u16; 16 * 4];
+    let e = P010Frame::try_new_checked(&y, &uv, 16, 8, 16, 16).unwrap_err();
+    assert!(matches!(e, P010FrameError::YPlaneTooShort { .. }));
   }
 }

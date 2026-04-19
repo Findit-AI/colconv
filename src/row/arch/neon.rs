@@ -488,6 +488,50 @@ fn clamp_u10(v: int16x8_t, zero_v: int16x8_t, max_v: int16x8_t) -> uint16x8_t {
   unsafe { vreinterpretq_u16_s16(vminq_s16(vmaxq_s16(v, zero_v), max_v)) }
 }
 
+/// NEON P010 → packed **8‑bit** RGB. **Stub**: currently delegates
+/// to the scalar reference. Replaced with a real NEON implementation
+/// as part of the Ship 3 per‑backend rollout.
+///
+/// # Safety
+///
+/// 1. **NEON must be available on the current CPU.**
+/// 2. `width & 1 == 0`.
+/// 3. `y.len() >= width`, `uv_half.len() >= width`,
+///    `rgb_out.len() >= 3 * width`.
+#[inline]
+#[target_feature(enable = "neon")]
+pub(crate) unsafe fn p010_to_rgb_row(
+  y: &[u16],
+  uv_half: &[u16],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  scalar::p010_to_rgb_row(y, uv_half, rgb_out, width, matrix, full_range);
+}
+
+/// NEON P010 → packed **10‑bit `u16`** RGB. **Stub**.
+///
+/// # Safety
+///
+/// 1. **NEON must be available on the current CPU.**
+/// 2. `width & 1 == 0`.
+/// 3. `y.len() >= width`, `uv_half.len() >= width`,
+///    `rgb_out.len() >= 3 * width`.
+#[inline]
+#[target_feature(enable = "neon")]
+pub(crate) unsafe fn p010_to_rgb_u16_row(
+  y: &[u16],
+  uv_half: &[u16],
+  rgb_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  scalar::p010_to_rgb_u16_row(y, uv_half, rgb_out, width, matrix, full_range);
+}
+
 /// NEON NV12 → packed RGB (UV-ordered chroma). Thin wrapper over the
 /// shared [`nv12_or_nv21_to_rgb_row_impl`] with `SWAP_UV = false`.
 ///

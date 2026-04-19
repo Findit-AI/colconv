@@ -500,6 +500,41 @@ unsafe fn write_rgb_u16_8(r: v128, g: v128, b: v128, ptr: *mut u16) {
   }
 }
 
+/// WASM simd128 P010 → packed **8‑bit** RGB. **Stub**.
+///
+/// # Safety
+///
+/// 1. **simd128 must be enabled at compile time.**
+/// 2. `width & 1 == 0`.
+/// 3. `y.len() >= width`, `uv_half.len() >= width`,
+///    `rgb_out.len() >= 3 * width`.
+#[inline]
+#[target_feature(enable = "simd128")]
+pub(crate) unsafe fn p010_to_rgb_row(
+  y: &[u16],
+  uv_half: &[u16],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  scalar::p010_to_rgb_row(y, uv_half, rgb_out, width, matrix, full_range);
+}
+
+/// WASM simd128 P010 → packed **10‑bit `u16`** RGB. **Stub**.
+#[inline]
+#[target_feature(enable = "simd128")]
+pub(crate) unsafe fn p010_to_rgb_u16_row(
+  y: &[u16],
+  uv_half: &[u16],
+  rgb_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  scalar::p010_to_rgb_u16_row(y, uv_half, rgb_out, width, matrix, full_range);
+}
+
 /// WASM simd128 NV12 → packed RGB (UV-ordered chroma). Thin wrapper
 /// over [`nv12_or_nv21_to_rgb_row_impl`] with `SWAP_UV = false`.
 ///

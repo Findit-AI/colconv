@@ -526,6 +526,41 @@ fn clamp_u10_x16(v: __m256i, zero_v: __m256i, max_v: __m256i) -> __m256i {
   unsafe { _mm256_min_epi16(_mm256_max_epi16(v, zero_v), max_v) }
 }
 
+/// AVX2 P010 → packed **8‑bit** RGB. **Stub**.
+///
+/// # Safety
+///
+/// 1. **AVX2 must be available on the current CPU.**
+/// 2. `width & 1 == 0`.
+/// 3. `y.len() >= width`, `uv_half.len() >= width`,
+///    `rgb_out.len() >= 3 * width`.
+#[inline]
+#[target_feature(enable = "avx2")]
+pub(crate) unsafe fn p010_to_rgb_row(
+  y: &[u16],
+  uv_half: &[u16],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  scalar::p010_to_rgb_row(y, uv_half, rgb_out, width, matrix, full_range);
+}
+
+/// AVX2 P010 → packed **10‑bit `u16`** RGB. **Stub**.
+#[inline]
+#[target_feature(enable = "avx2")]
+pub(crate) unsafe fn p010_to_rgb_u16_row(
+  y: &[u16],
+  uv_half: &[u16],
+  rgb_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  scalar::p010_to_rgb_u16_row(y, uv_half, rgb_out, width, matrix, full_range);
+}
+
 /// AVX2 NV12 → packed RGB (UV-ordered chroma). Thin wrapper over
 /// [`nv12_or_nv21_to_rgb_row_impl`] with `SWAP_UV = false`.
 ///
