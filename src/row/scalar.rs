@@ -175,6 +175,185 @@ fn clamp_u8(v: i32) -> u8 {
   v.clamp(0, 255) as u8
 }
 
+// ---- High-bit-depth YUV 4:2:0 → RGB (BITS ∈ {10, 12, 14}) -------------
+
+/// Converts one row of high-bit-depth 4:2:0 YUV (`u16` samples in the
+/// low `BITS` bits of each element) directly to **8-bit** packed RGB.
+///
+/// `BITS` is the active input bit depth (10/12/14). Chroma bias is
+/// `128 << (BITS - 8)` and the Q15 coefficients plus i32 intermediates
+/// work unchanged across all three depths — only the range‑scaling
+/// params ([`range_params_n`]) change with `BITS`. 16‑bit input is
+/// not handled here because the i32 chroma sum would overflow.
+///
+/// Output semantics match [`yuv_420_to_rgb_row`]: the final clamp is
+/// to `[0, 255]`, so the scale inside [`range_params_n`] targets an
+/// 8‑bit output range — the kernel sheds the extra `BITS - 8` bits of
+/// source precision inline rather than converting first at `BITS` and
+/// then downshifting. This keeps the fast path a single Q15 shift.
+///
+/// # Panics (debug builds)
+///
+/// - `width` must be even.
+/// - `y.len() >= width`, `u_half.len() >= width / 2`,
+///   `v_half.len() >= width / 2`, `rgb_out.len() >= 3 * width`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn yuv_420p_n_to_rgb_row<const BITS: u32>(
+  y: &[u16],
+  u_half: &[u16],
+  v_half: &[u16],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  debug_assert_eq!(width & 1, 0, "YUV 4:2:0 requires even width");
+  debug_assert!(y.len() >= width, "y row too short");
+  debug_assert!(u_half.len() >= width / 2, "u_half row too short");
+  debug_assert!(v_half.len() >= width / 2, "v_half row too short");
+  debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
+
+  let coeffs = Coefficients::for_matrix(matrix);
+  let (y_off, y_scale, c_scale) = range_params_n::<BITS, 8>(full_range);
+  let bias = chroma_bias::<BITS>();
+  const RND: i32 = 1 << 14;
+
+  let mut x = 0;
+  while x < width {
+    let c_idx = x / 2;
+    let u_d = ((u_half[c_idx] as i32 - bias) * c_scale + RND) >> 15;
+    let v_d = ((v_half[c_idx] as i32 - bias) * c_scale + RND) >> 15;
+
+    let r_chroma = (coeffs.r_u() * u_d + coeffs.r_v() * v_d + RND) >> 15;
+    let g_chroma = (coeffs.g_u() * u_d + coeffs.g_v() * v_d + RND) >> 15;
+    let b_chroma = (coeffs.b_u() * u_d + coeffs.b_v() * v_d + RND) >> 15;
+
+    let y0 = ((y[x] as i32 - y_off) * y_scale + RND) >> 15;
+    rgb_out[x * 3] = clamp_u8(y0 + r_chroma);
+    rgb_out[x * 3 + 1] = clamp_u8(y0 + g_chroma);
+    rgb_out[x * 3 + 2] = clamp_u8(y0 + b_chroma);
+
+    let y1 = ((y[x + 1] as i32 - y_off) * y_scale + RND) >> 15;
+    rgb_out[(x + 1) * 3] = clamp_u8(y1 + r_chroma);
+    rgb_out[(x + 1) * 3 + 1] = clamp_u8(y1 + g_chroma);
+    rgb_out[(x + 1) * 3 + 2] = clamp_u8(y1 + b_chroma);
+
+    x += 2;
+  }
+}
+
+/// Converts one row of high‑bit‑depth 4:2:0 YUV to **`u16`** packed
+/// RGB at the **input's native bit depth** (`BITS`). For 10‑bit input
+/// the output lives in `[0, 1023]` with the top 6 bits of each `u16`
+/// zero — the FFmpeg `p010` / `yuv420p10le` convention. 12‑ and
+/// 14‑bit inputs produce `[0, 4095]` / `[0, 16383]` respectively.
+///
+/// This is the fidelity‑preserving path: no bits are shed inside the
+/// conversion, so the output retains the full dynamic range of the
+/// source for HDR tone mapping, 10‑bit scene analysis, and similar
+/// downstream work. Callers who only need 8‑bit output should prefer
+/// [`yuv_420p_n_to_rgb_row`], which is ~2× faster.
+///
+/// # Panics (debug builds)
+///
+/// - `width` must be even.
+/// - `y.len() >= width`, `u_half.len() >= width / 2`,
+///   `v_half.len() >= width / 2`, `rgb_out.len() >= 3 * width`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn yuv_420p_n_to_rgb_u16_row<const BITS: u32>(
+  y: &[u16],
+  u_half: &[u16],
+  v_half: &[u16],
+  rgb_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  debug_assert_eq!(width & 1, 0, "YUV 4:2:0 requires even width");
+  debug_assert!(y.len() >= width, "y row too short");
+  debug_assert!(u_half.len() >= width / 2, "u_half row too short");
+  debug_assert!(v_half.len() >= width / 2, "v_half row too short");
+  debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
+
+  let coeffs = Coefficients::for_matrix(matrix);
+  let (y_off, y_scale, c_scale) = range_params_n::<BITS, BITS>(full_range);
+  let bias = chroma_bias::<BITS>();
+  let out_max: i32 = (1i32 << BITS) - 1;
+  const RND: i32 = 1 << 14;
+
+  let mut x = 0;
+  while x < width {
+    let c_idx = x / 2;
+    let u_d = ((u_half[c_idx] as i32 - bias) * c_scale + RND) >> 15;
+    let v_d = ((v_half[c_idx] as i32 - bias) * c_scale + RND) >> 15;
+
+    let r_chroma = (coeffs.r_u() * u_d + coeffs.r_v() * v_d + RND) >> 15;
+    let g_chroma = (coeffs.g_u() * u_d + coeffs.g_v() * v_d + RND) >> 15;
+    let b_chroma = (coeffs.b_u() * u_d + coeffs.b_v() * v_d + RND) >> 15;
+
+    let y0 = ((y[x] as i32 - y_off) * y_scale + RND) >> 15;
+    rgb_out[x * 3] = (y0 + r_chroma).clamp(0, out_max) as u16;
+    rgb_out[x * 3 + 1] = (y0 + g_chroma).clamp(0, out_max) as u16;
+    rgb_out[x * 3 + 2] = (y0 + b_chroma).clamp(0, out_max) as u16;
+
+    let y1 = ((y[x + 1] as i32 - y_off) * y_scale + RND) >> 15;
+    rgb_out[(x + 1) * 3] = (y1 + r_chroma).clamp(0, out_max) as u16;
+    rgb_out[(x + 1) * 3 + 1] = (y1 + g_chroma).clamp(0, out_max) as u16;
+    rgb_out[(x + 1) * 3 + 2] = (y1 + b_chroma).clamp(0, out_max) as u16;
+
+    x += 2;
+  }
+}
+
+/// Chroma bias for input bit depth `BITS` — `128 << (BITS - 8)`.
+/// 128 for 8‑bit, 512 for 10‑bit, 2048 for 12‑bit, 8192 for 14‑bit.
+/// Exposed at module visibility so SIMD backends can reuse it.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(super) const fn chroma_bias<const BITS: u32>() -> i32 {
+  128i32 << (BITS - 8)
+}
+
+/// Range‑scaling params `(y_off, y_scale_q15, c_scale_q15)` for the
+/// high‑bit‑depth kernel family.
+///
+/// `BITS` is the input bit depth (10 / 12 / 14); `OUT_BITS` is the
+/// target output range (8 for u8‑packed RGB, equal to `BITS` for
+/// native‑depth `u16` output).
+///
+/// The scales are chosen so that after `((sample - y_off) * scale + RND) >> 15`
+/// the result lies in `[0, (1 << OUT_BITS) - 1]` without further
+/// downshifting. This keeps the fast path a single Q15 multiply for
+/// both output widths.
+///
+/// - Full range: luma and chroma both use the same scale, mapping
+///   `[0, in_max]` to `[0, out_max]`. Same shape as 8‑bit's
+///   `(0, 1<<15, 1<<15)` for `BITS == OUT_BITS`.
+/// - Limited range: luma maps `[16·k, 235·k]` to `[0, out_max]`,
+///   chroma maps `[16·k, 240·k]` to `[0, out_max]`, where
+///   `k = 1 << (BITS - 8)`. Matches FFmpeg's `AVCOL_RANGE_MPEG`
+///   semantics.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(super) const fn range_params_n<const BITS: u32, const OUT_BITS: u32>(
+  full_range: bool,
+) -> (i32, i32, i32) {
+  let in_max: i64 = (1i64 << BITS) - 1;
+  let out_max: i64 = (1i64 << OUT_BITS) - 1;
+  if full_range {
+    // `scale = round((out_max << 15) / in_max)`. For `BITS == OUT_BITS`
+    // the quotient is exactly `1 << 15` (no rounding needed); for
+    // 10‑bit→8‑bit it's `(255 << 15) / 1023 ≈ 8167`.
+    let scale = ((out_max << 15) + in_max / 2) / in_max;
+    (0, scale as i32, scale as i32)
+  } else {
+    let y_off = 16i32 << (BITS - 8);
+    let y_range: i64 = 219i64 << (BITS - 8);
+    let c_range: i64 = 224i64 << (BITS - 8);
+    let y_scale = ((out_max << 15) + y_range / 2) / y_range;
+    let c_scale = ((out_max << 15) + c_range / 2) / c_range;
+    (y_off, y_scale as i32, c_scale as i32)
+  }
+}
+
 /// Range-scaling params: `(y_off, y_scale_q15, c_scale_q15)`.
 ///
 /// Full range: no offset, unit scales (Q15 = 2^15).
@@ -619,5 +798,148 @@ mod tests {
     let (mut h, mut s, mut v) = ([0u8; 1], [0u8; 1], [0u8; 1]);
     rgb_to_hsv_row(&rgb, &mut h, &mut s, &mut v, 1);
     assert_eq!((h[0], s[0], v[0]), (120, 255, 255));
+  }
+
+  // ---- yuv_420p_n_to_rgb_row (10-bit → u8) -----------------------------
+
+  #[test]
+  fn yuv420p10_rgb_black_full_range() {
+    // Y=0, neutral chroma (512 in 10-bit) → black.
+    let y = [0u16; 4];
+    let u = [512u16; 2];
+    let v = [512u16; 2];
+    let mut rgb = [0u8; 12];
+    yuv_420p_n_to_rgb_row::<10>(&y, &u, &v, &mut rgb, 4, ColorMatrix::Bt601, true);
+    assert!(rgb.iter().all(|&c| c == 0), "got {rgb:?}");
+  }
+
+  #[test]
+  fn yuv420p10_rgb_white_full_range() {
+    // 10-bit full-range white is Y=1023.
+    let y = [1023u16; 4];
+    let u = [512u16; 2];
+    let v = [512u16; 2];
+    let mut rgb = [0u8; 12];
+    yuv_420p_n_to_rgb_row::<10>(&y, &u, &v, &mut rgb, 4, ColorMatrix::Bt601, true);
+    assert!(rgb.iter().all(|&c| c == 255), "got {rgb:?}");
+  }
+
+  #[test]
+  fn yuv420p10_rgb_gray_is_gray() {
+    // Mid-gray 10-bit Y=512 ↔ 8-bit 128. Within ±1 for Q15 rounding.
+    let y = [512u16; 4];
+    let u = [512u16; 2];
+    let v = [512u16; 2];
+    let mut rgb = [0u8; 12];
+    yuv_420p_n_to_rgb_row::<10>(&y, &u, &v, &mut rgb, 4, ColorMatrix::Bt601, true);
+    for x in 0..4 {
+      let (r, g, b) = (rgb[x * 3], rgb[x * 3 + 1], rgb[x * 3 + 2]);
+      assert_eq!(r, g);
+      assert_eq!(g, b);
+      assert!(r.abs_diff(128) <= 1, "got {r}");
+    }
+  }
+
+  #[test]
+  fn yuv420p10_rgb_limited_range_black_and_white() {
+    // 10-bit limited: Y=64 → black, Y=940 → white.
+    let y = [64u16, 64, 940, 940];
+    let u = [512u16; 2];
+    let v = [512u16; 2];
+    let mut rgb = [0u8; 12];
+    yuv_420p_n_to_rgb_row::<10>(&y, &u, &v, &mut rgb, 4, ColorMatrix::Bt601, false);
+    assert_eq!((rgb[0], rgb[1], rgb[2]), (0, 0, 0));
+    assert_eq!((rgb[3], rgb[4], rgb[5]), (0, 0, 0));
+    assert_eq!((rgb[6], rgb[7], rgb[8]), (255, 255, 255));
+    assert_eq!((rgb[9], rgb[10], rgb[11]), (255, 255, 255));
+  }
+
+  #[test]
+  fn yuv420p10_rgb_chroma_shared_across_pair() {
+    // Two 10-bit Y values sharing chroma: output is gray = Y>>2.
+    let y = [200u16, 800, 200, 800];
+    let u = [512u16; 2];
+    let v = [512u16; 2];
+    let mut rgb = [0u8; 12];
+    yuv_420p_n_to_rgb_row::<10>(&y, &u, &v, &mut rgb, 4, ColorMatrix::Bt601, true);
+    // Full-range 10→8 scale = 255/1023, so Y=200 → 50, Y=800 → 199.4 → 199.
+    // Allow ±1 for Q15 rounding.
+    assert!(rgb[0].abs_diff(50) <= 1, "got {}", rgb[0]);
+    assert!(rgb[3].abs_diff(199) <= 1, "got {}", rgb[3]);
+    assert!(rgb[6].abs_diff(50) <= 1, "got {}", rgb[6]);
+    assert!(rgb[9].abs_diff(199) <= 1, "got {}", rgb[9]);
+  }
+
+  // ---- yuv_420p_n_to_rgb_u16_row (10-bit → 10-bit u16) ----------------
+
+  #[test]
+  fn yuv420p10_rgb_u16_black_full_range() {
+    let y = [0u16; 4];
+    let u = [512u16; 2];
+    let v = [512u16; 2];
+    let mut rgb = [0u16; 12];
+    yuv_420p_n_to_rgb_u16_row::<10>(&y, &u, &v, &mut rgb, 4, ColorMatrix::Bt601, true);
+    assert!(rgb.iter().all(|&c| c == 0), "got {rgb:?}");
+  }
+
+  #[test]
+  fn yuv420p10_rgb_u16_white_full_range() {
+    // 10-bit input Y=1023, full-range scale=1 → output Y=1023 on each channel.
+    let y = [1023u16; 4];
+    let u = [512u16; 2];
+    let v = [512u16; 2];
+    let mut rgb = [0u16; 12];
+    yuv_420p_n_to_rgb_u16_row::<10>(&y, &u, &v, &mut rgb, 4, ColorMatrix::Bt601, true);
+    assert!(rgb.iter().all(|&c| c == 1023), "got {rgb:?}");
+  }
+
+  #[test]
+  fn yuv420p10_rgb_u16_limited_range_endpoints() {
+    // Limited-range: Y=64 → 0, Y=940 → 1023 in 10-bit output.
+    let y = [64u16, 940];
+    let u = [512u16; 1];
+    let v = [512u16; 1];
+    let mut rgb = [0u16; 6];
+    yuv_420p_n_to_rgb_u16_row::<10>(&y, &u, &v, &mut rgb, 2, ColorMatrix::Bt709, false);
+    assert_eq!((rgb[0], rgb[1], rgb[2]), (0, 0, 0));
+    assert_eq!((rgb[3], rgb[4], rgb[5]), (1023, 1023, 1023));
+  }
+
+  #[test]
+  fn yuv420p10_rgb_u16_preserves_full_10bit_precision() {
+    // Sanity: the u16 path retains native-depth precision, so two
+    // inputs that round to the same u8 are distinguishable in u16.
+    // Full-range Y=200 vs Y=201: same u8 output (50 vs 50) but
+    // distinct u16 outputs (200 vs 201).
+    let y = [200u16, 201];
+    let u = [512u16; 1];
+    let v = [512u16; 1];
+    let mut rgb8 = [0u8; 6];
+    let mut rgb16 = [0u16; 6];
+    yuv_420p_n_to_rgb_row::<10>(&y, &u, &v, &mut rgb8, 2, ColorMatrix::Bt601, true);
+    yuv_420p_n_to_rgb_u16_row::<10>(&y, &u, &v, &mut rgb16, 2, ColorMatrix::Bt601, true);
+    assert_eq!(rgb8[0], rgb8[3]);
+    assert_ne!(rgb16[0], rgb16[3]);
+  }
+
+  #[test]
+  fn yuv420p10_bt709_ycgco_differ_for_chroma() {
+    // Non-neutral chroma — different matrices produce different RGB.
+    let y = [512u16; 2];
+    let u = [512u16; 1];
+    let v = [800u16; 1];
+    let mut bt709 = [0u8; 6];
+    let mut ycgco = [0u8; 6];
+    yuv_420p_n_to_rgb_row::<10>(&y, &u, &v, &mut bt709, 2, ColorMatrix::Bt709, true);
+    yuv_420p_n_to_rgb_row::<10>(&y, &u, &v, &mut ycgco, 2, ColorMatrix::YCgCo, true);
+    let sad: i32 = bt709
+      .iter()
+      .zip(ycgco.iter())
+      .map(|(a, b)| (*a as i32 - *b as i32).abs())
+      .sum();
+    assert!(
+      sad > 20,
+      "matrices should materially differ: {bt709:?} vs {ycgco:?}"
+    );
   }
 }

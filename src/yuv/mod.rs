@@ -8,13 +8,17 @@
 //!   default).
 //! - [`Nv21`](crate::yuv::Nv21) — 4:2:0 semi‑planar with **VU**-ordered
 //!   chroma (Android MediaCodec default).
+//! - [`Yuv420p10`](crate::yuv::Yuv420p10) — 4:2:0 planar at 10 bits
+//!   per sample (HDR10 / 10‑bit SDR software decode).
 //!
 //! Other families land in follow-up commits.
 
 mod nv12;
 mod nv21;
 mod yuv420p;
+mod yuv420p10;
 
 pub use nv12::{Nv12, Nv12Row, Nv12Sink, nv12_to};
 pub use nv21::{Nv21, Nv21Row, Nv21Sink, nv21_to};
 pub use yuv420p::{Yuv420p, Yuv420pRow, Yuv420pSink, yuv420p_to};
+pub use yuv420p10::{Yuv420p10, Yuv420p10Row, Yuv420p10Sink, yuv420p10_to};
