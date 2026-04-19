@@ -47,8 +47,14 @@ thiserror = { version = "2", default-features = false }
 libm = { version = "0.2", optional = true }
 
 [dev-dependencies]
-criterion = "0.8"
 tempfile = "3"
+
+# Criterion pulls in rayon, which doesn't build for the wasm32‑wasi*
+# targets we use to run the simd128 backends under wasmtime. Gate it
+# to non‑wasm hosts — benches never run on wasm anyway (they need
+# system threading / timing that the wasi runner doesn't expose).
+[target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
+criterion = "0.8"
 
 [profile.bench]
 opt-level = 3

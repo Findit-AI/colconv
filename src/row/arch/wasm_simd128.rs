@@ -1324,11 +1324,14 @@ mod tests {
   // ---- yuv420p10 scalar-equivalence -----------------------------------
   //
   // These tests compile only for `target_arch = "wasm32"` (via the
-  // outer `target_feature = "simd128"` gate on the module). CI today
-  // builds the wasm target but does not execute its tests — running
-  // them requires a wasm runtime (wasmtime with wasi‑test‑runner, or
-  // `wasm-pack test --node`). The test code is written so it drops
-  // in cleanly once that runtime is wired.
+  // outer `target_feature = "simd128"` gate on the module). CI
+  // executes them under wasmtime in the `test-wasm-simd128` job
+  // (see `.github/workflows/ci.yml`): the lib is compiled for
+  // `wasm32-wasip1` with `-C target-feature=+simd128` and
+  // `CARGO_TARGET_WASM32_WASIP1_RUNNER=wasmtime run --` passes each
+  // compiled `.wasm` test binary to wasmtime. Every scalar‑
+  // equivalence check below runs on real SIMD instructions, not
+  // just a compile check.
 
   fn p10_plane(n: usize, seed: usize) -> std::vec::Vec<u16> {
     (0..n)
