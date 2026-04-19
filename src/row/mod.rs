@@ -314,6 +314,190 @@ pub fn nv21_to_rgb_row(
   scalar::nv21_to_rgb_row(y, vu_half, rgb_out, width, matrix, full_range);
 }
 
+/// Converts one row of **10‑bit** YUV 4:2:0 to packed **8‑bit** RGB.
+///
+/// Samples are `u16` with 10 active bits in the low bits of each
+/// element. Output is packed `R, G, B` bytes (`3 * width` bytes),
+/// with the conversion clamping to `[0, 255]` — the native‑depth
+/// path is [`yuv420p10_to_rgb_u16_row`].
+///
+/// See `scalar::yuv_420p_n_to_rgb_row` for the full semantic
+/// specification. `use_simd = false` forces the scalar reference
+/// path.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn yuv420p10_to_rgb_row(
+  y: &[u16],
+  u_half: &[u16],
+  v_half: &[u16],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  use_simd: bool,
+) {
+  assert_eq!(width & 1, 0, "YUV 4:2:0 requires even width");
+  let rgb_min = rgb_row_bytes(width);
+  assert!(y.len() >= width, "y row too short");
+  assert!(u_half.len() >= width / 2, "u_half row too short");
+  assert!(v_half.len() >= width / 2, "v_half row too short");
+  assert!(rgb_out.len() >= rgb_min, "rgb_out row too short");
+
+  if use_simd {
+    cfg_select! {
+      target_arch = "aarch64" => {
+        if neon_available() {
+          // SAFETY: NEON verified on this CPU; bounds / parity are
+          // the caller's obligation (asserted above).
+          unsafe {
+            arch::neon::yuv420p10_to_rgb_row(y, u_half, v_half, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+      },
+      target_arch = "x86_64" => {
+        if avx512_available() {
+          // SAFETY: AVX‑512BW verified.
+          unsafe {
+            arch::x86_avx512::yuv420p10_to_rgb_row(
+              y, u_half, v_half, rgb_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+        if avx2_available() {
+          // SAFETY: AVX2 verified.
+          unsafe {
+            arch::x86_avx2::yuv420p10_to_rgb_row(
+              y, u_half, v_half, rgb_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+        if sse41_available() {
+          // SAFETY: SSE4.1 verified.
+          unsafe {
+            arch::x86_sse41::yuv420p10_to_rgb_row(
+              y, u_half, v_half, rgb_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+      },
+      target_arch = "wasm32" => {
+        if simd128_available() {
+          // SAFETY: simd128 compile‑time verified.
+          unsafe {
+            arch::wasm_simd128::yuv420p10_to_rgb_row(
+              y, u_half, v_half, rgb_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+      },
+      _ => {}
+    }
+  }
+
+  scalar::yuv_420p_n_to_rgb_row::<10>(y, u_half, v_half, rgb_out, width, matrix, full_range);
+}
+
+/// Converts one row of **10‑bit** YUV 4:2:0 to **native‑depth** packed
+/// RGB `u16` (10‑bit values in the **low** 10 bits of each `u16`,
+/// matching FFmpeg's `yuv420p10le` convention). Use this for lossless
+/// downstream HDR processing when the consumer expects low‑bit‑packed
+/// samples.
+///
+/// Output is packed `R, G, B` triples: `rgb_out[3 * width]` `u16`
+/// elements, each in `[0, 1023]` with the upper 6 bits zero.
+///
+/// This is **not** the FFmpeg `p010` layout — `p010` stores samples
+/// in the **high** 10 bits of each `u16` (`sample << 6`). Callers
+/// feeding this output into a p010 consumer must shift left by 6
+/// before handing off.
+///
+/// See `scalar::yuv_420p_n_to_rgb_u16_row` for the full semantic
+/// specification. `use_simd = false` forces the scalar reference
+/// path.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn yuv420p10_to_rgb_u16_row(
+  y: &[u16],
+  u_half: &[u16],
+  v_half: &[u16],
+  rgb_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  use_simd: bool,
+) {
+  assert_eq!(width & 1, 0, "YUV 4:2:0 requires even width");
+  let rgb_min = rgb_row_elems(width);
+  assert!(y.len() >= width, "y row too short");
+  assert!(u_half.len() >= width / 2, "u_half row too short");
+  assert!(v_half.len() >= width / 2, "v_half row too short");
+  assert!(rgb_out.len() >= rgb_min, "rgb_out row too short");
+
+  if use_simd {
+    cfg_select! {
+      target_arch = "aarch64" => {
+        if neon_available() {
+          // SAFETY: NEON verified.
+          unsafe {
+            arch::neon::yuv420p10_to_rgb_u16_row(
+              y, u_half, v_half, rgb_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+      },
+      target_arch = "x86_64" => {
+        if avx512_available() {
+          // SAFETY: AVX‑512BW verified.
+          unsafe {
+            arch::x86_avx512::yuv420p10_to_rgb_u16_row(
+              y, u_half, v_half, rgb_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+        if avx2_available() {
+          // SAFETY: AVX2 verified.
+          unsafe {
+            arch::x86_avx2::yuv420p10_to_rgb_u16_row(
+              y, u_half, v_half, rgb_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+        if sse41_available() {
+          // SAFETY: SSE4.1 verified.
+          unsafe {
+            arch::x86_sse41::yuv420p10_to_rgb_u16_row(
+              y, u_half, v_half, rgb_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+      },
+      target_arch = "wasm32" => {
+        if simd128_available() {
+          // SAFETY: simd128 compile‑time verified.
+          unsafe {
+            arch::wasm_simd128::yuv420p10_to_rgb_u16_row(
+              y, u_half, v_half, rgb_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+      },
+      _ => {}
+    }
+  }
+
+  scalar::yuv_420p_n_to_rgb_u16_row::<10>(y, u_half, v_half, rgb_out, width, matrix, full_range);
+}
+
 /// Converts one row of packed RGB to planar HSV (OpenCV 8‑bit
 /// encoding). See `scalar::rgb_to_hsv_row` for semantics.
 ///
@@ -484,6 +668,21 @@ fn swap_rb_channels_row(input: &[u8], output: &mut [u8], width: usize, use_simd:
 /// out‑of‑bounds writes downstream.
 #[cfg_attr(not(tarpaulin), inline(always))]
 fn rgb_row_bytes(width: usize) -> usize {
+  match width.checked_mul(3) {
+    Some(n) => n,
+    None => panic!("width ({width}) × 3 overflows usize"),
+  }
+}
+
+/// Element count of one packed `u16`‑RGB row (`width × 3`). Identical
+/// math to [`rgb_row_bytes`] — the returned value is in `u16`
+/// elements, not bytes. Callers use it to size `&mut [u16]` buffers
+/// for the `u16` output path. `width × 3` overflow still matters on
+/// 32‑bit targets: the product names the number of elements the
+/// caller allocates, and downstream SIMD kernels index with it
+/// directly without re‑multiplying.
+#[cfg_attr(not(tarpaulin), inline(always))]
+fn rgb_row_elems(width: usize) -> usize {
   match width.checked_mul(3) {
     Some(n) => n,
     None => panic!("width ({width}) × 3 overflows usize"),

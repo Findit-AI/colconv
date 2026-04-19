@@ -200,6 +200,52 @@ jobs:
           export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER="$SDE_PATH/sde64 -icx --"
           cargo test --all-features
 
+  # Run the wasm32 simd128 lib tests under wasmtime. The `cross` job
+  # above only builds for wasm targets; without this job the
+  # `wasm_simd128` backend's handcrafted swizzles / clamps / u16
+  # stores were dispatchable in production (under
+  # `-C target-feature=+simd128`) but never runtime‑verified. This job
+  # runs every scalar‑equivalence test — including the new yuv420p10
+  # u8 / u16 output paths and the adversarial out‑of‑range regressions
+  # — against an actual wasm runtime.
+  #
+  # `wasm32-wasip1` is the wasi preview‑1 target (libstd + file/env
+  # APIs that the test harness needs). Criterion is gated out of the
+  # wasm dev‑deps in Cargo.toml because rayon doesn't build for wasi.
+  test-wasm-simd128:
+    name: test-wasm-simd128
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Cache cargo build and registry
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-test-wasm-simd128-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-test-wasm-simd128-
+      - name: Install Rust + wasm32-wasip1
+        run: |
+          rustup update stable --no-self-update
+          rustup default stable
+          rustup target add wasm32-wasip1
+      - name: Install wasmtime
+        run: |
+          curl https://wasmtime.dev/install.sh -sSf | bash
+          echo "$HOME/.wasmtime/bin" >> "$GITHUB_PATH"
+      - name: Run lib tests under wasmtime (simd128)
+        env:
+          # `cargo test` hands the compiled `.wasm` test binary as the
+          # first positional arg after `--`; wasmtime's `run --`
+          # interprets that as the module path. We don't need filesystem
+          # or env access — the tests are pure compute.
+          CARGO_TARGET_WASM32_WASIP1_RUNNER: wasmtime run --
+          RUSTFLAGS: -C target-feature=+simd128
+        run: cargo test --lib --target wasm32-wasip1
+
   sanitizer:
     name: sanitizer
     runs-on: ubuntu-latest

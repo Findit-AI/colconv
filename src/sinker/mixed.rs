@@ -18,8 +18,14 @@ use thiserror::Error;
 
 use crate::{
   HsvBuffers, PixelSink, SourceFormat,
-  row::{nv12_to_rgb_row, nv21_to_rgb_row, rgb_to_hsv_row, yuv_420_to_rgb_row},
-  yuv::{Nv12, Nv12Row, Nv12Sink, Nv21, Nv21Row, Nv21Sink, Yuv420p, Yuv420pRow, Yuv420pSink},
+  row::{
+    nv12_to_rgb_row, nv21_to_rgb_row, rgb_to_hsv_row, yuv_420_to_rgb_row, yuv420p10_to_rgb_row,
+    yuv420p10_to_rgb_u16_row,
+  },
+  yuv::{
+    Nv12, Nv12Row, Nv12Sink, Nv21, Nv21Row, Nv21Sink, Yuv420p, Yuv420p10, Yuv420p10Row,
+    Yuv420p10Sink, Yuv420pRow, Yuv420pSink,
+  },
 };
 
 /// Errors returned by [`MixedSinker`] configuration and per-frame
@@ -55,6 +61,19 @@ pub enum MixedSinkerError {
     /// Minimum bytes required (`width × height × 3`).
     expected: usize,
     /// Bytes supplied.
+    actual: usize,
+  },
+
+  /// `u16` RGB buffer attached via [`MixedSinker::with_rgb_u16`] /
+  /// [`MixedSinker::set_rgb_u16`] is shorter than `width × height × 3`
+  /// `u16` elements. Only the high‑bit‑depth source impls
+  /// (currently [`Yuv420p10`](crate::yuv::Yuv420p10)) write into this
+  /// buffer.
+  #[error("MixedSinker rgb_u16 buffer too short: expected >= {expected} elements, got {actual}")]
+  RgbU16BufferTooShort {
+    /// Minimum `u16` elements required (`width × height × 3`).
+    expected: usize,
+    /// `u16` elements supplied.
     actual: usize,
   },
 
@@ -97,17 +116,24 @@ pub enum MixedSinkerError {
   /// direct `process` callers that bypass the walker (hand-crafted
   /// rows, replayed rows, etc.) before a wrong-shaped slice reaches
   /// an unsafe SIMD kernel.
+  ///
+  /// Lengths are expressed in **slice elements** — `u8` bytes for
+  /// the 8‑bit source rows (Y, U/V half, UV/VU half) and `u16`
+  /// elements for the 10‑bit source rows (Y10, U/V half 10). The
+  /// message deliberately says "elements" rather than "bytes" so the
+  /// same variant can serve both the `u8` and `u16` row families.
   #[error(
-    "MixedSinker row shape mismatch at row {row}: {which} slice has {actual} bytes, expected {expected}"
+    "MixedSinker row shape mismatch at row {row}: {which} slice has {actual} elements, expected {expected}"
   )]
   RowShapeMismatch {
     /// Which slice mismatched. See [`RowSlice`] for variants.
     which: RowSlice,
     /// Row index reported by the offending row.
     row: usize,
-    /// Expected slice length in bytes (given the sink's configured width).
+    /// Expected slice length in elements of the slice's element type
+    /// (`u8` for 8‑bit source rows; `u16` for 10‑bit source rows).
     expected: usize,
-    /// Actual slice length supplied by the row.
+    /// Actual slice length in the same unit as `expected`.
     actual: usize,
   },
 
@@ -181,6 +207,18 @@ pub enum RowSlice {
   /// pairs — byte order swapped relative to [`Self::UvHalf`].
   #[display("VU Half")]
   VuHalf,
+  /// Full‑width Y row of a **10‑bit** planar source ([`Yuv420p10`]).
+  /// `u16` samples, `width` elements.
+  #[display("Y10")]
+  Y10,
+  /// Half‑width U row of a **10‑bit** planar source. `u16` samples,
+  /// `width / 2` elements.
+  #[display("U Half 10")]
+  UHalf10,
+  /// Half‑width V row of a **10‑bit** planar source. `u16` samples,
+  /// `width / 2` elements.
+  #[display("V Half 10")]
+  VHalf10,
 }
 
 /// A sink that writes any subset of `{RGB, Luma, HSV}` into
@@ -206,6 +244,7 @@ pub enum RowSlice {
 /// [`Nv21`](crate::yuv::Nv21).
 pub struct MixedSinker<'a, F: SourceFormat> {
   rgb: Option<&'a mut [u8]>,
+  rgb_u16: Option<&'a mut [u16]>,
   luma: Option<&'a mut [u8]>,
   hsv: Option<HsvBuffers<'a>>,
   width: usize,
@@ -231,6 +270,7 @@ impl<F: SourceFormat> MixedSinker<'_, F> {
   pub fn new(width: usize, height: usize) -> Self {
     Self {
       rgb: None,
+      rgb_u16: None,
       luma: None,
       hsv: None,
       width,
@@ -241,10 +281,20 @@ impl<F: SourceFormat> MixedSinker<'_, F> {
     }
   }
 
-  /// Returns `true` iff the sinker will write RGB.
+  /// Returns `true` iff the sinker will write 8‑bit RGB.
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn produces_rgb(&self) -> bool {
     self.rgb.is_some()
+  }
+
+  /// Returns `true` iff the sinker will write `u16` RGB at the
+  /// source's native bit depth. Only high‑bit‑depth source impls
+  /// (currently [`Yuv420p10`](crate::yuv::Yuv420p10)) honor this
+  /// buffer — attaching it on an 8‑bit source format is legal but
+  /// no writes occur.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn produces_rgb_u16(&self) -> bool {
+    self.rgb_u16.is_some()
   }
 
   /// Returns `true` iff the sinker will write luma.
@@ -337,6 +387,14 @@ impl<'a, F: SourceFormat> MixedSinker<'a, F> {
     self.rgb = Some(buf);
     Ok(self)
   }
+
+  // NOTE: `with_rgb_u16` / `set_rgb_u16` are **not** declared here.
+  // They live on a format‑specific impl block further down (currently
+  // [`MixedSinker<Yuv420p10>`]) so the buffer can only be attached to
+  // sink types whose `PixelSink` impl actually writes it. Attaching a
+  // `u16` RGB buffer to a [`Yuv420p`] / [`Nv12`] / [`Nv21`] sink is a
+  // compile error, not a silent stale‑state bug. Future high‑bit‑depth
+  // markers (12‑bit, 14‑bit, P010) will add their own impl blocks.
 
   /// Attaches a single-plane luma output buffer.
   /// Returns `Err(LumaBufferTooShort)` if `buf.len() < width × height`,
@@ -835,6 +893,221 @@ impl PixelSink for MixedSinker<'_, Nv21> {
   }
 }
 
+// ---- Yuv420p10 impl -----------------------------------------------------
+
+impl<'a> MixedSinker<'a, Yuv420p10> {
+  /// Attaches a packed **`u16`** RGB output buffer. Only available on
+  /// sinkers whose source format populates native‑depth `u16` RGB —
+  /// calling `with_rgb_u16` on an 8‑bit source sinker (e.g.
+  /// [`MixedSinker<Yuv420p>`]) is a compile error rather than a
+  /// silent no‑op that would leave the caller's buffer stale.
+  ///
+  /// Length is measured in `u16` **elements** (not bytes): minimum
+  /// `width × height × 3`. Each element carries a 10‑bit value in
+  /// the **low** 10 bits (upper 6 bits zero), matching FFmpeg's
+  /// `yuv420p10le` convention. This is **not** the `p010` layout
+  /// (which stores samples in the high 10 bits); callers feeding a
+  /// p010 consumer must shift the output left by 6.
+  ///
+  /// Returns `Err(RgbU16BufferTooShort)` if
+  /// `buf.len() < width × height × 3`, or `Err(GeometryOverflow)`
+  /// on 32‑bit targets when the product overflows.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn with_rgb_u16(mut self, buf: &'a mut [u16]) -> Result<Self, MixedSinkerError> {
+    self.set_rgb_u16(buf)?;
+    Ok(self)
+  }
+
+  /// In-place variant of [`with_rgb_u16`](Self::with_rgb_u16). The
+  /// required length is measured in `u16` **elements**, not bytes.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn set_rgb_u16(&mut self, buf: &'a mut [u16]) -> Result<&mut Self, MixedSinkerError> {
+    // Packed RGB requires `width × height × 3` channel values —
+    // that's the same count whether the element type is `u8` or
+    // `u16`, so the [`Self::frame_bytes`] helper (named for the u8
+    // RGB path's byte count) gives the element count here too. No
+    // size conversion needed.
+    let expected_elements = self.frame_bytes(3)?;
+    if buf.len() < expected_elements {
+      return Err(MixedSinkerError::RgbU16BufferTooShort {
+        expected: expected_elements,
+        actual: buf.len(),
+      });
+    }
+    self.rgb_u16 = Some(buf);
+    Ok(self)
+  }
+}
+
+impl Yuv420p10Sink for MixedSinker<'_, Yuv420p10> {}
+
+impl PixelSink for MixedSinker<'_, Yuv420p10> {
+  type Input<'r> = Yuv420p10Row<'r>;
+  type Error = MixedSinkerError;
+
+  fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
+    if self.width & 1 != 0 {
+      return Err(MixedSinkerError::OddWidth { width: self.width });
+    }
+    check_dimensions_match(self.width, self.height, width, height)
+  }
+
+  fn process(&mut self, row: Yuv420p10Row<'_>) -> Result<(), Self::Error> {
+    // Bit depth is fixed by the format (10) — declared as a const so
+    // the downshift for u8 luma stays obvious at the call site.
+    const BITS: u32 = 10;
+
+    let w = self.width;
+    let h = self.height;
+    let idx = row.row();
+    let use_simd = self.simd;
+
+    // Defense in depth — see the [`Yuv420p`] impl for the rationale.
+    // Row slice checks use the 10‑bit variants of [`RowSlice`] so
+    // downstream log output disambiguates from the 8‑bit source impls.
+    if w & 1 != 0 {
+      return Err(MixedSinkerError::OddWidth { width: w });
+    }
+    if row.y().len() != w {
+      return Err(MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::Y10,
+        row: idx,
+        expected: w,
+        actual: row.y().len(),
+      });
+    }
+    if row.u_half().len() != w / 2 {
+      return Err(MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::UHalf10,
+        row: idx,
+        expected: w / 2,
+        actual: row.u_half().len(),
+      });
+    }
+    if row.v_half().len() != w / 2 {
+      return Err(MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::VHalf10,
+        row: idx,
+        expected: w / 2,
+        actual: row.v_half().len(),
+      });
+    }
+    if idx >= self.height {
+      return Err(MixedSinkerError::RowIndexOutOfRange {
+        row: idx,
+        configured_height: self.height,
+      });
+    }
+
+    let Self {
+      rgb,
+      rgb_u16,
+      luma,
+      hsv,
+      rgb_scratch,
+      ..
+    } = self;
+
+    let one_plane_start = idx * w;
+    let one_plane_end = one_plane_start + w;
+
+    // Luma: downshift 10‑bit Y to 8‑bit for the existing u8 luma
+    // buffer contract. Bit‑extension by `(BITS - 8)` preserves the
+    // most significant bits — functionally equivalent to FFmpeg's
+    // `>> (BITS - 8)` conversion used by many downstream analyses.
+    if let Some(luma) = luma.as_deref_mut() {
+      let dst = &mut luma[one_plane_start..one_plane_end];
+      for (d, &s) in dst.iter_mut().zip(row.y().iter()) {
+        *d = (s >> (BITS - 8)) as u8;
+      }
+    }
+
+    // `u16` RGB output — written directly via the native‑depth row
+    // primitive. Computed independently of the u8 path: the two
+    // outputs have different scale params inside `range_params_n`,
+    // so they can't share an intermediate without losing precision.
+    if let Some(buf) = rgb_u16.as_deref_mut() {
+      let rgb_plane_end =
+        one_plane_end
+          .checked_mul(3)
+          .ok_or(MixedSinkerError::GeometryOverflow {
+            width: w,
+            height: h,
+            channels: 3,
+          })?;
+      let rgb_plane_start = one_plane_start * 3;
+      yuv420p10_to_rgb_u16_row(
+        row.y(),
+        row.u_half(),
+        row.v_half(),
+        &mut buf[rgb_plane_start..rgb_plane_end],
+        w,
+        row.matrix(),
+        row.full_range(),
+        use_simd,
+      );
+    }
+
+    let want_rgb = rgb.is_some();
+    let want_hsv = hsv.is_some();
+    if !want_rgb && !want_hsv {
+      return Ok(());
+    }
+
+    // 8‑bit RGB path — either writes to the caller's buffer (when
+    // `with_rgb` is set) or to the lazily‑grown scratch (when HSV is
+    // requested without RGB). Mirrors the 8‑bit source impls' layout.
+    let rgb_row: &mut [u8] = match rgb.as_deref_mut() {
+      Some(buf) => {
+        let rgb_plane_end =
+          one_plane_end
+            .checked_mul(3)
+            .ok_or(MixedSinkerError::GeometryOverflow {
+              width: w,
+              height: h,
+              channels: 3,
+            })?;
+        let rgb_plane_start = one_plane_start * 3;
+        &mut buf[rgb_plane_start..rgb_plane_end]
+      }
+      None => {
+        let rgb_row_bytes = w.checked_mul(3).ok_or(MixedSinkerError::GeometryOverflow {
+          width: w,
+          height: h,
+          channels: 3,
+        })?;
+        if rgb_scratch.len() < rgb_row_bytes {
+          rgb_scratch.resize(rgb_row_bytes, 0);
+        }
+        &mut rgb_scratch[..rgb_row_bytes]
+      }
+    };
+
+    yuv420p10_to_rgb_row(
+      row.y(),
+      row.u_half(),
+      row.v_half(),
+      rgb_row,
+      w,
+      row.matrix(),
+      row.full_range(),
+      use_simd,
+    );
+
+    if let Some(hsv) = hsv.as_mut() {
+      rgb_to_hsv_row(
+        rgb_row,
+        &mut hsv.h[one_plane_start..one_plane_end],
+        &mut hsv.s[one_plane_start..one_plane_end],
+        &mut hsv.v[one_plane_start..one_plane_end],
+        w,
+        use_simd,
+      );
+    }
+    Ok(())
+  }
+}
+
 /// Returns `Ok(())` iff the walker's frame dimensions exactly match
 /// the sinker's configured dimensions. Called from
 /// [`PixelSink::begin_frame`] on both `MixedSinker<Yuv420p>` and
@@ -872,8 +1145,8 @@ mod tests {
   use super::*;
   use crate::{
     ColorMatrix,
-    frame::{Nv12Frame, Nv21Frame, Yuv420pFrame},
-    yuv::{nv12_to, nv21_to, yuv420p_to},
+    frame::{Nv12Frame, Nv21Frame, Yuv420p10Frame, Yuv420pFrame},
+    yuv::{nv12_to, nv21_to, yuv420p_to, yuv420p10_to},
   };
 
   fn solid_yuv420p_frame(
@@ -1738,5 +2011,163 @@ mod tests {
     nv21_to(&nv21_src, false, ColorMatrix::Bt709, &mut s_nv21).unwrap();
 
     assert_eq!(rgb_nv12, rgb_nv21);
+  }
+
+  // ---- Yuv420p10 --------------------------------------------------------
+
+  fn solid_yuv420p10_frame(
+    width: u32,
+    height: u32,
+    y: u16,
+    u: u16,
+    v: u16,
+  ) -> (Vec<u16>, Vec<u16>, Vec<u16>) {
+    let w = width as usize;
+    let h = height as usize;
+    let cw = w / 2;
+    let ch = h / 2;
+    (
+      std::vec![y; w * h],
+      std::vec![u; cw * ch],
+      std::vec![v; cw * ch],
+    )
+  }
+
+  #[test]
+  fn yuv420p10_rgb_u8_only_gray_is_gray() {
+    // 10-bit mid-gray: Y=512, UV=512 → 8-bit RGB ≈ 128 on every channel.
+    let (yp, up, vp) = solid_yuv420p10_frame(16, 8, 512, 512, 512);
+    let src = Yuv420p10Frame::new(&yp, &up, &vp, 16, 8, 16, 8, 8);
+
+    let mut rgb = std::vec![0u8; 16 * 8 * 3];
+    let mut sink = MixedSinker::<Yuv420p10>::new(16, 8)
+      .with_rgb(&mut rgb)
+      .unwrap();
+    yuv420p10_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+    for px in rgb.chunks(3) {
+      assert!(px[0].abs_diff(128) <= 1);
+      assert_eq!(px[0], px[1]);
+      assert_eq!(px[1], px[2]);
+    }
+  }
+
+  #[test]
+  fn yuv420p10_rgb_u16_only_native_depth_gray() {
+    // Same mid-gray frame → u16 RGB output in native 10-bit depth, so
+    // each channel should be ≈ 512 (the 10-bit mid).
+    let (yp, up, vp) = solid_yuv420p10_frame(16, 8, 512, 512, 512);
+    let src = Yuv420p10Frame::new(&yp, &up, &vp, 16, 8, 16, 8, 8);
+
+    let mut rgb = std::vec![0u16; 16 * 8 * 3];
+    let mut sink = MixedSinker::<Yuv420p10>::new(16, 8)
+      .with_rgb_u16(&mut rgb)
+      .unwrap();
+    yuv420p10_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+    for px in rgb.chunks(3) {
+      assert!(px[0].abs_diff(512) <= 1, "got {px:?}");
+      assert_eq!(px[0], px[1]);
+      assert_eq!(px[1], px[2]);
+      // Upper 6 bits of each u16 must be zero — 10-bit convention.
+      assert!(px[0] <= 1023);
+    }
+  }
+
+  #[test]
+  fn yuv420p10_rgb_u8_and_u16_both_populated() {
+    // 10-bit full-range white: Y=1023, UV=512. Both buffers should
+    // fill with their respective "white" values (255 for u8, 1023 for
+    // u16) in the same call.
+    let (yp, up, vp) = solid_yuv420p10_frame(16, 8, 1023, 512, 512);
+    let src = Yuv420p10Frame::new(&yp, &up, &vp, 16, 8, 16, 8, 8);
+
+    let mut rgb_u8 = std::vec![0u8; 16 * 8 * 3];
+    let mut rgb_u16 = std::vec![0u16; 16 * 8 * 3];
+    let mut sink = MixedSinker::<Yuv420p10>::new(16, 8)
+      .with_rgb(&mut rgb_u8)
+      .unwrap()
+      .with_rgb_u16(&mut rgb_u16)
+      .unwrap();
+    yuv420p10_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+    assert!(rgb_u8.iter().all(|&c| c == 255));
+    assert!(rgb_u16.iter().all(|&c| c == 1023));
+  }
+
+  #[test]
+  fn yuv420p10_luma_downshifts_to_8bit() {
+    // Y=512 at 10 bits → 512 >> 2 = 128 at 8 bits.
+    let (yp, up, vp) = solid_yuv420p10_frame(16, 8, 512, 512, 512);
+    let src = Yuv420p10Frame::new(&yp, &up, &vp, 16, 8, 16, 8, 8);
+
+    let mut luma = std::vec![0u8; 16 * 8];
+    let mut sink = MixedSinker::<Yuv420p10>::new(16, 8)
+      .with_luma(&mut luma)
+      .unwrap();
+    yuv420p10_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+    assert!(luma.iter().all(|&l| l == 128));
+  }
+
+  #[test]
+  fn yuv420p10_hsv_from_gray_is_zero_hue_zero_sat() {
+    // HSV derived from the internal u8 RGB scratch: neutral gray →
+    // H=0, S=0, V≈128. Exercises the "HSV without RGB" scratch path
+    // on the 10-bit source.
+    let (yp, up, vp) = solid_yuv420p10_frame(16, 8, 512, 512, 512);
+    let src = Yuv420p10Frame::new(&yp, &up, &vp, 16, 8, 16, 8, 8);
+
+    let mut h = std::vec![0xFFu8; 16 * 8];
+    let mut s = std::vec![0xFFu8; 16 * 8];
+    let mut v = std::vec![0xFFu8; 16 * 8];
+    let mut sink = MixedSinker::<Yuv420p10>::new(16, 8)
+      .with_hsv(&mut h, &mut s, &mut v)
+      .unwrap();
+    yuv420p10_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+    assert!(h.iter().all(|&b| b == 0));
+    assert!(s.iter().all(|&b| b == 0));
+    assert!(v.iter().all(|&b| b.abs_diff(128) <= 1));
+  }
+
+  #[test]
+  fn yuv420p10_rgb_u16_too_short_returns_err() {
+    let mut rgb = std::vec![0u16; 10]; // Way too small.
+    let err = MixedSinker::<Yuv420p10>::new(16, 8)
+      .with_rgb_u16(&mut rgb)
+      .err()
+      .unwrap();
+    assert!(matches!(err, MixedSinkerError::RgbU16BufferTooShort { .. }));
+  }
+
+  #[test]
+  fn yuv420p10_with_simd_false_matches_with_simd_true() {
+    // The SIMD toggle exercises scalar-vs-SIMD dispatch. Both paths
+    // must produce byte-identical results on both outputs.
+    let (yp, up, vp) = solid_yuv420p10_frame(64, 16, 600, 400, 700);
+    let src = Yuv420p10Frame::new(&yp, &up, &vp, 64, 16, 64, 32, 32);
+
+    let mut rgb_scalar = std::vec![0u8; 64 * 16 * 3];
+    let mut rgb_u16_scalar = std::vec![0u16; 64 * 16 * 3];
+    let mut s_scalar = MixedSinker::<Yuv420p10>::new(64, 16)
+      .with_simd(false)
+      .with_rgb(&mut rgb_scalar)
+      .unwrap()
+      .with_rgb_u16(&mut rgb_u16_scalar)
+      .unwrap();
+    yuv420p10_to(&src, false, ColorMatrix::Bt709, &mut s_scalar).unwrap();
+
+    let mut rgb_simd = std::vec![0u8; 64 * 16 * 3];
+    let mut rgb_u16_simd = std::vec![0u16; 64 * 16 * 3];
+    let mut s_simd = MixedSinker::<Yuv420p10>::new(64, 16)
+      .with_rgb(&mut rgb_simd)
+      .unwrap()
+      .with_rgb_u16(&mut rgb_u16_simd)
+      .unwrap();
+    yuv420p10_to(&src, false, ColorMatrix::Bt709, &mut s_simd).unwrap();
+
+    assert_eq!(rgb_scalar, rgb_simd);
+    assert_eq!(rgb_u16_scalar, rgb_u16_simd);
   }
 }

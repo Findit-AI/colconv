@@ -33,13 +33,14 @@
 //! 8. Saturate‑narrow to u8x16 and interleave with `vst3q_u8`.
 
 use core::arch::aarch64::{
-  float32x4_t, int16x8_t, int32x4_t, uint8x16_t, uint8x16x3_t, vaddq_f32, vaddq_s32, vbslq_f32,
-  vceqq_f32, vcltq_f32, vcombine_s16, vcombine_u8, vcombine_u16, vcvtq_f32_u32, vcvtq_u32_f32,
-  vdivq_f32, vdupq_n_f32, vdupq_n_s16, vdupq_n_s32, vget_high_s16, vget_high_u8, vget_high_u16,
-  vget_low_s16, vget_low_u8, vget_low_u16, vld1_u8, vld1q_u8, vld2_u8, vld3q_u8, vmaxq_f32,
-  vminq_f32, vmovl_s16, vmovl_u8, vmovl_u16, vmovn_u16, vmovn_u32, vmulq_f32, vmulq_s32, vmvnq_u32,
-  vqaddq_s16, vqmovn_s32, vqmovun_s16, vreinterpretq_s16_u16, vshrq_n_s32, vst1q_u8, vst3q_u8,
-  vsubq_f32, vsubq_s16, vzip1q_s16, vzip2q_s16,
+  float32x4_t, int16x8_t, int32x4_t, uint8x16_t, uint8x16x3_t, uint16x8_t, uint16x8x3_t, vaddq_f32,
+  vaddq_s32, vandq_u16, vbslq_f32, vceqq_f32, vcltq_f32, vcombine_s16, vcombine_u8, vcombine_u16,
+  vcvtq_f32_u32, vcvtq_u32_f32, vdivq_f32, vdupq_n_f32, vdupq_n_s16, vdupq_n_s32, vdupq_n_u16,
+  vget_high_s16, vget_high_u8, vget_high_u16, vget_low_s16, vget_low_u8, vget_low_u16, vld1_u8,
+  vld1q_u8, vld1q_u16, vld2_u8, vld3q_u8, vmaxq_f32, vmaxq_s16, vminq_f32, vminq_s16, vmovl_s16,
+  vmovl_u8, vmovl_u16, vmovn_u16, vmovn_u32, vmulq_f32, vmulq_s32, vmvnq_u32, vqaddq_s16,
+  vqmovn_s32, vqmovun_s16, vreinterpretq_s16_u16, vreinterpretq_u16_s16, vshrq_n_s32, vst1q_u8,
+  vst3q_u8, vst3q_u16, vsubq_f32, vsubq_s16, vzip1q_s16, vzip2q_s16,
 };
 
 use crate::{ColorMatrix, row::scalar};
@@ -187,6 +188,304 @@ pub(crate) unsafe fn yuv_420_to_rgb_row(
       );
     }
   }
+}
+
+/// NEON YUV 4:2:0 10‑bit → packed **8‑bit** RGB.
+///
+/// Block size is 16 Y pixels / 8 chroma pairs per iteration. The
+/// pipeline mirrors [`yuv_420_to_rgb_row`] byte‑for‑byte; the only
+/// structural differences are:
+/// - Loads are `vld1q_u16` (8 lanes of `u16`) instead of `vld1q_u8`
+///   (16 lanes of `u8`), so each Y iteration needs two Y loads to
+///   cover 16 pixels — there's no widening step because the samples
+///   already live in 16‑bit lanes.
+/// - Chroma bias is **512** (10‑bit center) rather than 128.
+/// - Range‑scaling params come from [`scalar::range_params_n`] with
+///   `BITS = 10, OUT_BITS = 8`, so `y_scale` / `c_scale` are ~¼ the
+///   8‑bit values (mapping 10‑bit input to 8‑bit output).
+///
+/// # Numerical contract
+///
+/// Byte‑identical to [`scalar::yuv_420p_n_to_rgb_row::<10>`] — every
+/// Q15 multiply / shift mirrors the scalar path exactly, with the
+/// same `(prod + (1 << 14)) >> 15` rounding.
+///
+/// # Safety
+///
+/// 1. **NEON must be available on the current CPU.**
+/// 2. `width & 1 == 0`.
+/// 3. `y.len() >= width`, `u_half.len() >= width / 2`,
+///    `v_half.len() >= width / 2`, `rgb_out.len() >= 3 * width`.
+#[inline]
+#[target_feature(enable = "neon")]
+pub(crate) unsafe fn yuv420p10_to_rgb_row(
+  y: &[u16],
+  u_half: &[u16],
+  v_half: &[u16],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  debug_assert_eq!(width & 1, 0);
+  debug_assert!(y.len() >= width);
+  debug_assert!(u_half.len() >= width / 2);
+  debug_assert!(v_half.len() >= width / 2);
+  debug_assert!(rgb_out.len() >= width * 3);
+
+  let coeffs = scalar::Coefficients::for_matrix(matrix);
+  let (y_off, y_scale, c_scale) = scalar::range_params_n::<10, 8>(full_range);
+  let bias = scalar::chroma_bias::<10>();
+  const RND: i32 = 1 << 14;
+
+  // SAFETY: NEON availability is the caller's obligation; the
+  // dispatcher in `crate::row` verifies it. Pointer adds are bounded
+  // by the `while x + 16 <= width` loop condition and the caller‑
+  // promised slice lengths checked above.
+  unsafe {
+    let rnd_v = vdupq_n_s32(RND);
+    let y_off_v = vdupq_n_s16(y_off as i16);
+    let y_scale_v = vdupq_n_s32(y_scale);
+    let c_scale_v = vdupq_n_s32(c_scale);
+    let bias_v = vdupq_n_s16(bias as i16);
+    let mask_v = vdupq_n_u16(scalar::bits_mask::<10>());
+    let cru = vdupq_n_s32(coeffs.r_u());
+    let crv = vdupq_n_s32(coeffs.r_v());
+    let cgu = vdupq_n_s32(coeffs.g_u());
+    let cgv = vdupq_n_s32(coeffs.g_v());
+    let cbu = vdupq_n_s32(coeffs.b_u());
+    let cbv = vdupq_n_s32(coeffs.b_v());
+
+    let mut x = 0usize;
+    while x + 16 <= width {
+      // Two Y loads cover 16 lanes; one U load + one V load cover 8
+      // chroma each. Each load is AND‑masked to the low 10 bits so
+      // out‑of‑range samples (e.g. `p010`‑style packing with the
+      // 10 active bits in the high 10 of each u16) can never push
+      // an intermediate past i16 range. For valid input the AND is
+      // a no‑op (samples already in [0, 1023]).
+      let y_vec_lo = vandq_u16(vld1q_u16(y.as_ptr().add(x)), mask_v);
+      let y_vec_hi = vandq_u16(vld1q_u16(y.as_ptr().add(x + 8)), mask_v);
+      let u_vec = vandq_u16(vld1q_u16(u_half.as_ptr().add(x / 2)), mask_v);
+      let v_vec = vandq_u16(vld1q_u16(v_half.as_ptr().add(x / 2)), mask_v);
+
+      let y_lo = vreinterpretq_s16_u16(y_vec_lo);
+      let y_hi = vreinterpretq_s16_u16(y_vec_hi);
+
+      // c - 512 for 10‑bit chroma, fits i16 since c ≤ 1023.
+      let u_i16 = vsubq_s16(vreinterpretq_s16_u16(u_vec), bias_v);
+      let v_i16 = vsubq_s16(vreinterpretq_s16_u16(v_vec), bias_v);
+
+      // Widen to i32x4 halves so the Q15 multiplies don't overflow.
+      let u_lo_i32 = vmovl_s16(vget_low_s16(u_i16));
+      let u_hi_i32 = vmovl_s16(vget_high_s16(u_i16));
+      let v_lo_i32 = vmovl_s16(vget_low_s16(v_i16));
+      let v_hi_i32 = vmovl_s16(vget_high_s16(v_i16));
+
+      let u_d_lo = q15_shift(vaddq_s32(vmulq_s32(u_lo_i32, c_scale_v), rnd_v));
+      let u_d_hi = q15_shift(vaddq_s32(vmulq_s32(u_hi_i32, c_scale_v), rnd_v));
+      let v_d_lo = q15_shift(vaddq_s32(vmulq_s32(v_lo_i32, c_scale_v), rnd_v));
+      let v_d_hi = q15_shift(vaddq_s32(vmulq_s32(v_hi_i32, c_scale_v), rnd_v));
+
+      let r_chroma = chroma_i16x8(cru, crv, u_d_lo, v_d_lo, u_d_hi, v_d_hi, rnd_v);
+      let g_chroma = chroma_i16x8(cgu, cgv, u_d_lo, v_d_lo, u_d_hi, v_d_hi, rnd_v);
+      let b_chroma = chroma_i16x8(cbu, cbv, u_d_lo, v_d_lo, u_d_hi, v_d_hi, rnd_v);
+
+      // Duplicate the 8 chroma lanes into 16‑lane pairs — identical
+      // nearest‑neighbor upsample strategy as the 8‑bit kernel.
+      let r_dup_lo = vzip1q_s16(r_chroma, r_chroma);
+      let r_dup_hi = vzip2q_s16(r_chroma, r_chroma);
+      let g_dup_lo = vzip1q_s16(g_chroma, g_chroma);
+      let g_dup_hi = vzip2q_s16(g_chroma, g_chroma);
+      let b_dup_lo = vzip1q_s16(b_chroma, b_chroma);
+      let b_dup_hi = vzip2q_s16(b_chroma, b_chroma);
+
+      let y_scaled_lo = scale_y(y_lo, y_off_v, y_scale_v, rnd_v);
+      let y_scaled_hi = scale_y(y_hi, y_off_v, y_scale_v, rnd_v);
+
+      // u8 output: saturate‑narrow i16 → u8 clamps to [0, 255].
+      let b_u8 = vcombine_u8(
+        vqmovun_s16(vqaddq_s16(y_scaled_lo, b_dup_lo)),
+        vqmovun_s16(vqaddq_s16(y_scaled_hi, b_dup_hi)),
+      );
+      let g_u8 = vcombine_u8(
+        vqmovun_s16(vqaddq_s16(y_scaled_lo, g_dup_lo)),
+        vqmovun_s16(vqaddq_s16(y_scaled_hi, g_dup_hi)),
+      );
+      let r_u8 = vcombine_u8(
+        vqmovun_s16(vqaddq_s16(y_scaled_lo, r_dup_lo)),
+        vqmovun_s16(vqaddq_s16(y_scaled_hi, r_dup_hi)),
+      );
+
+      let rgb = uint8x16x3_t(r_u8, g_u8, b_u8);
+      vst3q_u8(rgb_out.as_mut_ptr().add(x * 3), rgb);
+
+      x += 16;
+    }
+
+    // Scalar tail — remaining < 16 pixels (always even per 4:2:0).
+    if x < width {
+      scalar::yuv_420p_n_to_rgb_row::<10>(
+        &y[x..width],
+        &u_half[x / 2..width / 2],
+        &v_half[x / 2..width / 2],
+        &mut rgb_out[x * 3..width * 3],
+        width - x,
+        matrix,
+        full_range,
+      );
+    }
+  }
+}
+
+/// NEON YUV 4:2:0 10‑bit → packed **10‑bit `u16`** RGB (native depth).
+///
+/// Block size is 16 Y pixels / 8 chroma pairs per iteration. Shares
+/// all pre‑write math with [`yuv420p10_to_rgb_row`]; the only
+/// difference is the final clamp + write:
+/// - Y‑path scale is calibrated for `OUT_BITS = 10` rather than 8,
+///   so `y_scaled` lives in `[0, 1023]` before the chroma add.
+/// - The `y_scaled + chroma` sum is clamped to `[0, 1023]` with
+///   `vmaxq_s16(vminq_s16(_, 1023), 0)` — a simple saturate‑narrow
+///   doesn't suffice because the sum can overshoot 1023 (up to ~2046
+///   without saturating at i16 bounds).
+/// - Writes use two `vst3q_u16` calls per iteration — each handles 8
+///   pixels × 3 channels = 24 `u16` elements, so two cover 16 pixels.
+///
+/// # Numerical contract
+///
+/// Identical to [`scalar::yuv_420p_n_to_rgb_u16_row::<10>`] — every
+/// Q15 multiply / shift / clamp mirrors the scalar reference.
+///
+/// # Safety
+///
+/// 1. **NEON must be available on the current CPU.**
+/// 2. `width & 1 == 0`.
+/// 3. `y.len() >= width`, `u_half.len() >= width / 2`,
+///    `v_half.len() >= width / 2`, `rgb_out.len() >= 3 * width`.
+#[inline]
+#[target_feature(enable = "neon")]
+pub(crate) unsafe fn yuv420p10_to_rgb_u16_row(
+  y: &[u16],
+  u_half: &[u16],
+  v_half: &[u16],
+  rgb_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  debug_assert_eq!(width & 1, 0);
+  debug_assert!(y.len() >= width);
+  debug_assert!(u_half.len() >= width / 2);
+  debug_assert!(v_half.len() >= width / 2);
+  debug_assert!(rgb_out.len() >= width * 3);
+
+  let coeffs = scalar::Coefficients::for_matrix(matrix);
+  let (y_off, y_scale, c_scale) = scalar::range_params_n::<10, 10>(full_range);
+  let bias = scalar::chroma_bias::<10>();
+  const RND: i32 = 1 << 14;
+  const OUT_MAX_10: i16 = 1023;
+
+  // SAFETY: NEON availability is the caller's obligation; the
+  // dispatcher in `crate::row` verifies it. Pointer adds are bounded
+  // by the `while x + 16 <= width` loop condition and the caller‑
+  // promised slice lengths.
+  unsafe {
+    let rnd_v = vdupq_n_s32(RND);
+    let y_off_v = vdupq_n_s16(y_off as i16);
+    let y_scale_v = vdupq_n_s32(y_scale);
+    let c_scale_v = vdupq_n_s32(c_scale);
+    let bias_v = vdupq_n_s16(bias as i16);
+    let mask_v = vdupq_n_u16(scalar::bits_mask::<10>());
+    let max_v = vdupq_n_s16(OUT_MAX_10);
+    let zero_v = vdupq_n_s16(0);
+    let cru = vdupq_n_s32(coeffs.r_u());
+    let crv = vdupq_n_s32(coeffs.r_v());
+    let cgu = vdupq_n_s32(coeffs.g_u());
+    let cgv = vdupq_n_s32(coeffs.g_v());
+    let cbu = vdupq_n_s32(coeffs.b_u());
+    let cbv = vdupq_n_s32(coeffs.b_v());
+
+    let mut x = 0usize;
+    while x + 16 <= width {
+      // AND‑mask each load to the low 10 bits so intermediates stay
+      // within the i16 range the Q15 narrow steps expect — see
+      // matching comment in [`yuv420p10_to_rgb_row`].
+      let y_vec_lo = vandq_u16(vld1q_u16(y.as_ptr().add(x)), mask_v);
+      let y_vec_hi = vandq_u16(vld1q_u16(y.as_ptr().add(x + 8)), mask_v);
+      let u_vec = vandq_u16(vld1q_u16(u_half.as_ptr().add(x / 2)), mask_v);
+      let v_vec = vandq_u16(vld1q_u16(v_half.as_ptr().add(x / 2)), mask_v);
+
+      let y_lo = vreinterpretq_s16_u16(y_vec_lo);
+      let y_hi = vreinterpretq_s16_u16(y_vec_hi);
+
+      let u_i16 = vsubq_s16(vreinterpretq_s16_u16(u_vec), bias_v);
+      let v_i16 = vsubq_s16(vreinterpretq_s16_u16(v_vec), bias_v);
+
+      let u_lo_i32 = vmovl_s16(vget_low_s16(u_i16));
+      let u_hi_i32 = vmovl_s16(vget_high_s16(u_i16));
+      let v_lo_i32 = vmovl_s16(vget_low_s16(v_i16));
+      let v_hi_i32 = vmovl_s16(vget_high_s16(v_i16));
+
+      let u_d_lo = q15_shift(vaddq_s32(vmulq_s32(u_lo_i32, c_scale_v), rnd_v));
+      let u_d_hi = q15_shift(vaddq_s32(vmulq_s32(u_hi_i32, c_scale_v), rnd_v));
+      let v_d_lo = q15_shift(vaddq_s32(vmulq_s32(v_lo_i32, c_scale_v), rnd_v));
+      let v_d_hi = q15_shift(vaddq_s32(vmulq_s32(v_hi_i32, c_scale_v), rnd_v));
+
+      let r_chroma = chroma_i16x8(cru, crv, u_d_lo, v_d_lo, u_d_hi, v_d_hi, rnd_v);
+      let g_chroma = chroma_i16x8(cgu, cgv, u_d_lo, v_d_lo, u_d_hi, v_d_hi, rnd_v);
+      let b_chroma = chroma_i16x8(cbu, cbv, u_d_lo, v_d_lo, u_d_hi, v_d_hi, rnd_v);
+
+      let r_dup_lo = vzip1q_s16(r_chroma, r_chroma);
+      let r_dup_hi = vzip2q_s16(r_chroma, r_chroma);
+      let g_dup_lo = vzip1q_s16(g_chroma, g_chroma);
+      let g_dup_hi = vzip2q_s16(g_chroma, g_chroma);
+      let b_dup_lo = vzip1q_s16(b_chroma, b_chroma);
+      let b_dup_hi = vzip2q_s16(b_chroma, b_chroma);
+
+      let y_scaled_lo = scale_y(y_lo, y_off_v, y_scale_v, rnd_v);
+      let y_scaled_hi = scale_y(y_hi, y_off_v, y_scale_v, rnd_v);
+
+      // Native‑depth output: add Y + chroma in i16, then clamp to
+      // [0, 1023] explicitly. `vqaddq_s16` saturates at i16 bounds
+      // (irrelevant here since |sum| < 2047 always), so the subsequent
+      // max/min clamps to the 10‑bit range.
+      let r_lo = clamp_u10(vqaddq_s16(y_scaled_lo, r_dup_lo), zero_v, max_v);
+      let r_hi = clamp_u10(vqaddq_s16(y_scaled_hi, r_dup_hi), zero_v, max_v);
+      let g_lo = clamp_u10(vqaddq_s16(y_scaled_lo, g_dup_lo), zero_v, max_v);
+      let g_hi = clamp_u10(vqaddq_s16(y_scaled_hi, g_dup_hi), zero_v, max_v);
+      let b_lo = clamp_u10(vqaddq_s16(y_scaled_lo, b_dup_lo), zero_v, max_v);
+      let b_hi = clamp_u10(vqaddq_s16(y_scaled_hi, b_dup_hi), zero_v, max_v);
+
+      // Two interleaved u16 writes — each `vst3q_u16` covers 8 pixels.
+      let rgb_lo = uint16x8x3_t(r_lo, g_lo, b_lo);
+      let rgb_hi = uint16x8x3_t(r_hi, g_hi, b_hi);
+      vst3q_u16(rgb_out.as_mut_ptr().add(x * 3), rgb_lo);
+      vst3q_u16(rgb_out.as_mut_ptr().add(x * 3 + 24), rgb_hi);
+
+      x += 16;
+    }
+
+    if x < width {
+      scalar::yuv_420p_n_to_rgb_u16_row::<10>(
+        &y[x..width],
+        &u_half[x / 2..width / 2],
+        &v_half[x / 2..width / 2],
+        &mut rgb_out[x * 3..width * 3],
+        width - x,
+        matrix,
+        full_range,
+      );
+    }
+  }
+}
+
+/// Clamps an i16x8 vector to `[0, max]` and reinterprets to u16x8.
+/// Used by the 10‑bit u16 output path to avoid `vqmovun_s16`'s u8
+/// saturation.
+#[inline(always)]
+fn clamp_u10(v: int16x8_t, zero_v: int16x8_t, max_v: int16x8_t) -> uint16x8_t {
+  unsafe { vreinterpretq_u16_s16(vminq_s16(vmaxq_s16(v, zero_v), max_v)) }
 }
 
 /// NEON NV12 → packed RGB (UV-ordered chroma). Thin wrapper over the
@@ -1123,5 +1422,201 @@ mod tests {
     scalar::bgr_rgb_swap_row(&round_trip, &mut back, 64);
 
     assert_eq!(input, back, "swap is not self-inverse");
+  }
+
+  // ---- yuv420p10 scalar-equivalence -----------------------------------
+
+  /// Deterministic pseudo‑random `u16` samples in `[0, 1023]` — the
+  /// 10‑bit range. Upper 6 bits always zero, so the generator matches
+  /// real `yuv420p10le` bit patterns.
+  fn p10_plane(n: usize, seed: usize) -> std::vec::Vec<u16> {
+    (0..n)
+      .map(|i| ((i * seed + seed * 3) & 0x3FF) as u16)
+      .collect()
+  }
+
+  fn check_p10_u8_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+    let y = p10_plane(width, 37);
+    let u = p10_plane(width / 2, 53);
+    let v = p10_plane(width / 2, 71);
+    let mut rgb_scalar = std::vec![0u8; width * 3];
+    let mut rgb_neon = std::vec![0u8; width * 3];
+
+    scalar::yuv_420p_n_to_rgb_row::<10>(&y, &u, &v, &mut rgb_scalar, width, matrix, full_range);
+    unsafe {
+      yuv420p10_to_rgb_row(&y, &u, &v, &mut rgb_neon, width, matrix, full_range);
+    }
+
+    if rgb_scalar != rgb_neon {
+      let first_diff = rgb_scalar
+        .iter()
+        .zip(rgb_neon.iter())
+        .position(|(a, b)| a != b)
+        .unwrap();
+      panic!(
+        "NEON 10→u8 diverges from scalar at byte {first_diff} (width={width}, matrix={matrix:?}, full_range={full_range}): scalar={} neon={}",
+        rgb_scalar[first_diff], rgb_neon[first_diff]
+      );
+    }
+  }
+
+  fn check_p10_u16_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+    let y = p10_plane(width, 37);
+    let u = p10_plane(width / 2, 53);
+    let v = p10_plane(width / 2, 71);
+    let mut rgb_scalar = std::vec![0u16; width * 3];
+    let mut rgb_neon = std::vec![0u16; width * 3];
+
+    scalar::yuv_420p_n_to_rgb_u16_row::<10>(&y, &u, &v, &mut rgb_scalar, width, matrix, full_range);
+    unsafe {
+      yuv420p10_to_rgb_u16_row(&y, &u, &v, &mut rgb_neon, width, matrix, full_range);
+    }
+
+    if rgb_scalar != rgb_neon {
+      let first_diff = rgb_scalar
+        .iter()
+        .zip(rgb_neon.iter())
+        .position(|(a, b)| a != b)
+        .unwrap();
+      panic!(
+        "NEON 10→u16 diverges from scalar at elem {first_diff} (width={width}, matrix={matrix:?}, full_range={full_range}): scalar={} neon={}",
+        rgb_scalar[first_diff], rgb_neon[first_diff]
+      );
+    }
+  }
+
+  #[test]
+  fn neon_p10_u8_matches_scalar_all_matrices_16() {
+    for m in [
+      ColorMatrix::Bt601,
+      ColorMatrix::Bt709,
+      ColorMatrix::Bt2020Ncl,
+      ColorMatrix::Smpte240m,
+      ColorMatrix::Fcc,
+      ColorMatrix::YCgCo,
+    ] {
+      for full in [true, false] {
+        check_p10_u8_equivalence(16, m, full);
+      }
+    }
+  }
+
+  #[test]
+  fn neon_p10_u16_matches_scalar_all_matrices_16() {
+    for m in [
+      ColorMatrix::Bt601,
+      ColorMatrix::Bt709,
+      ColorMatrix::Bt2020Ncl,
+      ColorMatrix::Smpte240m,
+      ColorMatrix::Fcc,
+      ColorMatrix::YCgCo,
+    ] {
+      for full in [true, false] {
+        check_p10_u16_equivalence(16, m, full);
+      }
+    }
+  }
+
+  #[test]
+  fn neon_p10_matches_scalar_odd_tail_widths() {
+    for w in [18usize, 30, 34, 1922] {
+      check_p10_u8_equivalence(w, ColorMatrix::Bt601, false);
+      check_p10_u16_equivalence(w, ColorMatrix::Bt709, true);
+    }
+  }
+
+  #[test]
+  fn neon_p10_matches_scalar_1920() {
+    check_p10_u8_equivalence(1920, ColorMatrix::Bt709, false);
+    check_p10_u16_equivalence(1920, ColorMatrix::Bt2020Ncl, false);
+  }
+
+  /// Out‑of‑range regression: every kernel AND‑masks each `u16` load
+  /// to the low `BITS` bits, so **arbitrary** upper‑bit corruption
+  /// (not just p010 packing) produces scalar/NEON bit‑identical
+  /// output. This test sweeps three adversarial input shapes:
+  ///
+  /// - `p010`: 10 active bits in the high 10 of each `u16`
+  ///   (`sample << 6`) — the canonical mispacking mistake.
+  /// - `ycgco_worst`: `Y=[0x8000; W]`, `U=[0; W/2]`, `V=[0x8000; W/2]`
+  ///   — the specific Codex‑identified case that used to produce
+  ///   `(1023, 0, 0)` on scalar vs `(0, 0, 0)` on NEON before the
+  ///   load‑time mask was added.
+  /// - `random`: arbitrary upper‑bit flips with no particular pattern.
+  ///
+  /// Each variant runs through every color matrix × range × both
+  /// output paths (u8 + native‑depth u16) and asserts byte equality.
+  #[test]
+  fn neon_p10_matches_scalar_on_out_of_range_samples() {
+    let width = 32;
+
+    let p010_variant =
+      |i: usize, seed: u16| 0xFC00u16.wrapping_add(((i as u16).wrapping_mul(seed)) << 6);
+    let random_variant = |i: usize, seed: u16| {
+      let x = (i as u32)
+        .wrapping_mul(seed as u32)
+        .wrapping_add(0xDEAD_BEEF) as u16;
+      x ^ 0xA5A5
+    };
+
+    for variant_name in ["p010", "ycgco_worst", "random"] {
+      let y: std::vec::Vec<u16> = match variant_name {
+        "ycgco_worst" => std::vec![0x8000u16; width],
+        "p010" => (0..width).map(|i| p010_variant(i, 37)).collect(),
+        _ => (0..width).map(|i| random_variant(i, 37)).collect(),
+      };
+      let u: std::vec::Vec<u16> = match variant_name {
+        "ycgco_worst" => std::vec![0x0u16; width / 2],
+        "p010" => (0..width / 2).map(|i| p010_variant(i, 53)).collect(),
+        _ => (0..width / 2).map(|i| random_variant(i, 53)).collect(),
+      };
+      let v: std::vec::Vec<u16> = match variant_name {
+        "ycgco_worst" => std::vec![0x8000u16; width / 2],
+        "p010" => (0..width / 2).map(|i| p010_variant(i, 71)).collect(),
+        _ => (0..width / 2).map(|i| random_variant(i, 71)).collect(),
+      };
+
+      for matrix in [ColorMatrix::Bt601, ColorMatrix::Bt709, ColorMatrix::YCgCo] {
+        for full_range in [true, false] {
+          let mut rgb_scalar = std::vec![0u8; width * 3];
+          let mut rgb_neon = std::vec![0u8; width * 3];
+          scalar::yuv_420p_n_to_rgb_row::<10>(
+            &y,
+            &u,
+            &v,
+            &mut rgb_scalar,
+            width,
+            matrix,
+            full_range,
+          );
+          unsafe {
+            yuv420p10_to_rgb_row(&y, &u, &v, &mut rgb_neon, width, matrix, full_range);
+          }
+          assert_eq!(
+            rgb_scalar, rgb_neon,
+            "scalar and NEON diverge on {variant_name} input (matrix={matrix:?}, full_range={full_range})"
+          );
+
+          let mut rgb16_scalar = std::vec![0u16; width * 3];
+          let mut rgb16_neon = std::vec![0u16; width * 3];
+          scalar::yuv_420p_n_to_rgb_u16_row::<10>(
+            &y,
+            &u,
+            &v,
+            &mut rgb16_scalar,
+            width,
+            matrix,
+            full_range,
+          );
+          unsafe {
+            yuv420p10_to_rgb_u16_row(&y, &u, &v, &mut rgb16_neon, width, matrix, full_range);
+          }
+          assert_eq!(
+            rgb16_scalar, rgb16_neon,
+            "scalar and NEON diverge on {variant_name} u16 output (matrix={matrix:?}, full_range={full_range})"
+          );
+        }
+      }
+    }
   }
 }
