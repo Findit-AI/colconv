@@ -95,8 +95,9 @@ impl<'a> Nv12Row<'a> {
 /// Sinks that consume NV12 rows.
 ///
 /// A subtrait of [`PixelSink`] that pins the row shape to [`Nv12Row`].
-/// Implementors get `process(&mut self, row: Nv12Row<'_>)` via the
-/// supertrait.
+/// Implementors get
+/// `process(&mut self, row: Nv12Row<'_>) -> Result<(), Self::Error>`
+/// via the supertrait.
 pub trait Nv12Sink: for<'a> PixelSink<Input<'a> = Nv12Row<'a>> {}
 
 /// Converts an NV12 frame by walking its rows and feeding each one to

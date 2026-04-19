@@ -101,7 +101,8 @@ impl<'a> Yuv420pRow<'a> {
 /// Sinks that consume YUV 4:2:0 rows.
 ///
 /// A subtrait of [`PixelSink`] that pins the row shape to
-/// [`Yuv420pRow`]. Implementors get `process(&mut self, row: Yuv420pRow<'_>)`
+/// [`Yuv420pRow`]. Implementors get
+/// `process(&mut self, row: Yuv420pRow<'_>) -> Result<(), Self::Error>`
 /// via the supertrait.
 pub trait Yuv420pSink: for<'a> PixelSink<Input<'a> = Yuv420pRow<'a>> {}
 

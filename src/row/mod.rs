@@ -520,10 +520,18 @@ mod overflow_tests {
   #[cfg(target_pointer_width = "32")]
   use crate::ColorMatrix;
 
-  /// `usize::MAX / 3 + 1` rounded up to an even number — the smallest
-  /// even width whose product with 3 overflows 32-bit usize.
+  /// The smallest even width greater than `usize::MAX / 3`, so
+  /// `width * 3` overflows 32-bit `usize` without tripping the
+  /// dispatchers' even-width precondition first. `(usize::MAX / 3)`
+  /// is always odd on 32-bit (`(2^32 - 1) / 3 == 1431655765`), so
+  /// `+ 1` produces an even number — the `+ (candidate & 1)` keeps
+  /// this correct on hypothetical platforms where the parity
+  /// differs.
   #[cfg(target_pointer_width = "32")]
-  const OVERFLOW_WIDTH: usize = (usize::MAX / 3) + 2;
+  const OVERFLOW_WIDTH: usize = {
+    let candidate = (usize::MAX / 3) + 1;
+    candidate + (candidate & 1)
+  };
 
   #[cfg(target_pointer_width = "32")]
   #[test]

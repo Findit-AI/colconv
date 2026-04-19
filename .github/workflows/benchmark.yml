@@ -139,7 +139,7 @@ jobs:
       # `RUSTFLAGS` to avoid SIGILL when rustc loads host-compiled
       # proc-macro dylibs that were codegen'd with `target-cpu=native`.
       # Empty for tiers that don't opt in — cargo treats empty as unset.
-      CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: ${{ matrix.target_rustflags }}
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: ${{ matrix.target_rustflags || '' }}
     steps:
       - uses: actions/checkout@v6
 
@@ -204,8 +204,8 @@ jobs:
           echo "- Runner: ${{ runner.name }}" >> "$summary"
           echo "- Runner arch (GH): ${{ runner.arch }}" >> "$summary"
           echo "- RUSTFLAGS: \`${{ matrix.rustflags }}\`" >> "$summary"
-          if [ -n "${{ matrix.target_rustflags }}" ]; then
-            echo "- CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: \`${{ matrix.target_rustflags }}\`" >> "$summary"
+          if [ -n "${{ matrix.target_rustflags || '' }}" ]; then
+            echo "- CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: \`${{ matrix.target_rustflags || '' }}\`" >> "$summary"
           fi
           echo "- Date: $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> "$summary"
           echo "" >> "$summary"

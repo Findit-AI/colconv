@@ -421,6 +421,7 @@ impl PixelSink for MixedSinker<'_, Yuv420p> {
 
   fn process(&mut self, row: Yuv420pRow<'_>) -> Result<(), Self::Error> {
     let w = self.width;
+    let h = self.height;
     let idx = row.row();
     let use_simd = self.simd;
 
@@ -480,14 +481,13 @@ impl PixelSink for MixedSinker<'_, Yuv420p> {
       ..
     } = self;
 
-    // With preflight validation in place, `idx < h`, and `w × h × N`
-    // guaranteed not to overflow, every row-slice range below is
-    // in-bounds by construction — no per-row size checks needed.
+    // Single-plane row ranges are guaranteed not to overflow: `idx <
+    // h` and `with_luma` / `with_hsv` validated `w × h × 1` fits
+    // usize, so `(idx + 1) * w ≤ h * w` fits too. The `× 3` RGB
+    // ranges are only needed when RGB output is requested — computed
+    // lazily below with overflow checking.
     let one_plane_start = idx * w;
     let one_plane_end = one_plane_start + w;
-    let rgb_plane_start = one_plane_start * 3;
-    let rgb_plane_end = one_plane_end * 3;
-    let rgb_row_bytes = w * 3;
 
     // Luma — YUV420p luma *is* the Y plane. Just copy.
     if let Some(luma) = luma.as_deref_mut() {
@@ -504,9 +504,33 @@ impl PixelSink for MixedSinker<'_, Yuv420p> {
     // own buffer, write directly there; otherwise use the scratch.
     // Either way, the slice we hold is `&mut [u8]` that we then
     // reborrow as `&[u8]` for the HSV step.
+    //
+    // RGB byte ranges use `checked_mul` because `w × 3` (and
+    // `(idx + 1) × w × 3`) can wrap 32-bit `usize` for large widths
+    // even when the single-plane ranges fit — a caller can attach
+    // only `with_hsv` (which validates `w × h × 1`) and never go
+    // through the `× 3` check at buffer attachment. Overflow here
+    // returns `GeometryOverflow` instead of panicking inside the row
+    // dispatcher's own checked multiplication.
     let rgb_row: &mut [u8] = match rgb.as_deref_mut() {
-      Some(buf) => &mut buf[rgb_plane_start..rgb_plane_end],
+      Some(buf) => {
+        let rgb_plane_end =
+          one_plane_end
+            .checked_mul(3)
+            .ok_or(MixedSinkerError::GeometryOverflow {
+              width: w,
+              height: h,
+              channels: 3,
+            })?;
+        let rgb_plane_start = one_plane_start * 3; // ≤ rgb_plane_end, fits.
+        &mut buf[rgb_plane_start..rgb_plane_end]
+      }
       None => {
+        let rgb_row_bytes = w.checked_mul(3).ok_or(MixedSinkerError::GeometryOverflow {
+          width: w,
+          height: h,
+          channels: 3,
+        })?;
         if rgb_scratch.len() < rgb_row_bytes {
           rgb_scratch.resize(rgb_row_bytes, 0);
         }
@@ -563,6 +587,7 @@ impl PixelSink for MixedSinker<'_, Nv12> {
 
   fn process(&mut self, row: Nv12Row<'_>) -> Result<(), Self::Error> {
     let w = self.width;
+    let h = self.height;
     let idx = row.row();
     let use_simd = self.simd;
 
@@ -604,14 +629,11 @@ impl PixelSink for MixedSinker<'_, Nv12> {
       ..
     } = self;
 
-    // Row slices are in-bounds by construction: preflight validation
-    // guaranteed `width × height × N ≤ buffer.len()`, and `idx < h`
-    // holds per the assert above.
+    // Single-plane row ranges are guaranteed to fit; RGB ranges use
+    // checked arithmetic (see the Yuv420p impl above for the full
+    // rationale — hsv-only attachment never validated `× 3`).
     let one_plane_start = idx * w;
     let one_plane_end = one_plane_start + w;
-    let rgb_plane_start = one_plane_start * 3;
-    let rgb_plane_end = one_plane_end * 3;
-    let rgb_row_bytes = w * 3;
 
     // Luma — NV12 luma is the Y plane. Copy verbatim.
     if let Some(luma) = luma.as_deref_mut() {
@@ -625,8 +647,24 @@ impl PixelSink for MixedSinker<'_, Nv12> {
     }
 
     let rgb_row: &mut [u8] = match rgb.as_deref_mut() {
-      Some(buf) => &mut buf[rgb_plane_start..rgb_plane_end],
+      Some(buf) => {
+        let rgb_plane_end =
+          one_plane_end
+            .checked_mul(3)
+            .ok_or(MixedSinkerError::GeometryOverflow {
+              width: w,
+              height: h,
+              channels: 3,
+            })?;
+        let rgb_plane_start = one_plane_start * 3;
+        &mut buf[rgb_plane_start..rgb_plane_end]
+      }
       None => {
+        let rgb_row_bytes = w.checked_mul(3).ok_or(MixedSinkerError::GeometryOverflow {
+          width: w,
+          height: h,
+          channels: 3,
+        })?;
         if rgb_scratch.len() < rgb_row_bytes {
           rgb_scratch.resize(rgb_row_bytes, 0);
         }
