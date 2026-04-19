@@ -3,9 +3,10 @@
 //!
 //! Generic over the source format via an `F: SourceFormat` type
 //! parameter. One `PixelSink` impl per supported format; v0.1 ships
-//! the [`Yuv420p`](crate::yuv::Yuv420p) and [`Nv12`](crate::yuv::Nv12)
-//! impls. All configuration and processing methods are fallible — no
-//! panics under normal contract violations — so the sink is usable on
+//! the [`Yuv420p`](crate::yuv::Yuv420p),
+//! [`Nv12`](crate::yuv::Nv12), and [`Nv21`](crate::yuv::Nv21) impls.
+//! All configuration and processing methods are fallible — no panics
+//! under normal contract violations — so the sink is usable on
 //! `panic = "abort"` targets.
 
 use core::marker::PhantomData;
@@ -124,15 +125,16 @@ pub enum MixedSinkerError {
     configured_height: usize,
   },
 
-  /// The sinker's configured `width` is odd. YUV420p / NV12 subsample
-  /// chroma 2:1 in width, and the row primitives (scalar + every SIMD
-  /// backend) assume `width & 1 == 0` — calling them with an odd
-  /// width panics. `MixedSinker::new` is infallible and accepts any
-  /// width, so this error surfaces the misconfiguration at the first
-  /// use site ([`PixelSink::begin_frame`] or [`PixelSink::process`])
-  /// before any row primitive is invoked, preserving the no-panic
-  /// contract.
-  #[error("MixedSinker configured width {width} is odd; YUV420p / NV12 require even width")]
+  /// The sinker's configured `width` is odd. 4:2:0 formats
+  /// (YUV420p / NV12 / NV21, plus future 4:2:2 variants) subsample
+  /// chroma 2:1 in width, and the row primitives (scalar + every
+  /// SIMD backend) assume `width & 1 == 0` — calling them with an
+  /// odd width panics. `MixedSinker::new` is infallible and accepts
+  /// any width, so this error surfaces the misconfiguration at the
+  /// first use site ([`PixelSink::begin_frame`] or
+  /// [`PixelSink::process`]) before any row primitive is invoked,
+  /// preserving the no-panic contract.
+  #[error("MixedSinker configured width {width} is odd; 4:2:0 formats require even width")]
   OddWidth {
     /// Sink's configured width.
     width: usize,
@@ -155,10 +157,9 @@ pub enum HsvPlane {
 /// [`MixedSinkerError::RowShapeMismatch`].
 ///
 /// `#[non_exhaustive]` because each new source format the crate grows
-/// support for — NV21 (VU instead of UV), YUV422p / YUV444p (full‑width
-/// chroma), P010 / P016 (10/16‑bit planes), etc. — will add its own
-/// variant. Pattern matches from downstream code should include a
-/// `_ => …` arm.
+/// support for — YUV422p / YUV444p (full‑width chroma), P010 / P016
+/// (10/16‑bit planes), etc. — will add its own variant. Pattern
+/// matches from downstream code should include a `_ => …` arm.
 #[derive(Debug, Display, Clone, Copy, PartialEq, Eq, Hash, IsVariant)]
 #[non_exhaustive]
 pub enum RowSlice {
@@ -175,6 +176,11 @@ pub enum RowSlice {
   /// ([`Nv12`]). Each row is `U0, V0, U1, V1, …` for `width / 2` pairs.
   #[display("UV Half")]
   UvHalf,
+  /// Half‑width interleaved VU plane in a semi‑planar 4:2:0 source
+  /// ([`Nv21`]). Each row is `V0, U0, V1, U1, …` for `width / 2`
+  /// pairs — byte order swapped relative to [`Self::UvHalf`].
+  #[display("VU Half")]
+  VuHalf,
 }
 
 /// A sink that writes any subset of `{RGB, Luma, HSV}` into
@@ -193,9 +199,11 @@ pub enum RowSlice {
 ///
 /// # Type parameter
 ///
-/// `F` identifies the source format — `Yuv420p`, `Nv12`, `Bgr24`, etc.
-/// Each format provides its own `impl PixelSink for MixedSinker<'_, F>`
-/// (the only `impl` landed in v0.1 is for [`Yuv420p`]).
+/// `F` identifies the source format — `Yuv420p`, `Nv12`, `Nv21`,
+/// `Bgr24`, etc. Each format provides its own
+/// `impl PixelSink for MixedSinker<'_, F>`. v0.1 ships impls for
+/// [`Yuv420p`](crate::yuv::Yuv420p), [`Nv12`](crate::yuv::Nv12), and
+/// [`Nv21`](crate::yuv::Nv21).
 pub struct MixedSinker<'a, F: SourceFormat> {
   rgb: Option<&'a mut [u8]>,
   luma: Option<&'a mut [u8]>,
@@ -740,13 +748,8 @@ impl PixelSink for MixedSinker<'_, Nv21> {
       });
     }
     if row.vu_half().len() != w {
-      // Nv21 reuses the `UvHalf` variant because the RowSlice enum
-      // describes "half-width interleaved chroma" structurally — the
-      // byte order isn't part of the shape contract. If a caller
-      // needs the format-specific distinction they can match on the
-      // sink type instead.
       return Err(MixedSinkerError::RowShapeMismatch {
-        which: RowSlice::UvHalf,
+        which: RowSlice::VuHalf,
         row: idx,
         expected: w,
         actual: row.vu_half().len(),

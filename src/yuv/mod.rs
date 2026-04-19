@@ -6,8 +6,8 @@
 //! - [`Nv12`](crate::yuv::Nv12) — 4:2:0 **semi‑planar** with interleaved
 //!   UV (VideoToolbox / VA‑API / NVDEC / D3D11VA hardware‑decode
 //!   default).
-//! - [`Nv21`](crate::yuv::Nv21) — 4:2:0 semi‑planar with **VU**-
-//!   ordered chroma (Android MediaCodec default).
+//! - [`Nv21`](crate::yuv::Nv21) — 4:2:0 semi‑planar with **VU**-ordered
+//!   chroma (Android MediaCodec default).
 //!
 //! Other families land in follow-up commits.
 
