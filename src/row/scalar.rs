@@ -216,30 +216,73 @@ pub(crate) fn yuv_420p_n_to_rgb_row<const BITS: u32>(
   let coeffs = Coefficients::for_matrix(matrix);
   let (y_off, y_scale, c_scale) = range_params_n::<BITS, 8>(full_range);
   let bias = chroma_bias::<BITS>();
-  const RND: i32 = 1 << 14;
 
+  // Arithmetic notes for the 10/12/14‑bit path — every op matches
+  // a concrete SIMD intrinsic so scalar and the 5 SIMD backends
+  // stay **bit‑identical** on every input, including mispacked
+  // `p010`‑style data with bits above BITS set:
+  //
+  // - The `y_off` / `bias` subtract is done in **i16 with wrap**
+  //   (`wrapping_sub`) to mirror `vsubq_s16` / `_mm_sub_epi16` /
+  //   `i16x8_sub`. For in‑range samples the result fits i16
+  //   un‑wrapped, so this is a no‑op on the hot path.
+  // - The Q15 coefficient path (`r_u * u_d + r_v * v_d + RND`) uses
+  //   `wrapping_mul` / `wrapping_add` to mirror `_mm_mullo_epi32` /
+  //   `_mm_add_epi32` / `vmulq_s32` / `vaddq_s32`, all of which wrap
+  //   on i32 overflow by contract. Valid input cannot overflow
+  //   (chroma sum max ≈ 10⁹ for 14‑bit, well within i32), so again
+  //   no behavior change on the hot path; malformed input no longer
+  //   trips debug‑mode overflow panics that SIMD silently wraps past.
+  let y_off_i16 = y_off as i16;
+  let bias_i16 = bias as i16;
   let mut x = 0;
   while x < width {
     let c_idx = x / 2;
-    let u_d = ((u_half[c_idx] as i32 - bias) * c_scale + RND) >> 15;
-    let v_d = ((v_half[c_idx] as i32 - bias) * c_scale + RND) >> 15;
+    let u_d = q15_scale(
+      (u_half[c_idx] as i16).wrapping_sub(bias_i16) as i32,
+      c_scale,
+    );
+    let v_d = q15_scale(
+      (v_half[c_idx] as i16).wrapping_sub(bias_i16) as i32,
+      c_scale,
+    );
 
-    let r_chroma = (coeffs.r_u() * u_d + coeffs.r_v() * v_d + RND) >> 15;
-    let g_chroma = (coeffs.g_u() * u_d + coeffs.g_v() * v_d + RND) >> 15;
-    let b_chroma = (coeffs.b_u() * u_d + coeffs.b_v() * v_d + RND) >> 15;
+    let r_chroma = q15_chroma(coeffs.r_u(), u_d, coeffs.r_v(), v_d);
+    let g_chroma = q15_chroma(coeffs.g_u(), u_d, coeffs.g_v(), v_d);
+    let b_chroma = q15_chroma(coeffs.b_u(), u_d, coeffs.b_v(), v_d);
 
-    let y0 = ((y[x] as i32 - y_off) * y_scale + RND) >> 15;
-    rgb_out[x * 3] = clamp_u8(y0 + r_chroma);
-    rgb_out[x * 3 + 1] = clamp_u8(y0 + g_chroma);
-    rgb_out[x * 3 + 2] = clamp_u8(y0 + b_chroma);
+    let y0 = q15_scale((y[x] as i16).wrapping_sub(y_off_i16) as i32, y_scale);
+    rgb_out[x * 3] = clamp_u8(y0.wrapping_add(r_chroma));
+    rgb_out[x * 3 + 1] = clamp_u8(y0.wrapping_add(g_chroma));
+    rgb_out[x * 3 + 2] = clamp_u8(y0.wrapping_add(b_chroma));
 
-    let y1 = ((y[x + 1] as i32 - y_off) * y_scale + RND) >> 15;
-    rgb_out[(x + 1) * 3] = clamp_u8(y1 + r_chroma);
-    rgb_out[(x + 1) * 3 + 1] = clamp_u8(y1 + g_chroma);
-    rgb_out[(x + 1) * 3 + 2] = clamp_u8(y1 + b_chroma);
+    let y1 = q15_scale((y[x + 1] as i16).wrapping_sub(y_off_i16) as i32, y_scale);
+    rgb_out[(x + 1) * 3] = clamp_u8(y1.wrapping_add(r_chroma));
+    rgb_out[(x + 1) * 3 + 1] = clamp_u8(y1.wrapping_add(g_chroma));
+    rgb_out[(x + 1) * 3 + 2] = clamp_u8(y1.wrapping_add(b_chroma));
 
     x += 2;
   }
+}
+
+/// `(sample * scale_q15 + RND) >> 15` using wrapping i32 arithmetic
+/// — matches the SIMD backends' implicit wrap‑on‑overflow semantics.
+/// RND = `1 << 14` for round‑to‑nearest.
+#[cfg_attr(not(tarpaulin), inline(always))]
+fn q15_scale(sample: i32, scale_q15: i32) -> i32 {
+  sample.wrapping_mul(scale_q15).wrapping_add(1 << 14) >> 15
+}
+
+/// `(c_u * u_d + c_v * v_d + RND) >> 15` using wrapping i32
+/// arithmetic — mirrors the SIMD `_mm_mullo_epi32` /
+/// `_mm_add_epi32` / `vmulq_s32` / `vaddq_s32` chain.
+#[cfg_attr(not(tarpaulin), inline(always))]
+fn q15_chroma(c_u: i32, u_d: i32, c_v: i32, v_d: i32) -> i32 {
+  c_u
+    .wrapping_mul(u_d)
+    .wrapping_add(c_v.wrapping_mul(v_d))
+    .wrapping_add(1 << 14)
+    >> 15
 }
 
 /// Converts one row of high‑bit‑depth 4:2:0 YUV to **`u16`** packed
@@ -286,27 +329,37 @@ pub(crate) fn yuv_420p_n_to_rgb_u16_row<const BITS: u32>(
   let (y_off, y_scale, c_scale) = range_params_n::<BITS, BITS>(full_range);
   let bias = chroma_bias::<BITS>();
   let out_max: i32 = (1i32 << BITS) - 1;
-  const RND: i32 = 1 << 14;
 
+  // Wrapping arithmetic throughout — see matching comment in
+  // [`yuv_420p_n_to_rgb_row`]. Keeps scalar bit‑identical to every
+  // SIMD backend on out‑of‑range input.
+  let y_off_i16 = y_off as i16;
+  let bias_i16 = bias as i16;
   let mut x = 0;
   while x < width {
     let c_idx = x / 2;
-    let u_d = ((u_half[c_idx] as i32 - bias) * c_scale + RND) >> 15;
-    let v_d = ((v_half[c_idx] as i32 - bias) * c_scale + RND) >> 15;
+    let u_d = q15_scale(
+      (u_half[c_idx] as i16).wrapping_sub(bias_i16) as i32,
+      c_scale,
+    );
+    let v_d = q15_scale(
+      (v_half[c_idx] as i16).wrapping_sub(bias_i16) as i32,
+      c_scale,
+    );
 
-    let r_chroma = (coeffs.r_u() * u_d + coeffs.r_v() * v_d + RND) >> 15;
-    let g_chroma = (coeffs.g_u() * u_d + coeffs.g_v() * v_d + RND) >> 15;
-    let b_chroma = (coeffs.b_u() * u_d + coeffs.b_v() * v_d + RND) >> 15;
+    let r_chroma = q15_chroma(coeffs.r_u(), u_d, coeffs.r_v(), v_d);
+    let g_chroma = q15_chroma(coeffs.g_u(), u_d, coeffs.g_v(), v_d);
+    let b_chroma = q15_chroma(coeffs.b_u(), u_d, coeffs.b_v(), v_d);
 
-    let y0 = ((y[x] as i32 - y_off) * y_scale + RND) >> 15;
-    rgb_out[x * 3] = (y0 + r_chroma).clamp(0, out_max) as u16;
-    rgb_out[x * 3 + 1] = (y0 + g_chroma).clamp(0, out_max) as u16;
-    rgb_out[x * 3 + 2] = (y0 + b_chroma).clamp(0, out_max) as u16;
+    let y0 = q15_scale((y[x] as i16).wrapping_sub(y_off_i16) as i32, y_scale);
+    rgb_out[x * 3] = y0.wrapping_add(r_chroma).clamp(0, out_max) as u16;
+    rgb_out[x * 3 + 1] = y0.wrapping_add(g_chroma).clamp(0, out_max) as u16;
+    rgb_out[x * 3 + 2] = y0.wrapping_add(b_chroma).clamp(0, out_max) as u16;
 
-    let y1 = ((y[x + 1] as i32 - y_off) * y_scale + RND) >> 15;
-    rgb_out[(x + 1) * 3] = (y1 + r_chroma).clamp(0, out_max) as u16;
-    rgb_out[(x + 1) * 3 + 1] = (y1 + g_chroma).clamp(0, out_max) as u16;
-    rgb_out[(x + 1) * 3 + 2] = (y1 + b_chroma).clamp(0, out_max) as u16;
+    let y1 = q15_scale((y[x + 1] as i16).wrapping_sub(y_off_i16) as i32, y_scale);
+    rgb_out[(x + 1) * 3] = y1.wrapping_add(r_chroma).clamp(0, out_max) as u16;
+    rgb_out[(x + 1) * 3 + 1] = y1.wrapping_add(g_chroma).clamp(0, out_max) as u16;
+    rgb_out[(x + 1) * 3 + 2] = y1.wrapping_add(b_chroma).clamp(0, out_max) as u16;
 
     x += 2;
   }

@@ -1523,4 +1523,65 @@ mod tests {
     check_p10_u8_equivalence(1920, ColorMatrix::Bt709, false);
     check_p10_u16_equivalence(1920, ColorMatrix::Bt2020Ncl, false);
   }
+
+  /// Out‑of‑range regression: mispacked input (e.g. `p010`‑packed
+  /// data handed to the `yuv420p10le`‑shaped kernel — a common
+  /// real‑world mistake) must still produce **bit‑identical output**
+  /// on scalar and NEON. The scalar path uses `sample as i16 as i32`
+  /// specifically to match the SIMD backends' signed reinterpretation
+  /// of the `u16` lanes; this test guards that contract.
+  ///
+  /// Samples like `0xFC00` (p010 white = `1023 << 6`) are nonsense
+  /// when read as `yuv420p10le`, but the output — whatever it is —
+  /// must be the same across backends so the "wrong color" is a
+  /// deterministic signal that downstream diffing can catch.
+  #[test]
+  fn neon_p10_matches_scalar_on_out_of_range_samples() {
+    let width = 32;
+    // p010‑style samples: 10 bits in the high 10 of each u16. Every
+    // value has bit 15 set, so `as i16` reinterprets it as negative.
+    let y: std::vec::Vec<u16> = (0..width)
+      .map(|i| 0xFC00u16.wrapping_add((i as u16) << 6))
+      .collect();
+    let u: std::vec::Vec<u16> = (0..width / 2)
+      .map(|i| 0x8000u16 | ((i as u16) << 6))
+      .collect();
+    let v: std::vec::Vec<u16> = (0..width / 2)
+      .map(|i| 0xC000u16 ^ ((i as u16) << 6))
+      .collect();
+
+    for matrix in [ColorMatrix::Bt601, ColorMatrix::Bt709, ColorMatrix::YCgCo] {
+      for full_range in [true, false] {
+        let mut rgb_scalar = std::vec![0u8; width * 3];
+        let mut rgb_neon = std::vec![0u8; width * 3];
+        scalar::yuv_420p_n_to_rgb_row::<10>(&y, &u, &v, &mut rgb_scalar, width, matrix, full_range);
+        unsafe {
+          yuv420p10_to_rgb_row(&y, &u, &v, &mut rgb_neon, width, matrix, full_range);
+        }
+        assert_eq!(
+          rgb_scalar, rgb_neon,
+          "scalar and NEON diverge on out‑of‑range input (matrix={matrix:?}, full_range={full_range})"
+        );
+
+        let mut rgb16_scalar = std::vec![0u16; width * 3];
+        let mut rgb16_neon = std::vec![0u16; width * 3];
+        scalar::yuv_420p_n_to_rgb_u16_row::<10>(
+          &y,
+          &u,
+          &v,
+          &mut rgb16_scalar,
+          width,
+          matrix,
+          full_range,
+        );
+        unsafe {
+          yuv420p10_to_rgb_u16_row(&y, &u, &v, &mut rgb16_neon, width, matrix, full_range);
+        }
+        assert_eq!(
+          rgb16_scalar, rgb16_neon,
+          "scalar and NEON diverge on out‑of‑range u16 output (matrix={matrix:?}, full_range={full_range})"
+        );
+      }
+    }
+  }
 }

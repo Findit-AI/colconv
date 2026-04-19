@@ -713,12 +713,22 @@ pub enum Nv21FrameError {
 /// validates geometry only and the contract falls on the caller.
 /// Decoders and FFmpeg output satisfy this by construction.
 ///
-/// **Output is undefined for samples outside that range.** Scalar and
-/// x86 backends treat a 16‑bit `u16` as an unsigned intermediate;
-/// NEON reinterprets it as signed `i16` before the Q15 path, so a
-/// sample with bit 15 set produces architecturally distinct garbage
-/// on aarch64 vs x86. Callers handling potentially dirty buffers
-/// should mask (`sample & ((1 << BITS) - 1)`) upstream.
+/// **Output is wrong‑but‑consistent for samples outside that
+/// range.** Every backend (scalar + all 5 SIMD tiers) treats the
+/// `u16` lane as **signed `i16`** before the Q15 path, so a sample
+/// with bit 15 set is interpreted as a negative value. The scalar
+/// kernel uses `sample as i16 as i32`; the SIMD kernels use the
+/// corresponding intrinsics (`vreinterpretq_s16_u16`,
+/// `_mm_cvtepi16_epi32`, `i32x4_extend_low_i16x8`, etc.). The
+/// output is bit‑identical across backends, so mispacking — e.g.
+/// feeding a `p010`‑packed buffer (`sample << 6`) into a
+/// `yuv420p10le`‑shaped frame — produces visibly‑wrong colors that
+/// show up immediately in diffs, rather than silent
+/// architecture‑dependent drift.
+///
+/// Callers holding untrusted buffers can use [`Self::try_new_checked`]
+/// to reject out‑of‑range samples up front with a plane‑specific
+/// diagnostic, or mask (`sample & ((1 << BITS) - 1)`) upstream.
 ///
 /// colconv v0.2 ships `BITS == 10` only (the use‑case keystone for
 /// HDR and 10‑bit SDR). 12 and 14 are mechanical follow‑ups that
