@@ -235,6 +235,85 @@ pub fn nv12_to_rgb_row(
   scalar::nv12_to_rgb_row(y, uv_half, rgb_out, width, matrix, full_range);
 }
 
+/// Converts one row of NV21 (semi‑planar 4:2:0, VU-ordered) to
+/// packed RGB.
+///
+/// Same numerical contract as [`nv12_to_rgb_row`]; the only
+/// difference is chroma byte order — NV21 stores `V0, U0, V1, U1, …`
+/// instead of NV12's `U0, V0, U1, V1, …`. See `scalar::nv21_to_rgb_row`
+/// for the reference implementation.
+///
+/// `use_simd = false` forces the scalar reference path.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn nv21_to_rgb_row(
+  y: &[u8],
+  vu_half: &[u8],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  use_simd: bool,
+) {
+  // Runtime asserts at the dispatcher boundary.
+  assert_eq!(width & 1, 0, "NV21 requires even width");
+  let rgb_min = rgb_row_bytes(width);
+  assert!(y.len() >= width, "y row too short");
+  assert!(vu_half.len() >= width, "vu_half row too short");
+  assert!(rgb_out.len() >= rgb_min, "rgb_out row too short");
+
+  if use_simd {
+    cfg_select! {
+      target_arch = "aarch64" => {
+        if neon_available() {
+          // SAFETY: `neon_available()` verified NEON is present.
+          unsafe {
+            arch::neon::nv21_to_rgb_row(y, vu_half, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+      },
+      target_arch = "x86_64" => {
+        if avx512_available() {
+          // SAFETY: `avx512_available()` verified AVX‑512BW is present.
+          unsafe {
+            arch::x86_avx512::nv21_to_rgb_row(y, vu_half, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+        if avx2_available() {
+          // SAFETY: AVX2 verified.
+          unsafe {
+            arch::x86_avx2::nv21_to_rgb_row(y, vu_half, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+        if sse41_available() {
+          // SAFETY: SSE4.1 verified.
+          unsafe {
+            arch::x86_sse41::nv21_to_rgb_row(y, vu_half, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+      },
+      target_arch = "wasm32" => {
+        if simd128_available() {
+          // SAFETY: simd128 verified at compile time.
+          unsafe {
+            arch::wasm_simd128::nv21_to_rgb_row(y, vu_half, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+      },
+      _ => {
+        // Targets without a SIMD backend fall through to scalar.
+      }
+    }
+  }
+
+  scalar::nv21_to_rgb_row(y, vu_half, rgb_out, width, matrix, full_range);
+}
+
 /// Converts one row of packed RGB to planar HSV (OpenCV 8‑bit
 /// encoding). See `scalar::rgb_to_hsv_row` for semantics.
 ///

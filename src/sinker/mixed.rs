@@ -3,9 +3,10 @@
 //!
 //! Generic over the source format via an `F: SourceFormat` type
 //! parameter. One `PixelSink` impl per supported format; v0.1 ships
-//! the [`Yuv420p`](crate::yuv::Yuv420p) and [`Nv12`](crate::yuv::Nv12)
-//! impls. All configuration and processing methods are fallible — no
-//! panics under normal contract violations — so the sink is usable on
+//! the [`Yuv420p`](crate::yuv::Yuv420p),
+//! [`Nv12`](crate::yuv::Nv12), and [`Nv21`](crate::yuv::Nv21) impls.
+//! All configuration and processing methods are fallible — no panics
+//! under normal contract violations — so the sink is usable on
 //! `panic = "abort"` targets.
 
 use core::marker::PhantomData;
@@ -17,8 +18,8 @@ use thiserror::Error;
 
 use crate::{
   HsvBuffers, PixelSink, SourceFormat,
-  row::{nv12_to_rgb_row, rgb_to_hsv_row, yuv_420_to_rgb_row},
-  yuv::{Nv12, Nv12Row, Nv12Sink, Yuv420p, Yuv420pRow, Yuv420pSink},
+  row::{nv12_to_rgb_row, nv21_to_rgb_row, rgb_to_hsv_row, yuv_420_to_rgb_row},
+  yuv::{Nv12, Nv12Row, Nv12Sink, Nv21, Nv21Row, Nv21Sink, Yuv420p, Yuv420pRow, Yuv420pSink},
 };
 
 /// Errors returned by [`MixedSinker`] configuration and per-frame
@@ -124,15 +125,16 @@ pub enum MixedSinkerError {
     configured_height: usize,
   },
 
-  /// The sinker's configured `width` is odd. YUV420p / NV12 subsample
-  /// chroma 2:1 in width, and the row primitives (scalar + every SIMD
-  /// backend) assume `width & 1 == 0` — calling them with an odd
-  /// width panics. `MixedSinker::new` is infallible and accepts any
-  /// width, so this error surfaces the misconfiguration at the first
-  /// use site ([`PixelSink::begin_frame`] or [`PixelSink::process`])
-  /// before any row primitive is invoked, preserving the no-panic
-  /// contract.
-  #[error("MixedSinker configured width {width} is odd; YUV420p / NV12 require even width")]
+  /// The sinker's configured `width` is odd. 4:2:0 formats
+  /// (YUV420p / NV12 / NV21, plus future 4:2:2 variants) subsample
+  /// chroma 2:1 in width, and the row primitives (scalar + every
+  /// SIMD backend) assume `width & 1 == 0` — calling them with an
+  /// odd width panics. `MixedSinker::new` is infallible and accepts
+  /// any width, so this error surfaces the misconfiguration at the
+  /// first use site ([`PixelSink::begin_frame`] or
+  /// [`PixelSink::process`]) before any row primitive is invoked,
+  /// preserving the no-panic contract.
+  #[error("MixedSinker configured width {width} is odd; 4:2:0 formats require even width")]
   OddWidth {
     /// Sink's configured width.
     width: usize,
@@ -155,10 +157,9 @@ pub enum HsvPlane {
 /// [`MixedSinkerError::RowShapeMismatch`].
 ///
 /// `#[non_exhaustive]` because each new source format the crate grows
-/// support for — NV21 (VU instead of UV), YUV422p / YUV444p (full‑width
-/// chroma), P010 / P016 (10/16‑bit planes), etc. — will add its own
-/// variant. Pattern matches from downstream code should include a
-/// `_ => …` arm.
+/// support for — YUV422p / YUV444p (full‑width chroma), P010 / P016
+/// (10/16‑bit planes), etc. — will add its own variant. Pattern
+/// matches from downstream code should include a `_ => …` arm.
 #[derive(Debug, Display, Clone, Copy, PartialEq, Eq, Hash, IsVariant)]
 #[non_exhaustive]
 pub enum RowSlice {
@@ -175,6 +176,11 @@ pub enum RowSlice {
   /// ([`Nv12`]). Each row is `U0, V0, U1, V1, …` for `width / 2` pairs.
   #[display("UV Half")]
   UvHalf,
+  /// Half‑width interleaved VU plane in a semi‑planar 4:2:0 source
+  /// ([`Nv21`]). Each row is `V0, U0, V1, U1, …` for `width / 2`
+  /// pairs — byte order swapped relative to [`Self::UvHalf`].
+  #[display("VU Half")]
+  VuHalf,
 }
 
 /// A sink that writes any subset of `{RGB, Luma, HSV}` into
@@ -193,9 +199,11 @@ pub enum RowSlice {
 ///
 /// # Type parameter
 ///
-/// `F` identifies the source format — `Yuv420p`, `Nv12`, `Bgr24`, etc.
-/// Each format provides its own `impl PixelSink for MixedSinker<'_, F>`
-/// (the only `impl` landed in v0.1 is for [`Yuv420p`]).
+/// `F` identifies the source format — `Yuv420p`, `Nv12`, `Nv21`,
+/// `Bgr24`, etc. Each format provides its own
+/// `impl PixelSink for MixedSinker<'_, F>`. v0.1 ships impls for
+/// [`Yuv420p`](crate::yuv::Yuv420p), [`Nv12`](crate::yuv::Nv12), and
+/// [`Nv21`](crate::yuv::Nv21).
 pub struct MixedSinker<'a, F: SourceFormat> {
   rgb: Option<&'a mut [u8]>,
   luma: Option<&'a mut [u8]>,
@@ -700,6 +708,133 @@ impl PixelSink for MixedSinker<'_, Nv12> {
 
 impl Yuv420pSink for MixedSinker<'_, Yuv420p> {}
 
+// ---- Nv21 impl ----------------------------------------------------------
+//
+// Structurally identical to the Nv12 impl — the row primitives hide
+// the U/V byte-order difference. Only the trait `Input<'r>` and the
+// primitive name change.
+
+impl Nv21Sink for MixedSinker<'_, Nv21> {}
+
+impl PixelSink for MixedSinker<'_, Nv21> {
+  type Input<'r> = Nv21Row<'r>;
+  type Error = MixedSinkerError;
+
+  fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
+    if self.width & 1 != 0 {
+      return Err(MixedSinkerError::OddWidth { width: self.width });
+    }
+    check_dimensions_match(self.width, self.height, width, height)
+  }
+
+  fn process(&mut self, row: Nv21Row<'_>) -> Result<(), Self::Error> {
+    let w = self.width;
+    let h = self.height;
+    let idx = row.row();
+    let use_simd = self.simd;
+
+    // Defense in depth: same shape check as the Nv12 impl. A VU row
+    // has `width` bytes of interleaved V / U payload — same length
+    // as Y — so both slices must equal `self.width`.
+    if w & 1 != 0 {
+      return Err(MixedSinkerError::OddWidth { width: w });
+    }
+    if row.y().len() != w {
+      return Err(MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::Y,
+        row: idx,
+        expected: w,
+        actual: row.y().len(),
+      });
+    }
+    if row.vu_half().len() != w {
+      return Err(MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::VuHalf,
+        row: idx,
+        expected: w,
+        actual: row.vu_half().len(),
+      });
+    }
+    if idx >= self.height {
+      return Err(MixedSinkerError::RowIndexOutOfRange {
+        row: idx,
+        configured_height: self.height,
+      });
+    }
+
+    let Self {
+      rgb,
+      luma,
+      hsv,
+      rgb_scratch,
+      ..
+    } = self;
+
+    let one_plane_start = idx * w;
+    let one_plane_end = one_plane_start + w;
+
+    if let Some(luma) = luma.as_deref_mut() {
+      luma[one_plane_start..one_plane_end].copy_from_slice(&row.y()[..w]);
+    }
+
+    let want_rgb = rgb.is_some();
+    let want_hsv = hsv.is_some();
+    if !want_rgb && !want_hsv {
+      return Ok(());
+    }
+
+    let rgb_row: &mut [u8] = match rgb.as_deref_mut() {
+      Some(buf) => {
+        let rgb_plane_end =
+          one_plane_end
+            .checked_mul(3)
+            .ok_or(MixedSinkerError::GeometryOverflow {
+              width: w,
+              height: h,
+              channels: 3,
+            })?;
+        let rgb_plane_start = one_plane_start * 3;
+        &mut buf[rgb_plane_start..rgb_plane_end]
+      }
+      None => {
+        let rgb_row_bytes = w.checked_mul(3).ok_or(MixedSinkerError::GeometryOverflow {
+          width: w,
+          height: h,
+          channels: 3,
+        })?;
+        if rgb_scratch.len() < rgb_row_bytes {
+          rgb_scratch.resize(rgb_row_bytes, 0);
+        }
+        &mut rgb_scratch[..rgb_row_bytes]
+      }
+    };
+
+    // Fused NV21 → RGB: VU deinterleave + chroma upsample both happen
+    // in registers inside the row primitive, no intermediate memory.
+    nv21_to_rgb_row(
+      row.y(),
+      row.vu_half(),
+      rgb_row,
+      w,
+      row.matrix(),
+      row.full_range(),
+      use_simd,
+    );
+
+    if let Some(hsv) = hsv.as_mut() {
+      rgb_to_hsv_row(
+        rgb_row,
+        &mut hsv.h[one_plane_start..one_plane_end],
+        &mut hsv.s[one_plane_start..one_plane_end],
+        &mut hsv.v[one_plane_start..one_plane_end],
+        w,
+        use_simd,
+      );
+    }
+    Ok(())
+  }
+}
+
 /// Returns `Ok(())` iff the walker's frame dimensions exactly match
 /// the sinker's configured dimensions. Called from
 /// [`PixelSink::begin_frame`] on both `MixedSinker<Yuv420p>` and
@@ -737,8 +872,8 @@ mod tests {
   use super::*;
   use crate::{
     ColorMatrix,
-    frame::{Nv12Frame, Yuv420pFrame},
-    yuv::{nv12_to, yuv420p_to},
+    frame::{Nv12Frame, Nv21Frame, Yuv420pFrame},
+    yuv::{nv12_to, nv21_to, yuv420p_to},
   };
 
   fn solid_yuv420p_frame(
@@ -1483,5 +1618,125 @@ mod tests {
     nv12_to(&nv12_src, false, ColorMatrix::Bt709, &mut s_nv).unwrap();
 
     assert_eq!(rgb_yuv420p, rgb_nv12);
+  }
+
+  // ---- NV21 MixedSinker ---------------------------------------------------
+
+  fn solid_nv21_frame(width: u32, height: u32, y: u8, u: u8, v: u8) -> (Vec<u8>, Vec<u8>) {
+    let w = width as usize;
+    let h = height as usize;
+    let ch = h / 2;
+    // VU row payload = `width` bytes = `width/2` interleaved V/U pairs
+    // (V first).
+    let mut vu = std::vec![0u8; w * ch];
+    for row in 0..ch {
+      for i in 0..w / 2 {
+        vu[row * w + i * 2] = v;
+        vu[row * w + i * 2 + 1] = u;
+      }
+    }
+    (std::vec![y; w * h], vu)
+  }
+
+  #[test]
+  fn nv21_luma_only_copies_y_plane() {
+    let (yp, vup) = solid_nv21_frame(16, 8, 42, 128, 128);
+    let src = Nv21Frame::new(&yp, &vup, 16, 8, 16, 16);
+
+    let mut luma = std::vec![0u8; 16 * 8];
+    let mut sink = MixedSinker::<Nv21>::new(16, 8)
+      .with_luma(&mut luma)
+      .unwrap();
+    nv21_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+    assert!(luma.iter().all(|&y| y == 42));
+  }
+
+  #[test]
+  fn nv21_rgb_only_converts_gray_to_gray() {
+    let (yp, vup) = solid_nv21_frame(16, 8, 128, 128, 128);
+    let src = Nv21Frame::new(&yp, &vup, 16, 8, 16, 16);
+
+    let mut rgb = std::vec![0u8; 16 * 8 * 3];
+    let mut sink = MixedSinker::<Nv21>::new(16, 8).with_rgb(&mut rgb).unwrap();
+    nv21_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+    for px in rgb.chunks(3) {
+      assert!(px[0].abs_diff(128) <= 1);
+      assert_eq!(px[0], px[1]);
+      assert_eq!(px[1], px[2]);
+    }
+  }
+
+  #[test]
+  fn nv21_mixed_all_three_outputs_populated() {
+    let (yp, vup) = solid_nv21_frame(16, 8, 200, 128, 128);
+    let src = Nv21Frame::new(&yp, &vup, 16, 8, 16, 16);
+
+    let mut rgb = std::vec![0u8; 16 * 8 * 3];
+    let mut luma = std::vec![0u8; 16 * 8];
+    let mut h = std::vec![0u8; 16 * 8];
+    let mut s = std::vec![0u8; 16 * 8];
+    let mut v = std::vec![0u8; 16 * 8];
+    let mut sink = MixedSinker::<Nv21>::new(16, 8)
+      .with_rgb(&mut rgb)
+      .unwrap()
+      .with_luma(&mut luma)
+      .unwrap()
+      .with_hsv(&mut h, &mut s, &mut v)
+      .unwrap();
+    nv21_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+    assert!(luma.iter().all(|&y| y == 200));
+    for px in rgb.chunks(3) {
+      assert!(px[0].abs_diff(200) <= 1);
+    }
+    assert!(h.iter().all(|&b| b == 0));
+    assert!(s.iter().all(|&b| b == 0));
+    assert!(v.iter().all(|&b| b.abs_diff(200) <= 1));
+  }
+
+  #[test]
+  fn nv21_matches_nv12_mixed_sinker_with_swapped_chroma() {
+    // Cross-format guarantee: an NV21 frame built from the same U / V
+    // bytes as an NV12 frame (just byte-swapped in the chroma plane)
+    // must produce identical RGB output via MixedSinker.
+    let w = 32u32;
+    let h = 16u32;
+    let ws = w as usize;
+    let hs = h as usize;
+
+    let yp: Vec<u8> = (0..ws * hs).map(|i| ((i * 37 + 11) & 0xFF) as u8).collect();
+    let mut uvp: Vec<u8> = std::vec![0u8; ws * (hs / 2)];
+    for r in 0..hs / 2 {
+      for c in 0..ws / 2 {
+        uvp[r * ws + 2 * c] = ((c + r * 53) & 0xFF) as u8; // U
+        uvp[r * ws + 2 * c + 1] = ((c + r * 71) & 0xFF) as u8; // V
+      }
+    }
+    // Byte-swap each chroma pair to get the VU-ordered stream.
+    let mut vup: Vec<u8> = uvp.clone();
+    for r in 0..hs / 2 {
+      for c in 0..ws / 2 {
+        vup[r * ws + 2 * c] = uvp[r * ws + 2 * c + 1];
+        vup[r * ws + 2 * c + 1] = uvp[r * ws + 2 * c];
+      }
+    }
+
+    let nv12_src = Nv12Frame::new(&yp, &uvp, w, h, w, w);
+    let nv21_src = Nv21Frame::new(&yp, &vup, w, h, w, w);
+
+    let mut rgb_nv12 = std::vec![0u8; ws * hs * 3];
+    let mut rgb_nv21 = std::vec![0u8; ws * hs * 3];
+    let mut s_nv12 = MixedSinker::<Nv12>::new(ws, hs)
+      .with_rgb(&mut rgb_nv12)
+      .unwrap();
+    let mut s_nv21 = MixedSinker::<Nv21>::new(ws, hs)
+      .with_rgb(&mut rgb_nv21)
+      .unwrap();
+    nv12_to(&nv12_src, false, ColorMatrix::Bt709, &mut s_nv12).unwrap();
+    nv21_to(&nv21_src, false, ColorMatrix::Bt709, &mut s_nv21).unwrap();
+
+    assert_eq!(rgb_nv12, rgb_nv21);
   }
 }

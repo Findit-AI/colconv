@@ -192,20 +192,12 @@ pub(crate) unsafe fn yuv_420_to_rgb_row(
   }
 }
 
-/// SSE4.1 NV12 → packed RGB. Identical math to [`yuv_420_to_rgb_row`];
-/// the only difference is UV ingestion — a single 16‑byte load from
-/// the interleaved UV row plus two `_mm_shuffle_epi8` calls extract the
-/// 8 U bytes and 8 V bytes into the low halves of two `__m128i`s,
-/// matching what `_mm_cvtepu8_epi16` expects downstream.
+/// SSE4.1 NV12 → packed RGB (UV-ordered chroma). Thin wrapper over
+/// [`nv12_or_nv21_to_rgb_row_impl`] with `SWAP_UV = false`.
 ///
 /// # Safety
 ///
-/// 1. **SSE4.1 must be available on the current CPU** (same obligation
-///    as [`yuv_420_to_rgb_row`]).
-/// 2. `width & 1 == 0`.
-/// 3. `y.len() >= width`.
-/// 4. `uv_half.len() >= width` (`2 * (width / 2)` interleaved bytes).
-/// 5. `rgb_out.len() >= 3 * width`.
+/// Same as [`nv12_or_nv21_to_rgb_row_impl`].
 #[inline]
 #[target_feature(enable = "sse4.1")]
 pub(crate) unsafe fn nv12_to_rgb_row(
@@ -216,9 +208,59 @@ pub(crate) unsafe fn nv12_to_rgb_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  debug_assert_eq!(width & 1, 0, "NV12 requires even width");
+  // SAFETY: caller obligations forwarded to the shared impl.
+  unsafe {
+    nv12_or_nv21_to_rgb_row_impl::<false>(y, uv_half, rgb_out, width, matrix, full_range);
+  }
+}
+
+/// SSE4.1 NV21 → packed RGB (VU-ordered chroma). Thin wrapper over
+/// [`nv12_or_nv21_to_rgb_row_impl`] with `SWAP_UV = true`.
+///
+/// # Safety
+///
+/// Same as [`nv12_or_nv21_to_rgb_row_impl`].
+#[inline]
+#[target_feature(enable = "sse4.1")]
+pub(crate) unsafe fn nv21_to_rgb_row(
+  y: &[u8],
+  vu_half: &[u8],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  // SAFETY: caller obligations forwarded to the shared impl.
+  unsafe {
+    nv12_or_nv21_to_rgb_row_impl::<true>(y, vu_half, rgb_out, width, matrix, full_range);
+  }
+}
+
+/// Shared SSE4.1 NV12/NV21 kernel. `SWAP_UV = false` → NV12,
+/// `SWAP_UV = true` → NV21. Const generic drives monomorphization —
+/// the swap is resolved at compile time.
+///
+/// # Safety
+///
+/// 1. **SSE4.1 must be available on the current CPU** (same obligation
+///    as [`yuv_420_to_rgb_row`]).
+/// 2. `width & 1 == 0`.
+/// 3. `y.len() >= width`.
+/// 4. `uv_or_vu_half.len() >= width` (2 × (width / 2) interleaved bytes).
+/// 5. `rgb_out.len() >= 3 * width`.
+#[inline]
+#[target_feature(enable = "sse4.1")]
+unsafe fn nv12_or_nv21_to_rgb_row_impl<const SWAP_UV: bool>(
+  y: &[u8],
+  uv_or_vu_half: &[u8],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  debug_assert_eq!(width & 1, 0, "NV12/NV21 require even width");
   debug_assert!(y.len() >= width);
-  debug_assert!(uv_half.len() >= width);
+  debug_assert!(uv_or_vu_half.len() >= width);
   debug_assert!(rgb_out.len() >= width * 3);
 
   let coeffs = scalar::Coefficients::for_matrix(matrix);
@@ -241,20 +283,29 @@ pub(crate) unsafe fn nv12_to_rgb_row(
     let cbu = _mm_set1_epi32(coeffs.b_u());
     let cbv = _mm_set1_epi32(coeffs.b_v());
 
-    // Deinterleave masks: pack U bytes (even UV offsets) into the low 8
-    // lanes; pack V bytes (odd offsets) into the low 8. Upper 8 bytes
-    // zeroed so `_mm_cvtepu8_epi16` sees the right 8 inputs.
-    let u_mask = _mm_setr_epi8(0, 2, 4, 6, 8, 10, 12, 14, -1, -1, -1, -1, -1, -1, -1, -1);
-    let v_mask = _mm_setr_epi8(1, 3, 5, 7, 9, 11, 13, 15, -1, -1, -1, -1, -1, -1, -1, -1);
+    // Deinterleave masks: `even_mask` pulls even-offset bytes into
+    // lanes 0..7, `odd_mask` pulls odd-offset bytes. For NV12 that's
+    // (U, V); for NV21 the roles swap.
+    let even_mask = _mm_setr_epi8(0, 2, 4, 6, 8, 10, 12, 14, -1, -1, -1, -1, -1, -1, -1, -1);
+    let odd_mask = _mm_setr_epi8(1, 3, 5, 7, 9, 11, 13, 15, -1, -1, -1, -1, -1, -1, -1, -1);
 
     let mut x = 0usize;
     while x + 16 <= width {
       let y_vec = _mm_loadu_si128(y.as_ptr().add(x).cast());
-      // 16 Y pixels correspond to 8 chroma pairs = 16 interleaved UV
-      // bytes at offset `x` in the UV row.
-      let uv_vec = _mm_loadu_si128(uv_half.as_ptr().add(x).cast());
-      let u_vec = _mm_shuffle_epi8(uv_vec, u_mask);
-      let v_vec = _mm_shuffle_epi8(uv_vec, v_mask);
+      // 16 Y pixels correspond to 8 chroma pairs = 16 interleaved
+      // bytes at offset `x` in the chroma row.
+      let uv_vec = _mm_loadu_si128(uv_or_vu_half.as_ptr().add(x).cast());
+      let (u_vec, v_vec) = if SWAP_UV {
+        (
+          _mm_shuffle_epi8(uv_vec, odd_mask),
+          _mm_shuffle_epi8(uv_vec, even_mask),
+        )
+      } else {
+        (
+          _mm_shuffle_epi8(uv_vec, even_mask),
+          _mm_shuffle_epi8(uv_vec, odd_mask),
+        )
+      };
 
       let u_i16 = _mm_sub_epi16(_mm_cvtepu8_epi16(u_vec), mid128);
       let v_i16 = _mm_sub_epi16(_mm_cvtepu8_epi16(v_vec), mid128);
@@ -302,14 +353,25 @@ pub(crate) unsafe fn nv12_to_rgb_row(
     }
 
     if x < width {
-      scalar::nv12_to_rgb_row(
-        &y[x..width],
-        &uv_half[x..width],
-        &mut rgb_out[x * 3..width * 3],
-        width - x,
-        matrix,
-        full_range,
-      );
+      if SWAP_UV {
+        scalar::nv21_to_rgb_row(
+          &y[x..width],
+          &uv_or_vu_half[x..width],
+          &mut rgb_out[x * 3..width * 3],
+          width - x,
+          matrix,
+          full_range,
+        );
+      } else {
+        scalar::nv12_to_rgb_row(
+          &y[x..width],
+          &uv_or_vu_half[x..width],
+          &mut rgb_out[x * 3..width * 3],
+          width - x,
+          matrix,
+          full_range,
+        );
+      }
     }
   }
 }
@@ -646,6 +708,88 @@ mod tests {
     }
   }
 
+  // ---- nv21_to_rgb_row equivalence ------------------------------------
+
+  fn check_nv21_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+    let y: std::vec::Vec<u8> = (0..width).map(|i| ((i * 37 + 11) & 0xFF) as u8).collect();
+    let vu: std::vec::Vec<u8> = (0..width / 2)
+      .flat_map(|i| [((i * 53 + 23) & 0xFF) as u8, ((i * 71 + 91) & 0xFF) as u8])
+      .collect();
+    let mut rgb_scalar = std::vec![0u8; width * 3];
+    let mut rgb_sse41 = std::vec![0u8; width * 3];
+
+    scalar::nv21_to_rgb_row(&y, &vu, &mut rgb_scalar, width, matrix, full_range);
+    unsafe {
+      nv21_to_rgb_row(&y, &vu, &mut rgb_sse41, width, matrix, full_range);
+    }
+    assert_eq!(
+      rgb_scalar, rgb_sse41,
+      "SSE4.1 NV21 ≠ scalar (width={width}, matrix={matrix:?})"
+    );
+  }
+
+  fn check_nv21_matches_nv12_swapped(width: usize, matrix: ColorMatrix, full_range: bool) {
+    let y: std::vec::Vec<u8> = (0..width).map(|i| ((i * 37 + 11) & 0xFF) as u8).collect();
+    let uv: std::vec::Vec<u8> = (0..width / 2)
+      .flat_map(|i| [((i * 53 + 23) & 0xFF) as u8, ((i * 71 + 91) & 0xFF) as u8])
+      .collect();
+    let mut vu = std::vec![0u8; width];
+    for i in 0..width / 2 {
+      vu[2 * i] = uv[2 * i + 1];
+      vu[2 * i + 1] = uv[2 * i];
+    }
+
+    let mut rgb_nv12 = std::vec![0u8; width * 3];
+    let mut rgb_nv21 = std::vec![0u8; width * 3];
+    unsafe {
+      nv12_to_rgb_row(&y, &uv, &mut rgb_nv12, width, matrix, full_range);
+      nv21_to_rgb_row(&y, &vu, &mut rgb_nv21, width, matrix, full_range);
+    }
+    assert_eq!(
+      rgb_nv12, rgb_nv21,
+      "SSE4.1 NV21 ≠ NV12 with byte-swapped chroma"
+    );
+  }
+
+  #[test]
+  fn nv21_sse41_matches_scalar_all_matrices_16() {
+    if !std::arch::is_x86_feature_detected!("sse4.1") {
+      return;
+    }
+    for m in [
+      ColorMatrix::Bt601,
+      ColorMatrix::Bt709,
+      ColorMatrix::Bt2020Ncl,
+      ColorMatrix::Smpte240m,
+      ColorMatrix::Fcc,
+      ColorMatrix::YCgCo,
+    ] {
+      for full in [true, false] {
+        check_nv21_equivalence(16, m, full);
+      }
+    }
+  }
+
+  #[test]
+  fn nv21_sse41_matches_scalar_widths() {
+    if !std::arch::is_x86_feature_detected!("sse4.1") {
+      return;
+    }
+    for w in [32usize, 1920, 18, 30, 34, 1922] {
+      check_nv21_equivalence(w, ColorMatrix::Bt709, false);
+    }
+  }
+
+  #[test]
+  fn nv21_sse41_matches_nv12_swapped() {
+    if !std::arch::is_x86_feature_detected!("sse4.1") {
+      return;
+    }
+    for w in [16usize, 30, 64, 1920] {
+      check_nv21_matches_nv12_swapped(w, ColorMatrix::Bt709, false);
+      check_nv21_matches_nv12_swapped(w, ColorMatrix::YCgCo, true);
+    }
+  }
   // ---- rgb_to_hsv_row equivalence --------------------------------------
 
   fn check_hsv_equivalence(rgb: &[u8], width: usize) {
