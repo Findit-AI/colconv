@@ -381,11 +381,12 @@ pub(crate) fn p010_to_rgb_row(
   let (y_off, y_scale, c_scale) = range_params_n::<10, 8>(full_range);
   let bias = chroma_bias::<10>();
 
-  // Each `u16` load is extracted to its 10‑bit value via `>> 6`
-  // (which leaves the result in `[0, 1023]`). Mispacked input
-  // (`yuv420p10le` handed to this kernel) gets its active bits
-  // discarded — same result as masking `& 0x3FF` on every SIMD
-  // backend below. No hot‑path cost: one shift per load.
+  // Each `u16` load is converted to its 10-bit sample with `>> 6`,
+  // extracting the upper 10 bits and leaving the result in
+  // `[0, 1023]`. If low-packed input (`yuv420p10le`) is handed to
+  // this kernel by mistake, that shift discards the active low 6 bits
+  // rather than recovering the intended 10-bit value. No hot-path
+  // cost: one shift per load.
   let mut x = 0;
   while x < width {
     let c_idx = x / 2;
