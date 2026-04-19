@@ -4,14 +4,14 @@
 //! plus U / V at half width and half height — but sample width is
 //! **`u16`** (10 active bits in the low bits of each element). The
 //! [`Yuv420p10Frame`] type alias pins the bit depth; the underlying
-//! [`Yuv420pFrame16`] struct is const‑generic over `BITS` so 12‑bit
-//! and 14‑bit variants can be added by relaxing its validator without
-//! changing kernel math.
+//! [`Yuv420pFrame16`] struct is const‑generic over `BITS` and the
+//! 12‑bit / 14‑bit siblings ([`super::Yuv420p12`] / [`super::Yuv420p14`])
+//! reuse the same scalar + SIMD kernel family with a different
+//! monomorphization.
 //!
-//! Ships in colconv v0.2 as the first high‑bit‑depth format (HDR /
-//! 10‑bit SDR keystone). Kernel semantics match [`super::Yuv420p`]:
-//! two consecutive Y rows share one chroma row (4:2:0), chroma is
-//! nearest‑neighbor upsampled in registers inside the row primitive.
+//! Kernel semantics match [`super::Yuv420p`]: two consecutive Y rows
+//! share one chroma row (4:2:0), chroma is nearest‑neighbor upsampled
+//! in registers inside the row primitive.
 
 use crate::{
   ColorMatrix, PixelSink, SourceFormat,
@@ -22,10 +22,11 @@ use crate::{
 /// Zero‑sized marker for the YUV 4:2:0 **10‑bit** source format. Used
 /// as the `F` type parameter on [`crate::sinker::MixedSinker`].
 ///
-/// colconv v0.2 ships only the 10‑bit specialization; 12‑ and 14‑bit
-/// will arrive as separate markers (`Yuv420p12`, `Yuv420p14`) that
-/// refer to the same underlying [`Yuv420pFrame16`] struct with
-/// different `BITS` values.
+/// 12‑bit and 14‑bit siblings ship as separate markers
+/// ([`super::Yuv420p12`] / [`super::Yuv420p14`]) on the same
+/// [`Yuv420pFrame16`] struct with different `BITS` values. 16‑bit
+/// needs a different kernel family (Q15 chroma_sum overflows i32) and
+/// is not yet shipped.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct Yuv420p10;
 

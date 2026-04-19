@@ -207,6 +207,13 @@ pub(crate) fn yuv_420p_n_to_rgb_row<const BITS: u32>(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
+  // Low-bit-packed planar kernels are defined for BITS in {10, 12, 14}.
+  // 16 would overflow the Q15 chroma sum; 8 belongs to the non-
+  // const-generic `yuv_420_to_rgb_row` family.
+  debug_assert!(
+    BITS == 10 || BITS == 12 || BITS == 14,
+    "yuv_420p_n_to_rgb_row only supports BITS in {{10, 12, 14}}"
+  );
   debug_assert_eq!(width & 1, 0, "YUV 4:2:0 requires even width");
   debug_assert!(y.len() >= width, "y row too short");
   debug_assert!(u_half.len() >= width / 2, "u_half row too short");
@@ -300,6 +307,12 @@ pub(crate) fn yuv_420p_n_to_rgb_u16_row<const BITS: u32>(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
+  // Same BITS range as the u8-output counterpart. See
+  // `yuv_420p_n_to_rgb_row` for the rationale.
+  debug_assert!(
+    BITS == 10 || BITS == 12 || BITS == 14,
+    "yuv_420p_n_to_rgb_u16_row only supports BITS in {{10, 12, 14}}"
+  );
   debug_assert_eq!(width & 1, 0, "YUV 4:2:0 requires even width");
   debug_assert!(y.len() >= width, "y row too short");
   debug_assert!(u_half.len() >= width / 2, "u_half row too short");
@@ -347,16 +360,17 @@ pub(crate) fn yuv_420p_n_to_rgb_u16_row<const BITS: u32>(
 // ---- P010 (semi-planar 10-bit, high-bit-packed) → RGB ------------------
 
 /// Converts one row of P010 (semi‑planar 4:2:0 with UV interleaved,
-/// 10 active bits in the **high** 10 of each `u16`) to **8‑bit**
-/// packed RGB.
+/// `BITS` active bits in the **high** `BITS` of each `u16`) to
+/// **8‑bit** packed RGB.
 ///
 /// Structurally identical to [`nv12_to_rgb_row`] plus the per‑sample
-/// shift: each `u16` load is extracted to its 10‑bit value via
-/// `sample >> 6`, then the same Q15 pipeline as
-/// [`yuv_420p_n_to_rgb_row`] runs with `BITS == 10`. Mispacked input
-/// — e.g. a `yuv420p10le` buffer with values in the **low** 10 bits
-/// — is masked down to a small positive number (producing near‑black
-/// output) rather than silent garbage, matching every SIMD backend.
+/// shift: each `u16` load is extracted to its `BITS`‑bit value via
+/// `sample >> (16 - BITS)`, then the same Q15 pipeline as
+/// [`yuv_420p_n_to_rgb_row`] runs with the same `BITS`. For `BITS ==
+/// 10` this is P010 (`>> 6`); for `BITS == 12` it's P012 (`>> 4`).
+/// Mispacked input — e.g. a low‑bit‑packed buffer handed to this
+/// kernel — has its active low bits discarded (producing near‑black
+/// output), matching every SIMD backend.
 ///
 /// # Panics (debug builds)
 ///
@@ -364,7 +378,7 @@ pub(crate) fn yuv_420p_n_to_rgb_u16_row<const BITS: u32>(
 /// - `y.len() >= width`, `uv_half.len() >= width`,
 ///   `rgb_out.len() >= 3 * width`.
 #[cfg_attr(not(tarpaulin), inline(always))]
-pub(crate) fn p010_to_rgb_row(
+pub(crate) fn p_n_to_rgb_row<const BITS: u32>(
   y: &[u16],
   uv_half: &[u16],
   rgb_out: &mut [u8],
@@ -372,26 +386,36 @@ pub(crate) fn p010_to_rgb_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  debug_assert_eq!(width & 1, 0, "P010 requires even width");
+  // High-bit-packed Pn kernels are only defined for BITS in {10, 12}.
+  // Outside that set, `16 - BITS` could under/overflow and the Q15
+  // coefficient table has no corresponding entry. Caught here before
+  // the SIMD dispatcher hands control to unsafe code.
+  debug_assert!(
+    BITS == 10 || BITS == 12,
+    "p_n_to_rgb_row only supports BITS in {{10, 12}}"
+  );
+  debug_assert_eq!(width & 1, 0, "semi-planar high-bit requires even width");
   debug_assert!(y.len() >= width, "y row too short");
   debug_assert!(uv_half.len() >= width, "uv row too short");
   debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
 
   let coeffs = Coefficients::for_matrix(matrix);
-  let (y_off, y_scale, c_scale) = range_params_n::<10, 8>(full_range);
-  let bias = chroma_bias::<10>();
+  let (y_off, y_scale, c_scale) = range_params_n::<BITS, 8>(full_range);
+  let bias = chroma_bias::<BITS>();
+  let shift = 16 - BITS;
 
-  // Each `u16` load is converted to its 10-bit sample with `>> 6`,
-  // extracting the upper 10 bits and leaving the result in
-  // `[0, 1023]`. If low-packed input (`yuv420p10le`) is handed to
-  // this kernel by mistake, that shift discards the active low 6 bits
-  // rather than recovering the intended 10-bit value. No hot-path
-  // cost: one shift per load.
+  // Each `u16` load is converted to its `BITS`-bit sample with
+  // `>> (16 - BITS)` — 6 for P010, 4 for P012. Extracts the upper
+  // bits and leaves the result in `[0, (1 << BITS) - 1]`. If
+  // low-packed input (`yuv420p10le`, `yuv420p12le`) is handed to
+  // this kernel by mistake, the shift discards the active low bits
+  // rather than recovering the intended value. No hot-path cost:
+  // one shift per load.
   let mut x = 0;
   while x < width {
     let c_idx = x / 2;
-    let u_sample = uv_half[c_idx * 2] >> 6;
-    let v_sample = uv_half[c_idx * 2 + 1] >> 6;
+    let u_sample = uv_half[c_idx * 2] >> shift;
+    let v_sample = uv_half[c_idx * 2 + 1] >> shift;
     let u_d = q15_scale(u_sample as i32 - bias, c_scale);
     let v_d = q15_scale(v_sample as i32 - bias, c_scale);
 
@@ -399,12 +423,12 @@ pub(crate) fn p010_to_rgb_row(
     let g_chroma = q15_chroma(coeffs.g_u(), u_d, coeffs.g_v(), v_d);
     let b_chroma = q15_chroma(coeffs.b_u(), u_d, coeffs.b_v(), v_d);
 
-    let y0 = q15_scale((y[x] >> 6) as i32 - y_off, y_scale);
+    let y0 = q15_scale((y[x] >> shift) as i32 - y_off, y_scale);
     rgb_out[x * 3] = clamp_u8(y0 + r_chroma);
     rgb_out[x * 3 + 1] = clamp_u8(y0 + g_chroma);
     rgb_out[x * 3 + 2] = clamp_u8(y0 + b_chroma);
 
-    let y1 = q15_scale((y[x + 1] >> 6) as i32 - y_off, y_scale);
+    let y1 = q15_scale((y[x + 1] >> shift) as i32 - y_off, y_scale);
     rgb_out[(x + 1) * 3] = clamp_u8(y1 + r_chroma);
     rgb_out[(x + 1) * 3 + 1] = clamp_u8(y1 + g_chroma);
     rgb_out[(x + 1) * 3 + 2] = clamp_u8(y1 + b_chroma);
@@ -413,15 +437,18 @@ pub(crate) fn p010_to_rgb_row(
   }
 }
 
-/// Converts one row of P010 to **native‑depth `u16`** packed RGB
-/// (10 active bits in the low bits of each `u16`, matching
-/// `yuv420p10le` convention — **not** P010's high‑bit packing).
+/// Converts one row of high‑bit‑packed semi‑planar 4:2:0
+/// (`BITS` ∈ {10, 12}: P010, P012) to **native‑depth `u16`**
+/// packed RGB — samples are **low‑bit‑packed** on output
+/// (`[0, (1 << BITS) - 1]` in the low bits of each `u16`, upper bits
+/// zero), matching the `yuv420p10le` / `yuv420p12le` convention —
+/// **not** the P010/P012 high‑bit packing. Callers feeding a P010/
+/// P012 consumer must shift the output left by `16 - BITS`.
 ///
-/// Mirrors [`yuv_420p_n_to_rgb_u16_row::<10>`] on the math side; the
-/// only difference is the input shift (`sample >> 6` instead of
-/// `sample & 0x3FF`) and the UV deinterleave. Output is suitable for
-/// direct consumption by downstream `yuv420p10le`‑shaped tooling. If
-/// you need P010‑packed RGB output, shift left by 6 on the caller.
+/// Mirrors [`yuv_420p_n_to_rgb_u16_row`] on the math side; the only
+/// differences are the input shift (`sample >> (16 - BITS)` to
+/// extract the `BITS`-bit value from the high-bit packing) and the
+/// interleaved UV layout.
 ///
 /// # Panics (debug builds)
 ///
@@ -429,7 +456,7 @@ pub(crate) fn p010_to_rgb_row(
 /// - `y.len() >= width`, `uv_half.len() >= width`,
 ///   `rgb_out.len() >= 3 * width`.
 #[cfg_attr(not(tarpaulin), inline(always))]
-pub(crate) fn p010_to_rgb_u16_row(
+pub(crate) fn p_n_to_rgb_u16_row<const BITS: u32>(
   y: &[u16],
   uv_half: &[u16],
   rgb_out: &mut [u16],
@@ -437,21 +464,28 @@ pub(crate) fn p010_to_rgb_u16_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  debug_assert_eq!(width & 1, 0, "P010 requires even width");
+  // See `p_n_to_rgb_row` for the BITS range rationale. Duplicated
+  // here so either entry point catches misuse on its own.
+  debug_assert!(
+    BITS == 10 || BITS == 12,
+    "p_n_to_rgb_u16_row only supports BITS in {{10, 12}}"
+  );
+  debug_assert_eq!(width & 1, 0, "semi-planar high-bit requires even width");
   debug_assert!(y.len() >= width, "y row too short");
   debug_assert!(uv_half.len() >= width, "uv row too short");
   debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
 
   let coeffs = Coefficients::for_matrix(matrix);
-  let (y_off, y_scale, c_scale) = range_params_n::<10, 10>(full_range);
-  let bias = chroma_bias::<10>();
-  let out_max: i32 = (1i32 << 10) - 1;
+  let (y_off, y_scale, c_scale) = range_params_n::<BITS, BITS>(full_range);
+  let bias = chroma_bias::<BITS>();
+  let out_max: i32 = (1i32 << BITS) - 1;
+  let shift = 16 - BITS;
 
   let mut x = 0;
   while x < width {
     let c_idx = x / 2;
-    let u_sample = uv_half[c_idx * 2] >> 6;
-    let v_sample = uv_half[c_idx * 2 + 1] >> 6;
+    let u_sample = uv_half[c_idx * 2] >> shift;
+    let v_sample = uv_half[c_idx * 2 + 1] >> shift;
     let u_d = q15_scale(u_sample as i32 - bias, c_scale);
     let v_d = q15_scale(v_sample as i32 - bias, c_scale);
 
@@ -459,12 +493,12 @@ pub(crate) fn p010_to_rgb_u16_row(
     let g_chroma = q15_chroma(coeffs.g_u(), u_d, coeffs.g_v(), v_d);
     let b_chroma = q15_chroma(coeffs.b_u(), u_d, coeffs.b_v(), v_d);
 
-    let y0 = q15_scale((y[x] >> 6) as i32 - y_off, y_scale);
+    let y0 = q15_scale((y[x] >> shift) as i32 - y_off, y_scale);
     rgb_out[x * 3] = (y0 + r_chroma).clamp(0, out_max) as u16;
     rgb_out[x * 3 + 1] = (y0 + g_chroma).clamp(0, out_max) as u16;
     rgb_out[x * 3 + 2] = (y0 + b_chroma).clamp(0, out_max) as u16;
 
-    let y1 = q15_scale((y[x + 1] >> 6) as i32 - y_off, y_scale);
+    let y1 = q15_scale((y[x + 1] >> shift) as i32 - y_off, y_scale);
     rgb_out[(x + 1) * 3] = (y1 + r_chroma).clamp(0, out_max) as u16;
     rgb_out[(x + 1) * 3 + 1] = (y1 + g_chroma).clamp(0, out_max) as u16;
     rgb_out[(x + 1) * 3 + 2] = (y1 + b_chroma).clamp(0, out_max) as u16;
@@ -1131,7 +1165,7 @@ mod tests {
     let y = [0u16; 4];
     let uv = [0x8000u16, 0x8000, 0x8000, 0x8000]; // U0 V0 U1 V1
     let mut rgb = [0u8; 12];
-    p010_to_rgb_row(&y, &uv, &mut rgb, 4, ColorMatrix::Bt601, true);
+    p_n_to_rgb_row::<10>(&y, &uv, &mut rgb, 4, ColorMatrix::Bt601, true);
     assert!(rgb.iter().all(|&c| c == 0), "got {rgb:?}");
   }
 
@@ -1141,7 +1175,7 @@ mod tests {
     let y = [0xFFC0u16; 4];
     let uv = [0x8000u16, 0x8000, 0x8000, 0x8000];
     let mut rgb = [0u8; 12];
-    p010_to_rgb_row(&y, &uv, &mut rgb, 4, ColorMatrix::Bt601, true);
+    p_n_to_rgb_row::<10>(&y, &uv, &mut rgb, 4, ColorMatrix::Bt601, true);
     assert!(rgb.iter().all(|&c| c == 255), "got {rgb:?}");
   }
 
@@ -1151,7 +1185,7 @@ mod tests {
     let y = [0x8000u16; 4];
     let uv = [0x8000u16; 4];
     let mut rgb = [0u8; 12];
-    p010_to_rgb_row(&y, &uv, &mut rgb, 4, ColorMatrix::Bt601, true);
+    p_n_to_rgb_row::<10>(&y, &uv, &mut rgb, 4, ColorMatrix::Bt601, true);
     for x in 0..4 {
       let (r, g, b) = (rgb[x * 3], rgb[x * 3 + 1], rgb[x * 3 + 2]);
       assert_eq!(r, g);
@@ -1167,7 +1201,7 @@ mod tests {
     let y = [0x1000u16, 0x1000, 0xEB00, 0xEB00];
     let uv = [0x8000u16, 0x8000, 0x8000, 0x8000];
     let mut rgb = [0u8; 12];
-    p010_to_rgb_row(&y, &uv, &mut rgb, 4, ColorMatrix::Bt601, false);
+    p_n_to_rgb_row::<10>(&y, &uv, &mut rgb, 4, ColorMatrix::Bt601, false);
     assert_eq!((rgb[0], rgb[1], rgb[2]), (0, 0, 0));
     assert_eq!((rgb[3], rgb[4], rgb[5]), (0, 0, 0));
     assert_eq!((rgb[6], rgb[7], rgb[8]), (255, 255, 255));
@@ -1196,7 +1230,7 @@ mod tests {
       ColorMatrix::Bt709,
       true,
     );
-    p010_to_rgb_row(
+    p_n_to_rgb_row::<10>(
       &y_p010,
       &uv_p010,
       &mut rgb_p010,
@@ -1214,7 +1248,7 @@ mod tests {
     let y = [0xFFC0u16; 4];
     let uv = [0x8000u16; 4];
     let mut rgb = [0u16; 12];
-    p010_to_rgb_u16_row(&y, &uv, &mut rgb, 4, ColorMatrix::Bt601, true);
+    p_n_to_rgb_u16_row::<10>(&y, &uv, &mut rgb, 4, ColorMatrix::Bt601, true);
     assert!(rgb.iter().all(|&c| c == 1023), "got {rgb:?}");
   }
 
@@ -1223,7 +1257,7 @@ mod tests {
     let y = [0x1000u16, 0xEB00];
     let uv = [0x8000u16, 0x8000];
     let mut rgb = [0u16; 6];
-    p010_to_rgb_u16_row(&y, &uv, &mut rgb, 2, ColorMatrix::Bt709, false);
+    p_n_to_rgb_u16_row::<10>(&y, &uv, &mut rgb, 2, ColorMatrix::Bt709, false);
     assert_eq!((rgb[0], rgb[1], rgb[2]), (0, 0, 0));
     assert_eq!((rgb[3], rgb[4], rgb[5]), (1023, 1023, 1023));
   }

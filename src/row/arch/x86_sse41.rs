@@ -37,10 +37,10 @@
 
 use core::arch::x86_64::{
   __m128i, _mm_add_epi32, _mm_adds_epi16, _mm_and_si128, _mm_cvtepi16_epi32, _mm_cvtepu8_epi16,
-  _mm_loadl_epi64, _mm_loadu_si128, _mm_max_epi16, _mm_min_epi16, _mm_mullo_epi32, _mm_packs_epi32,
-  _mm_packus_epi16, _mm_set1_epi16, _mm_set1_epi32, _mm_setr_epi8, _mm_shuffle_epi8,
-  _mm_srai_epi32, _mm_srli_epi16, _mm_srli_si128, _mm_sub_epi16, _mm_unpackhi_epi16,
-  _mm_unpackhi_epi64, _mm_unpacklo_epi16, _mm_unpacklo_epi64,
+  _mm_cvtsi32_si128, _mm_loadl_epi64, _mm_loadu_si128, _mm_max_epi16, _mm_min_epi16,
+  _mm_mullo_epi32, _mm_packs_epi32, _mm_packus_epi16, _mm_set1_epi16, _mm_set1_epi32,
+  _mm_setr_epi8, _mm_shuffle_epi8, _mm_srai_epi32, _mm_srl_epi16, _mm_srli_si128, _mm_sub_epi16,
+  _mm_unpackhi_epi16, _mm_unpackhi_epi64, _mm_unpacklo_epi16, _mm_unpacklo_epi64,
 };
 
 use crate::{
@@ -193,12 +193,14 @@ pub(crate) unsafe fn yuv_420_to_rgb_row(
   }
 }
 
-/// SSE4.1 P010 → packed **8‑bit** RGB.
+/// SSE4.1 high‑bit‑packed semi‑planar (`BITS` ∈ {10, 12}) → packed
+/// **8‑bit** RGB.
 ///
 /// Block size 16 Y pixels / 8 chroma pairs per iteration. Differences
-/// from [`yuv420p10_to_rgb_row`]:
-/// - Samples are shifted right by 6 (`_mm_srli_epi16::<6>`) instead
-///   of AND‑masked — P010's 10 active bits live in the HIGH 10 of
+/// from [`super::x86_sse41::yuv_420p_n_to_rgb_row`]:
+/// - Samples are shifted right by `16 - BITS` (`_mm_srl_epi16`, with
+///   a shift count computed from `BITS` once per call) instead of
+///   AND‑masked — Pn's `BITS` active bits live in the HIGH `BITS` of
 ///   each `u16`.
 /// - Semi‑planar UV is deinterleaved via [`deinterleave_uv_u16`]
 ///   below (one `_mm_shuffle_epi8` + two 64‑bit unpacks per 16
@@ -206,7 +208,8 @@ pub(crate) unsafe fn yuv_420_to_rgb_row(
 ///
 /// # Numerical contract
 ///
-/// Byte‑identical to [`scalar::p010_to_rgb_row`].
+/// Byte‑identical to [`scalar::p_n_to_rgb_row::<BITS>`] for the
+/// monomorphized `BITS`.
 ///
 /// # Safety
 ///
@@ -216,7 +219,7 @@ pub(crate) unsafe fn yuv_420_to_rgb_row(
 ///    `rgb_out.len() >= 3 * width`.
 #[inline]
 #[target_feature(enable = "sse4.1")]
-pub(crate) unsafe fn p010_to_rgb_row(
+pub(crate) unsafe fn p_n_to_rgb_row<const BITS: u32>(
   y: &[u16],
   uv_half: &[u16],
   rgb_out: &mut [u8],
@@ -230,8 +233,8 @@ pub(crate) unsafe fn p010_to_rgb_row(
   debug_assert!(rgb_out.len() >= width * 3);
 
   let coeffs = scalar::Coefficients::for_matrix(matrix);
-  let (y_off, y_scale, c_scale) = scalar::range_params_n::<10, 8>(full_range);
-  let bias = scalar::chroma_bias::<10>();
+  let (y_off, y_scale, c_scale) = scalar::range_params_n::<BITS, 8>(full_range);
+  let bias = scalar::chroma_bias::<BITS>();
   const RND: i32 = 1 << 14;
 
   // SAFETY: SSE4.1 availability is the caller's obligation.
@@ -241,6 +244,10 @@ pub(crate) unsafe fn p010_to_rgb_row(
     let y_scale_v = _mm_set1_epi32(y_scale);
     let c_scale_v = _mm_set1_epi32(c_scale);
     let bias_v = _mm_set1_epi16(bias as i16);
+    // High-bit-packed samples: shift right by `16 - BITS` to extract
+    // the BITS-bit value. Loop-invariant, loaded once into the low 64b
+    // of `shr_count` for `_mm_srl_epi16`.
+    let shr_count = _mm_cvtsi32_si128((16 - BITS) as i32);
     let cru = _mm_set1_epi32(coeffs.r_u());
     let crv = _mm_set1_epi32(coeffs.r_v());
     let cgu = _mm_set1_epi32(coeffs.g_u());
@@ -250,15 +257,15 @@ pub(crate) unsafe fn p010_to_rgb_row(
 
     let mut x = 0usize;
     while x + 16 <= width {
-      // Y: two u16×8 loads, each shifted right by 6.
-      let y_low_i16 = _mm_srli_epi16::<6>(_mm_loadu_si128(y.as_ptr().add(x).cast()));
-      let y_high_i16 = _mm_srli_epi16::<6>(_mm_loadu_si128(y.as_ptr().add(x + 8).cast()));
+      // Y: two u16×8 loads, each shifted right by `16 - BITS`.
+      let y_low_i16 = _mm_srl_epi16(_mm_loadu_si128(y.as_ptr().add(x).cast()), shr_count);
+      let y_high_i16 = _mm_srl_epi16(_mm_loadu_si128(y.as_ptr().add(x + 8).cast()), shr_count);
 
       // UV: two u16×8 loads of interleaved [U0,V0,U1,V1,...], then
       // deinterleave into separate u_vec + v_vec.
       let (u_vec, v_vec) = deinterleave_uv_u16(uv_half.as_ptr().add(x));
-      let u_vec = _mm_srli_epi16::<6>(u_vec);
-      let v_vec = _mm_srli_epi16::<6>(v_vec);
+      let u_vec = _mm_srl_epi16(u_vec, shr_count);
+      let v_vec = _mm_srl_epi16(v_vec, shr_count);
 
       let u_i16 = _mm_sub_epi16(u_vec, bias_v);
       let v_i16 = _mm_sub_epi16(v_vec, bias_v);
@@ -304,7 +311,7 @@ pub(crate) unsafe fn p010_to_rgb_row(
     }
 
     if x < width {
-      scalar::p010_to_rgb_row(
+      scalar::p_n_to_rgb_row::<BITS>(
         &y[x..width],
         &uv_half[x..width],
         &mut rgb_out[x * 3..width * 3],
@@ -316,12 +323,14 @@ pub(crate) unsafe fn p010_to_rgb_row(
   }
 }
 
-/// SSE4.1 P010 → packed **10‑bit `u16`** RGB (native‑depth,
-/// low‑bit‑packed — `yuv420p10le` convention).
+/// SSE4.1 high‑bit‑packed semi‑planar (`BITS` ∈ {10, 12}) → packed
+/// **native‑depth `u16`** RGB (low‑bit‑packed output, `yuv420pNle`
+/// convention).
 ///
 /// # Numerical contract
 ///
-/// Byte‑identical to [`scalar::p010_to_rgb_u16_row`].
+/// Byte‑identical to [`scalar::p_n_to_rgb_u16_row::<BITS>`] for the
+/// monomorphized `BITS`.
 ///
 /// # Safety
 ///
@@ -331,7 +340,7 @@ pub(crate) unsafe fn p010_to_rgb_row(
 ///    `rgb_out.len() >= 3 * width`.
 #[inline]
 #[target_feature(enable = "sse4.1")]
-pub(crate) unsafe fn p010_to_rgb_u16_row(
+pub(crate) unsafe fn p_n_to_rgb_u16_row<const BITS: u32>(
   y: &[u16],
   uv_half: &[u16],
   rgb_out: &mut [u16],
@@ -345,10 +354,10 @@ pub(crate) unsafe fn p010_to_rgb_u16_row(
   debug_assert!(rgb_out.len() >= width * 3);
 
   let coeffs = scalar::Coefficients::for_matrix(matrix);
-  let (y_off, y_scale, c_scale) = scalar::range_params_n::<10, 10>(full_range);
-  let bias = scalar::chroma_bias::<10>();
+  let (y_off, y_scale, c_scale) = scalar::range_params_n::<BITS, BITS>(full_range);
+  let bias = scalar::chroma_bias::<BITS>();
   const RND: i32 = 1 << 14;
-  const OUT_MAX_10: i16 = 1023;
+  let out_max: i16 = ((1i32 << BITS) - 1) as i16;
 
   // SAFETY: SSE4.1 availability is the caller's obligation.
   unsafe {
@@ -357,8 +366,11 @@ pub(crate) unsafe fn p010_to_rgb_u16_row(
     let y_scale_v = _mm_set1_epi32(y_scale);
     let c_scale_v = _mm_set1_epi32(c_scale);
     let bias_v = _mm_set1_epi16(bias as i16);
-    let max_v = _mm_set1_epi16(OUT_MAX_10);
+    let max_v = _mm_set1_epi16(out_max);
     let zero_v = _mm_set1_epi16(0);
+    // High-bit-packed samples: shift right by `16 - BITS` to extract
+    // the BITS-bit value.
+    let shr_count = _mm_cvtsi32_si128((16 - BITS) as i32);
     let cru = _mm_set1_epi32(coeffs.r_u());
     let crv = _mm_set1_epi32(coeffs.r_v());
     let cgu = _mm_set1_epi32(coeffs.g_u());
@@ -368,11 +380,11 @@ pub(crate) unsafe fn p010_to_rgb_u16_row(
 
     let mut x = 0usize;
     while x + 16 <= width {
-      let y_low_i16 = _mm_srli_epi16::<6>(_mm_loadu_si128(y.as_ptr().add(x).cast()));
-      let y_high_i16 = _mm_srli_epi16::<6>(_mm_loadu_si128(y.as_ptr().add(x + 8).cast()));
+      let y_low_i16 = _mm_srl_epi16(_mm_loadu_si128(y.as_ptr().add(x).cast()), shr_count);
+      let y_high_i16 = _mm_srl_epi16(_mm_loadu_si128(y.as_ptr().add(x + 8).cast()), shr_count);
       let (u_vec, v_vec) = deinterleave_uv_u16(uv_half.as_ptr().add(x));
-      let u_vec = _mm_srli_epi16::<6>(u_vec);
-      let v_vec = _mm_srli_epi16::<6>(v_vec);
+      let u_vec = _mm_srl_epi16(u_vec, shr_count);
+      let v_vec = _mm_srl_epi16(v_vec, shr_count);
 
       let u_i16 = _mm_sub_epi16(u_vec, bias_v);
       let v_i16 = _mm_sub_epi16(v_vec, bias_v);
@@ -415,7 +427,7 @@ pub(crate) unsafe fn p010_to_rgb_u16_row(
     }
 
     if x < width {
-      scalar::p010_to_rgb_u16_row(
+      scalar::p_n_to_rgb_u16_row::<BITS>(
         &y[x..width],
         &uv_half[x..width],
         &mut rgb_out[x * 3..width * 3],
@@ -486,7 +498,7 @@ unsafe fn deinterleave_uv_u16(ptr: *const u16) -> (__m128i, __m128i) {
 ///    `v_half.len() >= width / 2`, `rgb_out.len() >= 3 * width`.
 #[inline]
 #[target_feature(enable = "sse4.1")]
-pub(crate) unsafe fn yuv420p10_to_rgb_row(
+pub(crate) unsafe fn yuv_420p_n_to_rgb_row<const BITS: u32>(
   y: &[u16],
   u_half: &[u16],
   v_half: &[u16],
@@ -502,8 +514,8 @@ pub(crate) unsafe fn yuv420p10_to_rgb_row(
   debug_assert!(rgb_out.len() >= width * 3);
 
   let coeffs = scalar::Coefficients::for_matrix(matrix);
-  let (y_off, y_scale, c_scale) = scalar::range_params_n::<10, 8>(full_range);
-  let bias = scalar::chroma_bias::<10>();
+  let (y_off, y_scale, c_scale) = scalar::range_params_n::<BITS, 8>(full_range);
+  let bias = scalar::chroma_bias::<BITS>();
   const RND: i32 = 1 << 14;
 
   // SAFETY: SSE4.1 availability is the caller's obligation; the
@@ -516,7 +528,7 @@ pub(crate) unsafe fn yuv420p10_to_rgb_row(
     let y_scale_v = _mm_set1_epi32(y_scale);
     let c_scale_v = _mm_set1_epi32(c_scale);
     let bias_v = _mm_set1_epi16(bias as i16);
-    let mask_v = _mm_set1_epi16(scalar::bits_mask::<10>() as i16);
+    let mask_v = _mm_set1_epi16(scalar::bits_mask::<BITS>() as i16);
     let cru = _mm_set1_epi32(coeffs.r_u());
     let crv = _mm_set1_epi32(coeffs.r_v());
     let cgu = _mm_set1_epi32(coeffs.g_u());
@@ -579,7 +591,7 @@ pub(crate) unsafe fn yuv420p10_to_rgb_row(
     }
 
     if x < width {
-      scalar::yuv_420p_n_to_rgb_row::<10>(
+      scalar::yuv_420p_n_to_rgb_row::<BITS>(
         &y[x..width],
         &u_half[x / 2..width / 2],
         &v_half[x / 2..width / 2],
@@ -614,7 +626,7 @@ pub(crate) unsafe fn yuv420p10_to_rgb_row(
 ///    `v_half.len() >= width / 2`, `rgb_out.len() >= 3 * width`.
 #[inline]
 #[target_feature(enable = "sse4.1")]
-pub(crate) unsafe fn yuv420p10_to_rgb_u16_row(
+pub(crate) unsafe fn yuv_420p_n_to_rgb_u16_row<const BITS: u32>(
   y: &[u16],
   u_half: &[u16],
   v_half: &[u16],
@@ -630,10 +642,10 @@ pub(crate) unsafe fn yuv420p10_to_rgb_u16_row(
   debug_assert!(rgb_out.len() >= width * 3);
 
   let coeffs = scalar::Coefficients::for_matrix(matrix);
-  let (y_off, y_scale, c_scale) = scalar::range_params_n::<10, 10>(full_range);
-  let bias = scalar::chroma_bias::<10>();
+  let (y_off, y_scale, c_scale) = scalar::range_params_n::<BITS, BITS>(full_range);
+  let bias = scalar::chroma_bias::<BITS>();
   const RND: i32 = 1 << 14;
-  const OUT_MAX_10: i16 = 1023;
+  let out_max: i16 = ((1i32 << BITS) - 1) as i16;
 
   // SAFETY: SSE4.1 availability is the caller's obligation.
   unsafe {
@@ -642,8 +654,8 @@ pub(crate) unsafe fn yuv420p10_to_rgb_u16_row(
     let y_scale_v = _mm_set1_epi32(y_scale);
     let c_scale_v = _mm_set1_epi32(c_scale);
     let bias_v = _mm_set1_epi16(bias as i16);
-    let mask_v = _mm_set1_epi16(scalar::bits_mask::<10>() as i16);
-    let max_v = _mm_set1_epi16(OUT_MAX_10);
+    let mask_v = _mm_set1_epi16(scalar::bits_mask::<BITS>() as i16);
+    let max_v = _mm_set1_epi16(out_max);
     let zero_v = _mm_set1_epi16(0);
     let cru = _mm_set1_epi32(coeffs.r_u());
     let crv = _mm_set1_epi32(coeffs.r_v());
@@ -708,7 +720,7 @@ pub(crate) unsafe fn yuv420p10_to_rgb_u16_row(
     }
 
     if x < width {
-      scalar::yuv_420p_n_to_rgb_u16_row::<10>(
+      scalar::yuv_420p_n_to_rgb_u16_row::<BITS>(
         &y[x..width],
         &u_half[x / 2..width / 2],
         &v_half[x / 2..width / 2],
@@ -1389,7 +1401,7 @@ mod tests {
 
     scalar::yuv_420p_n_to_rgb_row::<10>(&y, &u, &v, &mut rgb_scalar, width, matrix, full_range);
     unsafe {
-      yuv420p10_to_rgb_row(&y, &u, &v, &mut rgb_simd, width, matrix, full_range);
+      yuv_420p_n_to_rgb_row::<10>(&y, &u, &v, &mut rgb_simd, width, matrix, full_range);
     }
 
     if rgb_scalar != rgb_simd {
@@ -1417,7 +1429,7 @@ mod tests {
 
     scalar::yuv_420p_n_to_rgb_u16_row::<10>(&y, &u, &v, &mut rgb_scalar, width, matrix, full_range);
     unsafe {
-      yuv420p10_to_rgb_u16_row(&y, &u, &v, &mut rgb_simd, width, matrix, full_range);
+      yuv_420p_n_to_rgb_u16_row::<10>(&y, &u, &v, &mut rgb_simd, width, matrix, full_range);
     }
 
     if rgb_scalar != rgb_simd {
@@ -1508,9 +1520,9 @@ mod tests {
     let uv = p010_uv_interleave(&u, &v);
     let mut rgb_scalar = std::vec![0u8; width * 3];
     let mut rgb_simd = std::vec![0u8; width * 3];
-    scalar::p010_to_rgb_row(&y, &uv, &mut rgb_scalar, width, matrix, full_range);
+    scalar::p_n_to_rgb_row::<10>(&y, &uv, &mut rgb_scalar, width, matrix, full_range);
     unsafe {
-      p010_to_rgb_row(&y, &uv, &mut rgb_simd, width, matrix, full_range);
+      p_n_to_rgb_row::<10>(&y, &uv, &mut rgb_simd, width, matrix, full_range);
     }
     assert_eq!(rgb_scalar, rgb_simd, "SSE4.1 P010→u8 diverges");
   }
@@ -1525,9 +1537,9 @@ mod tests {
     let uv = p010_uv_interleave(&u, &v);
     let mut rgb_scalar = std::vec![0u16; width * 3];
     let mut rgb_simd = std::vec![0u16; width * 3];
-    scalar::p010_to_rgb_u16_row(&y, &uv, &mut rgb_scalar, width, matrix, full_range);
+    scalar::p_n_to_rgb_u16_row::<10>(&y, &uv, &mut rgb_scalar, width, matrix, full_range);
     unsafe {
-      p010_to_rgb_u16_row(&y, &uv, &mut rgb_simd, width, matrix, full_range);
+      p_n_to_rgb_u16_row::<10>(&y, &uv, &mut rgb_simd, width, matrix, full_range);
     }
     assert_eq!(rgb_scalar, rgb_simd, "SSE4.1 P010→u16 diverges");
   }
@@ -1576,5 +1588,181 @@ mod tests {
   fn sse41_p010_matches_scalar_1920() {
     check_p010_u8_sse41_equivalence(1920, ColorMatrix::Bt709, false);
     check_p010_u16_sse41_equivalence(1920, ColorMatrix::Bt2020Ncl, false);
+  }
+
+  // ---- Generic BITS equivalence (12/14-bit coverage) ------------------
+  //
+  // The helpers below parameterize over `const BITS: u32` so the same
+  // scalar-equivalence scaffolding covers 10/12/14 without duplicating
+  // the 16-pixel block seeding + diff harness. `<10>` is already
+  // exercised by the dedicated tests above; `<12>` / `<14>` add
+  // regression coverage for the new yuv420p12 / yuv420p14 / P012
+  // kernels. 14-bit is planar-only (no P014 in Ship 4a).
+
+  fn planar_n_plane<const BITS: u32>(n: usize, seed: usize) -> std::vec::Vec<u16> {
+    let mask = (1u32 << BITS) - 1;
+    (0..n)
+      .map(|i| ((i * seed + seed * 3) as u32 & mask) as u16)
+      .collect()
+  }
+
+  fn p_n_packed_plane<const BITS: u32>(n: usize, seed: usize) -> std::vec::Vec<u16> {
+    let mask = (1u32 << BITS) - 1;
+    let shift = 16 - BITS;
+    (0..n)
+      .map(|i| (((i * seed + seed * 3) as u32 & mask) as u16) << shift)
+      .collect()
+  }
+
+  fn check_planar_u8_sse41_equivalence_n<const BITS: u32>(
+    width: usize,
+    matrix: ColorMatrix,
+    full_range: bool,
+  ) {
+    if !std::arch::is_x86_feature_detected!("sse4.1") {
+      return;
+    }
+    let y = planar_n_plane::<BITS>(width, 37);
+    let u = planar_n_plane::<BITS>(width / 2, 53);
+    let v = planar_n_plane::<BITS>(width / 2, 71);
+    let mut rgb_scalar = std::vec![0u8; width * 3];
+    let mut rgb_simd = std::vec![0u8; width * 3];
+
+    scalar::yuv_420p_n_to_rgb_row::<BITS>(&y, &u, &v, &mut rgb_scalar, width, matrix, full_range);
+    unsafe {
+      yuv_420p_n_to_rgb_row::<BITS>(&y, &u, &v, &mut rgb_simd, width, matrix, full_range);
+    }
+    assert_eq!(
+      rgb_scalar, rgb_simd,
+      "SSE4.1 planar {BITS}-bit → u8 diverges (width={width}, matrix={matrix:?}, full_range={full_range})"
+    );
+  }
+
+  fn check_planar_u16_sse41_equivalence_n<const BITS: u32>(
+    width: usize,
+    matrix: ColorMatrix,
+    full_range: bool,
+  ) {
+    if !std::arch::is_x86_feature_detected!("sse4.1") {
+      return;
+    }
+    let y = planar_n_plane::<BITS>(width, 37);
+    let u = planar_n_plane::<BITS>(width / 2, 53);
+    let v = planar_n_plane::<BITS>(width / 2, 71);
+    let mut rgb_scalar = std::vec![0u16; width * 3];
+    let mut rgb_simd = std::vec![0u16; width * 3];
+
+    scalar::yuv_420p_n_to_rgb_u16_row::<BITS>(
+      &y,
+      &u,
+      &v,
+      &mut rgb_scalar,
+      width,
+      matrix,
+      full_range,
+    );
+    unsafe {
+      yuv_420p_n_to_rgb_u16_row::<BITS>(&y, &u, &v, &mut rgb_simd, width, matrix, full_range);
+    }
+    assert_eq!(
+      rgb_scalar, rgb_simd,
+      "SSE4.1 planar {BITS}-bit → u16 diverges (width={width}, matrix={matrix:?}, full_range={full_range})"
+    );
+  }
+
+  fn check_pn_u8_sse41_equivalence_n<const BITS: u32>(
+    width: usize,
+    matrix: ColorMatrix,
+    full_range: bool,
+  ) {
+    if !std::arch::is_x86_feature_detected!("sse4.1") {
+      return;
+    }
+    let y = p_n_packed_plane::<BITS>(width, 37);
+    let u = p_n_packed_plane::<BITS>(width / 2, 53);
+    let v = p_n_packed_plane::<BITS>(width / 2, 71);
+    let uv = p010_uv_interleave(&u, &v);
+    let mut rgb_scalar = std::vec![0u8; width * 3];
+    let mut rgb_simd = std::vec![0u8; width * 3];
+    scalar::p_n_to_rgb_row::<BITS>(&y, &uv, &mut rgb_scalar, width, matrix, full_range);
+    unsafe {
+      p_n_to_rgb_row::<BITS>(&y, &uv, &mut rgb_simd, width, matrix, full_range);
+    }
+    assert_eq!(rgb_scalar, rgb_simd, "SSE4.1 Pn {BITS}-bit → u8 diverges");
+  }
+
+  fn check_pn_u16_sse41_equivalence_n<const BITS: u32>(
+    width: usize,
+    matrix: ColorMatrix,
+    full_range: bool,
+  ) {
+    if !std::arch::is_x86_feature_detected!("sse4.1") {
+      return;
+    }
+    let y = p_n_packed_plane::<BITS>(width, 37);
+    let u = p_n_packed_plane::<BITS>(width / 2, 53);
+    let v = p_n_packed_plane::<BITS>(width / 2, 71);
+    let uv = p010_uv_interleave(&u, &v);
+    let mut rgb_scalar = std::vec![0u16; width * 3];
+    let mut rgb_simd = std::vec![0u16; width * 3];
+    scalar::p_n_to_rgb_u16_row::<BITS>(&y, &uv, &mut rgb_scalar, width, matrix, full_range);
+    unsafe {
+      p_n_to_rgb_u16_row::<BITS>(&y, &uv, &mut rgb_simd, width, matrix, full_range);
+    }
+    assert_eq!(rgb_scalar, rgb_simd, "SSE4.1 Pn {BITS}-bit → u16 diverges");
+  }
+
+  #[test]
+  fn sse41_p12_matches_scalar_all_matrices() {
+    for m in [
+      ColorMatrix::Bt601,
+      ColorMatrix::Bt709,
+      ColorMatrix::Bt2020Ncl,
+      ColorMatrix::Smpte240m,
+      ColorMatrix::Fcc,
+      ColorMatrix::YCgCo,
+    ] {
+      for full in [true, false] {
+        check_planar_u8_sse41_equivalence_n::<12>(16, m, full);
+        check_planar_u16_sse41_equivalence_n::<12>(16, m, full);
+        check_pn_u8_sse41_equivalence_n::<12>(16, m, full);
+        check_pn_u16_sse41_equivalence_n::<12>(16, m, full);
+      }
+    }
+  }
+
+  #[test]
+  fn sse41_p14_matches_scalar_all_matrices() {
+    for m in [
+      ColorMatrix::Bt601,
+      ColorMatrix::Bt709,
+      ColorMatrix::Bt2020Ncl,
+      ColorMatrix::Smpte240m,
+      ColorMatrix::Fcc,
+      ColorMatrix::YCgCo,
+    ] {
+      for full in [true, false] {
+        check_planar_u8_sse41_equivalence_n::<14>(16, m, full);
+        check_planar_u16_sse41_equivalence_n::<14>(16, m, full);
+      }
+    }
+  }
+
+  #[test]
+  fn sse41_p12_matches_scalar_tail_widths() {
+    for w in [18usize, 30, 34, 1922] {
+      check_planar_u8_sse41_equivalence_n::<12>(w, ColorMatrix::Bt601, false);
+      check_planar_u16_sse41_equivalence_n::<12>(w, ColorMatrix::Bt709, true);
+      check_pn_u8_sse41_equivalence_n::<12>(w, ColorMatrix::Bt601, false);
+      check_pn_u16_sse41_equivalence_n::<12>(w, ColorMatrix::Bt2020Ncl, false);
+    }
+  }
+
+  #[test]
+  fn sse41_p14_matches_scalar_tail_widths() {
+    for w in [18usize, 30, 34, 1922] {
+      check_planar_u8_sse41_equivalence_n::<14>(w, ColorMatrix::Bt601, false);
+      check_planar_u16_sse41_equivalence_n::<14>(w, ColorMatrix::Bt709, true);
+    }
   }
 }

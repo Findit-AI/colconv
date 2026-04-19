@@ -24,8 +24,46 @@
 //! [`with_hsv`](sinker::MixedSinker::with_hsv) to select which channels
 //! to derive.
 //!
-//! The crate design also follows a per-format expansion plan with
-//! defined implementation priority tiers for the conversion kernels.
+//! # Supported source formats
+//!
+//! Shipped (all 4:2:0 subsampling):
+//!
+//! | Family           | Bit depth | Packing                | FFmpeg name           |
+//! | ---------------- | --------- | ---------------------- | --------------------- |
+//! | [`Yuv420p`]      |  8        | planar                 | `yuv420p`             |
+//! | [`Nv12`]         |  8        | semi-planar UV         | `nv12`                |
+//! | [`Nv21`]         |  8        | semi-planar VU         | `nv21`                |
+//! | [`Yuv420p10`]    | 10        | planar, low-packed     | `yuv420p10le`         |
+//! | [`Yuv420p12`]    | 12        | planar, low-packed     | `yuv420p12le`         |
+//! | [`Yuv420p14`]    | 14        | planar, low-packed     | `yuv420p14le`         |
+//! | [`P010`]         | 10        | semi-planar, high-packed | `p010le`            |
+//! | [`P012`]         | 12        | semi-planar, high-packed | `p012le`            |
+//!
+//! Not yet shipped (follow-up):
+//!
+//! - **16‑bit families** (`Yuv420p16` / `P016`) — require a separate
+//!   kernel family because the Q15 chroma_sum overflows i32 at
+//!   `BITS == 16`. Current scalar / SIMD kernels `debug_assert!` out
+//!   `BITS == 16` precisely to surface this.
+//! - **4:2:2 and 4:4:4** (`Yuv422p`, `Yuv444p`, `Nv16`, `Nv24`,
+//!   `Nv42`) — share the Q15 math but need their own row walkers
+//!   for the different chroma subsampling / stride.
+//! - **Packed RGB sources** (`Rgb24`, `Bgr24`, `Rgba`, `Bgra`,
+//!   `Rgba1010102`, etc.).
+//!
+//! See [`yuv`] for the per-format module-level breakdown and
+//! [`frame`] for the validated frame types plus the `BITS` const
+//! generic on the high-bit-depth families (`Yuv420pFrame16<BITS>`
+//! and `PnFrame<BITS>`).
+//!
+//! [`Yuv420p`]: crate::yuv::Yuv420p
+//! [`Nv12`]: crate::yuv::Nv12
+//! [`Nv21`]: crate::yuv::Nv21
+//! [`Yuv420p10`]: crate::yuv::Yuv420p10
+//! [`Yuv420p12`]: crate::yuv::Yuv420p12
+//! [`Yuv420p14`]: crate::yuv::Yuv420p14
+//! [`P010`]: crate::yuv::P010
+//! [`P012`]: crate::yuv::P012
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
@@ -167,8 +205,9 @@ pub trait PixelSink {
   }
 
   /// Consume one input unit. Called by the kernel once per unit (one
-  /// row, for the row-granular kernels v0.1 ships). Input borrows may
-  /// be invalidated after the call returns — implementations must not
+  /// row, for the row-granular kernels currently shipped). Input
+  /// borrows may be invalidated after the call returns —
+  /// implementations must not
   /// retain them.
   ///
   /// Returns `Err` to short-circuit the walker: on the first `Err`,
