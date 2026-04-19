@@ -496,28 +496,28 @@ pub enum Nv12FrameError {
 ///
 /// # Input sample range and packing sanity
 ///
-/// Each `u16` sample's 10 active bits live in the high 10 positions;
-/// the low 6 bits are expected to be zero. [`Self::try_new`] validates
-/// geometry only.
+/// Each `u16` sample's `BITS` active bits live in the high `BITS`
+/// positions; the low `16 - BITS` bits are expected to be zero.
+/// [`Self::try_new`] validates geometry only.
 ///
 /// [`Self::try_new_checked`] additionally scans every sample and
-/// rejects any with non‑zero low 6 bits — a **necessary but not
-/// sufficient** packing sanity check. It catches mispacked
-/// `yuv420p10le` buffers as long as **at least one** sample has
-/// low‑bit content (the usual case for noisy real‑world image data),
-/// but it **cannot distinguish** P010 from a `yuv420p10le` buffer
-/// whose samples all happen to be multiples of 64. Values like
-/// `Y = 64` (limited‑range black) and `UV = 512` (neutral chroma)
-/// both have low 6 bits zero and so pass the check, even though the
-/// buffer layout is wrong. For strict provenance, callers must rely
-/// on their source format metadata and pick the right frame type
-/// ([`P010Frame`] vs [`Yuv420p10Frame`]) at construction.
+/// rejects any with non‑zero low `16 - BITS` bits — a **necessary
+/// but not sufficient** packing sanity check. Its catch rate
+/// weakens as `BITS` grows: at `BITS == 10` it rejects 63/64 random
+/// samples and is a strong signal; at `BITS == 12` it only rejects
+/// 15/16, and **common flat‑region values in decoder output are
+/// exactly the ones that slip through** (`Y = 256/1024` limited
+/// black, `UV = 2048` neutral chroma are all multiples of 16 in
+/// both layouts). See [`Self::try_new_checked`] for the full
+/// table. For strict provenance, callers must rely on their source
+/// format metadata and pick the right frame type ([`PnFrame`] vs
+/// [`Yuv420pFrame16`]) at construction.
 ///
-/// Kernels shift each load right by 6 to extract the 10‑bit value,
-/// so mispacked input (e.g. a `yuv420p10le` buffer handed to the
-/// P010 kernel) produces deterministic, backend‑independent output
-/// — wrong colors, but consistently wrong across scalar + every
-/// SIMD backend, which is visible in any output diff.
+/// Kernels shift each load right by `16 - BITS` to extract the
+/// active value, so mispacked input (e.g. a `yuv420p12le` buffer
+/// handed to the P012 kernel) produces deterministic, backend‑
+/// independent output — wrong colors, but consistently wrong across
+/// scalar + every SIMD backend, which is visible in any output diff.
 #[derive(Debug, Clone, Copy)]
 pub struct PnFrame<'a, const BITS: u32> {
   y: &'a [u16],
@@ -633,29 +633,44 @@ impl<'a, const BITS: u32> PnFrame<'a, BITS> {
   }
 
   /// Like [`Self::try_new`] but additionally scans every sample and
-  /// rejects any whose **low 6 bits** are non‑zero. A valid P010
-  /// sample has its 10 active bits in the high 10 positions and zero
-  /// below, so non‑zero low bits is evidence the buffer isn't P010.
+  /// rejects any whose **low `16 - BITS` bits** are non‑zero. A valid
+  /// high‑bit‑packed sample has its `BITS` active bits in the high
+  /// `BITS` positions and zero below, so non‑zero low bits is
+  /// evidence the buffer isn't Pn‑shaped.
   ///
   /// **This is a packing sanity check, not a provenance validator.**
-  /// The check catches noisy `yuv420p10le` data (where most samples
-  /// have low‑bit content), but it **cannot** distinguish P010 from
-  /// a `yuv420p10le` buffer whose samples all happen to be multiples
-  /// of 64. Common flat‑region values like `Y = 64` (limited‑range
-  /// black) or `UV = 512` (neutral chroma) are multiples of 64 in
-  /// both layouts, so a yuv420p10le buffer of flat content will
-  /// silently pass this check. Callers who need strict provenance
-  /// must rely on their source format metadata and pick the right
-  /// frame type at construction ([`P010Frame`] vs [`Yuv420p10Frame`]);
-  /// no runtime check on opaque `u16` data can reliably tell the two
-  /// layouts apart.
+  /// The check catches noisy low‑bit‑packed data (where most samples
+  /// have low‑bit content), but it **cannot** distinguish Pn from a
+  /// low‑bit‑packed buffer whose samples all happen to be multiples
+  /// of `1 << (16 - BITS)`. The catch rate scales with `BITS`:
+  ///
+  /// - `BITS == 10` (P010): 6 low bits must be zero. Random u16
+  ///   samples pass with probability `1/64`; noisy `yuv420p10le`
+  ///   data is almost always caught.
+  /// - `BITS == 12` (P012): only 4 low bits. Pass probability is
+  ///   `1/16` — 4× weaker. **Common limited‑range flat‑region values
+  ///   (`Y = 256` limited black, `UV = 2048` neutral chroma,
+  ///   `Y = 1024` full black) are all multiples of 16 in both
+  ///   layouts**, so flat `yuv420p12le` content passes **every
+  ///   time**. The `>> 4` extraction in the Pn kernels then
+  ///   discards the real signal and produces badly darkened
+  ///   output. For P012, prefer format metadata over this check.
+  ///
+  /// Callers who need strict provenance must rely on their source
+  /// format metadata and pick the right frame type at construction
+  /// ([`PnFrame`] vs [`Yuv420pFrame16`]); no runtime check on opaque
+  /// `u16` data can reliably tell the two layouts apart, and the
+  /// weakness is proportionally worse the higher the `BITS` value.
+  /// The regression test
+  /// `p012_try_new_checked_accepts_low_packed_flat_content_by_design`
+  /// in `frame::tests` pins this limitation in code.
   ///
   /// Cost: one O(plane_size) scan per plane. The default
   /// [`Self::try_new`] skips this so the hot path stays O(1).
   ///
   /// Returns [`PnFrameError::SampleLowBitsSet`] on the first
-  /// offending sample — carries the plane, element index, and
-  /// offending value.
+  /// offending sample — carries the plane, element index, offending
+  /// value, and the number of low bits expected to be zero.
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub fn try_new_checked(
     y: &'a [u16],
@@ -1138,11 +1153,13 @@ pub enum Nv21FrameError {
 /// [`Self::try_new_checked`] — it scans every sample and returns
 /// [`Yuv420pFrame16Error::SampleOutOfRange`] on the first violation.
 ///
-/// colconv v0.2 ships `BITS == 10` only (the use‑case keystone for
-/// HDR and 10‑bit SDR). 12 and 14 are mechanical follow‑ups that
-/// just relax the constructor's `BITS` check and add tiered aliases
-/// — the kernel math (Q15 coefficients + i32 intermediates) works
-/// unchanged across all three, derived at compile time from `BITS`.
+/// All three supported depths — `BITS == 10` (HDR10 / 10‑bit SDR
+/// keystone), `BITS == 12` (HEVC Main 12 / VP9 Profile 3), and
+/// `BITS == 14` (grading / mastering pipelines) — share the same
+/// scalar + SIMD kernel family. The Q15 coefficients + i32
+/// intermediates work unchanged across all three, derived at
+/// compile time from `BITS`; the constructor validates the `BITS`
+/// value against the set `{10, 12, 14}` up front.
 ///
 /// 16‑bit input (which would overflow the i32 chroma sum in the
 /// Q15 path) is **not** represented by this type — it needs a
@@ -1174,8 +1191,9 @@ impl<'a, const BITS: u32> Yuv420pFrame16<'a, BITS> {
   /// lengths, and the `BITS` parameter.
   ///
   /// Returns [`Yuv420pFrame16Error`] if any of:
-  /// - `BITS` is not 10, 12, or 14 (colconv v0.2 additionally rejects
-  ///   12/14 at the type alias layer — see [`Yuv420p10Frame`]),
+  /// - `BITS` is not 10, 12, or 14 — use [`Yuv420p10Frame`],
+  ///   [`Yuv420p12Frame`], or [`Yuv420p14Frame`] at call sites for
+  ///   readability, all three are type aliases over this struct,
   /// - `width` or `height` is zero,
   /// - `width` is odd,
   /// - any stride is smaller than the plane's declared pixel width,
@@ -2357,5 +2375,75 @@ mod tests {
     // which P010 kernels then bias/scale as if those were the 10-bit
     // source values). That's accepted behavior — the type system,
     // not `try_new_checked`, is what keeps yuv420p10le out of P010.
+  }
+
+  #[test]
+  fn p012_try_new_checked_accepts_shifted_samples() {
+    // Valid P012 samples: low 4 bits zero (12-bit value << 4).
+    let y = std::vec![(2048u16) << 4; 16 * 8]; // 12-bit mid-gray shifted up
+    let uv = std::vec![(2048u16) << 4; 16 * 4];
+    P012Frame::try_new_checked(&y, &uv, 16, 8, 16, 16).expect("shifted samples valid");
+  }
+
+  #[test]
+  fn p012_try_new_checked_rejects_low_bits_set() {
+    // A Y sample with any of the low 4 bits set — e.g. yuv420p12le
+    // value 0x0ABC landing where P012 expects `value << 4`. The check
+    // catches samples like this that are obviously mispacked.
+    let mut y = std::vec![(2048u16) << 4; 16 * 8];
+    y[3 * 16 + 5] = 0x0ABC; // low 4 bits = 0xC ≠ 0
+    let uv = std::vec![(2048u16) << 4; 16 * 4];
+    let e = P012Frame::try_new_checked(&y, &uv, 16, 8, 16, 16).unwrap_err();
+    match e {
+      PnFrameError::SampleLowBitsSet {
+        plane,
+        value,
+        low_bits,
+        ..
+      } => {
+        assert_eq!(plane, PnFramePlane::Y);
+        assert_eq!(value, 0x0ABC);
+        assert_eq!(low_bits, 4);
+      }
+      other => panic!("expected SampleLowBitsSet, got {other:?}"),
+    }
+  }
+
+  /// Regression documenting a **worse known limitation** of
+  /// [`P012Frame::try_new_checked`] compared to P010: because the
+  /// low‑bits check only has 4 bits to work with at `BITS == 12`,
+  /// every multiple‑of‑16 `yuv420p12le` value passes silently. The
+  /// practical impact is that common limited‑range flat‑region
+  /// content in real decoder output — `Y = 256` (limited‑range
+  /// black), `UV = 2048` (neutral chroma), `Y = 1024` (full black)
+  /// — is entirely invisible to this check.
+  ///
+  /// This test pins the limitation with a reproducible input so
+  /// that:
+  /// 1. Users reading the test suite can see the exact failure
+  ///    mode for `try_new_checked` on 12‑bit data.
+  /// 2. Any future attempt to strengthen `try_new_checked` (e.g.,
+  ///    into a statistical provenance heuristic) has a concrete
+  ///    input to validate against.
+  /// 3. The `PnFrame` docs' warning about this limitation has a
+  ///    named test to point to.
+  ///
+  /// For P012, the type system (choosing [`P012Frame`] vs
+  /// [`Yuv420p12Frame`] at construction based on decoder metadata)
+  /// is the only reliable provenance guarantee.
+  #[test]
+  fn p012_try_new_checked_accepts_low_packed_flat_content_by_design() {
+    // All values are multiples of 16 — exactly the set that slips
+    // through a 4-low-bits-zero check. `yuv420p12le` limited-range
+    // black and neutral chroma both satisfy this.
+    let y = std::vec![0x0100u16; 16 * 8]; // Y = 256 (limited-range black), multiple of 16
+    let uv = std::vec![0x0800u16; 16 * 4]; // UV = 2048 (neutral chroma), multiple of 16
+    let f = P012Frame::try_new_checked(&y, &uv, 16, 8, 16, 16)
+      .expect("known limitation: 4-low-bits-zero check cannot tell yuv420p12le from P012");
+    assert_eq!(f.width(), 16);
+    // Downstream P012 kernels would extract `>> 4` — giving Y=16 and
+    // UV=128 instead of the intended Y=256 and UV=2048. Silent color
+    // corruption. The type system, not `try_new_checked`, must
+    // guarantee provenance for 12-bit.
   }
 }

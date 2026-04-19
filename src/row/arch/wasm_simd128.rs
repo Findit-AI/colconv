@@ -500,18 +500,22 @@ unsafe fn write_rgb_u16_8(r: v128, g: v128, b: v128, ptr: *mut u16) {
   }
 }
 
-/// WASM simd128 P010 → packed **8‑bit** RGB.
+/// WASM simd128 high‑bit‑packed semi‑planar (`BITS` ∈ {10, 12}) →
+/// packed **8‑bit** RGB.
 ///
 /// Block size 16 Y pixels / 8 chroma pairs per iteration. Mirrors
-/// [`yuv420p10_to_rgb_row`] with two structural differences:
-/// - Samples are shifted right by 6 (`u16x8_shr(_, 6)`) instead of
-///   AND‑masked.
+/// [`super::wasm_simd128::yuv_420p_n_to_rgb_row`] with two structural
+/// differences:
+/// - Samples are shifted right by `16 - BITS` (`u16x8_shr`, with
+///   the shift amount computed from `BITS` once per call) instead
+///   of AND‑masked.
 /// - Semi‑planar UV is deinterleaved via [`deinterleave_uv_u16_wasm`]
 ///   (two `u8x16_swizzle` + two `i8x16_shuffle` combines).
 ///
 /// # Numerical contract
 ///
-/// Byte‑identical to [`scalar::p_n_to_rgb_row::<10>`].
+/// Byte‑identical to [`scalar::p_n_to_rgb_row::<BITS>`] for the
+/// monomorphized `BITS`.
 ///
 /// # Safety
 ///
@@ -621,12 +625,14 @@ pub(crate) unsafe fn p_n_to_rgb_row<const BITS: u32>(
   }
 }
 
-/// WASM simd128 P010 → packed **10‑bit `u16`** RGB (low‑bit‑packed
-/// `yuv420p10le` convention).
+/// WASM simd128 high‑bit‑packed semi‑planar (`BITS` ∈ {10, 12}) →
+/// packed **native‑depth `u16`** RGB (low‑bit‑packed output,
+/// `yuv420pNle` convention).
 ///
 /// # Numerical contract
 ///
-/// Byte‑identical to [`scalar::p_n_to_rgb_u16_row::<10>`].
+/// Byte‑identical to [`scalar::p_n_to_rgb_u16_row::<BITS>`] for the
+/// monomorphized `BITS`.
 ///
 /// # Safety
 ///

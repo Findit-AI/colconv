@@ -643,17 +643,20 @@ pub(crate) unsafe fn p_n_to_rgb_row<const BITS: u32>(
 /// **native‑depth `u16`** RGB (low‑bit‑packed output,
 /// `yuv420p10le` / `yuv420p12le` convention — not P010/P012).
 ///
-/// Same structure as [`p010_to_rgb_row`] up to the chroma compute;
-/// the only differences are:
-/// - `range_params_n::<10, 10>` → larger scales targeting the 10‑bit
-///   output range.
-/// - Clamp is explicit min/max to `[0, 1023]` via
-///   [`clamp_u10`](crate::row::arch::neon::clamp_u10).
+/// Same structure as [`super::neon::p_n_to_rgb_row`] up to the
+/// chroma compute; the only differences are:
+/// - `range_params_n::<BITS, BITS>` → larger scales targeting the
+///   native‑depth output range.
+/// - Clamp is explicit min/max to `[0, (1 << BITS) - 1]` via
+///   [`clamp_u10`](crate::row::arch::neon::clamp_u10) — the helper
+///   name is historical; the actual max is derived from `BITS` at
+///   the call site (1023 for P010, 4095 for P012).
 /// - Writes use two `vst3q_u16` calls per 16‑pixel block.
 ///
 /// # Numerical contract
 ///
-/// Byte‑identical to [`scalar::p_n_to_rgb_u16_row::<10>`].
+/// Byte‑identical to [`scalar::p_n_to_rgb_u16_row::<BITS>`] for the
+/// monomorphized `BITS`.
 ///
 /// # Safety
 ///

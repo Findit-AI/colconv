@@ -207,6 +207,13 @@ pub(crate) fn yuv_420p_n_to_rgb_row<const BITS: u32>(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
+  // Low-bit-packed planar kernels are defined for BITS in {10, 12, 14}.
+  // 16 would overflow the Q15 chroma sum; 8 belongs to the non-
+  // const-generic `yuv_420_to_rgb_row` family.
+  debug_assert!(
+    BITS == 10 || BITS == 12 || BITS == 14,
+    "yuv_420p_n_to_rgb_row only supports BITS in {{10, 12, 14}}"
+  );
   debug_assert_eq!(width & 1, 0, "YUV 4:2:0 requires even width");
   debug_assert!(y.len() >= width, "y row too short");
   debug_assert!(u_half.len() >= width / 2, "u_half row too short");
@@ -300,6 +307,12 @@ pub(crate) fn yuv_420p_n_to_rgb_u16_row<const BITS: u32>(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
+  // Same BITS range as the u8-output counterpart. See
+  // `yuv_420p_n_to_rgb_row` for the rationale.
+  debug_assert!(
+    BITS == 10 || BITS == 12 || BITS == 14,
+    "yuv_420p_n_to_rgb_u16_row only supports BITS in {{10, 12, 14}}"
+  );
   debug_assert_eq!(width & 1, 0, "YUV 4:2:0 requires even width");
   debug_assert!(y.len() >= width, "y row too short");
   debug_assert!(u_half.len() >= width / 2, "u_half row too short");
@@ -373,6 +386,14 @@ pub(crate) fn p_n_to_rgb_row<const BITS: u32>(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
+  // High-bit-packed Pn kernels are only defined for BITS in {10, 12}.
+  // Outside that set, `16 - BITS` could under/overflow and the Q15
+  // coefficient table has no corresponding entry. Caught here before
+  // the SIMD dispatcher hands control to unsafe code.
+  debug_assert!(
+    BITS == 10 || BITS == 12,
+    "p_n_to_rgb_row only supports BITS in {{10, 12}}"
+  );
   debug_assert_eq!(width & 1, 0, "semi-planar high-bit requires even width");
   debug_assert!(y.len() >= width, "y row too short");
   debug_assert!(uv_half.len() >= width, "uv row too short");
@@ -443,6 +464,12 @@ pub(crate) fn p_n_to_rgb_u16_row<const BITS: u32>(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
+  // See `p_n_to_rgb_row` for the BITS range rationale. Duplicated
+  // here so either entry point catches misuse on its own.
+  debug_assert!(
+    BITS == 10 || BITS == 12,
+    "p_n_to_rgb_u16_row only supports BITS in {{10, 12}}"
+  );
   debug_assert_eq!(width & 1, 0, "semi-planar high-bit requires even width");
   debug_assert!(y.len() >= width, "y row too short");
   debug_assert!(uv_half.len() >= width, "uv row too short");

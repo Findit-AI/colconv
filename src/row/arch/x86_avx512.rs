@@ -572,12 +572,15 @@ unsafe fn write_quarter(r: __m512i, g: __m512i, b: __m512i, idx: u8, ptr: *mut u
   }
 }
 
-/// AVX‑512 P010 → packed **8‑bit** RGB.
+/// AVX‑512 high‑bit‑packed semi‑planar (`BITS` ∈ {10, 12}) → packed
+/// **8‑bit** RGB.
 ///
 /// Block size 64 Y pixels / 32 chroma pairs per iteration. Mirrors
-/// [`yuv420p10_to_rgb_row`] with two structural differences:
-/// - Samples are shifted right by 6 (`_mm512_srli_epi16::<6>`)
-///   instead of AND‑masked.
+/// [`super::x86_avx512::yuv_420p_n_to_rgb_row`] with two structural
+/// differences:
+/// - Samples are shifted right by `16 - BITS` (`_mm512_srl_epi16`,
+///   with a shift count computed from `BITS` once per call) instead
+///   of AND‑masked.
 /// - Semi‑planar UV is deinterleaved via [`deinterleave_uv_u16_avx512`]
 ///   — per‑128‑lane shuffle + 64‑bit permute + cross‑vector
 ///   `_mm512_permutex2var_epi64` to produce 32‑sample U and V
@@ -585,7 +588,8 @@ unsafe fn write_quarter(r: __m512i, g: __m512i, b: __m512i, idx: u8, ptr: *mut u
 ///
 /// # Numerical contract
 ///
-/// Byte‑identical to [`scalar::p_n_to_rgb_row::<10>`].
+/// Byte‑identical to [`scalar::p_n_to_rgb_row::<BITS>`] for the
+/// monomorphized `BITS`.
 ///
 /// # Safety
 ///
@@ -707,12 +711,14 @@ pub(crate) unsafe fn p_n_to_rgb_row<const BITS: u32>(
   }
 }
 
-/// AVX‑512 P010 → packed **10‑bit `u16`** RGB (low‑bit‑packed
-/// `yuv420p10le` convention).
+/// AVX‑512 high‑bit‑packed semi‑planar (`BITS` ∈ {10, 12}) → packed
+/// **native‑depth `u16`** RGB (low‑bit‑packed output, `yuv420pNle`
+/// convention).
 ///
 /// # Numerical contract
 ///
-/// Byte‑identical to [`scalar::p_n_to_rgb_u16_row::<10>`].
+/// Byte‑identical to [`scalar::p_n_to_rgb_u16_row::<BITS>`] for the
+/// monomorphized `BITS`.
 ///
 /// # Safety
 ///

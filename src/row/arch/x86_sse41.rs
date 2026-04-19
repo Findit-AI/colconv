@@ -193,12 +193,14 @@ pub(crate) unsafe fn yuv_420_to_rgb_row(
   }
 }
 
-/// SSE4.1 P010 → packed **8‑bit** RGB.
+/// SSE4.1 high‑bit‑packed semi‑planar (`BITS` ∈ {10, 12}) → packed
+/// **8‑bit** RGB.
 ///
 /// Block size 16 Y pixels / 8 chroma pairs per iteration. Differences
-/// from [`yuv420p10_to_rgb_row`]:
-/// - Samples are shifted right by 6 (`_mm_srli_epi16::<6>`) instead
-///   of AND‑masked — P010's 10 active bits live in the HIGH 10 of
+/// from [`super::x86_sse41::yuv_420p_n_to_rgb_row`]:
+/// - Samples are shifted right by `16 - BITS` (`_mm_srl_epi16`, with
+///   a shift count computed from `BITS` once per call) instead of
+///   AND‑masked — Pn's `BITS` active bits live in the HIGH `BITS` of
 ///   each `u16`.
 /// - Semi‑planar UV is deinterleaved via [`deinterleave_uv_u16`]
 ///   below (one `_mm_shuffle_epi8` + two 64‑bit unpacks per 16
@@ -206,7 +208,8 @@ pub(crate) unsafe fn yuv_420_to_rgb_row(
 ///
 /// # Numerical contract
 ///
-/// Byte‑identical to [`scalar::p_n_to_rgb_row::<10>`].
+/// Byte‑identical to [`scalar::p_n_to_rgb_row::<BITS>`] for the
+/// monomorphized `BITS`.
 ///
 /// # Safety
 ///
@@ -320,12 +323,14 @@ pub(crate) unsafe fn p_n_to_rgb_row<const BITS: u32>(
   }
 }
 
-/// SSE4.1 P010 → packed **10‑bit `u16`** RGB (native‑depth,
-/// low‑bit‑packed — `yuv420p10le` convention).
+/// SSE4.1 high‑bit‑packed semi‑planar (`BITS` ∈ {10, 12}) → packed
+/// **native‑depth `u16`** RGB (low‑bit‑packed output, `yuv420pNle`
+/// convention).
 ///
 /// # Numerical contract
 ///
-/// Byte‑identical to [`scalar::p_n_to_rgb_u16_row::<10>`].
+/// Byte‑identical to [`scalar::p_n_to_rgb_u16_row::<BITS>`] for the
+/// monomorphized `BITS`.
 ///
 /// # Safety
 ///

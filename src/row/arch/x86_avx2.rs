@@ -527,19 +527,23 @@ fn clamp_u10_x16(v: __m256i, zero_v: __m256i, max_v: __m256i) -> __m256i {
   unsafe { _mm256_min_epi16(_mm256_max_epi16(v, zero_v), max_v) }
 }
 
-/// AVX2 P010 → packed **8‑bit** RGB.
+/// AVX2 high‑bit‑packed semi‑planar (`BITS` ∈ {10, 12}) → packed
+/// **8‑bit** RGB.
 ///
 /// Block size 32 Y pixels / 16 chroma pairs per iteration. Mirrors
-/// [`yuv420p10_to_rgb_row`] with two structural differences:
-/// - Samples are shifted right by 6 (`_mm256_srli_epi16::<6>`)
-///   instead of AND‑masked.
+/// [`super::x86_avx2::yuv_420p_n_to_rgb_row`] with two structural
+/// differences:
+/// - Samples are shifted right by `16 - BITS` (`_mm256_srl_epi16`,
+///   with a shift count computed from `BITS` once per call) instead
+///   of AND‑masked.
 /// - Semi‑planar UV is deinterleaved via [`deinterleave_uv_u16_avx2`]
 ///   (two `_mm256_shuffle_epi8` + two `_mm256_permute4x64_epi64` +
 ///   two `_mm256_permute2x128_si256` per 32 chroma elements).
 ///
 /// # Numerical contract
 ///
-/// Byte‑identical to [`scalar::p_n_to_rgb_row::<10>`].
+/// Byte‑identical to [`scalar::p_n_to_rgb_row::<BITS>`] for the
+/// monomorphized `BITS`.
 ///
 /// # Safety
 ///
@@ -660,12 +664,14 @@ pub(crate) unsafe fn p_n_to_rgb_row<const BITS: u32>(
   }
 }
 
-/// AVX2 P010 → packed **10‑bit `u16`** RGB (low‑bit‑packed
-/// `yuv420p10le` convention).
+/// AVX2 high‑bit‑packed semi‑planar (`BITS` ∈ {10, 12}) → packed
+/// **native‑depth `u16`** RGB (low‑bit‑packed output, `yuv420pNle`
+/// convention).
 ///
 /// # Numerical contract
 ///
-/// Byte‑identical to [`scalar::p_n_to_rgb_u16_row::<10>`].
+/// Byte‑identical to [`scalar::p_n_to_rgb_u16_row::<BITS>`] for the
+/// monomorphized `BITS`.
 ///
 /// # Safety
 ///
