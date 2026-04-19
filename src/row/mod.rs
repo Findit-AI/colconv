@@ -350,7 +350,7 @@ pub fn yuv420p10_to_rgb_row(
           // SAFETY: NEON verified on this CPU; bounds / parity are
           // the caller's obligation (asserted above).
           unsafe {
-            arch::neon::yuv420p10_to_rgb_row(y, u_half, v_half, rgb_out, width, matrix, full_range);
+            arch::neon::yuv_420p_n_to_rgb_row::<10>(y, u_half, v_half, rgb_out, width, matrix, full_range);
           }
           return;
         }
@@ -359,7 +359,7 @@ pub fn yuv420p10_to_rgb_row(
         if avx512_available() {
           // SAFETY: AVX‑512BW verified.
           unsafe {
-            arch::x86_avx512::yuv420p10_to_rgb_row(
+            arch::x86_avx512::yuv_420p_n_to_rgb_row::<10>(
               y, u_half, v_half, rgb_out, width, matrix, full_range,
             );
           }
@@ -368,7 +368,7 @@ pub fn yuv420p10_to_rgb_row(
         if avx2_available() {
           // SAFETY: AVX2 verified.
           unsafe {
-            arch::x86_avx2::yuv420p10_to_rgb_row(
+            arch::x86_avx2::yuv_420p_n_to_rgb_row::<10>(
               y, u_half, v_half, rgb_out, width, matrix, full_range,
             );
           }
@@ -377,7 +377,7 @@ pub fn yuv420p10_to_rgb_row(
         if sse41_available() {
           // SAFETY: SSE4.1 verified.
           unsafe {
-            arch::x86_sse41::yuv420p10_to_rgb_row(
+            arch::x86_sse41::yuv_420p_n_to_rgb_row::<10>(
               y, u_half, v_half, rgb_out, width, matrix, full_range,
             );
           }
@@ -388,7 +388,7 @@ pub fn yuv420p10_to_rgb_row(
         if simd128_available() {
           // SAFETY: simd128 compile‑time verified.
           unsafe {
-            arch::wasm_simd128::yuv420p10_to_rgb_row(
+            arch::wasm_simd128::yuv_420p_n_to_rgb_row::<10>(
               y, u_half, v_half, rgb_out, width, matrix, full_range,
             );
           }
@@ -444,7 +444,7 @@ pub fn yuv420p10_to_rgb_u16_row(
         if neon_available() {
           // SAFETY: NEON verified.
           unsafe {
-            arch::neon::yuv420p10_to_rgb_u16_row(
+            arch::neon::yuv_420p_n_to_rgb_u16_row::<10>(
               y, u_half, v_half, rgb_out, width, matrix, full_range,
             );
           }
@@ -455,7 +455,7 @@ pub fn yuv420p10_to_rgb_u16_row(
         if avx512_available() {
           // SAFETY: AVX‑512BW verified.
           unsafe {
-            arch::x86_avx512::yuv420p10_to_rgb_u16_row(
+            arch::x86_avx512::yuv_420p_n_to_rgb_u16_row::<10>(
               y, u_half, v_half, rgb_out, width, matrix, full_range,
             );
           }
@@ -464,7 +464,7 @@ pub fn yuv420p10_to_rgb_u16_row(
         if avx2_available() {
           // SAFETY: AVX2 verified.
           unsafe {
-            arch::x86_avx2::yuv420p10_to_rgb_u16_row(
+            arch::x86_avx2::yuv_420p_n_to_rgb_u16_row::<10>(
               y, u_half, v_half, rgb_out, width, matrix, full_range,
             );
           }
@@ -473,7 +473,7 @@ pub fn yuv420p10_to_rgb_u16_row(
         if sse41_available() {
           // SAFETY: SSE4.1 verified.
           unsafe {
-            arch::x86_sse41::yuv420p10_to_rgb_u16_row(
+            arch::x86_sse41::yuv_420p_n_to_rgb_u16_row::<10>(
               y, u_half, v_half, rgb_out, width, matrix, full_range,
             );
           }
@@ -484,7 +484,7 @@ pub fn yuv420p10_to_rgb_u16_row(
         if simd128_available() {
           // SAFETY: simd128 compile‑time verified.
           unsafe {
-            arch::wasm_simd128::yuv420p10_to_rgb_u16_row(
+            arch::wasm_simd128::yuv_420p_n_to_rgb_u16_row::<10>(
               y, u_half, v_half, rgb_out, width, matrix, full_range,
             );
           }
@@ -504,7 +504,7 @@ pub fn yuv420p10_to_rgb_u16_row(
 ///
 /// This is the HDR hardware‑decode keystone format: VideoToolbox,
 /// VA‑API, NVDEC, D3D11VA, and Intel QSV all emit P010 for 10‑bit
-/// output. See `scalar::p010_to_rgb_row` for the full semantic
+/// output. See `scalar::p_n_to_rgb_row::<10>` for the full semantic
 /// specification. `use_simd = false` forces the scalar reference.
 #[cfg_attr(not(tarpaulin), inline(always))]
 #[allow(clippy::too_many_arguments)]
@@ -529,7 +529,7 @@ pub fn p010_to_rgb_row(
         if neon_available() {
           // SAFETY: NEON verified.
           unsafe {
-            arch::neon::p010_to_rgb_row(y, uv_half, rgb_out, width, matrix, full_range);
+            arch::neon::p_n_to_rgb_row::<10>(y, uv_half, rgb_out, width, matrix, full_range);
           }
           return;
         }
@@ -538,21 +538,21 @@ pub fn p010_to_rgb_row(
         if avx512_available() {
           // SAFETY: AVX‑512BW verified.
           unsafe {
-            arch::x86_avx512::p010_to_rgb_row(y, uv_half, rgb_out, width, matrix, full_range);
+            arch::x86_avx512::p_n_to_rgb_row::<10>(y, uv_half, rgb_out, width, matrix, full_range);
           }
           return;
         }
         if avx2_available() {
           // SAFETY: AVX2 verified.
           unsafe {
-            arch::x86_avx2::p010_to_rgb_row(y, uv_half, rgb_out, width, matrix, full_range);
+            arch::x86_avx2::p_n_to_rgb_row::<10>(y, uv_half, rgb_out, width, matrix, full_range);
           }
           return;
         }
         if sse41_available() {
           // SAFETY: SSE4.1 verified.
           unsafe {
-            arch::x86_sse41::p010_to_rgb_row(y, uv_half, rgb_out, width, matrix, full_range);
+            arch::x86_sse41::p_n_to_rgb_row::<10>(y, uv_half, rgb_out, width, matrix, full_range);
           }
           return;
         }
@@ -561,7 +561,7 @@ pub fn p010_to_rgb_row(
         if simd128_available() {
           // SAFETY: simd128 compile‑time verified.
           unsafe {
-            arch::wasm_simd128::p010_to_rgb_row(y, uv_half, rgb_out, width, matrix, full_range);
+            arch::wasm_simd128::p_n_to_rgb_row::<10>(y, uv_half, rgb_out, width, matrix, full_range);
           }
           return;
         }
@@ -570,7 +570,7 @@ pub fn p010_to_rgb_row(
     }
   }
 
-  scalar::p010_to_rgb_row(y, uv_half, rgb_out, width, matrix, full_range);
+  scalar::p_n_to_rgb_row::<10>(y, uv_half, rgb_out, width, matrix, full_range);
 }
 
 /// Converts one row of **P010** to **native‑depth `u16`** packed RGB
@@ -579,7 +579,7 @@ pub fn p010_to_rgb_row(
 /// Callers feeding this output into a P010 consumer must shift left
 /// by 6.
 ///
-/// See `scalar::p010_to_rgb_u16_row` for the full spec.
+/// See `scalar::p_n_to_rgb_u16_row::<10>` for the full spec.
 /// `use_simd = false` forces the scalar reference.
 #[cfg_attr(not(tarpaulin), inline(always))]
 #[allow(clippy::too_many_arguments)]
@@ -604,7 +604,7 @@ pub fn p010_to_rgb_u16_row(
         if neon_available() {
           // SAFETY: NEON verified.
           unsafe {
-            arch::neon::p010_to_rgb_u16_row(y, uv_half, rgb_out, width, matrix, full_range);
+            arch::neon::p_n_to_rgb_u16_row::<10>(y, uv_half, rgb_out, width, matrix, full_range);
           }
           return;
         }
@@ -613,21 +613,21 @@ pub fn p010_to_rgb_u16_row(
         if avx512_available() {
           // SAFETY: AVX‑512BW verified.
           unsafe {
-            arch::x86_avx512::p010_to_rgb_u16_row(y, uv_half, rgb_out, width, matrix, full_range);
+            arch::x86_avx512::p_n_to_rgb_u16_row::<10>(y, uv_half, rgb_out, width, matrix, full_range);
           }
           return;
         }
         if avx2_available() {
           // SAFETY: AVX2 verified.
           unsafe {
-            arch::x86_avx2::p010_to_rgb_u16_row(y, uv_half, rgb_out, width, matrix, full_range);
+            arch::x86_avx2::p_n_to_rgb_u16_row::<10>(y, uv_half, rgb_out, width, matrix, full_range);
           }
           return;
         }
         if sse41_available() {
           // SAFETY: SSE4.1 verified.
           unsafe {
-            arch::x86_sse41::p010_to_rgb_u16_row(y, uv_half, rgb_out, width, matrix, full_range);
+            arch::x86_sse41::p_n_to_rgb_u16_row::<10>(y, uv_half, rgb_out, width, matrix, full_range);
           }
           return;
         }
@@ -636,7 +636,7 @@ pub fn p010_to_rgb_u16_row(
         if simd128_available() {
           // SAFETY: simd128 compile‑time verified.
           unsafe {
-            arch::wasm_simd128::p010_to_rgb_u16_row(
+            arch::wasm_simd128::p_n_to_rgb_u16_row::<10>(
               y, uv_half, rgb_out, width, matrix, full_range,
             );
           }
@@ -647,7 +647,7 @@ pub fn p010_to_rgb_u16_row(
     }
   }
 
-  scalar::p010_to_rgb_u16_row(y, uv_half, rgb_out, width, matrix, full_range);
+  scalar::p_n_to_rgb_u16_row::<10>(y, uv_half, rgb_out, width, matrix, full_range);
 }
 
 /// Converts one row of packed RGB to planar HSV (OpenCV 8‑bit
