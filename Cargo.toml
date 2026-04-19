@@ -21,6 +21,10 @@ name = "yuv_420_to_rgb"
 harness = false
 
 [[bench]]
+name = "nv12_to_rgb"
+harness = false
+
+[[bench]]
 name = "rgb_to_hsv"
 harness = false
 

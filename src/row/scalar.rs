@@ -81,6 +81,57 @@ pub(crate) fn yuv_420_to_rgb_row(
   }
 }
 
+/// NV12 (semi‑planar 4:2:0) → packed RGB. Identical math and numerical
+/// contract to [`yuv_420_to_rgb_row`]; the only difference is UV source:
+/// `uv_half[2 * c_idx]` is U (Cb), `uv_half[2 * c_idx + 1]` is V (Cr).
+///
+/// # Panics (debug builds)
+///
+/// - `width` must be even (4:2:0 pairs pixel columns).
+/// - `y.len() >= width`, `uv_half.len() >= width` (`= 2 * (width / 2)`),
+///   `rgb_out.len() >= 3 * width`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn nv12_to_rgb_row(
+  y: &[u8],
+  uv_half: &[u8],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  debug_assert_eq!(width & 1, 0, "NV12 requires even width");
+  debug_assert!(y.len() >= width, "y row too short");
+  debug_assert!(uv_half.len() >= width, "uv_half row too short");
+  debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
+
+  let coeffs = Coefficients::for_matrix(matrix);
+  let (y_off, y_scale, c_scale) = range_params(full_range);
+  const RND: i32 = 1 << 14;
+
+  let mut x = 0;
+  while x < width {
+    let c_idx = x / 2;
+    let u_d = ((uv_half[c_idx * 2] as i32 - 128) * c_scale + RND) >> 15;
+    let v_d = ((uv_half[c_idx * 2 + 1] as i32 - 128) * c_scale + RND) >> 15;
+
+    let r_chroma = (coeffs.r_u() * u_d + coeffs.r_v() * v_d + RND) >> 15;
+    let g_chroma = (coeffs.g_u() * u_d + coeffs.g_v() * v_d + RND) >> 15;
+    let b_chroma = (coeffs.b_u() * u_d + coeffs.b_v() * v_d + RND) >> 15;
+
+    let y0 = ((y[x] as i32 - y_off) * y_scale + RND) >> 15;
+    rgb_out[x * 3] = clamp_u8(y0 + r_chroma);
+    rgb_out[x * 3 + 1] = clamp_u8(y0 + g_chroma);
+    rgb_out[x * 3 + 2] = clamp_u8(y0 + b_chroma);
+
+    let y1 = ((y[x + 1] as i32 - y_off) * y_scale + RND) >> 15;
+    rgb_out[(x + 1) * 3] = clamp_u8(y1 + r_chroma);
+    rgb_out[(x + 1) * 3 + 1] = clamp_u8(y1 + g_chroma);
+    rgb_out[(x + 1) * 3 + 2] = clamp_u8(y1 + b_chroma);
+
+    x += 2;
+  }
+}
+
 #[cfg_attr(not(tarpaulin), inline(always))]
 fn clamp_u8(v: i32) -> u8 {
   v.clamp(0, 255) as u8

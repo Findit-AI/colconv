@@ -101,7 +101,8 @@ impl<'a> Yuv420pRow<'a> {
 /// Sinks that consume YUV 4:2:0 rows.
 ///
 /// A subtrait of [`PixelSink`] that pins the row shape to
-/// [`Yuv420pRow`]. Implementors get `process(&mut self, row: Yuv420pRow<'_>)`
+/// [`Yuv420pRow`]. Implementors get
+/// `process(&mut self, row: Yuv420pRow<'_>) -> Result<(), Self::Error>`
 /// via the supertrait.
 pub trait Yuv420pSink: for<'a> PixelSink<Input<'a> = Yuv420pRow<'a>> {}
 
@@ -120,7 +121,14 @@ pub fn yuv420p_to<S: Yuv420pSink>(
   full_range: bool,
   matrix: ColorMatrix,
   sink: &mut S,
-) {
+) -> Result<(), S::Error> {
+  // Per-frame preflight so the Sink can validate frame-vs-buffer
+  // geometry **before** any row is handed to it. See
+  // [`PixelSink::begin_frame`] for the rationale (catches stale bottom
+  // rows from a shorter frame and partial writes from a taller one).
+  // Any error here propagates before row 0 is touched.
+  sink.begin_frame(src.width(), src.height())?;
+
   let w = src.width() as usize;
   let h = src.height() as usize;
   let y_stride = src.y_stride() as usize;
@@ -144,6 +152,9 @@ pub fn yuv420p_to<S: Yuv420pSink>(
     let u_half = &u_plane[u_start..u_start + chroma_width];
     let v_half = &v_plane[v_start..v_start + chroma_width];
 
-    sink.process(Yuv420pRow::new(y, u_half, v_half, row, matrix, full_range));
+    // `?` short-circuits the walk on the first sink error. No
+    // subsequent rows are processed and no wasted work is done.
+    sink.process(Yuv420pRow::new(y, u_half, v_half, row, matrix, full_range))?;
   }
+  Ok(())
 }

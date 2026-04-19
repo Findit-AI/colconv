@@ -50,8 +50,8 @@ pub mod yuv;
 ///
 /// Consumers ([`sinker::MixedSinker`], the application's own reducers,
 /// etc.) implement this once per source format they want to accept. The
-/// source kernel calls [`Self::process`] for every output row of
-/// the frame.
+/// source kernel calls [`Self::process`] for every output row of the
+/// frame and may propagate the sink's error back to the caller.
 ///
 /// # Input type
 ///
@@ -62,16 +62,118 @@ pub mod yuv;
 /// which is intentional. To handle multiple sources, use the
 /// `SourceFormat` type-parameter pattern demonstrated by
 /// [`sinker::MixedSinker`].
+///
+/// # Why fallible (`Result<(), Self::Error>`)
+///
+/// Both [`begin_frame`](Self::begin_frame) and [`process`](Self::process)
+/// return `Result<(), Self::Error>` so the crate can run on
+/// panic-sensitive targets — `#![no_std]` with `panic = "abort"`,
+/// embedded RTOS codebases that lint against `unwrap`/`panic!`, and
+/// similar environments where a single bad frame must not crash the
+/// process. This mirrors the `embedded-hal` / `embedded-graphics`
+/// convention for per-pixel and per-row sinks.
+///
+/// Sinks that genuinely cannot fail (pure compute — histogram, hash,
+/// …) declare `type Error = core::convert::Infallible;` and return
+/// `Ok(())` unconditionally. LLVM strips the result wrapping away at
+/// the `Infallible` call sites, so there's no hot-path overhead
+/// versus a `()` return.
+///
+/// # Error philosophy
+///
+/// - **Input geometry errors** (malformed source plane, odd width)
+///   surface at [`frame::Yuv420pFrame::try_new`] /
+///   [`frame::Nv12Frame::try_new`], not in the sink.
+/// - **Sink configuration errors** (undersized buffer) surface at
+///   sink construction — `MixedSinker::with_rgb` etc. return
+///   `Result<Self, MixedSinkerError>` so a short buffer never reaches
+///   the walker.
+/// - **Per-frame setup errors** (frame dims don't match the sink's
+///   configuration) surface at [`begin_frame`](Self::begin_frame),
+///   before the first row is processed — so the caller's buffers are
+///   never partially mutated before the error is returned.
+/// - **Runtime sink errors** (I/O failure, GPU upload, …) surface
+///   naturally as `Err` returns from `process`. The walker short-
+///   circuits on the first error, so no wasted work on subsequent
+///   rows.
+///
+/// # Example: an Infallible counting sink
+///
+/// ```ignore
+/// use core::convert::Infallible;
+/// use colconv::{PixelSink, yuv::Yuv420pRow};
+///
+/// struct RowCounter(usize);
+/// impl PixelSink for RowCounter {
+///     type Input<'a> = Yuv420pRow<'a>;
+///     type Error = Infallible;
+///     fn process(&mut self, _row: Yuv420pRow<'_>) -> Result<(), Infallible> {
+///         self.0 += 1;
+///         Ok(())
+///     }
+/// }
+/// ```
+///
+/// # Example: a fallible file-writing sink
+///
+/// ```ignore
+/// use std::io::{self, BufWriter, Write};
+/// use colconv::{PixelSink, yuv::Yuv420pRow};
+///
+/// struct FileSink { w: BufWriter<std::fs::File> }
+///
+/// impl PixelSink for FileSink {
+///     type Input<'a> = Yuv420pRow<'a>;
+///     type Error = io::Error;
+///     fn process(&mut self, row: Yuv420pRow<'_>) -> io::Result<()> {
+///         self.w.write_all(row.y())
+///     }
+/// }
+/// ```
+///
+/// The walker returns `Result<(), io::Error>`; `?` propagates
+/// cleanly through the caller's code.
 pub trait PixelSink {
   /// The shape of one input unit chosen by the per-format subtrait —
   /// e.g. [`yuv::Yuv420pRow`] for YUV 4:2:0, one row at a time.
   type Input<'a>;
 
+  /// The error type surfaced by this sink. Use
+  /// [`core::convert::Infallible`] for sinks that can't fail — the
+  /// compiler eliminates the `Result` branching at the call sites.
+  type Error;
+
+  /// Called by the walker exactly once per frame, **before** any
+  /// [`process`](Self::process) call, with the source frame's
+  /// dimensions.
+  ///
+  /// Sinks that care about geometry — buffer-backed sinks like
+  /// [`sinker::MixedSinker`] — override this to validate the frame
+  /// against their configured dimensions *before* any row is written.
+  /// This catches the two stale-state failure modes that a per-row
+  /// `idx < height` guard can't: shorter frames that would silently
+  /// leave bottom rows unwritten, and taller frames that would
+  /// partially mutate the output before failing halfway through.
+  ///
+  /// Default is `Ok(())`, so pure-computation sinks (histogram, hash,
+  /// etc.) that don't care about source geometry don't need to
+  /// override.
+  ///
+  /// Any `Err` returned here is propagated by the walker before any
+  /// row is processed.
+  #[allow(unused_variables)]
+  fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
+    Ok(())
+  }
+
   /// Consume one input unit. Called by the kernel once per unit (one
   /// row, for the row-granular kernels v0.1 ships). Input borrows may
   /// be invalidated after the call returns — implementations must not
   /// retain them.
-  fn process(&mut self, input: Self::Input<'_>);
+  ///
+  /// Returns `Err` to short-circuit the walker: on the first `Err`,
+  /// the walker returns immediately without processing further rows.
+  fn process(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error>;
 }
 
 /// YUV → RGB conversion matrix.
