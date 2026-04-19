@@ -123,6 +123,20 @@ pub enum MixedSinkerError {
     /// Sink's configured height.
     configured_height: usize,
   },
+
+  /// The sinker's configured `width` is odd. YUV420p / NV12 subsample
+  /// chroma 2:1 in width, and the row primitives (scalar + every SIMD
+  /// backend) assume `width & 1 == 0` — calling them with an odd
+  /// width panics. `MixedSinker::new` is infallible and accepts any
+  /// width, so this error surfaces the misconfiguration at the first
+  /// use site ([`PixelSink::begin_frame`] or [`PixelSink::process`])
+  /// before any row primitive is invoked, preserving the no-panic
+  /// contract.
+  #[error("MixedSinker configured width {width} is odd; YUV420p / NV12 require even width")]
+  OddWidth {
+    /// Sink's configured width.
+    width: usize,
+  },
 }
 
 /// Identifies which of the three HSV planes a
@@ -395,6 +409,13 @@ impl PixelSink for MixedSinker<'_, Yuv420p> {
   type Error = MixedSinkerError;
 
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
+    // Reject odd-width sinkers up front — the underlying row
+    // primitives assume `width & 1 == 0` and would panic on the
+    // first `process` call otherwise (`MixedSinker::new` is
+    // infallible and accepts any width).
+    if self.width & 1 != 0 {
+      return Err(MixedSinkerError::OddWidth { width: self.width });
+    }
     check_dimensions_match(self.width, self.height, width, height)
   }
 
@@ -410,6 +431,14 @@ impl PixelSink for MixedSinker<'_, Yuv420p> {
     // to unsafe SIMD kernels. Report the offending slice length and
     // row index directly — don't reuse `DimensionMismatch`, whose
     // `frame_w` / `frame_h` fields would be meaningless here.
+    //
+    // Odd-width check first: the row primitives assume
+    // `width & 1 == 0` and would panic past this point. Keeping the
+    // check here (and in `begin_frame`) preserves the no-panic
+    // contract for direct `process` callers that skip `begin_frame`.
+    if w & 1 != 0 {
+      return Err(MixedSinkerError::OddWidth { width: w });
+    }
     if row.y().len() != w {
       return Err(MixedSinkerError::RowShapeMismatch {
         which: RowSlice::Y,
@@ -522,6 +551,13 @@ impl PixelSink for MixedSinker<'_, Nv12> {
   type Error = MixedSinkerError;
 
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
+    // Reject odd-width sinkers up front — the underlying row
+    // primitives assume `width & 1 == 0` and would panic on the
+    // first `process` call otherwise (`MixedSinker::new` is
+    // infallible and accepts any width).
+    if self.width & 1 != 0 {
+      return Err(MixedSinkerError::OddWidth { width: self.width });
+    }
     check_dimensions_match(self.width, self.height, width, height)
   }
 
@@ -532,7 +568,11 @@ impl PixelSink for MixedSinker<'_, Nv12> {
 
     // Defense-in-depth shape check (see Yuv420p impl above). An NV12
     // UV row is `width` bytes of interleaved U / V payload — same
-    // length as Y — so both slices must equal `self.width`.
+    // length as Y — so both slices must equal `self.width`. Odd-width
+    // check comes first since the row primitive would panic on it.
+    if w & 1 != 0 {
+      return Err(MixedSinkerError::OddWidth { width: w });
+    }
     if row.y().len() != w {
       return Err(MixedSinkerError::RowShapeMismatch {
         which: RowSlice::Y,
@@ -1262,6 +1302,69 @@ mod tests {
         configured_height: 8,
       }
     );
+  }
+
+  #[test]
+  fn yuv420p_odd_width_sink_returns_err_at_begin_frame() {
+    // A sink configured with an odd width would later panic inside
+    // `yuv_420_to_rgb_row` (which asserts `width & 1 == 0`). The
+    // fallible API surfaces this as `OddWidth` at frame start — no
+    // rows are processed, no panic. Width=15, height=8 — matching
+    // frame so `DimensionMismatch` can't fire first.
+    let w = 15usize;
+    let h = 8usize;
+    let y = std::vec![0u8; w * h];
+    let u = std::vec![128u8; ((w + 1) / 2) * h / 2 + 8]; // any valid size
+    let v = std::vec![128u8; ((w + 1) / 2) * h / 2 + 8];
+    // Build the Frame separately — Yuv420pFrame rejects odd width
+    // too, so we can't construct a 15-wide frame. That's fine: we
+    // only need to hit `begin_frame`, which takes (width, height)
+    // parameters directly. Call it manually.
+    let mut rgb = std::vec![0u8; 16 * 8 * 3]; // Dummy; not touched.
+    let mut sink = MixedSinker::<Yuv420p>::new(w, h)
+      .with_rgb(&mut rgb)
+      .unwrap();
+    let err = sink.begin_frame(w as u32, h as u32).err().unwrap();
+    assert_eq!(err, MixedSinkerError::OddWidth { width: 15 });
+    // Silence unused-vec warnings — these would have been the plane data.
+    let _ = (y, u, v);
+  }
+
+  #[test]
+  fn yuv420p_odd_width_sink_returns_err_at_direct_process() {
+    // Direct `process` caller bypassing `begin_frame`. Process must
+    // still reject odd width before calling the kernel.
+    let mut rgb = std::vec![0u8; 16 * 8 * 3];
+    let mut sink = MixedSinker::<Yuv420p>::new(15, 8)
+      .with_rgb(&mut rgb)
+      .unwrap();
+    let y = [0u8; 15];
+    let u = [128u8; 7]; // ceil(15/2) = 8; 7 triggers the width check first
+    let v = [128u8; 7];
+    let row = Yuv420pRow::new(&y, &u, &v, 0, ColorMatrix::Bt601, true);
+    let err = sink.process(row).err().unwrap();
+    assert_eq!(err, MixedSinkerError::OddWidth { width: 15 });
+  }
+
+  #[test]
+  fn nv12_odd_width_sink_returns_err_at_begin_frame() {
+    let w = 15usize;
+    let h = 8usize;
+    let mut rgb = std::vec![0u8; 16 * 8 * 3];
+    let mut sink = MixedSinker::<Nv12>::new(w, h).with_rgb(&mut rgb).unwrap();
+    let err = sink.begin_frame(w as u32, h as u32).err().unwrap();
+    assert_eq!(err, MixedSinkerError::OddWidth { width: 15 });
+  }
+
+  #[test]
+  fn nv12_odd_width_sink_returns_err_at_direct_process() {
+    let mut rgb = std::vec![0u8; 16 * 8 * 3];
+    let mut sink = MixedSinker::<Nv12>::new(15, 8).with_rgb(&mut rgb).unwrap();
+    let y = [0u8; 15];
+    let uv = [128u8; 15];
+    let row = Nv12Row::new(&y, &uv, 0, ColorMatrix::Bt601, true);
+    let err = sink.process(row).err().unwrap();
+    assert_eq!(err, MixedSinkerError::OddWidth { width: 15 });
   }
 
   #[test]

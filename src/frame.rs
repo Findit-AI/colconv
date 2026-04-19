@@ -38,7 +38,9 @@ impl<'a> Yuv420pFrame<'a> {
   /// plane lengths.
   ///
   /// Returns [`Yuv420pFrameError`] if any of:
-  /// - `width` or `height` is zero or odd,
+  /// - `width` or `height` is zero,
+  /// - `width` is odd (odd height is allowed and handled via
+  ///   `height.div_ceil(2)` in chroma-row sizing),
   /// - `y_stride < width`, `u_stride < (width + 1) / 2`, or
   ///   `v_stride < (width + 1) / 2`,
   /// - any plane is too short to cover its declared rows.
@@ -253,7 +255,9 @@ impl<'a> Nv12Frame<'a> {
   /// lengths.
   ///
   /// Returns [`Nv12FrameError`] if any of:
-  /// - `width` or `height` is zero or odd,
+  /// - `width` or `height` is zero,
+  /// - `width` is odd (4:2:0 subsamples chroma 2:1 in width; odd
+  ///   height is allowed and handled via `height.div_ceil(2)`),
   /// - `y_stride < width`,
   /// - `uv_stride < width` (the UV row holds `width / 2` interleaved
   ///   pairs = `width` bytes of payload),
