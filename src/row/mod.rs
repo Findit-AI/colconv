@@ -62,11 +62,18 @@ pub fn yuv_420_to_rgb_row(
   // arithmetic, so we validate in *release* builds too — not just
   // under `debug_assert!`. Kernels keep their own `debug_assert!`s as
   // internal sanity checks.
+  //
+  // `rgb_min` uses `checked_mul` because `3 * width` can wrap `usize`
+  // on 32‑bit targets (wasm32, i686) for extreme widths. Without the
+  // guard, a wrapped product could admit an undersized `rgb_out` and
+  // let the scalar loop's `x * 3` indexing or a SIMD kernel's
+  // pointer arithmetic run off the end.
   assert_eq!(width & 1, 0, "YUV 4:2:0 requires even width");
+  let rgb_min = rgb_row_bytes(width);
   assert!(y.len() >= width, "y row too short");
   assert!(u_half.len() >= width / 2, "u_half row too short");
   assert!(v_half.len() >= width / 2, "v_half row too short");
-  assert!(rgb_out.len() >= 3 * width, "rgb_out row too short");
+  assert!(rgb_out.len() >= rgb_min, "rgb_out row too short");
 
   if use_simd {
     cfg_select! {
@@ -145,6 +152,89 @@ pub fn yuv_420_to_rgb_row(
   scalar::yuv_420_to_rgb_row(y, u_half, v_half, rgb_out, width, matrix, full_range);
 }
 
+/// Converts one row of NV12 (semi‑planar 4:2:0) to packed RGB.
+///
+/// Same numerical contract as [`yuv_420_to_rgb_row`]; the only
+/// difference is UV source — NV12 delivers U and V interleaved in a
+/// single `width`‑byte row (`U0, V0, U1, V1, …`). See
+/// `scalar::nv12_to_rgb_row` for the reference implementation.
+///
+/// `use_simd = false` forces the scalar reference path.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn nv12_to_rgb_row(
+  y: &[u8],
+  uv_half: &[u8],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  use_simd: bool,
+) {
+  // Runtime asserts at the dispatcher boundary (see
+  // [`yuv_420_to_rgb_row`] for rationale, including the checked
+  // `width × 3` multiplication).
+  assert_eq!(width & 1, 0, "NV12 requires even width");
+  let rgb_min = rgb_row_bytes(width);
+  assert!(y.len() >= width, "y row too short");
+  assert!(uv_half.len() >= width, "uv_half row too short");
+  assert!(rgb_out.len() >= rgb_min, "rgb_out row too short");
+
+  if use_simd {
+    cfg_select! {
+      target_arch = "aarch64" => {
+        if neon_available() {
+          // SAFETY: `neon_available()` verified NEON is present on this
+          // CPU. Bounds / parity invariants are the caller's obligation
+          // (checked above).
+          unsafe {
+            arch::neon::nv12_to_rgb_row(y, uv_half, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+      },
+      target_arch = "x86_64" => {
+        if avx512_available() {
+          // SAFETY: `avx512_available()` verified AVX‑512BW is present.
+          unsafe {
+            arch::x86_avx512::nv12_to_rgb_row(y, uv_half, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+        if avx2_available() {
+          // SAFETY: `avx2_available()` verified AVX2 is present.
+          unsafe {
+            arch::x86_avx2::nv12_to_rgb_row(y, uv_half, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+        if sse41_available() {
+          // SAFETY: `sse41_available()` verified SSE4.1 is present.
+          unsafe {
+            arch::x86_sse41::nv12_to_rgb_row(y, uv_half, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+      },
+      target_arch = "wasm32" => {
+        if simd128_available() {
+          // SAFETY: `simd128_available()` verified simd128 is on at
+          // compile time (WASM has no runtime CPU detection).
+          unsafe {
+            arch::wasm_simd128::nv12_to_rgb_row(y, uv_half, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+      },
+      _ => {
+        // Targets without a SIMD backend fall through to scalar.
+      }
+    }
+  }
+
+  scalar::nv12_to_rgb_row(y, uv_half, rgb_out, width, matrix, full_range);
+}
+
 /// Converts one row of packed RGB to planar HSV (OpenCV 8‑bit
 /// encoding). See `scalar::rgb_to_hsv_row` for semantics.
 ///
@@ -160,8 +250,10 @@ pub fn rgb_to_hsv_row(
   use_simd: bool,
 ) {
   // Runtime asserts at the dispatcher boundary (see
-  // [`yuv_420_to_rgb_row`] for rationale).
-  assert!(rgb.len() >= 3 * width, "rgb row too short");
+  // [`yuv_420_to_rgb_row`] for rationale, including the checked
+  // `width × 3` multiplication).
+  let rgb_min = rgb_row_bytes(width);
+  assert!(rgb.len() >= rgb_min, "rgb row too short");
   assert!(h_out.len() >= width, "h_out row too short");
   assert!(s_out.len() >= width, "s_out row too short");
   assert!(v_out.len() >= width, "v_out row too short");
@@ -244,9 +336,11 @@ pub fn rgb_to_bgr_row(rgb: &[u8], bgr_out: &mut [u8], width: usize, use_simd: bo
 #[cfg_attr(not(tarpaulin), inline(always))]
 fn swap_rb_channels_row(input: &[u8], output: &mut [u8], width: usize, use_simd: bool) {
   // Runtime asserts at the dispatcher boundary (see
-  // [`yuv_420_to_rgb_row`] for rationale).
-  assert!(input.len() >= 3 * width, "input row too short");
-  assert!(output.len() >= 3 * width, "output row too short");
+  // [`yuv_420_to_rgb_row`] for rationale, including the checked
+  // `width × 3` multiplication).
+  let rgb_min = rgb_row_bytes(width);
+  assert!(input.len() >= rgb_min, "input row too short");
+  assert!(output.len() >= rgb_min, "output row too short");
 
   if use_simd {
     cfg_select! {
@@ -298,6 +392,23 @@ fn swap_rb_channels_row(input: &[u8], output: &mut [u8], width: usize, use_simd:
   }
 
   scalar::bgr_rgb_swap_row(input, output, width);
+}
+
+// ---- shared dispatcher helpers ---------------------------------------
+
+/// Computes the byte length of one packed‑RGB row with overflow
+/// checking. Panics if `width × 3` cannot be represented as `usize`
+/// (only reachable on 32‑bit targets — wasm32, i686 — with extreme
+/// widths). Callers use the returned length as the minimum buffer
+/// size they hand to unsafe SIMD kernels, so an unchecked
+/// multiplication here could admit an undersized buffer and trigger
+/// out‑of‑bounds writes downstream.
+#[cfg_attr(not(tarpaulin), inline(always))]
+fn rgb_row_bytes(width: usize) -> usize {
+  match width.checked_mul(3) {
+    Some(n) => n,
+    None => panic!("width ({width}) × 3 overflows usize"),
+  }
 }
 
 // ---- runtime CPU feature detection -----------------------------------
@@ -394,4 +505,81 @@ const fn avx512_available() -> bool {
 #[cfg_attr(not(tarpaulin), inline(always))]
 const fn simd128_available() -> bool {
   !cfg!(colconv_force_scalar) && cfg!(target_feature = "simd128")
+}
+
+#[cfg(all(test, feature = "std"))]
+mod overflow_tests {
+  //! 32-bit RGB-row-bytes overflow regressions for the public
+  //! dispatchers. `width × 3` can wrap `usize` on wasm32 / i686 for
+  //! extreme widths; the shared [`rgb_row_bytes`] helper rejects
+  //! these before any unsafe kernel sees them. Tests are gated on
+  //! 32-bit because `u32 × 3` never wraps 64-bit `usize`.
+
+  #[cfg(target_pointer_width = "32")]
+  use super::*;
+  #[cfg(target_pointer_width = "32")]
+  use crate::ColorMatrix;
+
+  /// `usize::MAX / 3 + 1` rounded up to an even number — the smallest
+  /// even width whose product with 3 overflows 32-bit usize.
+  #[cfg(target_pointer_width = "32")]
+  const OVERFLOW_WIDTH: usize = (usize::MAX / 3) + 2;
+
+  #[cfg(target_pointer_width = "32")]
+  #[test]
+  #[should_panic(expected = "overflows usize")]
+  fn yuv_420_dispatcher_rejects_width_times_3_overflow() {
+    let y: [u8; 0] = [];
+    let u: [u8; 0] = [];
+    let v: [u8; 0] = [];
+    let mut rgb: [u8; 0] = [];
+    yuv_420_to_rgb_row(
+      &y,
+      &u,
+      &v,
+      &mut rgb,
+      OVERFLOW_WIDTH,
+      ColorMatrix::Bt601,
+      true,
+      false,
+    );
+  }
+
+  #[cfg(target_pointer_width = "32")]
+  #[test]
+  #[should_panic(expected = "overflows usize")]
+  fn nv12_dispatcher_rejects_width_times_3_overflow() {
+    let y: [u8; 0] = [];
+    let uv: [u8; 0] = [];
+    let mut rgb: [u8; 0] = [];
+    nv12_to_rgb_row(
+      &y,
+      &uv,
+      &mut rgb,
+      OVERFLOW_WIDTH,
+      ColorMatrix::Bt601,
+      true,
+      false,
+    );
+  }
+
+  #[cfg(target_pointer_width = "32")]
+  #[test]
+  #[should_panic(expected = "overflows usize")]
+  fn rgb_to_hsv_dispatcher_rejects_width_times_3_overflow() {
+    let rgb: [u8; 0] = [];
+    let mut h: [u8; 0] = [];
+    let mut s: [u8; 0] = [];
+    let mut v: [u8; 0] = [];
+    rgb_to_hsv_row(&rgb, &mut h, &mut s, &mut v, OVERFLOW_WIDTH, false);
+  }
+
+  #[cfg(target_pointer_width = "32")]
+  #[test]
+  #[should_panic(expected = "overflows usize")]
+  fn bgr_to_rgb_dispatcher_rejects_width_times_3_overflow() {
+    let input: [u8; 0] = [];
+    let mut output: [u8; 0] = [];
+    bgr_to_rgb_row(&input, &mut output, OVERFLOW_WIDTH, false);
+  }
 }

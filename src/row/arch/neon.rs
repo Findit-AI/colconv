@@ -36,8 +36,8 @@ use core::arch::aarch64::{
   float32x4_t, int16x8_t, int32x4_t, uint8x16_t, uint8x16x3_t, vaddq_f32, vaddq_s32, vbslq_f32,
   vceqq_f32, vcltq_f32, vcombine_s16, vcombine_u8, vcombine_u16, vcvtq_f32_u32, vcvtq_u32_f32,
   vdivq_f32, vdupq_n_f32, vdupq_n_s16, vdupq_n_s32, vget_high_s16, vget_high_u8, vget_high_u16,
-  vget_low_s16, vget_low_u8, vget_low_u16, vld1_u8, vld1q_u8, vld3q_u8, vmaxq_f32, vminq_f32,
-  vmovl_s16, vmovl_u8, vmovl_u16, vmovn_u16, vmovn_u32, vmulq_f32, vmulq_s32, vmvnq_u32,
+  vget_low_s16, vget_low_u8, vget_low_u16, vld1_u8, vld1q_u8, vld2_u8, vld3q_u8, vmaxq_f32,
+  vminq_f32, vmovl_s16, vmovl_u8, vmovl_u16, vmovn_u16, vmovn_u32, vmulq_f32, vmulq_s32, vmvnq_u32,
   vqaddq_s16, vqmovn_s32, vqmovun_s16, vreinterpretq_s16_u16, vshrq_n_s32, vst1q_u8, vst3q_u8,
   vsubq_f32, vsubq_s16, vzip1q_s16, vzip2q_s16,
 };
@@ -180,6 +180,134 @@ pub(crate) unsafe fn yuv_420_to_rgb_row(
         &y[x..width],
         &u_half[x / 2..width / 2],
         &v_half[x / 2..width / 2],
+        &mut rgb_out[x * 3..width * 3],
+        width - x,
+        matrix,
+        full_range,
+      );
+    }
+  }
+}
+
+/// NEON NV12 → packed RGB. Identical math to [`yuv_420_to_rgb_row`];
+/// the only difference is UV ingestion — `vld2_u8` deinterleaves 16
+/// interleaved UV bytes into u8x8 U and u8x8 V vectors in one
+/// instruction, matching the shape expected by the rest of the
+/// chroma→RGB pipeline.
+///
+/// # Safety
+///
+/// 1. **NEON must be available on the current CPU.** The dispatcher
+///    verifies this; direct callers are responsible.
+/// 2. `width & 1 == 0`.
+/// 3. `y.len() >= width`.
+/// 4. `uv_half.len() >= width` (`2 * (width / 2)` interleaved bytes).
+/// 5. `rgb_out.len() >= 3 * width`.
+///
+/// Bounds are `debug_assert`‑checked; release builds trust the caller
+/// because the kernel uses unchecked pointer arithmetic (`vld1q_u8`,
+/// `vld2_u8`, `vst3q_u8`).
+#[inline]
+#[target_feature(enable = "neon")]
+pub(crate) unsafe fn nv12_to_rgb_row(
+  y: &[u8],
+  uv_half: &[u8],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  debug_assert_eq!(width & 1, 0, "NV12 requires even width");
+  debug_assert!(y.len() >= width);
+  debug_assert!(uv_half.len() >= width);
+  debug_assert!(rgb_out.len() >= width * 3);
+
+  let coeffs = scalar::Coefficients::for_matrix(matrix);
+  let (y_off, y_scale, c_scale) = scalar::range_params(full_range);
+  const RND: i32 = 1 << 14;
+
+  // SAFETY: NEON availability is the caller's obligation; all pointer
+  // adds below are bounded by the `while x + 16 <= width` loop
+  // condition and the caller‑promised slice lengths above.
+  unsafe {
+    let rnd_v = vdupq_n_s32(RND);
+    let y_off_v = vdupq_n_s16(y_off as i16);
+    let y_scale_v = vdupq_n_s32(y_scale);
+    let c_scale_v = vdupq_n_s32(c_scale);
+    let mid128 = vdupq_n_s16(128);
+    let cru = vdupq_n_s32(coeffs.r_u());
+    let crv = vdupq_n_s32(coeffs.r_v());
+    let cgu = vdupq_n_s32(coeffs.g_u());
+    let cgv = vdupq_n_s32(coeffs.g_v());
+    let cbu = vdupq_n_s32(coeffs.b_u());
+    let cbv = vdupq_n_s32(coeffs.b_v());
+
+    let mut x = 0usize;
+    while x + 16 <= width {
+      let y_vec = vld1q_u8(y.as_ptr().add(x));
+      // 16 Y pixels → 8 chroma pairs. `vld2_u8` loads 16 UV bytes
+      // starting at offset `x` (= `x / 2 * 2`) and deinterleaves them
+      // into (u8x8 U, u8x8 V) — the shape the rest of the pipeline
+      // expects.
+      let uv_pair = vld2_u8(uv_half.as_ptr().add(x));
+      let u_vec = uv_pair.0;
+      let v_vec = uv_pair.1;
+
+      let y_lo = vreinterpretq_s16_u16(vmovl_u8(vget_low_u8(y_vec)));
+      let y_hi = vreinterpretq_s16_u16(vmovl_u8(vget_high_u8(y_vec)));
+
+      let u_i16 = vsubq_s16(vreinterpretq_s16_u16(vmovl_u8(u_vec)), mid128);
+      let v_i16 = vsubq_s16(vreinterpretq_s16_u16(vmovl_u8(v_vec)), mid128);
+
+      let u_lo_i32 = vmovl_s16(vget_low_s16(u_i16));
+      let u_hi_i32 = vmovl_s16(vget_high_s16(u_i16));
+      let v_lo_i32 = vmovl_s16(vget_low_s16(v_i16));
+      let v_hi_i32 = vmovl_s16(vget_high_s16(v_i16));
+
+      let u_d_lo = q15_shift(vaddq_s32(vmulq_s32(u_lo_i32, c_scale_v), rnd_v));
+      let u_d_hi = q15_shift(vaddq_s32(vmulq_s32(u_hi_i32, c_scale_v), rnd_v));
+      let v_d_lo = q15_shift(vaddq_s32(vmulq_s32(v_lo_i32, c_scale_v), rnd_v));
+      let v_d_hi = q15_shift(vaddq_s32(vmulq_s32(v_hi_i32, c_scale_v), rnd_v));
+
+      let r_chroma = chroma_i16x8(cru, crv, u_d_lo, v_d_lo, u_d_hi, v_d_hi, rnd_v);
+      let g_chroma = chroma_i16x8(cgu, cgv, u_d_lo, v_d_lo, u_d_hi, v_d_hi, rnd_v);
+      let b_chroma = chroma_i16x8(cbu, cbv, u_d_lo, v_d_lo, u_d_hi, v_d_hi, rnd_v);
+
+      let r_dup_lo = vzip1q_s16(r_chroma, r_chroma);
+      let r_dup_hi = vzip2q_s16(r_chroma, r_chroma);
+      let g_dup_lo = vzip1q_s16(g_chroma, g_chroma);
+      let g_dup_hi = vzip2q_s16(g_chroma, g_chroma);
+      let b_dup_lo = vzip1q_s16(b_chroma, b_chroma);
+      let b_dup_hi = vzip2q_s16(b_chroma, b_chroma);
+
+      let y_scaled_lo = scale_y(y_lo, y_off_v, y_scale_v, rnd_v);
+      let y_scaled_hi = scale_y(y_hi, y_off_v, y_scale_v, rnd_v);
+
+      let b_u8 = vcombine_u8(
+        vqmovun_s16(vqaddq_s16(y_scaled_lo, b_dup_lo)),
+        vqmovun_s16(vqaddq_s16(y_scaled_hi, b_dup_hi)),
+      );
+      let g_u8 = vcombine_u8(
+        vqmovun_s16(vqaddq_s16(y_scaled_lo, g_dup_lo)),
+        vqmovun_s16(vqaddq_s16(y_scaled_hi, g_dup_hi)),
+      );
+      let r_u8 = vcombine_u8(
+        vqmovun_s16(vqaddq_s16(y_scaled_lo, r_dup_lo)),
+        vqmovun_s16(vqaddq_s16(y_scaled_hi, r_dup_hi)),
+      );
+
+      let rgb = uint8x16x3_t(r_u8, g_u8, b_u8);
+      vst3q_u8(rgb_out.as_mut_ptr().add(x * 3), rgb);
+
+      x += 16;
+    }
+
+    // Scalar NV12 tail. UV slice stride matches Y stride (`width` each,
+    // with `x` already consumed from both).
+    if x < width {
+      scalar::nv12_to_rgb_row(
+        &y[x..width],
+        &uv_half[x..width],
         &mut rgb_out[x * 3..width * 3],
         width - x,
         matrix,
@@ -582,6 +710,104 @@ mod tests {
     // Widths that leave a non‑trivial scalar tail (non‑multiple of 16).
     for w in [18usize, 30, 34, 1922] {
       check_equivalence(w, ColorMatrix::Bt601, false);
+    }
+  }
+
+  // ---- nv12_to_rgb_row equivalence ------------------------------------
+
+  /// Scalar‑equivalence fixture for NV12. Builds an interleaved UV row
+  /// from the same U/V byte sequences used by the yuv420p fixture so a
+  /// single NV12 call should produce byte‑identical output to the
+  /// scalar NV12 reference.
+  fn check_nv12_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+    let y: std::vec::Vec<u8> = (0..width).map(|i| ((i * 37 + 11) & 0xFF) as u8).collect();
+    let uv: std::vec::Vec<u8> = (0..width / 2)
+      .flat_map(|i| {
+        [
+          ((i * 53 + 23) & 0xFF) as u8, // U_i
+          ((i * 71 + 91) & 0xFF) as u8, // V_i
+        ]
+      })
+      .collect();
+    let mut rgb_scalar = std::vec![0u8; width * 3];
+    let mut rgb_neon = std::vec![0u8; width * 3];
+
+    scalar::nv12_to_rgb_row(&y, &uv, &mut rgb_scalar, width, matrix, full_range);
+    unsafe {
+      nv12_to_rgb_row(&y, &uv, &mut rgb_neon, width, matrix, full_range);
+    }
+
+    if rgb_scalar != rgb_neon {
+      let first_diff = rgb_scalar
+        .iter()
+        .zip(rgb_neon.iter())
+        .position(|(a, b)| a != b)
+        .unwrap();
+      panic!(
+        "NEON NV12 diverges from scalar at byte {first_diff} (width={width}, matrix={matrix:?}, full_range={full_range}): scalar={} neon={}",
+        rgb_scalar[first_diff], rgb_neon[first_diff]
+      );
+    }
+  }
+
+  /// Cross-format equivalence: the NV12 output must match the YUV420P
+  /// output when fed the same U / V bytes interleaved. Guards against
+  /// any stray deinterleave bug.
+  fn check_nv12_matches_yuv420p(width: usize, matrix: ColorMatrix, full_range: bool) {
+    let y: std::vec::Vec<u8> = (0..width).map(|i| ((i * 37 + 11) & 0xFF) as u8).collect();
+    let u: std::vec::Vec<u8> = (0..width / 2)
+      .map(|i| ((i * 53 + 23) & 0xFF) as u8)
+      .collect();
+    let v: std::vec::Vec<u8> = (0..width / 2)
+      .map(|i| ((i * 71 + 91) & 0xFF) as u8)
+      .collect();
+    let uv: std::vec::Vec<u8> = u.iter().zip(v.iter()).flat_map(|(a, b)| [*a, *b]).collect();
+
+    let mut rgb_yuv420p = std::vec![0u8; width * 3];
+    let mut rgb_nv12 = std::vec![0u8; width * 3];
+    unsafe {
+      yuv_420_to_rgb_row(&y, &u, &v, &mut rgb_yuv420p, width, matrix, full_range);
+      nv12_to_rgb_row(&y, &uv, &mut rgb_nv12, width, matrix, full_range);
+    }
+    assert_eq!(
+      rgb_yuv420p, rgb_nv12,
+      "NV12 and YUV420P must produce byte-identical output for equivalent UV (width={width}, matrix={matrix:?}, full_range={full_range})"
+    );
+  }
+
+  #[test]
+  fn nv12_neon_matches_scalar_all_matrices_16() {
+    for m in [
+      ColorMatrix::Bt601,
+      ColorMatrix::Bt709,
+      ColorMatrix::Bt2020Ncl,
+      ColorMatrix::Smpte240m,
+      ColorMatrix::Fcc,
+      ColorMatrix::YCgCo,
+    ] {
+      for full in [true, false] {
+        check_nv12_equivalence(16, m, full);
+      }
+    }
+  }
+
+  #[test]
+  fn nv12_neon_matches_scalar_width_1920() {
+    check_nv12_equivalence(1920, ColorMatrix::Bt709, false);
+  }
+
+  #[test]
+  fn nv12_neon_matches_scalar_odd_tail_widths() {
+    for w in [18usize, 30, 34, 1922] {
+      check_nv12_equivalence(w, ColorMatrix::Bt601, false);
+    }
+  }
+
+  #[test]
+  fn nv12_neon_matches_yuv420p_neon() {
+    for w in [16usize, 30, 64, 1920] {
+      check_nv12_matches_yuv420p(w, ColorMatrix::Bt709, false);
+      check_nv12_matches_yuv420p(w, ColorMatrix::YCgCo, true);
     }
   }
 
