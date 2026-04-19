@@ -691,10 +691,13 @@ pub enum Nv21FrameError {
 /// Structurally identical to [`Yuv420pFrame`] — three planes, half‑
 /// size chroma — but sample storage is **`u16`** so every pixel
 /// carries up to 16 bits of payload. `BITS` is the active bit depth
-/// (10, 12, or 14); samples occupy the **low** `BITS` bits of each
-/// `u16` with the upper bits zero. This matches FFmpeg's little‑endian
-/// `yuv420p10le` / `yuv420p12le` / `yuv420p14le` convention, where
-/// each plane is a byte buffer reinterpretable as `u16` little‑endian.
+/// (10, 12, or 14). Callers are **expected** to store each sample in
+/// the **low** `BITS` bits of its `u16` (upper `16 - BITS` bits zero),
+/// matching FFmpeg's little‑endian `yuv420p10le` / `yuv420p12le` /
+/// `yuv420p14le` convention, where each plane is a byte buffer
+/// reinterpretable as `u16` little‑endian. `try_new` validates plane
+/// geometry / strides / lengths but does **not** inspect sample
+/// values to verify this packing.
 ///
 /// This is **not** the FFmpeg `p010` layout — `p010` stores samples
 /// in the **high** 10 bits of each `u16` (`sample << 6`). Callers
@@ -717,11 +720,11 @@ pub enum Nv21FrameError {
 /// on aarch64 vs x86. Callers handling potentially dirty buffers
 /// should mask (`sample & ((1 << BITS) - 1)`) upstream.
 ///
-/// Ship 2 ships `BITS == 10` only (the use‑case keystone for HDR and
-/// 10‑bit SDR). 12 and 14 are mechanical follow‑ups that just relax
-/// the constructor's `BITS` check and add a tiered aliases — the
-/// kernel math (Q15 coefficients + i32 intermediates) works unchanged
-/// across all three, derived at compile time from `BITS`.
+/// colconv v0.2 ships `BITS == 10` only (the use‑case keystone for
+/// HDR and 10‑bit SDR). 12 and 14 are mechanical follow‑ups that
+/// just relax the constructor's `BITS` check and add tiered aliases
+/// — the kernel math (Q15 coefficients + i32 intermediates) works
+/// unchanged across all three, derived at compile time from `BITS`.
 ///
 /// 16‑bit input (which would overflow the i32 chroma sum in the
 /// Q15 path) is **not** represented by this type — it needs a

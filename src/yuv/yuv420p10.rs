@@ -22,10 +22,10 @@ use crate::{
 /// Zero‑sized marker for the YUV 4:2:0 **10‑bit** source format. Used
 /// as the `F` type parameter on [`crate::sinker::MixedSinker`].
 ///
-/// Ship 2 ships only the 10‑bit specialization; 12‑ and 14‑bit will
-/// arrive as separate markers (`Yuv420p12`, `Yuv420p14`) referring to
-/// the same underlying [`Yuv420pFrame16`] struct with different
-/// `BITS` values.
+/// colconv v0.2 ships only the 10‑bit specialization; 12‑ and 14‑bit
+/// will arrive as separate markers (`Yuv420p12`, `Yuv420p14`) that
+/// refer to the same underlying [`Yuv420pFrame16`] struct with
+/// different `BITS` values.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct Yuv420p10;
 
@@ -119,16 +119,21 @@ pub fn yuv420p10_to<S: Yuv420p10Sink>(
   matrix: ColorMatrix,
   sink: &mut S,
 ) -> Result<(), S::Error> {
-  // Delegates to the const‑generic implementation. Once 12‑ and
-  // 14‑bit markers ship, each gets a thin wrapper that pins `BITS`.
-  yuv420p_n_to::<10, S>(src, full_range, matrix, sink)
+  // `BITS` is pinned at the const generic (10) so the walker body
+  // can be monomorphized per bit depth later; the row and sink types
+  // themselves are still 10‑bit only (`Yuv420p10Row` / `Yuv420p10Sink`).
+  // 12‑ and 14‑bit support will add their own marker / row / sink
+  // trios plus per‑depth walker entry points.
+  yuv420p10_walker::<10, S>(src, full_range, matrix, sink)
 }
 
-/// Shared walker for high‑bit‑depth YUV 4:2:0 sources. `BITS` is the
-/// active sample depth (10 for Ship 2; 12 / 14 reuse the same walker
-/// once the corresponding markers and Sink subtraits are defined).
+/// Row walker for the 10‑bit YUV 4:2:0 source. `BITS` is a const
+/// generic so [`Yuv420pFrame16<BITS>`] geometry reads (stride, plane
+/// slicing) are monomorphized; the row/sink types bound below are
+/// still pinned to the 10‑bit variants — 12 / 14 will grow their own
+/// walkers alongside their own marker types.
 #[cfg_attr(not(tarpaulin), inline(always))]
-fn yuv420p_n_to<const BITS: u32, S: Yuv420p10Sink>(
+fn yuv420p10_walker<const BITS: u32, S: Yuv420p10Sink>(
   src: &Yuv420pFrame16<'_, BITS>,
   full_range: bool,
   matrix: ColorMatrix,

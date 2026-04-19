@@ -399,13 +399,19 @@ impl<'a, F: SourceFormat> MixedSinker<'a, F> {
     Ok(self)
   }
 
-  /// In-place variant of [`with_rgb_u16`](Self::with_rgb_u16).
+  /// In-place variant of [`with_rgb_u16`](Self::with_rgb_u16). The
+  /// required length is measured in `u16` **elements**, not bytes.
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub fn set_rgb_u16(&mut self, buf: &'a mut [u16]) -> Result<&mut Self, MixedSinkerError> {
-    let expected = self.frame_bytes(3)?;
-    if buf.len() < expected {
+    // Packed RGB requires `width × height × 3` channel values —
+    // that's the same count whether the element type is `u8` or
+    // `u16`, so the [`Self::frame_bytes`] helper (named for the u8
+    // RGB path's byte count) gives the element count here too. No
+    // size conversion needed.
+    let expected_elements = self.frame_bytes(3)?;
+    if buf.len() < expected_elements {
       return Err(MixedSinkerError::RgbU16BufferTooShort {
-        expected,
+        expected: expected_elements,
         actual: buf.len(),
       });
     }
