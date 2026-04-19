@@ -1805,4 +1805,168 @@ mod tests {
     check_p010_u8_avx2_equivalence(1920, ColorMatrix::Bt709, false);
     check_p010_u16_avx2_equivalence(1920, ColorMatrix::Bt2020Ncl, false);
   }
+
+  // ---- Generic BITS equivalence (12/14-bit coverage) ------------------
+
+  fn planar_n_plane<const BITS: u32>(n: usize, seed: usize) -> std::vec::Vec<u16> {
+    let mask = (1u32 << BITS) - 1;
+    (0..n)
+      .map(|i| ((i * seed + seed * 3) as u32 & mask) as u16)
+      .collect()
+  }
+
+  fn p_n_packed_plane<const BITS: u32>(n: usize, seed: usize) -> std::vec::Vec<u16> {
+    let mask = (1u32 << BITS) - 1;
+    let shift = 16 - BITS;
+    (0..n)
+      .map(|i| (((i * seed + seed * 3) as u32 & mask) as u16) << shift)
+      .collect()
+  }
+
+  fn check_planar_u8_avx2_equivalence_n<const BITS: u32>(
+    width: usize,
+    matrix: ColorMatrix,
+    full_range: bool,
+  ) {
+    if !std::arch::is_x86_feature_detected!("avx2") {
+      return;
+    }
+    let y = planar_n_plane::<BITS>(width, 37);
+    let u = planar_n_plane::<BITS>(width / 2, 53);
+    let v = planar_n_plane::<BITS>(width / 2, 71);
+    let mut rgb_scalar = std::vec![0u8; width * 3];
+    let mut rgb_simd = std::vec![0u8; width * 3];
+    scalar::yuv_420p_n_to_rgb_row::<BITS>(&y, &u, &v, &mut rgb_scalar, width, matrix, full_range);
+    unsafe {
+      yuv_420p_n_to_rgb_row::<BITS>(&y, &u, &v, &mut rgb_simd, width, matrix, full_range);
+    }
+    assert_eq!(rgb_scalar, rgb_simd, "AVX2 planar {BITS}-bit → u8 diverges");
+  }
+
+  fn check_planar_u16_avx2_equivalence_n<const BITS: u32>(
+    width: usize,
+    matrix: ColorMatrix,
+    full_range: bool,
+  ) {
+    if !std::arch::is_x86_feature_detected!("avx2") {
+      return;
+    }
+    let y = planar_n_plane::<BITS>(width, 37);
+    let u = planar_n_plane::<BITS>(width / 2, 53);
+    let v = planar_n_plane::<BITS>(width / 2, 71);
+    let mut rgb_scalar = std::vec![0u16; width * 3];
+    let mut rgb_simd = std::vec![0u16; width * 3];
+    scalar::yuv_420p_n_to_rgb_u16_row::<BITS>(
+      &y,
+      &u,
+      &v,
+      &mut rgb_scalar,
+      width,
+      matrix,
+      full_range,
+    );
+    unsafe {
+      yuv_420p_n_to_rgb_u16_row::<BITS>(&y, &u, &v, &mut rgb_simd, width, matrix, full_range);
+    }
+    assert_eq!(
+      rgb_scalar, rgb_simd,
+      "AVX2 planar {BITS}-bit → u16 diverges"
+    );
+  }
+
+  fn check_pn_u8_avx2_equivalence_n<const BITS: u32>(
+    width: usize,
+    matrix: ColorMatrix,
+    full_range: bool,
+  ) {
+    if !std::arch::is_x86_feature_detected!("avx2") {
+      return;
+    }
+    let y = p_n_packed_plane::<BITS>(width, 37);
+    let u = p_n_packed_plane::<BITS>(width / 2, 53);
+    let v = p_n_packed_plane::<BITS>(width / 2, 71);
+    let uv = p010_uv_interleave(&u, &v);
+    let mut rgb_scalar = std::vec![0u8; width * 3];
+    let mut rgb_simd = std::vec![0u8; width * 3];
+    scalar::p_n_to_rgb_row::<BITS>(&y, &uv, &mut rgb_scalar, width, matrix, full_range);
+    unsafe {
+      p_n_to_rgb_row::<BITS>(&y, &uv, &mut rgb_simd, width, matrix, full_range);
+    }
+    assert_eq!(rgb_scalar, rgb_simd, "AVX2 Pn {BITS}-bit → u8 diverges");
+  }
+
+  fn check_pn_u16_avx2_equivalence_n<const BITS: u32>(
+    width: usize,
+    matrix: ColorMatrix,
+    full_range: bool,
+  ) {
+    if !std::arch::is_x86_feature_detected!("avx2") {
+      return;
+    }
+    let y = p_n_packed_plane::<BITS>(width, 37);
+    let u = p_n_packed_plane::<BITS>(width / 2, 53);
+    let v = p_n_packed_plane::<BITS>(width / 2, 71);
+    let uv = p010_uv_interleave(&u, &v);
+    let mut rgb_scalar = std::vec![0u16; width * 3];
+    let mut rgb_simd = std::vec![0u16; width * 3];
+    scalar::p_n_to_rgb_u16_row::<BITS>(&y, &uv, &mut rgb_scalar, width, matrix, full_range);
+    unsafe {
+      p_n_to_rgb_u16_row::<BITS>(&y, &uv, &mut rgb_simd, width, matrix, full_range);
+    }
+    assert_eq!(rgb_scalar, rgb_simd, "AVX2 Pn {BITS}-bit → u16 diverges");
+  }
+
+  #[test]
+  fn avx2_p12_matches_scalar_all_matrices() {
+    for m in [
+      ColorMatrix::Bt601,
+      ColorMatrix::Bt709,
+      ColorMatrix::Bt2020Ncl,
+      ColorMatrix::Smpte240m,
+      ColorMatrix::Fcc,
+      ColorMatrix::YCgCo,
+    ] {
+      for full in [true, false] {
+        check_planar_u8_avx2_equivalence_n::<12>(32, m, full);
+        check_planar_u16_avx2_equivalence_n::<12>(32, m, full);
+        check_pn_u8_avx2_equivalence_n::<12>(32, m, full);
+        check_pn_u16_avx2_equivalence_n::<12>(32, m, full);
+      }
+    }
+  }
+
+  #[test]
+  fn avx2_p14_matches_scalar_all_matrices() {
+    for m in [
+      ColorMatrix::Bt601,
+      ColorMatrix::Bt709,
+      ColorMatrix::Bt2020Ncl,
+      ColorMatrix::Smpte240m,
+      ColorMatrix::Fcc,
+      ColorMatrix::YCgCo,
+    ] {
+      for full in [true, false] {
+        check_planar_u8_avx2_equivalence_n::<14>(32, m, full);
+        check_planar_u16_avx2_equivalence_n::<14>(32, m, full);
+      }
+    }
+  }
+
+  #[test]
+  fn avx2_p12_matches_scalar_tail_widths() {
+    for w in [34usize, 62, 66, 1922] {
+      check_planar_u8_avx2_equivalence_n::<12>(w, ColorMatrix::Bt601, false);
+      check_planar_u16_avx2_equivalence_n::<12>(w, ColorMatrix::Bt709, true);
+      check_pn_u8_avx2_equivalence_n::<12>(w, ColorMatrix::Bt601, false);
+      check_pn_u16_avx2_equivalence_n::<12>(w, ColorMatrix::Bt2020Ncl, false);
+    }
+  }
+
+  #[test]
+  fn avx2_p14_matches_scalar_tail_widths() {
+    for w in [34usize, 62, 66, 1922] {
+      check_planar_u8_avx2_equivalence_n::<14>(w, ColorMatrix::Bt601, false);
+      check_planar_u16_avx2_equivalence_n::<14>(w, ColorMatrix::Bt709, true);
+    }
+  }
 }
