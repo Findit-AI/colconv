@@ -186,7 +186,7 @@ jobs:
       - name: Install Rust
         run: rustup update stable --no-self-update && rustup default stable
       - name: Install Intel SDE
-        uses: petarpetrovt/setup-sde@v2.4
+        uses: petarpetrovt/setup-sde@v3.0
         with:
           sdeVersion: 9.33.0
           environmentVariableName: SDE_PATH
