@@ -41,11 +41,19 @@ name = "yuv_420p14_to_rgb"
 harness = false
 
 [[bench]]
+name = "yuv_420p16_to_rgb"
+harness = false
+
+[[bench]]
 name = "p010_to_rgb"
 harness = false
 
 [[bench]]
 name = "p012_to_rgb"
+harness = false
+
+[[bench]]
+name = "p016_to_rgb"
 harness = false
 
 [[bench]]
