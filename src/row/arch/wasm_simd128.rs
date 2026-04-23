@@ -39,10 +39,11 @@ use core::arch::wasm32::{
   f32x4_add, f32x4_convert_i32x4, f32x4_div, f32x4_eq, f32x4_lt, f32x4_max, f32x4_min, f32x4_mul,
   f32x4_splat, f32x4_sub, i8x16, i8x16_shuffle, i16x8_add_sat, i16x8_max, i16x8_min,
   i16x8_narrow_i32x4, i16x8_splat, i16x8_sub, i32x4_add, i32x4_extend_high_i16x8,
-  i32x4_extend_low_i16x8, i32x4_mul, i32x4_shr, i32x4_splat, i32x4_trunc_sat_f32x4,
-  u8x16_narrow_i16x8, u8x16_swizzle, u16x8_extend_high_u8x16, u16x8_extend_low_u8x16,
-  u16x8_load_extend_u8x8, u16x8_shr, u16x8_splat, u32x4_extend_high_u16x8, u32x4_extend_low_u16x8,
-  v128, v128_and, v128_bitselect, v128_load, v128_or, v128_store,
+  i32x4_extend_low_i16x8, i32x4_mul, i32x4_shr, i32x4_splat, i32x4_sub,
+  i32x4_trunc_sat_f32x4, u8x16_narrow_i16x8, u8x16_swizzle, u16x8_extend_high_u8x16,
+  u16x8_extend_low_u8x16, u16x8_load_extend_u8x8, u16x8_shr, u16x8_splat,
+  u32x4_extend_high_u16x8, u32x4_extend_low_u16x8, v128, v128_and, v128_bitselect,
+  v128_load, v128_or, v128_store,
 };
 
 use crate::{ColorMatrix, row::scalar};
@@ -1116,6 +1117,271 @@ unsafe fn write_rgb_16(r: v128, g: v128, b: v128, ptr: *mut u8) {
   }
 }
 
+// ===== 16-bit YUV → RGB ==================================================
+
+/// `(Y_u16x8 - y_off) * y_scale + RND >> 15` for full u16 Y samples.
+/// Unsigned widening via `u32x4_extend_{low,high}_u16x8`. Returns i16x8.
+#[inline(always)]
+fn scale_y_u16_wasm(y_u16: v128, y_off32_v: v128, y_scale_v: v128, rnd_v: v128) -> v128 {
+  // y_off32_v = i32x4_splat(y_off)
+  let lo_u32 = u32x4_extend_low_u16x8(y_u16);
+  let hi_u32 = u32x4_extend_high_u16x8(y_u16);
+  let lo_i32 = i32x4_sub(lo_u32, y_off32_v);
+  let hi_i32 = i32x4_sub(hi_u32, y_off32_v);
+  let lo = q15_shift(i32x4_add(i32x4_mul(lo_i32, y_scale_v), rnd_v));
+  let hi = q15_shift(i32x4_add(i32x4_mul(hi_i32, y_scale_v), rnd_v));
+  i16x8_narrow_i32x4(lo, hi)
+}
+
+/// WASM simd128 YUV 4:2:0 16-bit → packed **8-bit** RGB. 16 pixels per iteration.
+/// UV centering via wrapping 0x8000 trick; unsigned Y widening.
+///
+/// # Safety
+///
+/// 1. **simd128 must be enabled at compile time.**
+/// 2. `width & 1 == 0`.
+/// 3. `y.len() >= width`, `u_half.len() >= width / 2`,
+///    `v_half.len() >= width / 2`, `rgb_out.len() >= 3 * width`.
+#[inline]
+#[target_feature(enable = "simd128")]
+pub(crate) unsafe fn yuv_420p16_to_rgb_row(
+  y: &[u16],
+  u_half: &[u16],
+  v_half: &[u16],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  debug_assert_eq!(width & 1, 0);
+  debug_assert!(y.len() >= width);
+  debug_assert!(u_half.len() >= width / 2);
+  debug_assert!(v_half.len() >= width / 2);
+  debug_assert!(rgb_out.len() >= width * 3);
+
+  let coeffs = scalar::Coefficients::for_matrix(matrix);
+  let (y_off, y_scale, c_scale) = scalar::range_params_n::<16, 8>(full_range);
+  const RND: i32 = 1 << 14;
+
+  unsafe {
+    let rnd_v = i32x4_splat(RND);
+    let y_off32_v = i32x4_splat(y_off);
+    let y_scale_v = i32x4_splat(y_scale);
+    let c_scale_v = i32x4_splat(c_scale);
+    let bias16_v = i16x8_splat(-32768i16);
+    let cru = i32x4_splat(coeffs.r_u());
+    let crv = i32x4_splat(coeffs.r_v());
+    let cgu = i32x4_splat(coeffs.g_u());
+    let cgv = i32x4_splat(coeffs.g_v());
+    let cbu = i32x4_splat(coeffs.b_u());
+    let cbv = i32x4_splat(coeffs.b_v());
+
+    let mut x = 0usize;
+    while x + 16 <= width {
+      let y_low = v128_load(y.as_ptr().add(x).cast());
+      let y_high = v128_load(y.as_ptr().add(x + 8).cast());
+      let u_vec = v128_load(u_half.as_ptr().add(x / 2).cast());
+      let v_vec = v128_load(v_half.as_ptr().add(x / 2).cast());
+
+      let u_i16 = i16x8_sub(u_vec, bias16_v);
+      let v_i16 = i16x8_sub(v_vec, bias16_v);
+
+      let u_lo_i32 = i32x4_extend_low_i16x8(u_i16);
+      let u_hi_i32 = i32x4_extend_high_i16x8(u_i16);
+      let v_lo_i32 = i32x4_extend_low_i16x8(v_i16);
+      let v_hi_i32 = i32x4_extend_high_i16x8(v_i16);
+
+      let u_d_lo = q15_shift(i32x4_add(i32x4_mul(u_lo_i32, c_scale_v), rnd_v));
+      let u_d_hi = q15_shift(i32x4_add(i32x4_mul(u_hi_i32, c_scale_v), rnd_v));
+      let v_d_lo = q15_shift(i32x4_add(i32x4_mul(v_lo_i32, c_scale_v), rnd_v));
+      let v_d_hi = q15_shift(i32x4_add(i32x4_mul(v_hi_i32, c_scale_v), rnd_v));
+
+      let r_chroma = chroma_i16x8(cru, crv, u_d_lo, v_d_lo, u_d_hi, v_d_hi, rnd_v);
+      let g_chroma = chroma_i16x8(cgu, cgv, u_d_lo, v_d_lo, u_d_hi, v_d_hi, rnd_v);
+      let b_chroma = chroma_i16x8(cbu, cbv, u_d_lo, v_d_lo, u_d_hi, v_d_hi, rnd_v);
+
+      let r_dup_lo = dup_lo(r_chroma);
+      let r_dup_hi = dup_hi(r_chroma);
+      let g_dup_lo = dup_lo(g_chroma);
+      let g_dup_hi = dup_hi(g_chroma);
+      let b_dup_lo = dup_lo(b_chroma);
+      let b_dup_hi = dup_hi(b_chroma);
+
+      let y_scaled_lo = scale_y_u16_wasm(y_low, y_off32_v, y_scale_v, rnd_v);
+      let y_scaled_hi = scale_y_u16_wasm(y_high, y_off32_v, y_scale_v, rnd_v);
+
+      let r_lo = i16x8_add_sat(y_scaled_lo, r_dup_lo);
+      let r_hi = i16x8_add_sat(y_scaled_hi, r_dup_hi);
+      let g_lo = i16x8_add_sat(y_scaled_lo, g_dup_lo);
+      let g_hi = i16x8_add_sat(y_scaled_hi, g_dup_hi);
+      let b_lo = i16x8_add_sat(y_scaled_lo, b_dup_lo);
+      let b_hi = i16x8_add_sat(y_scaled_hi, b_dup_hi);
+
+      let r_u8 = u8x16_narrow_i16x8(r_lo, r_hi);
+      let g_u8 = u8x16_narrow_i16x8(g_lo, g_hi);
+      let b_u8 = u8x16_narrow_i16x8(b_lo, b_hi);
+
+      write_rgb_16(r_u8, g_u8, b_u8, rgb_out.as_mut_ptr().add(x * 3));
+      x += 16;
+    }
+
+    if x < width {
+      scalar::yuv_420p16_to_rgb_row(
+        &y[x..width],
+        &u_half[x / 2..width / 2],
+        &v_half[x / 2..width / 2],
+        &mut rgb_out[x * 3..width * 3],
+        width - x,
+        matrix,
+        full_range,
+      );
+    }
+  }
+}
+
+/// WASM simd128 YUV 4:2:0 16-bit → packed **16-bit** RGB.
+/// Delegates to scalar (no native i64 arithmetic shift in simd128 at this time).
+///
+/// # Safety
+///
+/// 1. **simd128 must be enabled at compile time.**
+/// 2. `width & 1 == 0`.
+/// 3. `y.len() >= width`, `u_half.len() >= width / 2`,
+///    `v_half.len() >= width / 2`, `rgb_out.len() >= 3 * width`.
+#[inline]
+#[target_feature(enable = "simd128")]
+pub(crate) unsafe fn yuv_420p16_to_rgb_u16_row(
+  y: &[u16],
+  u_half: &[u16],
+  v_half: &[u16],
+  rgb_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  scalar::yuv_420p16_to_rgb_u16_row(y, u_half, v_half, rgb_out, width, matrix, full_range);
+}
+
+/// WASM simd128 P016 → packed **8-bit** RGB. 16 pixels per iteration.
+///
+/// # Safety
+///
+/// 1. **simd128 must be enabled at compile time.**
+/// 2. `width & 1 == 0`.
+/// 3. `y.len() >= width`, `uv_half.len() >= width`, `rgb_out.len() >= 3 * width`.
+#[inline]
+#[target_feature(enable = "simd128")]
+pub(crate) unsafe fn p16_to_rgb_row(
+  y: &[u16],
+  uv_half: &[u16],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  debug_assert_eq!(width & 1, 0);
+  debug_assert!(y.len() >= width);
+  debug_assert!(uv_half.len() >= width);
+  debug_assert!(rgb_out.len() >= width * 3);
+
+  let coeffs = scalar::Coefficients::for_matrix(matrix);
+  let (y_off, y_scale, c_scale) = scalar::range_params_n::<16, 8>(full_range);
+  const RND: i32 = 1 << 14;
+
+  unsafe {
+    let rnd_v = i32x4_splat(RND);
+    let y_off32_v = i32x4_splat(y_off);
+    let y_scale_v = i32x4_splat(y_scale);
+    let c_scale_v = i32x4_splat(c_scale);
+    let bias16_v = i16x8_splat(-32768i16);
+    let cru = i32x4_splat(coeffs.r_u());
+    let crv = i32x4_splat(coeffs.r_v());
+    let cgu = i32x4_splat(coeffs.g_u());
+    let cgv = i32x4_splat(coeffs.g_v());
+    let cbu = i32x4_splat(coeffs.b_u());
+    let cbv = i32x4_splat(coeffs.b_v());
+
+    let mut x = 0usize;
+    while x + 16 <= width {
+      let y_low = v128_load(y.as_ptr().add(x).cast());
+      let y_high = v128_load(y.as_ptr().add(x + 8).cast());
+      let (u_vec, v_vec) = deinterleave_uv_u16_wasm(uv_half.as_ptr().add(x));
+
+      let u_i16 = i16x8_sub(u_vec, bias16_v);
+      let v_i16 = i16x8_sub(v_vec, bias16_v);
+
+      let u_lo_i32 = i32x4_extend_low_i16x8(u_i16);
+      let u_hi_i32 = i32x4_extend_high_i16x8(u_i16);
+      let v_lo_i32 = i32x4_extend_low_i16x8(v_i16);
+      let v_hi_i32 = i32x4_extend_high_i16x8(v_i16);
+
+      let u_d_lo = q15_shift(i32x4_add(i32x4_mul(u_lo_i32, c_scale_v), rnd_v));
+      let u_d_hi = q15_shift(i32x4_add(i32x4_mul(u_hi_i32, c_scale_v), rnd_v));
+      let v_d_lo = q15_shift(i32x4_add(i32x4_mul(v_lo_i32, c_scale_v), rnd_v));
+      let v_d_hi = q15_shift(i32x4_add(i32x4_mul(v_hi_i32, c_scale_v), rnd_v));
+
+      let r_chroma = chroma_i16x8(cru, crv, u_d_lo, v_d_lo, u_d_hi, v_d_hi, rnd_v);
+      let g_chroma = chroma_i16x8(cgu, cgv, u_d_lo, v_d_lo, u_d_hi, v_d_hi, rnd_v);
+      let b_chroma = chroma_i16x8(cbu, cbv, u_d_lo, v_d_lo, u_d_hi, v_d_hi, rnd_v);
+
+      let r_dup_lo = dup_lo(r_chroma);
+      let r_dup_hi = dup_hi(r_chroma);
+      let g_dup_lo = dup_lo(g_chroma);
+      let g_dup_hi = dup_hi(g_chroma);
+      let b_dup_lo = dup_lo(b_chroma);
+      let b_dup_hi = dup_hi(b_chroma);
+
+      let y_scaled_lo = scale_y_u16_wasm(y_low, y_off32_v, y_scale_v, rnd_v);
+      let y_scaled_hi = scale_y_u16_wasm(y_high, y_off32_v, y_scale_v, rnd_v);
+
+      let r_lo = i16x8_add_sat(y_scaled_lo, r_dup_lo);
+      let r_hi = i16x8_add_sat(y_scaled_hi, r_dup_hi);
+      let g_lo = i16x8_add_sat(y_scaled_lo, g_dup_lo);
+      let g_hi = i16x8_add_sat(y_scaled_hi, g_dup_hi);
+      let b_lo = i16x8_add_sat(y_scaled_lo, b_dup_lo);
+      let b_hi = i16x8_add_sat(y_scaled_hi, b_dup_hi);
+
+      let r_u8 = u8x16_narrow_i16x8(r_lo, r_hi);
+      let g_u8 = u8x16_narrow_i16x8(g_lo, g_hi);
+      let b_u8 = u8x16_narrow_i16x8(b_lo, b_hi);
+
+      write_rgb_16(r_u8, g_u8, b_u8, rgb_out.as_mut_ptr().add(x * 3));
+      x += 16;
+    }
+
+    if x < width {
+      scalar::p16_to_rgb_row(
+        &y[x..width],
+        &uv_half[x..width],
+        &mut rgb_out[x * 3..width * 3],
+        width - x,
+        matrix,
+        full_range,
+      );
+    }
+  }
+}
+
+/// WASM simd128 P016 → packed **16-bit** RGB. Delegates to scalar.
+///
+/// # Safety
+///
+/// 1. **simd128 must be enabled at compile time.**
+/// 2. `width & 1 == 0`.
+/// 3. `y.len() >= width`, `uv_half.len() >= width`, `rgb_out.len() >= 3 * width`.
+#[inline]
+#[target_feature(enable = "simd128")]
+pub(crate) unsafe fn p16_to_rgb_u16_row(
+  y: &[u16],
+  uv_half: &[u16],
+  rgb_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  scalar::p16_to_rgb_u16_row(y, uv_half, rgb_out, width, matrix, full_range);
+}
+
 // ===== BGR ↔ RGB byte swap ==============================================
 
 /// WASM simd128 BGR ↔ RGB byte swap. 16 pixels per iteration via the
@@ -1956,5 +2222,77 @@ mod tests {
       check_planar_u8_simd128_equivalence_n::<14>(w, ColorMatrix::Bt601, false);
       check_planar_u16_simd128_equivalence_n::<14>(w, ColorMatrix::Bt709, true);
     }
+  }
+
+  // ---- 16-bit (full-range u16 samples) simd128 equivalence ------------
+
+  fn p16_plane_wasm(n: usize, seed: usize) -> std::vec::Vec<u16> {
+    (0..n)
+      .map(|i| ((i.wrapping_mul(seed).wrapping_add(seed * 3)) & 0xFFFF) as u16)
+      .collect()
+  }
+
+  fn check_yuv420p16_u8_simd128_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+    let y = p16_plane_wasm(width, 37);
+    let u = p16_plane_wasm(width / 2, 53);
+    let v = p16_plane_wasm(width / 2, 71);
+    let mut rgb_scalar = std::vec![0u8; width * 3];
+    let mut rgb_simd = std::vec![0u8; width * 3];
+    scalar::yuv_420p16_to_rgb_row(&y, &u, &v, &mut rgb_scalar, width, matrix, full_range);
+    unsafe {
+      yuv_420p16_to_rgb_row(&y, &u, &v, &mut rgb_simd, width, matrix, full_range);
+    }
+    assert_eq!(
+      rgb_scalar, rgb_simd,
+      "simd128 yuv420p16→u8 diverges (width={width}, matrix={matrix:?}, full_range={full_range})"
+    );
+  }
+
+  fn check_p16_u8_simd128_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+    let y = p16_plane_wasm(width, 37);
+    let u = p16_plane_wasm(width / 2, 53);
+    let v = p16_plane_wasm(width / 2, 71);
+    let uv = p010_uv_interleave(&u, &v);
+    let mut rgb_scalar = std::vec![0u8; width * 3];
+    let mut rgb_simd = std::vec![0u8; width * 3];
+    scalar::p16_to_rgb_row(&y, &uv, &mut rgb_scalar, width, matrix, full_range);
+    unsafe {
+      p16_to_rgb_row(&y, &uv, &mut rgb_simd, width, matrix, full_range);
+    }
+    assert_eq!(
+      rgb_scalar, rgb_simd,
+      "simd128 p016→u8 diverges (width={width}, matrix={matrix:?}, full_range={full_range})"
+    );
+  }
+
+  #[test]
+  fn simd128_p16_matches_scalar_all_matrices() {
+    for m in [
+      ColorMatrix::Bt601,
+      ColorMatrix::Bt709,
+      ColorMatrix::Bt2020Ncl,
+      ColorMatrix::Smpte240m,
+      ColorMatrix::Fcc,
+      ColorMatrix::YCgCo,
+    ] {
+      for full in [true, false] {
+        check_yuv420p16_u8_simd128_equivalence(16, m, full);
+        check_p16_u8_simd128_equivalence(16, m, full);
+      }
+    }
+  }
+
+  #[test]
+  fn simd128_p16_matches_scalar_tail_widths() {
+    for w in [18usize, 30, 34, 1922] {
+      check_yuv420p16_u8_simd128_equivalence(w, ColorMatrix::Bt601, false);
+      check_p16_u8_simd128_equivalence(w, ColorMatrix::Bt709, true);
+    }
+  }
+
+  #[test]
+  fn simd128_p16_matches_scalar_1920() {
+    check_yuv420p16_u8_simd128_equivalence(1920, ColorMatrix::Bt709, false);
+    check_p16_u8_simd128_equivalence(1920, ColorMatrix::Bt2020Ncl, false);
   }
 }

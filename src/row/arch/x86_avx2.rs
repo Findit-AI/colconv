@@ -40,12 +40,12 @@
 
 use core::arch::x86_64::{
   __m256i, _mm_cvtsi32_si128, _mm_loadu_si128, _mm256_add_epi32, _mm256_adds_epi16,
-  _mm256_and_si256, _mm256_castsi256_si128, _mm256_cvtepi16_epi32, _mm256_cvtepu8_epi16,
-  _mm256_extracti128_si256, _mm256_loadu_si256, _mm256_max_epi16, _mm256_min_epi16,
-  _mm256_mullo_epi32, _mm256_packs_epi32, _mm256_packus_epi16, _mm256_permute2x128_si256,
-  _mm256_permute4x64_epi64, _mm256_set1_epi16, _mm256_set1_epi32, _mm256_setr_epi8,
-  _mm256_shuffle_epi8, _mm256_srai_epi32, _mm256_srl_epi16, _mm256_sub_epi16,
-  _mm256_unpackhi_epi16, _mm256_unpacklo_epi16,
+  _mm256_and_si256, _mm256_castsi256_si128, _mm256_cvtepi16_epi32, _mm256_cvtepu16_epi32,
+  _mm256_cvtepu8_epi16, _mm256_extracti128_si256, _mm256_loadu_si256, _mm256_max_epi16,
+  _mm256_min_epi16, _mm256_mullo_epi32, _mm256_packs_epi32, _mm256_packus_epi16,
+  _mm256_permute2x128_si256, _mm256_permute4x64_epi64, _mm256_set1_epi16, _mm256_set1_epi32,
+  _mm256_setr_epi8, _mm256_shuffle_epi8, _mm256_srai_epi32, _mm256_srl_epi16,
+  _mm256_sub_epi16, _mm256_sub_epi32, _mm256_unpackhi_epi16, _mm256_unpacklo_epi16,
 };
 
 use crate::{
@@ -1191,6 +1191,283 @@ unsafe fn write_rgb_32(r: __m256i, g: __m256i, b: __m256i, ptr: *mut u8) {
   }
 }
 
+// ===== 16-bit YUV → RGB ==================================================
+
+/// `(Y_u16x16 - y_off) * y_scale + RND >> 15` for full u16 Y samples.
+/// Unsigned widening via `_mm256_cvtepu16_epi32`. Returns i16x16.
+#[inline(always)]
+fn scale_y_u16_avx2(
+  y_u16x16: __m256i,
+  y_off_v: __m256i,
+  y_scale_v: __m256i,
+  rnd_v: __m256i,
+) -> __m256i {
+  unsafe {
+    let y_lo_i32 = _mm256_sub_epi32(
+      _mm256_cvtepu16_epi32(_mm256_castsi256_si128(y_u16x16)),
+      y_off_v,
+    );
+    let y_hi_i32 = _mm256_sub_epi32(
+      _mm256_cvtepu16_epi32(_mm256_extracti128_si256::<1>(y_u16x16)),
+      y_off_v,
+    );
+    let lo = _mm256_srai_epi32::<15>(_mm256_add_epi32(
+      _mm256_mullo_epi32(y_lo_i32, y_scale_v),
+      rnd_v,
+    ));
+    let hi = _mm256_srai_epi32::<15>(_mm256_add_epi32(
+      _mm256_mullo_epi32(y_hi_i32, y_scale_v),
+      rnd_v,
+    ));
+    _mm256_permute4x64_epi64::<0xD8>(_mm256_packs_epi32(lo, hi))
+  }
+}
+
+/// AVX2 YUV 4:2:0 16-bit → packed **8-bit** RGB. 32 pixels per iteration.
+/// UV centering via wrapping 0x8000 trick; unsigned Y widening.
+///
+/// # Safety
+///
+/// 1. **AVX2 must be available.**
+/// 2. `width & 1 == 0`.
+/// 3. `y.len() >= width`, `u_half.len() >= width / 2`,
+///    `v_half.len() >= width / 2`, `rgb_out.len() >= 3 * width`.
+#[inline]
+#[target_feature(enable = "avx2")]
+pub(crate) unsafe fn yuv_420p16_to_rgb_row(
+  y: &[u16],
+  u_half: &[u16],
+  v_half: &[u16],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  debug_assert_eq!(width & 1, 0);
+  debug_assert!(y.len() >= width);
+  debug_assert!(u_half.len() >= width / 2);
+  debug_assert!(v_half.len() >= width / 2);
+  debug_assert!(rgb_out.len() >= width * 3);
+
+  let coeffs = scalar::Coefficients::for_matrix(matrix);
+  let (y_off, y_scale, c_scale) = scalar::range_params_n::<16, 8>(full_range);
+  const RND: i32 = 1 << 14;
+
+  unsafe {
+    let rnd_v = _mm256_set1_epi32(RND);
+    let y_off_v = _mm256_set1_epi32(y_off);
+    let y_scale_v = _mm256_set1_epi32(y_scale);
+    let c_scale_v = _mm256_set1_epi32(c_scale);
+    let bias16_v = _mm256_set1_epi16(-32768i16);
+    let cru = _mm256_set1_epi32(coeffs.r_u());
+    let crv = _mm256_set1_epi32(coeffs.r_v());
+    let cgu = _mm256_set1_epi32(coeffs.g_u());
+    let cgv = _mm256_set1_epi32(coeffs.g_v());
+    let cbu = _mm256_set1_epi32(coeffs.b_u());
+    let cbv = _mm256_set1_epi32(coeffs.b_v());
+
+    let mut x = 0usize;
+    while x + 32 <= width {
+      let y_low = _mm256_loadu_si256(y.as_ptr().add(x).cast());
+      let y_high = _mm256_loadu_si256(y.as_ptr().add(x + 16).cast());
+      let u_vec = _mm256_loadu_si256(u_half.as_ptr().add(x / 2).cast());
+      let v_vec = _mm256_loadu_si256(v_half.as_ptr().add(x / 2).cast());
+
+      let u_i16 = _mm256_sub_epi16(u_vec, bias16_v);
+      let v_i16 = _mm256_sub_epi16(v_vec, bias16_v);
+
+      let u_lo_i32 = _mm256_cvtepi16_epi32(_mm256_castsi256_si128(u_i16));
+      let u_hi_i32 = _mm256_cvtepi16_epi32(_mm256_extracti128_si256::<1>(u_i16));
+      let v_lo_i32 = _mm256_cvtepi16_epi32(_mm256_castsi256_si128(v_i16));
+      let v_hi_i32 = _mm256_cvtepi16_epi32(_mm256_extracti128_si256::<1>(v_i16));
+
+      let u_d_lo = q15_shift(_mm256_add_epi32(_mm256_mullo_epi32(u_lo_i32, c_scale_v), rnd_v));
+      let u_d_hi = q15_shift(_mm256_add_epi32(_mm256_mullo_epi32(u_hi_i32, c_scale_v), rnd_v));
+      let v_d_lo = q15_shift(_mm256_add_epi32(_mm256_mullo_epi32(v_lo_i32, c_scale_v), rnd_v));
+      let v_d_hi = q15_shift(_mm256_add_epi32(_mm256_mullo_epi32(v_hi_i32, c_scale_v), rnd_v));
+
+      let r_chroma = chroma_i16x16(cru, crv, u_d_lo, v_d_lo, u_d_hi, v_d_hi, rnd_v);
+      let g_chroma = chroma_i16x16(cgu, cgv, u_d_lo, v_d_lo, u_d_hi, v_d_hi, rnd_v);
+      let b_chroma = chroma_i16x16(cbu, cbv, u_d_lo, v_d_lo, u_d_hi, v_d_hi, rnd_v);
+
+      let (r_dup_lo, r_dup_hi) = chroma_dup(r_chroma);
+      let (g_dup_lo, g_dup_hi) = chroma_dup(g_chroma);
+      let (b_dup_lo, b_dup_hi) = chroma_dup(b_chroma);
+
+      let y_scaled_lo = scale_y_u16_avx2(y_low, y_off_v, y_scale_v, rnd_v);
+      let y_scaled_hi = scale_y_u16_avx2(y_high, y_off_v, y_scale_v, rnd_v);
+
+      let r_lo = _mm256_adds_epi16(y_scaled_lo, r_dup_lo);
+      let r_hi = _mm256_adds_epi16(y_scaled_hi, r_dup_hi);
+      let g_lo = _mm256_adds_epi16(y_scaled_lo, g_dup_lo);
+      let g_hi = _mm256_adds_epi16(y_scaled_hi, g_dup_hi);
+      let b_lo = _mm256_adds_epi16(y_scaled_lo, b_dup_lo);
+      let b_hi = _mm256_adds_epi16(y_scaled_hi, b_dup_hi);
+
+      let r_u8 = narrow_u8x32(r_lo, r_hi);
+      let g_u8 = narrow_u8x32(g_lo, g_hi);
+      let b_u8 = narrow_u8x32(b_lo, b_hi);
+
+      write_rgb_32(r_u8, g_u8, b_u8, rgb_out.as_mut_ptr().add(x * 3));
+      x += 32;
+    }
+
+    if x < width {
+      scalar::yuv_420p16_to_rgb_row(
+        &y[x..width],
+        &u_half[x / 2..width / 2],
+        &v_half[x / 2..width / 2],
+        &mut rgb_out[x * 3..width * 3],
+        width - x,
+        matrix,
+        full_range,
+      );
+    }
+  }
+}
+
+/// AVX2 YUV 4:2:0 16-bit → packed **16-bit** RGB.
+/// Delegates to SSE4.1 (i64 arithmetic; no AVX2 srai_epi64).
+///
+/// # Safety
+///
+/// Same as [`yuv_420p16_to_rgb_row`] but `rgb_out` is `&mut [u16]`.
+#[inline]
+#[target_feature(enable = "avx2")]
+pub(crate) unsafe fn yuv_420p16_to_rgb_u16_row(
+  y: &[u16],
+  u_half: &[u16],
+  v_half: &[u16],
+  rgb_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  unsafe {
+    super::x86_sse41::yuv_420p16_to_rgb_u16_row(y, u_half, v_half, rgb_out, width, matrix, full_range);
+  }
+}
+
+/// AVX2 P016 → packed **8-bit** RGB. 32 pixels per iteration.
+///
+/// # Safety
+///
+/// 1. **AVX2 must be available.**
+/// 2. `width & 1 == 0`.
+/// 3. `y.len() >= width`, `uv_half.len() >= width`, `rgb_out.len() >= 3 * width`.
+#[inline]
+#[target_feature(enable = "avx2")]
+pub(crate) unsafe fn p16_to_rgb_row(
+  y: &[u16],
+  uv_half: &[u16],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  debug_assert_eq!(width & 1, 0);
+  debug_assert!(y.len() >= width);
+  debug_assert!(uv_half.len() >= width);
+  debug_assert!(rgb_out.len() >= width * 3);
+
+  let coeffs = scalar::Coefficients::for_matrix(matrix);
+  let (y_off, y_scale, c_scale) = scalar::range_params_n::<16, 8>(full_range);
+  const RND: i32 = 1 << 14;
+
+  unsafe {
+    let rnd_v = _mm256_set1_epi32(RND);
+    let y_off_v = _mm256_set1_epi32(y_off);
+    let y_scale_v = _mm256_set1_epi32(y_scale);
+    let c_scale_v = _mm256_set1_epi32(c_scale);
+    let bias16_v = _mm256_set1_epi16(-32768i16);
+    let cru = _mm256_set1_epi32(coeffs.r_u());
+    let crv = _mm256_set1_epi32(coeffs.r_v());
+    let cgu = _mm256_set1_epi32(coeffs.g_u());
+    let cgv = _mm256_set1_epi32(coeffs.g_v());
+    let cbu = _mm256_set1_epi32(coeffs.b_u());
+    let cbv = _mm256_set1_epi32(coeffs.b_v());
+
+    let mut x = 0usize;
+    while x + 32 <= width {
+      let y_low = _mm256_loadu_si256(y.as_ptr().add(x).cast());
+      let y_high = _mm256_loadu_si256(y.as_ptr().add(x + 16).cast());
+      // Deinterleave 32 UV pairs (64 u16) from uv_half[x..x+32].
+      // Uses the shared AVX2 deinterleave helper for Pn formats.
+      let (u_vec, v_vec) = deinterleave_uv_u16_avx2(uv_half.as_ptr().add(x));
+
+      let u_i16 = _mm256_sub_epi16(u_vec, bias16_v);
+      let v_i16 = _mm256_sub_epi16(v_vec, bias16_v);
+
+      let u_lo_i32 = _mm256_cvtepi16_epi32(_mm256_castsi256_si128(u_i16));
+      let u_hi_i32 = _mm256_cvtepi16_epi32(_mm256_extracti128_si256::<1>(u_i16));
+      let v_lo_i32 = _mm256_cvtepi16_epi32(_mm256_castsi256_si128(v_i16));
+      let v_hi_i32 = _mm256_cvtepi16_epi32(_mm256_extracti128_si256::<1>(v_i16));
+
+      let u_d_lo = q15_shift(_mm256_add_epi32(_mm256_mullo_epi32(u_lo_i32, c_scale_v), rnd_v));
+      let u_d_hi = q15_shift(_mm256_add_epi32(_mm256_mullo_epi32(u_hi_i32, c_scale_v), rnd_v));
+      let v_d_lo = q15_shift(_mm256_add_epi32(_mm256_mullo_epi32(v_lo_i32, c_scale_v), rnd_v));
+      let v_d_hi = q15_shift(_mm256_add_epi32(_mm256_mullo_epi32(v_hi_i32, c_scale_v), rnd_v));
+
+      let r_chroma = chroma_i16x16(cru, crv, u_d_lo, v_d_lo, u_d_hi, v_d_hi, rnd_v);
+      let g_chroma = chroma_i16x16(cgu, cgv, u_d_lo, v_d_lo, u_d_hi, v_d_hi, rnd_v);
+      let b_chroma = chroma_i16x16(cbu, cbv, u_d_lo, v_d_lo, u_d_hi, v_d_hi, rnd_v);
+
+      let (r_dup_lo, r_dup_hi) = chroma_dup(r_chroma);
+      let (g_dup_lo, g_dup_hi) = chroma_dup(g_chroma);
+      let (b_dup_lo, b_dup_hi) = chroma_dup(b_chroma);
+
+      let y_scaled_lo = scale_y_u16_avx2(y_low, y_off_v, y_scale_v, rnd_v);
+      let y_scaled_hi = scale_y_u16_avx2(y_high, y_off_v, y_scale_v, rnd_v);
+
+      let r_lo = _mm256_adds_epi16(y_scaled_lo, r_dup_lo);
+      let r_hi = _mm256_adds_epi16(y_scaled_hi, r_dup_hi);
+      let g_lo = _mm256_adds_epi16(y_scaled_lo, g_dup_lo);
+      let g_hi = _mm256_adds_epi16(y_scaled_hi, g_dup_hi);
+      let b_lo = _mm256_adds_epi16(y_scaled_lo, b_dup_lo);
+      let b_hi = _mm256_adds_epi16(y_scaled_hi, b_dup_hi);
+
+      let r_u8 = narrow_u8x32(r_lo, r_hi);
+      let g_u8 = narrow_u8x32(g_lo, g_hi);
+      let b_u8 = narrow_u8x32(b_lo, b_hi);
+
+      write_rgb_32(r_u8, g_u8, b_u8, rgb_out.as_mut_ptr().add(x * 3));
+      x += 32;
+    }
+
+    if x < width {
+      scalar::p16_to_rgb_row(
+        &y[x..width],
+        &uv_half[x..width],
+        &mut rgb_out[x * 3..width * 3],
+        width - x,
+        matrix,
+        full_range,
+      );
+    }
+  }
+}
+
+/// AVX2 P016 → packed **16-bit** RGB.
+/// Delegates to SSE4.1 (i64 arithmetic; no AVX2 srai_epi64).
+///
+/// # Safety
+///
+/// Same as [`p16_to_rgb_row`] but `rgb_out` is `&mut [u16]`.
+#[inline]
+#[target_feature(enable = "avx2")]
+pub(crate) unsafe fn p16_to_rgb_u16_row(
+  y: &[u16],
+  uv_half: &[u16],
+  rgb_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  unsafe {
+    super::x86_sse41::p16_to_rgb_u16_row(y, uv_half, rgb_out, width, matrix, full_range);
+  }
+}
+
 // ===== BGR ↔ RGB byte swap ==============================================
 
 /// AVX2 BGR ↔ RGB byte swap. 32 pixels per iteration by invoking the
@@ -1974,5 +2251,128 @@ mod tests {
       check_planar_u8_avx2_equivalence_n::<14>(w, ColorMatrix::Bt601, false);
       check_planar_u16_avx2_equivalence_n::<14>(w, ColorMatrix::Bt709, true);
     }
+  }
+
+  // ---- 16-bit (full-range u16 samples) AVX2 equivalence ---------------
+
+  fn p16_plane_avx2(n: usize, seed: usize) -> std::vec::Vec<u16> {
+    (0..n)
+      .map(|i| ((i.wrapping_mul(seed).wrapping_add(seed * 3)) & 0xFFFF) as u16)
+      .collect()
+  }
+
+  fn check_yuv420p16_u8_avx2_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+    if !std::arch::is_x86_feature_detected!("avx2") {
+      return;
+    }
+    let y = p16_plane_avx2(width, 37);
+    let u = p16_plane_avx2(width / 2, 53);
+    let v = p16_plane_avx2(width / 2, 71);
+    let mut rgb_scalar = std::vec![0u8; width * 3];
+    let mut rgb_simd = std::vec![0u8; width * 3];
+    scalar::yuv_420p16_to_rgb_row(&y, &u, &v, &mut rgb_scalar, width, matrix, full_range);
+    unsafe {
+      yuv_420p16_to_rgb_row(&y, &u, &v, &mut rgb_simd, width, matrix, full_range);
+    }
+    assert_eq!(
+      rgb_scalar, rgb_simd,
+      "AVX2 yuv420p16→u8 diverges (width={width}, matrix={matrix:?}, full_range={full_range})"
+    );
+  }
+
+  fn check_yuv420p16_u16_avx2_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+    if !std::arch::is_x86_feature_detected!("avx2") {
+      return;
+    }
+    let y = p16_plane_avx2(width, 37);
+    let u = p16_plane_avx2(width / 2, 53);
+    let v = p16_plane_avx2(width / 2, 71);
+    let mut rgb_scalar = std::vec![0u16; width * 3];
+    let mut rgb_simd = std::vec![0u16; width * 3];
+    scalar::yuv_420p16_to_rgb_u16_row(&y, &u, &v, &mut rgb_scalar, width, matrix, full_range);
+    unsafe {
+      yuv_420p16_to_rgb_u16_row(&y, &u, &v, &mut rgb_simd, width, matrix, full_range);
+    }
+    assert_eq!(
+      rgb_scalar, rgb_simd,
+      "AVX2 yuv420p16→u16 diverges (width={width}, matrix={matrix:?}, full_range={full_range})"
+    );
+  }
+
+  fn check_p16_u8_avx2_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+    if !std::arch::is_x86_feature_detected!("avx2") {
+      return;
+    }
+    let y = p16_plane_avx2(width, 37);
+    let u = p16_plane_avx2(width / 2, 53);
+    let v = p16_plane_avx2(width / 2, 71);
+    let uv = p010_uv_interleave(&u, &v);
+    let mut rgb_scalar = std::vec![0u8; width * 3];
+    let mut rgb_simd = std::vec![0u8; width * 3];
+    scalar::p16_to_rgb_row(&y, &uv, &mut rgb_scalar, width, matrix, full_range);
+    unsafe {
+      p16_to_rgb_row(&y, &uv, &mut rgb_simd, width, matrix, full_range);
+    }
+    assert_eq!(
+      rgb_scalar, rgb_simd,
+      "AVX2 p016→u8 diverges (width={width}, matrix={matrix:?}, full_range={full_range})"
+    );
+  }
+
+  fn check_p16_u16_avx2_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+    if !std::arch::is_x86_feature_detected!("avx2") {
+      return;
+    }
+    let y = p16_plane_avx2(width, 37);
+    let u = p16_plane_avx2(width / 2, 53);
+    let v = p16_plane_avx2(width / 2, 71);
+    let uv = p010_uv_interleave(&u, &v);
+    let mut rgb_scalar = std::vec![0u16; width * 3];
+    let mut rgb_simd = std::vec![0u16; width * 3];
+    scalar::p16_to_rgb_u16_row(&y, &uv, &mut rgb_scalar, width, matrix, full_range);
+    unsafe {
+      p16_to_rgb_u16_row(&y, &uv, &mut rgb_simd, width, matrix, full_range);
+    }
+    assert_eq!(
+      rgb_scalar, rgb_simd,
+      "AVX2 p016→u16 diverges (width={width}, matrix={matrix:?}, full_range={full_range})"
+    );
+  }
+
+  #[test]
+  fn avx2_p16_matches_scalar_all_matrices() {
+    for m in [
+      ColorMatrix::Bt601,
+      ColorMatrix::Bt709,
+      ColorMatrix::Bt2020Ncl,
+      ColorMatrix::Smpte240m,
+      ColorMatrix::Fcc,
+      ColorMatrix::YCgCo,
+    ] {
+      for full in [true, false] {
+        check_yuv420p16_u8_avx2_equivalence(32, m, full);
+        check_yuv420p16_u16_avx2_equivalence(32, m, full);
+        check_p16_u8_avx2_equivalence(32, m, full);
+        check_p16_u16_avx2_equivalence(32, m, full);
+      }
+    }
+  }
+
+  #[test]
+  fn avx2_p16_matches_scalar_tail_widths() {
+    for w in [34usize, 62, 66, 1922] {
+      check_yuv420p16_u8_avx2_equivalence(w, ColorMatrix::Bt601, false);
+      check_yuv420p16_u16_avx2_equivalence(w, ColorMatrix::Bt709, true);
+      check_p16_u8_avx2_equivalence(w, ColorMatrix::Bt601, false);
+      check_p16_u16_avx2_equivalence(w, ColorMatrix::Bt2020Ncl, false);
+    }
+  }
+
+  #[test]
+  fn avx2_p16_matches_scalar_1920() {
+    check_yuv420p16_u8_avx2_equivalence(1920, ColorMatrix::Bt709, false);
+    check_yuv420p16_u16_avx2_equivalence(1920, ColorMatrix::Bt2020Ncl, false);
+    check_p16_u8_avx2_equivalence(1920, ColorMatrix::Bt709, false);
+    check_p16_u16_avx2_equivalence(1920, ColorMatrix::Bt2020Ncl, false);
   }
 }

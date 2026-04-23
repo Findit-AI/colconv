@@ -1119,12 +1119,47 @@ pub fn yuv420p16_to_rgb_row(
   assert!(v_half.len() >= width / 2, "v_half row too short");
   assert!(rgb_out.len() >= rgb_min, "rgb_out row too short");
 
-  // SIMD backends for the 16-bit i64 kernel family land incrementally.
-  // NEON lands first (ARM64 dev hardware + straightforward vmull_s32 /
-  // vshrq_n_s64 sequence). Until a given backend has a 16-bit kernel
-  // wired in, the dispatcher falls through to scalar. `use_simd` is
-  // kept so downstream benches/tests can still toggle SIMD off.
-  let _ = use_simd;
+  if use_simd {
+    cfg_select! {
+      target_arch = "aarch64" => {
+        if neon_available() {
+          unsafe {
+            arch::neon::yuv_420p16_to_rgb_row(y, u_half, v_half, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+      },
+      target_arch = "x86_64" => {
+        if avx512_available() {
+          unsafe {
+            arch::x86_avx512::yuv_420p16_to_rgb_row(y, u_half, v_half, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+        if avx2_available() {
+          unsafe {
+            arch::x86_avx2::yuv_420p16_to_rgb_row(y, u_half, v_half, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+        if sse41_available() {
+          unsafe {
+            arch::x86_sse41::yuv_420p16_to_rgb_row(y, u_half, v_half, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+      },
+      target_arch = "wasm32" => {
+        if simd128_available() {
+          unsafe {
+            arch::wasm_simd128::yuv_420p16_to_rgb_row(y, u_half, v_half, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+      },
+      _ => {}
+    }
+  }
 
   scalar::yuv_420p16_to_rgb_row(y, u_half, v_half, rgb_out, width, matrix, full_range);
 }
@@ -1150,7 +1185,47 @@ pub fn yuv420p16_to_rgb_u16_row(
   assert!(v_half.len() >= width / 2, "v_half row too short");
   assert!(rgb_out.len() >= rgb_min, "rgb_out row too short");
 
-  let _ = use_simd;
+  if use_simd {
+    cfg_select! {
+      target_arch = "aarch64" => {
+        if neon_available() {
+          unsafe {
+            arch::neon::yuv_420p16_to_rgb_u16_row(y, u_half, v_half, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+      },
+      target_arch = "x86_64" => {
+        if avx512_available() {
+          unsafe {
+            arch::x86_avx512::yuv_420p16_to_rgb_u16_row(y, u_half, v_half, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+        if avx2_available() {
+          unsafe {
+            arch::x86_avx2::yuv_420p16_to_rgb_u16_row(y, u_half, v_half, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+        if sse41_available() {
+          unsafe {
+            arch::x86_sse41::yuv_420p16_to_rgb_u16_row(y, u_half, v_half, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+      },
+      target_arch = "wasm32" => {
+        if simd128_available() {
+          unsafe {
+            arch::wasm_simd128::yuv_420p16_to_rgb_u16_row(y, u_half, v_half, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+      },
+      _ => {}
+    }
+  }
 
   scalar::yuv_420p16_to_rgb_u16_row(y, u_half, v_half, rgb_out, width, matrix, full_range);
 }
@@ -1175,7 +1250,47 @@ pub fn p016_to_rgb_row(
   assert!(uv_half.len() >= width, "uv_half row too short");
   assert!(rgb_out.len() >= rgb_min, "rgb_out row too short");
 
-  let _ = use_simd;
+  if use_simd {
+    cfg_select! {
+      target_arch = "aarch64" => {
+        if neon_available() {
+          unsafe {
+            arch::neon::p16_to_rgb_row(y, uv_half, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+      },
+      target_arch = "x86_64" => {
+        if avx512_available() {
+          unsafe {
+            arch::x86_avx512::p16_to_rgb_row(y, uv_half, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+        if avx2_available() {
+          unsafe {
+            arch::x86_avx2::p16_to_rgb_row(y, uv_half, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+        if sse41_available() {
+          unsafe {
+            arch::x86_sse41::p16_to_rgb_row(y, uv_half, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+      },
+      target_arch = "wasm32" => {
+        if simd128_available() {
+          unsafe {
+            arch::wasm_simd128::p16_to_rgb_row(y, uv_half, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+      },
+      _ => {}
+    }
+  }
 
   scalar::p16_to_rgb_row(y, uv_half, rgb_out, width, matrix, full_range);
 }
@@ -1199,7 +1314,47 @@ pub fn p016_to_rgb_u16_row(
   assert!(uv_half.len() >= width, "uv_half row too short");
   assert!(rgb_out.len() >= rgb_min, "rgb_out row too short");
 
-  let _ = use_simd;
+  if use_simd {
+    cfg_select! {
+      target_arch = "aarch64" => {
+        if neon_available() {
+          unsafe {
+            arch::neon::p16_to_rgb_u16_row(y, uv_half, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+      },
+      target_arch = "x86_64" => {
+        if avx512_available() {
+          unsafe {
+            arch::x86_avx512::p16_to_rgb_u16_row(y, uv_half, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+        if avx2_available() {
+          unsafe {
+            arch::x86_avx2::p16_to_rgb_u16_row(y, uv_half, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+        if sse41_available() {
+          unsafe {
+            arch::x86_sse41::p16_to_rgb_u16_row(y, uv_half, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+      },
+      target_arch = "wasm32" => {
+        if simd128_available() {
+          unsafe {
+            arch::wasm_simd128::p16_to_rgb_u16_row(y, uv_half, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+      },
+      _ => {}
+    }
+  }
 
   scalar::p16_to_rgb_u16_row(y, uv_half, rgb_out, width, matrix, full_range);
 }

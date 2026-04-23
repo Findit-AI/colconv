@@ -36,11 +36,14 @@
 //!    `super::x86_common::write_rgb_16`.
 
 use core::arch::x86_64::{
-  __m128i, _mm_add_epi32, _mm_adds_epi16, _mm_and_si128, _mm_cvtepi16_epi32, _mm_cvtepu8_epi16,
-  _mm_cvtsi32_si128, _mm_loadl_epi64, _mm_loadu_si128, _mm_max_epi16, _mm_min_epi16,
-  _mm_mullo_epi32, _mm_packs_epi32, _mm_packus_epi16, _mm_set1_epi16, _mm_set1_epi32,
-  _mm_setr_epi8, _mm_shuffle_epi8, _mm_srai_epi32, _mm_srl_epi16, _mm_srli_si128, _mm_sub_epi16,
-  _mm_unpackhi_epi16, _mm_unpackhi_epi64, _mm_unpacklo_epi16, _mm_unpacklo_epi64,
+  __m128i, _mm_add_epi32, _mm_add_epi64, _mm_adds_epi16, _mm_and_si128, _mm_cvtepi16_epi32,
+  _mm_cvtepu16_epi32, _mm_cvtepu8_epi16, _mm_cvtsi32_si128, _mm_loadl_epi64, _mm_loadu_si128,
+  _mm_max_epi16, _mm_min_epi16, _mm_mul_epi32, _mm_mullo_epi32, _mm_packs_epi32,
+  _mm_packus_epi16, _mm_packus_epi32, _mm_set1_epi16, _mm_set1_epi32, _mm_set1_epi64x,
+  _mm_setr_epi8, _mm_shuffle_epi32, _mm_shuffle_epi8, _mm_srai_epi32, _mm_srl_epi16,
+  _mm_srli_epi64, _mm_srli_si128, _mm_sub_epi16, _mm_sub_epi32, _mm_sub_epi64,
+  _mm_unpackhi_epi16, _mm_unpackhi_epi32, _mm_unpackhi_epi64, _mm_unpacklo_epi16,
+  _mm_unpacklo_epi32, _mm_unpacklo_epi64,
 };
 
 use crate::{
@@ -969,6 +972,561 @@ fn scale_y(y_i16: __m128i, y_off_v: __m128i, y_scale_v: __m128i, rnd: __m128i) -
   }
 }
 
+// ===== 16-bit YUV → RGB helpers =========================================
+
+/// `(Y_u16 - y_off) * y_scale + RND >> 15` for full u16 Y samples
+/// (unsigned widening via `_mm_cvtepu16_epi32`). Returns i16x8.
+#[inline(always)]
+fn scale_y_u16(y_u16: __m128i, y_off_v: __m128i, y_scale_v: __m128i, rnd_v: __m128i) -> __m128i {
+  unsafe {
+    let y_lo_i32 = _mm_sub_epi32(_mm_cvtepu16_epi32(y_u16), y_off_v);
+    let y_hi_u16 = _mm_srli_si128::<8>(y_u16);
+    let y_hi_i32 = _mm_sub_epi32(_mm_cvtepu16_epi32(y_hi_u16), y_off_v);
+    let lo = _mm_srai_epi32::<15>(_mm_add_epi32(_mm_mullo_epi32(y_lo_i32, y_scale_v), rnd_v));
+    let hi = _mm_srai_epi32::<15>(_mm_add_epi32(_mm_mullo_epi32(y_hi_i32, y_scale_v), rnd_v));
+    _mm_packs_epi32(lo, hi)
+  }
+}
+
+/// `srai64_15(x) = srli64_15(x + 2^32) - 2^17` — arithmetic right-shift
+/// by 15 for i64x2, valid for `x >= -2^31`. No `_mm_srai_epi64` in SSE4.1.
+#[inline(always)]
+fn srai64_15(x: __m128i) -> __m128i {
+  unsafe {
+    // Bias x up by 2^32 so the unsigned shift is correct, then undo the
+    // extra 2^17 (= 2^32 >> 15) introduced by the bias.
+    let biased = _mm_add_epi64(x, _mm_set1_epi64x(1i64 << 32));
+    let shifted = _mm_srli_epi64::<15>(biased);
+    _mm_sub_epi64(shifted, _mm_set1_epi64x(1i64 << 17))
+  }
+}
+
+/// Computes one i64x2 chroma channel from 2 × i64 (u_d, v_d) inputs.
+/// Returns i64x2 with [`srai64_15`]-shifted results.
+#[inline(always)]
+fn chroma_i64x2(
+  cu: __m128i,
+  cv: __m128i,
+  u_d: __m128i,
+  v_d: __m128i,
+  rnd_v: __m128i,
+) -> __m128i {
+  unsafe {
+    srai64_15(_mm_add_epi64(
+      _mm_add_epi64(_mm_mul_epi32(cu, u_d), _mm_mul_epi32(cv, v_d)),
+      rnd_v,
+    ))
+  }
+}
+
+/// `(y_minus_off * y_scale + RND) >> 15` in i64 via `_mm_mul_epi32` (even
+/// lanes). Caller must supply an i32x4 that is already `Y - y_off`.
+/// Returns i64x2 for the two even-indexed lanes.
+#[inline(always)]
+fn scale_y16_i64(y_minus_off: __m128i, y_scale_v: __m128i, rnd_v: __m128i) -> __m128i {
+  unsafe {
+    srai64_15(_mm_add_epi64(_mm_mul_epi32(y_minus_off, y_scale_v), rnd_v))
+  }
+}
+
+// ===== 16-bit planar (YUV420P16) → RGB ===================================
+
+/// SSE4.1 YUV 4:2:0 16-bit → packed **8-bit** RGB.
+///
+/// Block size 16 Y pixels / 8 chroma pairs per iteration. i32 chroma
+/// arithmetic suffices for the u8 output target (small `c_scale ≈ 146`).
+/// Y is unsigned-widened via `_mm_cvtepu16_epi32` (values can exceed 32767).
+/// UV centering subtracts 32768 using the `0x8000` wrapping trick
+/// (`_mm_sub_epi16(v, _mm_set1_epi16(-32768i16))`).
+///
+/// # Safety
+///
+/// 1. **SSE4.1 must be available on the current CPU.**
+/// 2. `width & 1 == 0`.
+/// 3. `y.len() >= width`, `u_half.len() >= width / 2`,
+///    `v_half.len() >= width / 2`, `rgb_out.len() >= 3 * width`.
+#[inline]
+#[target_feature(enable = "sse4.1")]
+pub(crate) unsafe fn yuv_420p16_to_rgb_row(
+  y: &[u16],
+  u_half: &[u16],
+  v_half: &[u16],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  debug_assert_eq!(width & 1, 0);
+  debug_assert!(y.len() >= width);
+  debug_assert!(u_half.len() >= width / 2);
+  debug_assert!(v_half.len() >= width / 2);
+  debug_assert!(rgb_out.len() >= width * 3);
+
+  let coeffs = scalar::Coefficients::for_matrix(matrix);
+  let (y_off, y_scale, c_scale) = scalar::range_params_n::<16, 8>(full_range);
+  const RND: i32 = 1 << 14;
+
+  unsafe {
+    let rnd_v = _mm_set1_epi32(RND);
+    let y_off_v = _mm_set1_epi32(y_off);
+    let y_scale_v = _mm_set1_epi32(y_scale);
+    let c_scale_v = _mm_set1_epi32(c_scale);
+    // Subtract 32768 (0x8000) via wrapping: -32768i16 as bits = 0x8000.
+    let bias16_v = _mm_set1_epi16(-32768i16);
+    let cru = _mm_set1_epi32(coeffs.r_u());
+    let crv = _mm_set1_epi32(coeffs.r_v());
+    let cgu = _mm_set1_epi32(coeffs.g_u());
+    let cgv = _mm_set1_epi32(coeffs.g_v());
+    let cbu = _mm_set1_epi32(coeffs.b_u());
+    let cbv = _mm_set1_epi32(coeffs.b_v());
+
+    let mut x = 0usize;
+    while x + 16 <= width {
+      let y_low = _mm_loadu_si128(y.as_ptr().add(x).cast());
+      let y_high = _mm_loadu_si128(y.as_ptr().add(x + 8).cast());
+      let u_vec = _mm_loadu_si128(u_half.as_ptr().add(x / 2).cast());
+      let v_vec = _mm_loadu_si128(v_half.as_ptr().add(x / 2).cast());
+
+      // Center UV: subtract 32768 (wrapping i16 trick).
+      let u_i16 = _mm_sub_epi16(u_vec, bias16_v);
+      let v_i16 = _mm_sub_epi16(v_vec, bias16_v);
+
+      // Scale UV to u8 space via i32 Q15 arithmetic.
+      let u_lo_i32 = _mm_cvtepi16_epi32(u_i16);
+      let u_hi_i32 = _mm_cvtepi16_epi32(_mm_srli_si128::<8>(u_i16));
+      let v_lo_i32 = _mm_cvtepi16_epi32(v_i16);
+      let v_hi_i32 = _mm_cvtepi16_epi32(_mm_srli_si128::<8>(v_i16));
+
+      let u_d_lo = q15_shift(_mm_add_epi32(_mm_mullo_epi32(u_lo_i32, c_scale_v), rnd_v));
+      let u_d_hi = q15_shift(_mm_add_epi32(_mm_mullo_epi32(u_hi_i32, c_scale_v), rnd_v));
+      let v_d_lo = q15_shift(_mm_add_epi32(_mm_mullo_epi32(v_lo_i32, c_scale_v), rnd_v));
+      let v_d_hi = q15_shift(_mm_add_epi32(_mm_mullo_epi32(v_hi_i32, c_scale_v), rnd_v));
+
+      let r_chroma = chroma_i16x8(cru, crv, u_d_lo, v_d_lo, u_d_hi, v_d_hi, rnd_v);
+      let g_chroma = chroma_i16x8(cgu, cgv, u_d_lo, v_d_lo, u_d_hi, v_d_hi, rnd_v);
+      let b_chroma = chroma_i16x8(cbu, cbv, u_d_lo, v_d_lo, u_d_hi, v_d_hi, rnd_v);
+
+      let r_dup_lo = _mm_unpacklo_epi16(r_chroma, r_chroma);
+      let r_dup_hi = _mm_unpackhi_epi16(r_chroma, r_chroma);
+      let g_dup_lo = _mm_unpacklo_epi16(g_chroma, g_chroma);
+      let g_dup_hi = _mm_unpackhi_epi16(g_chroma, g_chroma);
+      let b_dup_lo = _mm_unpacklo_epi16(b_chroma, b_chroma);
+      let b_dup_hi = _mm_unpackhi_epi16(b_chroma, b_chroma);
+
+      let y_scaled_lo = scale_y_u16(y_low, y_off_v, y_scale_v, rnd_v);
+      let y_scaled_hi = scale_y_u16(y_high, y_off_v, y_scale_v, rnd_v);
+
+      let r_lo = _mm_adds_epi16(y_scaled_lo, r_dup_lo);
+      let r_hi = _mm_adds_epi16(y_scaled_hi, r_dup_hi);
+      let g_lo = _mm_adds_epi16(y_scaled_lo, g_dup_lo);
+      let g_hi = _mm_adds_epi16(y_scaled_hi, g_dup_hi);
+      let b_lo = _mm_adds_epi16(y_scaled_lo, b_dup_lo);
+      let b_hi = _mm_adds_epi16(y_scaled_hi, b_dup_hi);
+
+      let r_u8 = _mm_packus_epi16(r_lo, r_hi);
+      let g_u8 = _mm_packus_epi16(g_lo, g_hi);
+      let b_u8 = _mm_packus_epi16(b_lo, b_hi);
+
+      write_rgb_16(r_u8, g_u8, b_u8, rgb_out.as_mut_ptr().add(x * 3));
+      x += 16;
+    }
+
+    if x < width {
+      scalar::yuv_420p16_to_rgb_row(
+        &y[x..width],
+        &u_half[x / 2..width / 2],
+        &v_half[x / 2..width / 2],
+        &mut rgb_out[x * 3..width * 3],
+        width - x,
+        matrix,
+        full_range,
+      );
+    }
+  }
+}
+
+/// SSE4.1 YUV 4:2:0 16-bit → packed **16-bit** RGB.
+///
+/// i64 chroma arithmetic via `_mm_mul_epi32` + `srai64_15` bias trick.
+/// Processes 8 Y pixels (4 chroma pairs) per iteration (i64 width constraint).
+/// Final saturation via `_mm_packus_epi32` (signed i32 → u16).
+///
+/// # Safety
+///
+/// Same as [`yuv_420p16_to_rgb_row`] but `rgb_out` is `&mut [u16]`.
+#[inline]
+#[target_feature(enable = "sse4.1")]
+pub(crate) unsafe fn yuv_420p16_to_rgb_u16_row(
+  y: &[u16],
+  u_half: &[u16],
+  v_half: &[u16],
+  rgb_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  debug_assert_eq!(width & 1, 0);
+  debug_assert!(y.len() >= width);
+  debug_assert!(u_half.len() >= width / 2);
+  debug_assert!(v_half.len() >= width / 2);
+  debug_assert!(rgb_out.len() >= width * 3);
+
+  let coeffs = scalar::Coefficients::for_matrix(matrix);
+  let (y_off, y_scale, c_scale) = scalar::range_params_n::<16, 16>(full_range);
+  const RND: i64 = 1 << 14;
+
+  unsafe {
+    let rnd_v = _mm_set1_epi64x(RND);
+    let y_off_v = _mm_set1_epi32(y_off);
+    let y_scale_v = _mm_set1_epi32(y_scale);
+    let c_scale_v = _mm_set1_epi32(c_scale);
+    let bias16_v = _mm_set1_epi16(-32768i16);
+    let cru = _mm_set1_epi32(coeffs.r_u());
+    let crv = _mm_set1_epi32(coeffs.r_v());
+    let cgu = _mm_set1_epi32(coeffs.g_u());
+    let cgv = _mm_set1_epi32(coeffs.g_v());
+    let cbu = _mm_set1_epi32(coeffs.b_u());
+    let cbv = _mm_set1_epi32(coeffs.b_v());
+
+    let mut x = 0usize;
+    while x + 8 <= width {
+      // Load 8 Y and 4 U/V; process 4 chroma pairs → 8 pixels.
+      let y_vec = _mm_loadu_si128(y.as_ptr().add(x).cast());
+      // Load 4 U and 4 V u16 values into the low 64 bits of each vector.
+      let u_vec4 = _mm_loadl_epi64(u_half.as_ptr().add(x / 2).cast());
+      let v_vec4 = _mm_loadl_epi64(v_half.as_ptr().add(x / 2).cast());
+
+      // Center UV: subtract 32768 (wrapping i16 trick).
+      let u_i16 = _mm_sub_epi16(u_vec4, bias16_v);
+      let v_i16 = _mm_sub_epi16(v_vec4, bias16_v);
+
+      // Scale UV in i32 (fits: |u_centered| ≤ 32768, c_scale ≤ 38302).
+      let rnd32_v = _mm_set1_epi32(1 << 14);
+      let u_i32 = _mm_cvtepi16_epi32(u_i16);
+      let v_i32 = _mm_cvtepi16_epi32(v_i16);
+      let u_d = q15_shift(_mm_add_epi32(_mm_mullo_epi32(u_i32, c_scale_v), rnd32_v));
+      let v_d = q15_shift(_mm_add_epi32(_mm_mullo_epi32(v_i32, c_scale_v), rnd32_v));
+
+      // Chroma in i64x2 pairs (even / odd lanes of u_d / v_d).
+      // _mm_mul_epi32 uses even-indexed i32 lanes → result is i64x2.
+      let u_d_even = u_d; // lanes [0,_,2,_] used by _mm_mul_epi32
+      let v_d_even = v_d;
+      let u_d_odd = _mm_shuffle_epi32::<0xF5>(u_d); // [1,1,3,3] → odd lanes to even
+      let v_d_odd = _mm_shuffle_epi32::<0xF5>(v_d);
+
+      let r_ch_even = chroma_i64x2(cru, crv, u_d_even, v_d_even, rnd_v);
+      let r_ch_odd = chroma_i64x2(cru, crv, u_d_odd, v_d_odd, rnd_v);
+      let g_ch_even = chroma_i64x2(cgu, cgv, u_d_even, v_d_even, rnd_v);
+      let g_ch_odd = chroma_i64x2(cgu, cgv, u_d_odd, v_d_odd, rnd_v);
+      let b_ch_even = chroma_i64x2(cbu, cbv, u_d_even, v_d_even, rnd_v);
+      let b_ch_odd = chroma_i64x2(cbu, cbv, u_d_odd, v_d_odd, rnd_v);
+
+      // Reassemble i64x2 pairs to i32x4: unpacklo_epi32 interleaves
+      // low 32 bits; unpacklo_epi64 joins the two halves.
+      let r_ch_i32 = _mm_unpacklo_epi64(
+        _mm_unpacklo_epi32(r_ch_even, r_ch_odd),
+        _mm_unpackhi_epi32(r_ch_even, r_ch_odd),
+      );
+      let g_ch_i32 = _mm_unpacklo_epi64(
+        _mm_unpacklo_epi32(g_ch_even, g_ch_odd),
+        _mm_unpackhi_epi32(g_ch_even, g_ch_odd),
+      );
+      let b_ch_i32 = _mm_unpacklo_epi64(
+        _mm_unpacklo_epi32(b_ch_even, b_ch_odd),
+        _mm_unpackhi_epi32(b_ch_even, b_ch_odd),
+      );
+
+      // Duplicate each chroma value for 2 Y pixels per chroma pair.
+      // unpacklo_epi32([r0,r1,r2,r3], same) → [r0,r0,r1,r1]
+      let r_dup_lo = _mm_unpacklo_epi32(r_ch_i32, r_ch_i32);
+      let r_dup_hi = _mm_unpackhi_epi32(r_ch_i32, r_ch_i32);
+      let g_dup_lo = _mm_unpacklo_epi32(g_ch_i32, g_ch_i32);
+      let g_dup_hi = _mm_unpackhi_epi32(g_ch_i32, g_ch_i32);
+      let b_dup_lo = _mm_unpacklo_epi32(b_ch_i32, b_ch_i32);
+      let b_dup_hi = _mm_unpackhi_epi32(b_ch_i32, b_ch_i32);
+
+      // Scale Y in i64 via pairs: process pixels 0-1, 2-3, 4-5, 6-7.
+      // Load pairs of Y as 32-bit lanes for _mm_mul_epi32.
+      let y_lo_pair = _mm_cvtepu16_epi32(y_vec);           // [y0,y1,y2,y3] as i32
+      let y_hi_pair = _mm_cvtepu16_epi32(_mm_srli_si128::<8>(y_vec)); // [y4,y5,y6,y7]
+
+      let y_lo_sub = _mm_sub_epi32(y_lo_pair, y_off_v);
+      let y_hi_sub = _mm_sub_epi32(y_hi_pair, y_off_v);
+
+      // Scale Y pairs in i64 via _mm_mul_epi32 (even lanes).
+      // y_lo_sub = [y0-off, y1-off, y2-off, y3-off]
+      // even lanes: y0-off and y2-off
+      let y_lo_even = scale_y16_i64(y_lo_sub, y_scale_v, rnd_v);
+      let y_lo_odd = scale_y16_i64(_mm_shuffle_epi32::<0xF5>(y_lo_sub), y_scale_v, rnd_v);
+      let y_hi_even = scale_y16_i64(y_hi_sub, y_scale_v, rnd_v);
+      let y_hi_odd = scale_y16_i64(_mm_shuffle_epi32::<0xF5>(y_hi_sub), y_scale_v, rnd_v);
+
+      // Reassemble Y i64x2 pairs to i32x4.
+      let y_lo_i32 = _mm_unpacklo_epi64(
+        _mm_unpacklo_epi32(y_lo_even, y_lo_odd),
+        _mm_unpackhi_epi32(y_lo_even, y_lo_odd),
+      );
+      let y_hi_i32 = _mm_unpacklo_epi64(
+        _mm_unpacklo_epi32(y_hi_even, y_hi_odd),
+        _mm_unpackhi_epi32(y_hi_even, y_hi_odd),
+      );
+
+      // Add Y + chroma, saturate to u16 via _mm_packus_epi32.
+      let r_lo_u16 = _mm_packus_epi32(_mm_add_epi32(y_lo_i32, r_dup_lo), _mm_add_epi32(y_hi_i32, r_dup_hi));
+      let g_lo_u16 = _mm_packus_epi32(_mm_add_epi32(y_lo_i32, g_dup_lo), _mm_add_epi32(y_hi_i32, g_dup_hi));
+      let b_lo_u16 = _mm_packus_epi32(_mm_add_epi32(y_lo_i32, b_dup_lo), _mm_add_epi32(y_hi_i32, b_dup_hi));
+
+      write_rgb_u16_8(r_lo_u16, g_lo_u16, b_lo_u16, rgb_out.as_mut_ptr().add(x * 3));
+      x += 8;
+    }
+
+    if x < width {
+      scalar::yuv_420p16_to_rgb_u16_row(
+        &y[x..width],
+        &u_half[x / 2..width / 2],
+        &v_half[x / 2..width / 2],
+        &mut rgb_out[x * 3..width * 3],
+        width - x,
+        matrix,
+        full_range,
+      );
+    }
+  }
+}
+
+// ===== 16-bit semi-planar (P016) → RGB ===================================
+
+/// SSE4.1 P016 → packed **8-bit** RGB. Thin wrapper: deinterleaves UV
+/// via [`deinterleave_uv_u16`] then delegates to the shared planar kernel.
+///
+/// # Safety
+///
+/// 1. **SSE4.1 must be available on the current CPU.**
+/// 2. `width & 1 == 0`.
+/// 3. `y.len() >= width`, `uv_half.len() >= width`, `rgb_out.len() >= 3 * width`.
+#[inline]
+#[target_feature(enable = "sse4.1")]
+pub(crate) unsafe fn p16_to_rgb_row(
+  y: &[u16],
+  uv_half: &[u16],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  debug_assert_eq!(width & 1, 0);
+  debug_assert!(y.len() >= width);
+  debug_assert!(uv_half.len() >= width);
+  debug_assert!(rgb_out.len() >= width * 3);
+
+  let coeffs = scalar::Coefficients::for_matrix(matrix);
+  let (y_off, y_scale, c_scale) = scalar::range_params_n::<16, 8>(full_range);
+  const RND: i32 = 1 << 14;
+
+  unsafe {
+    let rnd_v = _mm_set1_epi32(RND);
+    let y_off_v = _mm_set1_epi32(y_off);
+    let y_scale_v = _mm_set1_epi32(y_scale);
+    let c_scale_v = _mm_set1_epi32(c_scale);
+    let bias16_v = _mm_set1_epi16(-32768i16);
+    let cru = _mm_set1_epi32(coeffs.r_u());
+    let crv = _mm_set1_epi32(coeffs.r_v());
+    let cgu = _mm_set1_epi32(coeffs.g_u());
+    let cgv = _mm_set1_epi32(coeffs.g_v());
+    let cbu = _mm_set1_epi32(coeffs.b_u());
+    let cbv = _mm_set1_epi32(coeffs.b_v());
+
+    let mut x = 0usize;
+    while x + 16 <= width {
+      let y_low = _mm_loadu_si128(y.as_ptr().add(x).cast());
+      let y_high = _mm_loadu_si128(y.as_ptr().add(x + 8).cast());
+      let (u_vec, v_vec) = deinterleave_uv_u16(uv_half.as_ptr().add(x));
+
+      let u_i16 = _mm_sub_epi16(u_vec, bias16_v);
+      let v_i16 = _mm_sub_epi16(v_vec, bias16_v);
+
+      let u_lo_i32 = _mm_cvtepi16_epi32(u_i16);
+      let u_hi_i32 = _mm_cvtepi16_epi32(_mm_srli_si128::<8>(u_i16));
+      let v_lo_i32 = _mm_cvtepi16_epi32(v_i16);
+      let v_hi_i32 = _mm_cvtepi16_epi32(_mm_srli_si128::<8>(v_i16));
+
+      let u_d_lo = q15_shift(_mm_add_epi32(_mm_mullo_epi32(u_lo_i32, c_scale_v), rnd_v));
+      let u_d_hi = q15_shift(_mm_add_epi32(_mm_mullo_epi32(u_hi_i32, c_scale_v), rnd_v));
+      let v_d_lo = q15_shift(_mm_add_epi32(_mm_mullo_epi32(v_lo_i32, c_scale_v), rnd_v));
+      let v_d_hi = q15_shift(_mm_add_epi32(_mm_mullo_epi32(v_hi_i32, c_scale_v), rnd_v));
+
+      let r_chroma = chroma_i16x8(cru, crv, u_d_lo, v_d_lo, u_d_hi, v_d_hi, rnd_v);
+      let g_chroma = chroma_i16x8(cgu, cgv, u_d_lo, v_d_lo, u_d_hi, v_d_hi, rnd_v);
+      let b_chroma = chroma_i16x8(cbu, cbv, u_d_lo, v_d_lo, u_d_hi, v_d_hi, rnd_v);
+
+      let r_dup_lo = _mm_unpacklo_epi16(r_chroma, r_chroma);
+      let r_dup_hi = _mm_unpackhi_epi16(r_chroma, r_chroma);
+      let g_dup_lo = _mm_unpacklo_epi16(g_chroma, g_chroma);
+      let g_dup_hi = _mm_unpackhi_epi16(g_chroma, g_chroma);
+      let b_dup_lo = _mm_unpacklo_epi16(b_chroma, b_chroma);
+      let b_dup_hi = _mm_unpackhi_epi16(b_chroma, b_chroma);
+
+      let y_scaled_lo = scale_y_u16(y_low, y_off_v, y_scale_v, rnd_v);
+      let y_scaled_hi = scale_y_u16(y_high, y_off_v, y_scale_v, rnd_v);
+
+      let r_lo = _mm_adds_epi16(y_scaled_lo, r_dup_lo);
+      let r_hi = _mm_adds_epi16(y_scaled_hi, r_dup_hi);
+      let g_lo = _mm_adds_epi16(y_scaled_lo, g_dup_lo);
+      let g_hi = _mm_adds_epi16(y_scaled_hi, g_dup_hi);
+      let b_lo = _mm_adds_epi16(y_scaled_lo, b_dup_lo);
+      let b_hi = _mm_adds_epi16(y_scaled_hi, b_dup_hi);
+
+      let r_u8 = _mm_packus_epi16(r_lo, r_hi);
+      let g_u8 = _mm_packus_epi16(g_lo, g_hi);
+      let b_u8 = _mm_packus_epi16(b_lo, b_hi);
+
+      write_rgb_16(r_u8, g_u8, b_u8, rgb_out.as_mut_ptr().add(x * 3));
+      x += 16;
+    }
+
+    if x < width {
+      scalar::p16_to_rgb_row(
+        &y[x..width],
+        &uv_half[x..width],
+        &mut rgb_out[x * 3..width * 3],
+        width - x,
+        matrix,
+        full_range,
+      );
+    }
+  }
+}
+
+/// SSE4.1 P016 → packed **16-bit** RGB. i64 chroma arithmetic, 8 pixels per iteration.
+///
+/// # Safety
+///
+/// Same as [`p16_to_rgb_row`] but `rgb_out` is `&mut [u16]`.
+#[inline]
+#[target_feature(enable = "sse4.1")]
+pub(crate) unsafe fn p16_to_rgb_u16_row(
+  y: &[u16],
+  uv_half: &[u16],
+  rgb_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  debug_assert_eq!(width & 1, 0);
+  debug_assert!(y.len() >= width);
+  debug_assert!(uv_half.len() >= width);
+  debug_assert!(rgb_out.len() >= width * 3);
+
+  let coeffs = scalar::Coefficients::for_matrix(matrix);
+  let (y_off, y_scale, c_scale) = scalar::range_params_n::<16, 16>(full_range);
+  const RND: i64 = 1 << 14;
+
+  unsafe {
+    let rnd_v = _mm_set1_epi64x(RND);
+    let y_off_v = _mm_set1_epi32(y_off);
+    let y_scale_v = _mm_set1_epi32(y_scale);
+    let c_scale_v = _mm_set1_epi32(c_scale);
+    let bias16_v = _mm_set1_epi16(-32768i16);
+    let cru = _mm_set1_epi32(coeffs.r_u());
+    let crv = _mm_set1_epi32(coeffs.r_v());
+    let cgu = _mm_set1_epi32(coeffs.g_u());
+    let cgv = _mm_set1_epi32(coeffs.g_v());
+    let cbu = _mm_set1_epi32(coeffs.b_u());
+    let cbv = _mm_set1_epi32(coeffs.b_v());
+
+    let mut x = 0usize;
+    while x + 8 <= width {
+      let y_vec = _mm_loadu_si128(y.as_ptr().add(x).cast());
+      // Load 4 UV pairs = 8 u16 = 16 bytes; deinterleave inline.
+      // uv_half.len() >= width >= x + 8 guarantees 8 u16 readable.
+      let uv_raw = _mm_loadu_si128(uv_half.as_ptr().add(x).cast());
+      // [U0,V0,U1,V1,U2,V2,U3,V3] → [U0,U1,U2,U3, V0,V1,V2,V3]
+      let split_mask = _mm_setr_epi8(0,1,4,5,8,9,12,13, 2,3,6,7,10,11,14,15);
+      let uv_split = _mm_shuffle_epi8(uv_raw, split_mask);
+      let u_vec4 = uv_split;
+      let v_vec4 = _mm_srli_si128::<8>(uv_split);
+
+      let u_i16 = _mm_sub_epi16(u_vec4, bias16_v);
+      let v_i16 = _mm_sub_epi16(v_vec4, bias16_v);
+
+      let rnd32_v = _mm_set1_epi32(1 << 14);
+      let u_i32 = _mm_cvtepi16_epi32(u_i16);
+      let v_i32 = _mm_cvtepi16_epi32(v_i16);
+      let u_d = q15_shift(_mm_add_epi32(_mm_mullo_epi32(u_i32, c_scale_v), rnd32_v));
+      let v_d = q15_shift(_mm_add_epi32(_mm_mullo_epi32(v_i32, c_scale_v), rnd32_v));
+
+      let u_d_even = u_d;
+      let v_d_even = v_d;
+      let u_d_odd = _mm_shuffle_epi32::<0xF5>(u_d);
+      let v_d_odd = _mm_shuffle_epi32::<0xF5>(v_d);
+
+      let r_ch_even = chroma_i64x2(cru, crv, u_d_even, v_d_even, rnd_v);
+      let r_ch_odd = chroma_i64x2(cru, crv, u_d_odd, v_d_odd, rnd_v);
+      let g_ch_even = chroma_i64x2(cgu, cgv, u_d_even, v_d_even, rnd_v);
+      let g_ch_odd = chroma_i64x2(cgu, cgv, u_d_odd, v_d_odd, rnd_v);
+      let b_ch_even = chroma_i64x2(cbu, cbv, u_d_even, v_d_even, rnd_v);
+      let b_ch_odd = chroma_i64x2(cbu, cbv, u_d_odd, v_d_odd, rnd_v);
+
+      let r_ch_i32 = _mm_unpacklo_epi64(
+        _mm_unpacklo_epi32(r_ch_even, r_ch_odd),
+        _mm_unpackhi_epi32(r_ch_even, r_ch_odd),
+      );
+      let g_ch_i32 = _mm_unpacklo_epi64(
+        _mm_unpacklo_epi32(g_ch_even, g_ch_odd),
+        _mm_unpackhi_epi32(g_ch_even, g_ch_odd),
+      );
+      let b_ch_i32 = _mm_unpacklo_epi64(
+        _mm_unpacklo_epi32(b_ch_even, b_ch_odd),
+        _mm_unpackhi_epi32(b_ch_even, b_ch_odd),
+      );
+
+      let r_dup_lo = _mm_unpacklo_epi32(r_ch_i32, r_ch_i32);
+      let r_dup_hi = _mm_unpackhi_epi32(r_ch_i32, r_ch_i32);
+      let g_dup_lo = _mm_unpacklo_epi32(g_ch_i32, g_ch_i32);
+      let g_dup_hi = _mm_unpackhi_epi32(g_ch_i32, g_ch_i32);
+      let b_dup_lo = _mm_unpacklo_epi32(b_ch_i32, b_ch_i32);
+      let b_dup_hi = _mm_unpackhi_epi32(b_ch_i32, b_ch_i32);
+
+      let y_lo_pair = _mm_cvtepu16_epi32(y_vec);
+      let y_hi_pair = _mm_cvtepu16_epi32(_mm_srli_si128::<8>(y_vec));
+      let y_lo_sub = _mm_sub_epi32(y_lo_pair, y_off_v);
+      let y_hi_sub = _mm_sub_epi32(y_hi_pair, y_off_v);
+
+      let y_lo_even = scale_y16_i64(y_lo_sub, y_scale_v, rnd_v);
+      let y_lo_odd = scale_y16_i64(_mm_shuffle_epi32::<0xF5>(y_lo_sub), y_scale_v, rnd_v);
+      let y_hi_even = scale_y16_i64(y_hi_sub, y_scale_v, rnd_v);
+      let y_hi_odd = scale_y16_i64(_mm_shuffle_epi32::<0xF5>(y_hi_sub), y_scale_v, rnd_v);
+
+      let y_lo_i32 = _mm_unpacklo_epi64(
+        _mm_unpacklo_epi32(y_lo_even, y_lo_odd),
+        _mm_unpackhi_epi32(y_lo_even, y_lo_odd),
+      );
+      let y_hi_i32 = _mm_unpacklo_epi64(
+        _mm_unpacklo_epi32(y_hi_even, y_hi_odd),
+        _mm_unpackhi_epi32(y_hi_even, y_hi_odd),
+      );
+
+      let r_u16 = _mm_packus_epi32(_mm_add_epi32(y_lo_i32, r_dup_lo), _mm_add_epi32(y_hi_i32, r_dup_hi));
+      let g_u16 = _mm_packus_epi32(_mm_add_epi32(y_lo_i32, g_dup_lo), _mm_add_epi32(y_hi_i32, g_dup_hi));
+      let b_u16 = _mm_packus_epi32(_mm_add_epi32(y_lo_i32, b_dup_lo), _mm_add_epi32(y_hi_i32, b_dup_hi));
+
+      write_rgb_u16_8(r_u16, g_u16, b_u16, rgb_out.as_mut_ptr().add(x * 3));
+      x += 8;
+    }
+
+    if x < width {
+      scalar::p16_to_rgb_u16_row(
+        &y[x..width],
+        &uv_half[x..width],
+        &mut rgb_out[x * 3..width * 3],
+        width - x,
+        matrix,
+        full_range,
+      );
+    }
+  }
+}
+
 // ===== BGR ↔ RGB byte swap ==============================================
 
 /// SSE4.1 BGR ↔ RGB byte swap. 16 pixels per iteration via the shared
@@ -1764,5 +2322,128 @@ mod tests {
       check_planar_u8_sse41_equivalence_n::<14>(w, ColorMatrix::Bt601, false);
       check_planar_u16_sse41_equivalence_n::<14>(w, ColorMatrix::Bt709, true);
     }
+  }
+
+  // ---- 16-bit (full-range u16 samples) SSE4.1 equivalence -------------
+
+  fn p16_plane(n: usize, seed: usize) -> std::vec::Vec<u16> {
+    (0..n)
+      .map(|i| ((i.wrapping_mul(seed).wrapping_add(seed * 3)) & 0xFFFF) as u16)
+      .collect()
+  }
+
+  fn check_yuv420p16_u8_sse41_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+    if !std::arch::is_x86_feature_detected!("sse4.1") {
+      return;
+    }
+    let y = p16_plane(width, 37);
+    let u = p16_plane(width / 2, 53);
+    let v = p16_plane(width / 2, 71);
+    let mut rgb_scalar = std::vec![0u8; width * 3];
+    let mut rgb_simd = std::vec![0u8; width * 3];
+    scalar::yuv_420p16_to_rgb_row(&y, &u, &v, &mut rgb_scalar, width, matrix, full_range);
+    unsafe {
+      yuv_420p16_to_rgb_row(&y, &u, &v, &mut rgb_simd, width, matrix, full_range);
+    }
+    assert_eq!(
+      rgb_scalar, rgb_simd,
+      "SSE4.1 yuv420p16→u8 diverges (width={width}, matrix={matrix:?}, full_range={full_range})"
+    );
+  }
+
+  fn check_yuv420p16_u16_sse41_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+    if !std::arch::is_x86_feature_detected!("sse4.1") {
+      return;
+    }
+    let y = p16_plane(width, 37);
+    let u = p16_plane(width / 2, 53);
+    let v = p16_plane(width / 2, 71);
+    let mut rgb_scalar = std::vec![0u16; width * 3];
+    let mut rgb_simd = std::vec![0u16; width * 3];
+    scalar::yuv_420p16_to_rgb_u16_row(&y, &u, &v, &mut rgb_scalar, width, matrix, full_range);
+    unsafe {
+      yuv_420p16_to_rgb_u16_row(&y, &u, &v, &mut rgb_simd, width, matrix, full_range);
+    }
+    assert_eq!(
+      rgb_scalar, rgb_simd,
+      "SSE4.1 yuv420p16→u16 diverges (width={width}, matrix={matrix:?}, full_range={full_range})"
+    );
+  }
+
+  fn check_p16_u8_sse41_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+    if !std::arch::is_x86_feature_detected!("sse4.1") {
+      return;
+    }
+    let y = p16_plane(width, 37);
+    let u = p16_plane(width / 2, 53);
+    let v = p16_plane(width / 2, 71);
+    let uv = p010_uv_interleave(&u, &v);
+    let mut rgb_scalar = std::vec![0u8; width * 3];
+    let mut rgb_simd = std::vec![0u8; width * 3];
+    scalar::p16_to_rgb_row(&y, &uv, &mut rgb_scalar, width, matrix, full_range);
+    unsafe {
+      p16_to_rgb_row(&y, &uv, &mut rgb_simd, width, matrix, full_range);
+    }
+    assert_eq!(
+      rgb_scalar, rgb_simd,
+      "SSE4.1 p016→u8 diverges (width={width}, matrix={matrix:?}, full_range={full_range})"
+    );
+  }
+
+  fn check_p16_u16_sse41_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+    if !std::arch::is_x86_feature_detected!("sse4.1") {
+      return;
+    }
+    let y = p16_plane(width, 37);
+    let u = p16_plane(width / 2, 53);
+    let v = p16_plane(width / 2, 71);
+    let uv = p010_uv_interleave(&u, &v);
+    let mut rgb_scalar = std::vec![0u16; width * 3];
+    let mut rgb_simd = std::vec![0u16; width * 3];
+    scalar::p16_to_rgb_u16_row(&y, &uv, &mut rgb_scalar, width, matrix, full_range);
+    unsafe {
+      p16_to_rgb_u16_row(&y, &uv, &mut rgb_simd, width, matrix, full_range);
+    }
+    assert_eq!(
+      rgb_scalar, rgb_simd,
+      "SSE4.1 p016→u16 diverges (width={width}, matrix={matrix:?}, full_range={full_range})"
+    );
+  }
+
+  #[test]
+  fn sse41_p16_matches_scalar_all_matrices() {
+    for m in [
+      ColorMatrix::Bt601,
+      ColorMatrix::Bt709,
+      ColorMatrix::Bt2020Ncl,
+      ColorMatrix::Smpte240m,
+      ColorMatrix::Fcc,
+      ColorMatrix::YCgCo,
+    ] {
+      for full in [true, false] {
+        check_yuv420p16_u8_sse41_equivalence(16, m, full);
+        check_yuv420p16_u16_sse41_equivalence(16, m, full);
+        check_p16_u8_sse41_equivalence(16, m, full);
+        check_p16_u16_sse41_equivalence(16, m, full);
+      }
+    }
+  }
+
+  #[test]
+  fn sse41_p16_matches_scalar_tail_widths() {
+    for w in [18usize, 30, 34, 1922] {
+      check_yuv420p16_u8_sse41_equivalence(w, ColorMatrix::Bt601, false);
+      check_yuv420p16_u16_sse41_equivalence(w, ColorMatrix::Bt709, true);
+      check_p16_u8_sse41_equivalence(w, ColorMatrix::Bt601, false);
+      check_p16_u16_sse41_equivalence(w, ColorMatrix::Bt2020Ncl, false);
+    }
+  }
+
+  #[test]
+  fn sse41_p16_matches_scalar_1920() {
+    check_yuv420p16_u8_sse41_equivalence(1920, ColorMatrix::Bt709, false);
+    check_yuv420p16_u16_sse41_equivalence(1920, ColorMatrix::Bt2020Ncl, false);
+    check_p16_u8_sse41_equivalence(1920, ColorMatrix::Bt709, false);
+    check_p16_u16_sse41_equivalence(1920, ColorMatrix::Bt2020Ncl, false);
   }
 }
