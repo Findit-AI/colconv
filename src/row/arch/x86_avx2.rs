@@ -2691,18 +2691,27 @@ pub(crate) unsafe fn p16_to_rgb_u16_row(
     let cbu = _mm256_set1_epi32(coeffs.b_u());
     let cbv = _mm256_set1_epi32(coeffs.b_v());
 
-    // Reuse SSE4.1's 128-bit UV deinterleave — 16 pixels/iter needs
-    // exactly 8 UV pairs = 16 u16 (one __m128i load).
+    // 16 pixels/iter needs 8 UV pairs = 16 u16 = 32 bytes of UV data.
+    // Load as two __m128i halves so we can reuse the SSE4.1 128-bit
+    // byte-shuffle mask. Each half carries 4 UV pairs; we deinterleave
+    // each to [U's | V's] and then join the two U halves / two V halves.
     let split_mask_128 = _mm_setr_epi8(0, 1, 4, 5, 8, 9, 12, 13, 2, 3, 6, 7, 10, 11, 14, 15);
 
     let mut x = 0usize;
     while x + 16 <= width {
       let y_vec = _mm256_loadu_si256(y.as_ptr().add(x).cast());
-      // Load 8 UV pairs = 16 u16 as __m128i; shuffle to [U0..U7, V0..V7].
-      let uv_raw = _mm_loadu_si128(uv_half.as_ptr().add(x).cast());
-      let uv_split = _mm_shuffle_epi8(uv_raw, split_mask_128);
-      let u_vec_128 = uv_split;
-      let v_vec_128 = _mm_srli_si128::<8>(uv_split);
+      // Two 128-bit UV loads: bytes [0..16) and [16..32). `x + 8` is
+      // in u16 units (8 u16 = 16 bytes) — the second load starts at
+      // byte offset 16, which is UV pair index 4.
+      let uv_lo_raw = _mm_loadu_si128(uv_half.as_ptr().add(x).cast());
+      let uv_hi_raw = _mm_loadu_si128(uv_half.as_ptr().add(x + 8).cast());
+      // Deinterleave each half: [U0,V0,U1,V1,U2,V2,U3,V3] →
+      // [U0,U1,U2,U3, V0,V1,V2,V3] (low 64b = U's, high 64b = V's).
+      let uv_lo_split = _mm_shuffle_epi8(uv_lo_raw, split_mask_128);
+      let uv_hi_split = _mm_shuffle_epi8(uv_hi_raw, split_mask_128);
+      // Combine: low 64 of each → 8 U samples; high 64 of each → 8 V.
+      let u_vec_128 = _mm_unpacklo_epi64(uv_lo_split, uv_hi_split);
+      let v_vec_128 = _mm_unpackhi_epi64(uv_lo_split, uv_hi_split);
 
       let bias16_128 = _mm256_castsi256_si128(bias16_v);
       let u_i16 = _mm_sub_epi16(u_vec_128, bias16_128);

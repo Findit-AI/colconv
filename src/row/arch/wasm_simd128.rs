@@ -2193,11 +2193,13 @@ pub(crate) unsafe fn yuv_420p16_to_rgb_u16_row(
     while x + 8 <= width {
       // 8 Y pixels / 4 chroma pairs per iter (i64x2 constraint).
       let y_vec = v128_load(y.as_ptr().add(x).cast());
-      // Load 4 UV samples each = 8 bytes. v128_load reads 16 bytes;
-      // we use the low 8 and ignore the high — see debug_assert on
-      // u_half.len().
-      let u_vec = v128_load(u_half.as_ptr().add(x / 2).cast());
-      let v_vec = v128_load(v_half.as_ptr().add(x / 2).cast());
+      // 4 U + 4 V samples = 8 bytes each. Use `v128_load64_zero` so we
+      // don't over-read 8 bytes past the chroma plane — the public
+      // contract only promises `u_half.len() >= width / 2`, and at
+      // tight width=16 the second iteration's `v128_load` at
+      // `u_half[4..]` would read 8 bytes past the end.
+      let u_vec = v128_load64_zero(u_half.as_ptr().add(x / 2).cast());
+      let v_vec = v128_load64_zero(v_half.as_ptr().add(x / 2).cast());
 
       let u_i16 = i16x8_sub(u_vec, bias16);
       let v_i16 = i16x8_sub(v_vec, bias16);
