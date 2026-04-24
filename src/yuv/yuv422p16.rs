@@ -93,13 +93,17 @@ pub fn yuv422p16_to<S: Yuv422p16Sink>(
   let v_stride = src.v_stride() as usize;
   let chroma_width = w / 2;
 
+  let y_plane = src.y();
+  let u_plane = src.u();
+  let v_plane = src.v();
+
   for row in 0..h {
     let y_start = row * y_stride;
-    let y = &src.y()[y_start..y_start + w];
+    let y = &y_plane[y_start..y_start + w];
     let u_start = row * u_stride;
     let v_start = row * v_stride;
-    let u_half = &src.u()[u_start..u_start + chroma_width];
-    let v_half = &src.v()[v_start..v_start + chroma_width];
+    let u_half = &u_plane[u_start..u_start + chroma_width];
+    let v_half = &v_plane[v_start..v_start + chroma_width];
 
     sink.process(Yuv422p16Row::new(
       y, u_half, v_half, row, matrix, full_range,

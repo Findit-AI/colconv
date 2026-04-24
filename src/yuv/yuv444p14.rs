@@ -91,13 +91,17 @@ pub fn yuv444p14_to<S: Yuv444p14Sink>(
   let u_stride = src.u_stride() as usize;
   let v_stride = src.v_stride() as usize;
 
+  let y_plane = src.y();
+  let u_plane = src.u();
+  let v_plane = src.v();
+
   for row in 0..h {
     let y_start = row * y_stride;
-    let y = &src.y()[y_start..y_start + w];
+    let y = &y_plane[y_start..y_start + w];
     let u_start = row * u_stride;
     let v_start = row * v_stride;
-    let u = &src.u()[u_start..u_start + w];
-    let v = &src.v()[v_start..v_start + w];
+    let u = &u_plane[u_start..u_start + w];
+    let v = &v_plane[v_start..v_start + w];
 
     sink.process(Yuv444p14Row::new(y, u, v, row, matrix, full_range))?;
   }
