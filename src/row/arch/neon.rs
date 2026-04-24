@@ -499,8 +499,7 @@ pub(crate) unsafe fn yuv_420p_n_to_rgb_u16_row<const BITS: u32>(
 ///
 /// # Safety
 ///
-/// 1. **NEON must be available.** 2. `y.len() >= width`,
-/// `u.len() >= width`, `v.len() >= width`, `rgb_out.len() >= 3 * width`.
+/// 1. **NEON must be available.** 2. `y.len() >= width`, `u.len() >= width`, `v.len() >= width`, `rgb_out.len() >= 3 * width`.
 #[inline]
 #[target_feature(enable = "neon")]
 pub(crate) unsafe fn yuv_444p_n_to_rgb_row<const BITS: u32>(

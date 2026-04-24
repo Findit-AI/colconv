@@ -4085,7 +4085,7 @@ mod tests {
     let y = std::vec![0u16; 16 * 8];
     let u = std::vec![512u16; 8 * 4];
     let mut v = std::vec![512u16; 8 * 4];
-    v[1 * 8 + 7] = 0xFFFF; // all bits set
+    v[8 + 7] = 0xFFFF; // all bits set
     let e = Yuv420p10Frame::try_new_checked(&y, &u, &v, 16, 8, 16, 8, 8).unwrap_err();
     assert!(matches!(
       e,

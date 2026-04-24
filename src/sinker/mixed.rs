@@ -5045,8 +5045,8 @@ mod tests {
     let w = 15usize;
     let h = 8usize;
     let y = std::vec![0u8; w * h];
-    let u = std::vec![128u8; ((w + 1) / 2) * h / 2 + 8]; // any valid size
-    let v = std::vec![128u8; ((w + 1) / 2) * h / 2 + 8];
+    let u = std::vec![128u8; w.div_ceil(2) * h / 2 + 8]; // any valid size
+    let v = std::vec![128u8; w.div_ceil(2) * h / 2 + 8];
     // Build the Frame separately — Yuv420pFrame rejects odd width
     // too, so we can't construct a 15-wide frame. That's fine: we
     // only need to hit `begin_frame`, which takes (width, height)
