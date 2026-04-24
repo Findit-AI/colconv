@@ -555,8 +555,8 @@ pub fn yuv_444_to_rgb_row(
 }
 
 /// YUV 4:4:4 planar 10/12/14-bit → **u8** RGB dispatcher. Const
-/// generic over `BITS ∈ {10, 12, 14}`. Scalar-only for Phase 3 of
-/// this PR; SIMD backends wire in Phase 3c.
+/// generic over `BITS ∈ {10, 12, 14}`. NEON native; x86/wasm backends
+/// currently fall through to scalar (follow-up).
 #[cfg_attr(not(tarpaulin), inline(always))]
 #[allow(clippy::too_many_arguments)]
 pub fn yuv_444p_n_to_rgb_row<const BITS: u32>(
@@ -575,12 +575,27 @@ pub fn yuv_444p_n_to_rgb_row<const BITS: u32>(
   assert!(v.len() >= width, "v row too short");
   assert!(rgb_out.len() >= rgb_min, "rgb_out row too short");
 
-  let _ = use_simd;
+  if use_simd {
+    cfg_select! {
+      target_arch = "aarch64" => {
+        if neon_available() {
+          // SAFETY: NEON verified.
+          unsafe {
+            arch::neon::yuv_444p_n_to_rgb_row::<BITS>(y, u, v, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+      },
+      _ => {}
+    }
+  }
+
   scalar::yuv_444p_n_to_rgb_row::<BITS>(y, u, v, rgb_out, width, matrix, full_range);
 }
 
 /// YUV 4:4:4 planar 10/12/14-bit → **native-depth u16** RGB dispatcher.
 /// Const generic over `BITS ∈ {10, 12, 14}`. Low-bit-packed output.
+/// NEON native; x86/wasm fall through to scalar (follow-up).
 #[cfg_attr(not(tarpaulin), inline(always))]
 #[allow(clippy::too_many_arguments)]
 pub fn yuv_444p_n_to_rgb_u16_row<const BITS: u32>(
@@ -598,7 +613,21 @@ pub fn yuv_444p_n_to_rgb_u16_row<const BITS: u32>(
   assert!(v.len() >= width, "v row too short");
   assert!(rgb_out.len() >= 3 * width, "rgb_out row too short");
 
-  let _ = use_simd;
+  if use_simd {
+    cfg_select! {
+      target_arch = "aarch64" => {
+        if neon_available() {
+          // SAFETY: NEON verified.
+          unsafe {
+            arch::neon::yuv_444p_n_to_rgb_u16_row::<BITS>(y, u, v, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+      },
+      _ => {}
+    }
+  }
+
   scalar::yuv_444p_n_to_rgb_u16_row::<BITS>(y, u, v, rgb_out, width, matrix, full_range);
 }
 
@@ -720,7 +749,21 @@ pub fn yuv444p16_to_rgb_row(
   assert!(v.len() >= width, "v row too short");
   assert!(rgb_out.len() >= rgb_min, "rgb_out row too short");
 
-  let _ = use_simd;
+  if use_simd {
+    cfg_select! {
+      target_arch = "aarch64" => {
+        if neon_available() {
+          // SAFETY: NEON verified.
+          unsafe {
+            arch::neon::yuv_444p16_to_rgb_row(y, u, v, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+      },
+      _ => {}
+    }
+  }
+
   scalar::yuv_444p16_to_rgb_row(y, u, v, rgb_out, width, matrix, full_range);
 }
 
@@ -744,7 +787,21 @@ pub fn yuv444p16_to_rgb_u16_row(
   assert!(v.len() >= width, "v row too short");
   assert!(rgb_out.len() >= 3 * width, "rgb_out row too short");
 
-  let _ = use_simd;
+  if use_simd {
+    cfg_select! {
+      target_arch = "aarch64" => {
+        if neon_available() {
+          // SAFETY: NEON verified.
+          unsafe {
+            arch::neon::yuv_444p16_to_rgb_u16_row(y, u, v, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+      },
+      _ => {}
+    }
+  }
+
   scalar::yuv_444p16_to_rgb_u16_row(y, u, v, rgb_out, width, matrix, full_range);
 }
 

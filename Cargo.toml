@@ -69,6 +69,46 @@ name = "p016_to_rgb"
 harness = false
 
 [[bench]]
+name = "yuv_422p_to_rgb"
+harness = false
+
+[[bench]]
+name = "yuv_422p10_to_rgb"
+harness = false
+
+[[bench]]
+name = "yuv_422p12_to_rgb"
+harness = false
+
+[[bench]]
+name = "yuv_422p14_to_rgb"
+harness = false
+
+[[bench]]
+name = "yuv_422p16_to_rgb"
+harness = false
+
+[[bench]]
+name = "yuv_444p_to_rgb"
+harness = false
+
+[[bench]]
+name = "yuv_444p10_to_rgb"
+harness = false
+
+[[bench]]
+name = "yuv_444p12_to_rgb"
+harness = false
+
+[[bench]]
+name = "yuv_444p14_to_rgb"
+harness = false
+
+[[bench]]
+name = "yuv_444p16_to_rgb"
+harness = false
+
+[[bench]]
 name = "rgb_to_hsv"
 harness = false
 

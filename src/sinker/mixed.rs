@@ -4326,11 +4326,15 @@ mod tests {
     ColorMatrix,
     frame::{
       Nv12Frame, Nv16Frame, Nv21Frame, Nv24Frame, Nv42Frame, P010Frame, P012Frame, P016Frame,
-      Yuv420p10Frame, Yuv420p12Frame, Yuv420p14Frame, Yuv420p16Frame, Yuv420pFrame,
+      Yuv420p10Frame, Yuv420p12Frame, Yuv420p14Frame, Yuv420p16Frame, Yuv420pFrame, Yuv422p10Frame,
+      Yuv422p12Frame, Yuv422p14Frame, Yuv422p16Frame, Yuv422pFrame, Yuv444p10Frame, Yuv444p12Frame,
+      Yuv444p14Frame, Yuv444p16Frame, Yuv444pFrame,
     },
     yuv::{
       nv12_to, nv16_to, nv21_to, nv24_to, nv42_to, p010_to, p012_to, p016_to, yuv420p_to,
-      yuv420p10_to, yuv420p12_to, yuv420p14_to, yuv420p16_to,
+      yuv420p10_to, yuv420p12_to, yuv420p14_to, yuv420p16_to, yuv422p_to, yuv422p10_to,
+      yuv422p12_to, yuv422p14_to, yuv422p16_to, yuv444p_to, yuv444p10_to, yuv444p12_to,
+      yuv444p14_to, yuv444p16_to,
     },
   };
 
@@ -7086,5 +7090,340 @@ mod tests {
 
     assert_eq!(rgb_scalar, rgb_simd);
     assert_eq!(rgb_u16_scalar, rgb_u16_simd);
+  }
+
+  // ---- Ship 6: sanity tests for new 4:2:2 / 4:4:4 formats ---------------
+
+  fn solid_yuv422p_frame(
+    width: u32,
+    height: u32,
+    y: u8,
+    u: u8,
+    v: u8,
+  ) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
+    let w = width as usize;
+    let h = height as usize;
+    let cw = w / 2;
+    // 4:2:2: chroma is half-width, FULL-height.
+    (
+      std::vec![y; w * h],
+      std::vec![u; cw * h],
+      std::vec![v; cw * h],
+    )
+  }
+
+  fn solid_yuv444p_frame(
+    width: u32,
+    height: u32,
+    y: u8,
+    u: u8,
+    v: u8,
+  ) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
+    let w = width as usize;
+    let h = height as usize;
+    (
+      std::vec![y; w * h],
+      std::vec![u; w * h],
+      std::vec![v; w * h],
+    )
+  }
+
+  fn solid_yuv422p_n_frame(
+    width: u32,
+    height: u32,
+    y: u16,
+    u: u16,
+    v: u16,
+  ) -> (Vec<u16>, Vec<u16>, Vec<u16>) {
+    let w = width as usize;
+    let h = height as usize;
+    let cw = w / 2;
+    (
+      std::vec![y; w * h],
+      std::vec![u; cw * h],
+      std::vec![v; cw * h],
+    )
+  }
+
+  fn solid_yuv444p_n_frame(
+    width: u32,
+    height: u32,
+    y: u16,
+    u: u16,
+    v: u16,
+  ) -> (Vec<u16>, Vec<u16>, Vec<u16>) {
+    let w = width as usize;
+    let h = height as usize;
+    (
+      std::vec![y; w * h],
+      std::vec![u; w * h],
+      std::vec![v; w * h],
+    )
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn yuv422p_gray_to_gray() {
+    let (yp, up, vp) = solid_yuv422p_frame(16, 8, 128, 128, 128);
+    let src = Yuv422pFrame::new(&yp, &up, &vp, 16, 8, 16, 8, 8);
+
+    let mut rgb = std::vec![0u8; 16 * 8 * 3];
+    let mut sink = MixedSinker::<Yuv422p>::new(16, 8)
+      .with_rgb(&mut rgb)
+      .unwrap();
+    yuv422p_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+    for px in rgb.chunks(3) {
+      assert!(px[0].abs_diff(128) <= 1);
+      assert_eq!(px[0], px[1]);
+      assert_eq!(px[1], px[2]);
+    }
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn yuv444p_gray_to_gray() {
+    let (yp, up, vp) = solid_yuv444p_frame(16, 8, 128, 128, 128);
+    let src = Yuv444pFrame::new(&yp, &up, &vp, 16, 8, 16, 16, 16);
+
+    let mut rgb = std::vec![0u8; 16 * 8 * 3];
+    let mut sink = MixedSinker::<Yuv444p>::new(16, 8)
+      .with_rgb(&mut rgb)
+      .unwrap();
+    yuv444p_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+    for px in rgb.chunks(3) {
+      assert!(px[0].abs_diff(128) <= 1);
+      assert_eq!(px[0], px[1]);
+      assert_eq!(px[1], px[2]);
+    }
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn yuv422p10_gray_to_gray() {
+    let (yp, up, vp) = solid_yuv422p_n_frame(16, 8, 512, 512, 512);
+    let src = Yuv422p10Frame::new(&yp, &up, &vp, 16, 8, 16, 8, 8);
+
+    let mut rgb = std::vec![0u8; 16 * 8 * 3];
+    let mut sink = MixedSinker::<Yuv422p10>::new(16, 8)
+      .with_rgb(&mut rgb)
+      .unwrap();
+    yuv422p10_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+    for px in rgb.chunks(3) {
+      assert!(px[0].abs_diff(128) <= 1);
+      assert_eq!(px[0], px[1]);
+      assert_eq!(px[1], px[2]);
+    }
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn yuv422p12_gray_to_gray() {
+    let (yp, up, vp) = solid_yuv422p_n_frame(16, 8, 2048, 2048, 2048);
+    let src = Yuv422p12Frame::new(&yp, &up, &vp, 16, 8, 16, 8, 8);
+
+    let mut rgb = std::vec![0u8; 16 * 8 * 3];
+    let mut sink = MixedSinker::<Yuv422p12>::new(16, 8)
+      .with_rgb(&mut rgb)
+      .unwrap();
+    yuv422p12_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+    for px in rgb.chunks(3) {
+      assert!(px[0].abs_diff(128) <= 1);
+      assert_eq!(px[0], px[1]);
+      assert_eq!(px[1], px[2]);
+    }
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn yuv422p14_gray_to_gray() {
+    let (yp, up, vp) = solid_yuv422p_n_frame(16, 8, 8192, 8192, 8192);
+    let src = Yuv422p14Frame::new(&yp, &up, &vp, 16, 8, 16, 8, 8);
+
+    let mut rgb = std::vec![0u8; 16 * 8 * 3];
+    let mut sink = MixedSinker::<Yuv422p14>::new(16, 8)
+      .with_rgb(&mut rgb)
+      .unwrap();
+    yuv422p14_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+    for px in rgb.chunks(3) {
+      assert!(px[0].abs_diff(128) <= 1);
+      assert_eq!(px[0], px[1]);
+      assert_eq!(px[1], px[2]);
+    }
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn yuv422p16_gray_to_gray_u16() {
+    let (yp, up, vp) = solid_yuv422p_n_frame(16, 8, 32768, 32768, 32768);
+    let src = Yuv422p16Frame::new(&yp, &up, &vp, 16, 8, 16, 8, 8);
+
+    let mut rgb_u8 = std::vec![0u8; 16 * 8 * 3];
+    let mut rgb_u16 = std::vec![0u16; 16 * 8 * 3];
+    let mut sink = MixedSinker::<Yuv422p16>::new(16, 8)
+      .with_rgb(&mut rgb_u8)
+      .unwrap()
+      .with_rgb_u16(&mut rgb_u16)
+      .unwrap();
+    yuv422p16_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+    for px in rgb_u8.chunks(3) {
+      assert!(px[0].abs_diff(128) <= 1);
+      assert_eq!(px[0], px[1]);
+      assert_eq!(px[1], px[2]);
+    }
+    for px in rgb_u16.chunks(3) {
+      assert!(px[0].abs_diff(32768) <= 256);
+      assert_eq!(px[0], px[1]);
+      assert_eq!(px[1], px[2]);
+    }
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn yuv444p10_gray_to_gray() {
+    let (yp, up, vp) = solid_yuv444p_n_frame(16, 8, 512, 512, 512);
+    let src = Yuv444p10Frame::new(&yp, &up, &vp, 16, 8, 16, 16, 16);
+
+    let mut rgb = std::vec![0u8; 16 * 8 * 3];
+    let mut sink = MixedSinker::<Yuv444p10>::new(16, 8)
+      .with_rgb(&mut rgb)
+      .unwrap();
+    yuv444p10_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+    for px in rgb.chunks(3) {
+      assert!(px[0].abs_diff(128) <= 1);
+      assert_eq!(px[0], px[1]);
+      assert_eq!(px[1], px[2]);
+    }
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn yuv444p12_gray_to_gray() {
+    let (yp, up, vp) = solid_yuv444p_n_frame(16, 8, 2048, 2048, 2048);
+    let src = Yuv444p12Frame::new(&yp, &up, &vp, 16, 8, 16, 16, 16);
+
+    let mut rgb = std::vec![0u8; 16 * 8 * 3];
+    let mut sink = MixedSinker::<Yuv444p12>::new(16, 8)
+      .with_rgb(&mut rgb)
+      .unwrap();
+    yuv444p12_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+    for px in rgb.chunks(3) {
+      assert!(px[0].abs_diff(128) <= 1);
+      assert_eq!(px[0], px[1]);
+      assert_eq!(px[1], px[2]);
+    }
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn yuv444p14_gray_to_gray() {
+    let (yp, up, vp) = solid_yuv444p_n_frame(16, 8, 8192, 8192, 8192);
+    let src = Yuv444p14Frame::new(&yp, &up, &vp, 16, 8, 16, 16, 16);
+
+    let mut rgb = std::vec![0u8; 16 * 8 * 3];
+    let mut sink = MixedSinker::<Yuv444p14>::new(16, 8)
+      .with_rgb(&mut rgb)
+      .unwrap();
+    yuv444p14_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+    for px in rgb.chunks(3) {
+      assert!(px[0].abs_diff(128) <= 1);
+      assert_eq!(px[0], px[1]);
+      assert_eq!(px[1], px[2]);
+    }
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn yuv444p16_gray_to_gray_u16() {
+    let (yp, up, vp) = solid_yuv444p_n_frame(16, 8, 32768, 32768, 32768);
+    let src = Yuv444p16Frame::new(&yp, &up, &vp, 16, 8, 16, 16, 16);
+
+    let mut rgb_u8 = std::vec![0u8; 16 * 8 * 3];
+    let mut rgb_u16 = std::vec![0u16; 16 * 8 * 3];
+    let mut sink = MixedSinker::<Yuv444p16>::new(16, 8)
+      .with_rgb(&mut rgb_u8)
+      .unwrap()
+      .with_rgb_u16(&mut rgb_u16)
+      .unwrap();
+    yuv444p16_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+    for px in rgb_u8.chunks(3) {
+      assert!(px[0].abs_diff(128) <= 1);
+      assert_eq!(px[0], px[1]);
+      assert_eq!(px[1], px[2]);
+    }
+    for px in rgb_u16.chunks(3) {
+      assert!(px[0].abs_diff(32768) <= 256);
+      assert_eq!(px[0], px[1]);
+      assert_eq!(px[1], px[2]);
+    }
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn yuv422p_matches_yuv420p_luma_when_chroma_matches() {
+    // 4:2:2 and 4:2:0 differ only in vertical chroma walk. With solid
+    // chroma planes they must produce identical RGB output — this is
+    // the whole reason Yuv422p reuses the yuv_420 row kernel.
+    let w = 32u32;
+    let h = 8u32;
+    let (yp, up422, vp422) = solid_yuv422p_frame(w, h, 140, 100, 160);
+    let src422 = Yuv422pFrame::new(&yp, &up422, &vp422, w, h, w, w / 2, w / 2);
+
+    let (yp420, up420, vp420) = solid_yuv420p_frame(w, h, 140, 100, 160);
+    let src420 = Yuv420pFrame::new(&yp420, &up420, &vp420, w, h, w, w / 2, w / 2);
+
+    let mut rgb422 = std::vec![0u8; (w * h * 3) as usize];
+    let mut rgb420 = std::vec![0u8; (w * h * 3) as usize];
+    let mut s422 = MixedSinker::<Yuv422p>::new(w as usize, h as usize)
+      .with_rgb(&mut rgb422)
+      .unwrap();
+    let mut s420 = MixedSinker::<Yuv420p>::new(w as usize, h as usize)
+      .with_rgb(&mut rgb420)
+      .unwrap();
+    yuv422p_to(&src422, true, ColorMatrix::Bt709, &mut s422).unwrap();
+    yuv420p_to(&src420, true, ColorMatrix::Bt709, &mut s420).unwrap();
+    assert_eq!(rgb422, rgb420);
   }
 }

@@ -1,5 +1,80 @@
 # UNRELEASED
 
+## Ship 6 — Yuv422p / Yuv444p at 8/10/12/14/16 bit
+
+All three priorities landed in a single PR:
+- **A (HW→SW gap)** — `Yuv444p16` (NVDEC / CUDA 4:4:4 HDR download target)
+- **B (Pro video)** — `Yuv422p10/12/14`, `Yuv444p10/12/14` (ProRes, DNxHD)
+- **C (Common SW)** — `Yuv422p`, `Yuv444p` 8-bit (libx264 defaults)
+
+### New formats
+
+- **`Yuv422p`** — 4:2:2 planar, 8-bit. New `Yuv422pFrame` + marker +
+  walker + `MixedSinker<Yuv422p>` impl. Per-row kernel reused from
+  `Yuv420p` verbatim (4:2:0 vs 4:2:2 differs only in the vertical
+  walker). No new SIMD kernels.
+- **`Yuv422p10` / `Yuv422p12` / `Yuv422p14`** — 4:2:2 planar at 10 /
+  12 / 14 bit. Const-generic `Yuv422pFrame16<BITS>` with aliases.
+  Per-row kernels reused from the `Yuv420p_n<BITS>` family.
+- **`Yuv422p16`** — 4:2:2 planar at 16 bit. Alias over
+  `Yuv422pFrame16<'_, 16>`. Per-row kernels reused from the parallel
+  i64-chroma `yuv_420p16_to_rgb_*` family.
+- **`Yuv444p`** — 4:4:4 planar, 8-bit. New `Yuv444pFrame` + marker +
+  walker + `MixedSinker<Yuv444p>` + dedicated `yuv_444_to_rgb_row`
+  kernel family. No width parity constraint (4:4:4 chroma is 1:1
+  with Y, not paired).
+- **`Yuv444p10` / `Yuv444p12` / `Yuv444p14`** — 4:4:4 planar at 10 /
+  12 / 14 bit. Const-generic `Yuv444pFrame16<BITS>` with aliases.
+  New const-generic `yuv_444p_n_to_rgb_row<BITS>` +
+  `yuv_444p_n_to_rgb_u16_row<BITS>` kernel family.
+- **`Yuv444p16`** — 4:4:4 planar at 16 bit. Alias over
+  `Yuv444pFrame16<'_, 16>`. Dedicated parallel i64-chroma kernel
+  family `yuv444p16_to_rgb_*` (same rationale as `Yuv420p16` — the
+  blue coefficient overflows i32 at 16 bits).
+- New `RowSlice` variants for the full-width 4:4:4 chroma rows:
+  `UFull`, `VFull`, `UFull10/12/14`, `VFull10/12/14`.
+
+### SIMD
+
+| Kernel family              | NEON | SSE4.1 | AVX2 | AVX-512 | wasm   |
+| -------------------------- | ---- | ------ | ---- | ------- | ------ |
+| `yuv_444_to_rgb_row`       | ✅   | ✅     | ✅   | ✅      | ✅     |
+| `yuv_444p_n_to_rgb_*`      | ✅   | scalar | scalar | scalar | scalar |
+| `yuv444p16_to_rgb_*`       | ✅   | scalar | scalar | scalar | scalar |
+| `yuv_420_to_rgb_row` (via `Yuv422p`)                        | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `yuv420p{10,12,14,16}_to_rgb_*` (via `Yuv422p{10,12,14,16}`) | ✅ | ✅ | ✅ | ✅ | ✅ |
+
+The 4:2:2 row kernels inherit full per-arch SIMD coverage for free
+because they reuse the 4:2:0 row primitives. The new u16 / u8 4:4:4
+kernels (`yuv_444p_n`, `yuv444p16`) ship native NEON only; x86 /
+wasm are scalar fallbacks queued as a Ship 6c follow-up (mirrors
+Ship 4b → 4c).
+
+### Tests
+
+17 new tests total:
+- 11 `MixedSinker` integration tests (10 `gray → gray` sanity checks
+  covering every new format × u8/u16 output, plus a `yuv422p ↔
+  yuv420p` equivalence check that pins the shared-row-kernel
+  contract).
+- 6 NEON arch equivalence tests for `yuv_444p_n` and `yuv_444p16`
+  across all six matrices, full/limited range, and odd-width tails
+  (1, 3, 15, 17, 32, 33, 1920, 1921).
+
+Total suite: **271 passed on aarch64** (up from 254 at v0.5).
+
+### Benches
+
+10 new benches:
+- `yuv_422p_to_rgb`, `yuv_422p10_to_rgb`, `yuv_422p12_to_rgb`,
+  `yuv_422p14_to_rgb`, `yuv_422p16_to_rgb` — reuse the 4:2:0 row
+  primitives; output numerically identical to the 4:2:0 benches at
+  the same width.
+- `yuv_444p_to_rgb`, `yuv_444p10_to_rgb`, `yuv_444p12_to_rgb`,
+  `yuv_444p14_to_rgb`, `yuv_444p16_to_rgb` — dedicated 4:4:4
+  kernels. NEON 4× over scalar on the 8-bit kernel (~1.6 GiB/s
+  scalar → ~6.4 GiB/s NEON at 1080p).
+
 ## Ship 5 — NV16 / NV24 / NV42
 
 ### New formats
