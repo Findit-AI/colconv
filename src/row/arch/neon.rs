@@ -32,19 +32,7 @@
 //! 7. Saturating add Y + chroma per channel → i16x16.
 //! 8. Saturate‑narrow to u8x16 and interleave with `vst3q_u8`.
 
-use core::arch::aarch64::{
-  float32x4_t, int16x8_t, int32x2_t, int32x4_t, int64x2_t, uint8x16_t, uint8x16x3_t, uint16x8_t,
-  uint16x8x3_t, vaddq_f32, vaddq_s32, vaddq_s64, vandq_u16, vbslq_f32, vceqq_f32, vcltq_f32,
-  vcombine_s16, vcombine_s32, vcombine_u8, vcombine_u16, vcvtq_f32_u32, vcvtq_u32_f32, vdivq_f32,
-  vdup_n_s32, vdupq_n_f32, vdupq_n_s16, vdupq_n_s32, vdupq_n_s64, vdupq_n_u16, vget_high_s16,
-  vget_high_s32, vget_high_u8, vget_high_u16, vget_low_s16, vget_low_s32, vget_low_u8,
-  vget_low_u16, vld1_u8, vld1q_u8, vld1q_u16, vld2_u8, vld2q_u8, vld2q_u16, vld3q_u8, vmaxq_f32,
-  vmaxq_s16, vminq_f32, vminq_s16, vmovl_s16, vmovl_u8, vmovl_u16, vmovn_s64, vmovn_u16, vmovn_u32,
-  vmull_s32, vmulq_f32, vmulq_s32, vmvnq_u32, vqaddq_s16, vqmovn_s32, vqmovun_s16, vqmovun_s32,
-  vreinterpretq_s16_u16, vreinterpretq_s32_u32, vreinterpretq_u16_s16, vshlq_u16, vshrq_n_s32,
-  vshrq_n_s64, vst1q_u8, vst3q_u8, vst3q_u16, vsubq_f32, vsubq_s16, vsubq_s32, vzip1q_s16,
-  vzip1q_s32, vzip2q_s16, vzip2q_s32,
-};
+use core::arch::aarch64::*;
 
 use crate::{ColorMatrix, row::scalar};
 

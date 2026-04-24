@@ -6,12 +6,7 @@
 //! `#[inline(always)]` guarantees they inline into the caller,
 //! inheriting its `#[target_feature]` context.
 
-use core::arch::x86_64::{
-  __m128, __m128i, _mm_add_ps, _mm_blendv_ps, _mm_cmpeq_ps, _mm_cmplt_ps, _mm_cvtepi32_ps,
-  _mm_cvtepu8_epi32, _mm_cvttps_epi32, _mm_loadu_si128, _mm_max_ps, _mm_min_ps, _mm_mul_ps,
-  _mm_or_si128, _mm_packus_epi16, _mm_packus_epi32, _mm_rcp_ps, _mm_set1_ps, _mm_setr_epi8,
-  _mm_setzero_ps, _mm_shuffle_epi8, _mm_srli_si128, _mm_storeu_si128, _mm_sub_ps,
-};
+use core::arch::x86_64::*;
 
 /// Writes 16 pixels of packed RGB (48 bytes) from three u8x16 channel
 /// vectors.

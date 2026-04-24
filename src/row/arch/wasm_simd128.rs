@@ -35,15 +35,7 @@
 //! 8. Saturate‑narrow to u8x16 per channel (`u8x16_narrow_i16x8`),
 //!    interleave as packed RGB via three `u8x16_swizzle` calls.
 
-use core::arch::wasm32::{
-  f32x4_add, f32x4_convert_i32x4, f32x4_div, f32x4_eq, f32x4_lt, f32x4_max, f32x4_min, f32x4_mul,
-  f32x4_splat, f32x4_sub, i8x16, i8x16_shuffle, i16x8_add_sat, i16x8_max, i16x8_min,
-  i16x8_narrow_i32x4, i16x8_splat, i16x8_sub, i32x4_add, i32x4_extend_high_i16x8,
-  i32x4_extend_low_i16x8, i32x4_mul, i32x4_shr, i32x4_splat, i32x4_sub, i32x4_trunc_sat_f32x4,
-  u8x16_narrow_i16x8, u8x16_swizzle, u16x8_extend_high_u8x16, u16x8_extend_low_u8x16,
-  u16x8_load_extend_u8x8, u16x8_shr, u16x8_splat, u32x4_extend_high_u16x8, u32x4_extend_low_u16x8,
-  v128, v128_and, v128_bitselect, v128_load, v128_or, v128_store,
-};
+use core::arch::wasm32::*;
 
 use crate::{ColorMatrix, row::scalar};
 
@@ -442,6 +434,488 @@ pub(crate) unsafe fn yuv_420p_n_to_rgb_u16_row<const BITS: u32>(
 #[inline(always)]
 fn clamp_u10_wasm(v: v128, zero_v: v128, max_v: v128) -> v128 {
   i16x8_min(i16x8_max(v, zero_v), max_v)
+}
+
+/// WASM simd128 YUV 4:4:4 planar 10/12/14-bit → packed **u8** RGB.
+/// Const-generic over `BITS ∈ {10, 12, 14}`. Block size 16 pixels.
+///
+/// # Safety
+///
+/// 1. **simd128 must be enabled at compile time.**
+/// 2. `y.len() >= width`, `u.len() >= width`, `v.len() >= width`,
+///    `rgb_out.len() >= 3 * width`.
+#[inline]
+#[target_feature(enable = "simd128")]
+pub(crate) unsafe fn yuv_444p_n_to_rgb_row<const BITS: u32>(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  const { assert!(BITS == 10 || BITS == 12 || BITS == 14) };
+  debug_assert!(y.len() >= width);
+  debug_assert!(u.len() >= width);
+  debug_assert!(v.len() >= width);
+  debug_assert!(rgb_out.len() >= width * 3);
+
+  let coeffs = scalar::Coefficients::for_matrix(matrix);
+  let (y_off, y_scale, c_scale) = scalar::range_params_n::<BITS, 8>(full_range);
+  let bias = scalar::chroma_bias::<BITS>();
+  const RND: i32 = 1 << 14;
+
+  unsafe {
+    let rnd_v = i32x4_splat(RND);
+    let y_off_v = i16x8_splat(y_off as i16);
+    let y_scale_v = i32x4_splat(y_scale);
+    let c_scale_v = i32x4_splat(c_scale);
+    let bias_v = i16x8_splat(bias as i16);
+    let mask_v = u16x8_splat(scalar::bits_mask::<BITS>());
+    let cru = i32x4_splat(coeffs.r_u());
+    let crv = i32x4_splat(coeffs.r_v());
+    let cgu = i32x4_splat(coeffs.g_u());
+    let cgv = i32x4_splat(coeffs.g_v());
+    let cbu = i32x4_splat(coeffs.b_u());
+    let cbv = i32x4_splat(coeffs.b_v());
+
+    let mut x = 0usize;
+    while x + 16 <= width {
+      // 16 Y + 16 U + 16 V per iter. Full-width chroma (two u16x8
+      // loads each) — no horizontal duplication, 4:4:4 is 1:1.
+      let y_low_i16 = v128_and(v128_load(y.as_ptr().add(x).cast()), mask_v);
+      let y_high_i16 = v128_and(v128_load(y.as_ptr().add(x + 8).cast()), mask_v);
+      let u_lo_vec = v128_and(v128_load(u.as_ptr().add(x).cast()), mask_v);
+      let u_hi_vec = v128_and(v128_load(u.as_ptr().add(x + 8).cast()), mask_v);
+      let v_lo_vec = v128_and(v128_load(v.as_ptr().add(x).cast()), mask_v);
+      let v_hi_vec = v128_and(v128_load(v.as_ptr().add(x + 8).cast()), mask_v);
+
+      let u_lo_i16 = i16x8_sub(u_lo_vec, bias_v);
+      let u_hi_i16 = i16x8_sub(u_hi_vec, bias_v);
+      let v_lo_i16 = i16x8_sub(v_lo_vec, bias_v);
+      let v_hi_i16 = i16x8_sub(v_hi_vec, bias_v);
+
+      let u_lo_a = i32x4_extend_low_i16x8(u_lo_i16);
+      let u_lo_b = i32x4_extend_high_i16x8(u_lo_i16);
+      let u_hi_a = i32x4_extend_low_i16x8(u_hi_i16);
+      let u_hi_b = i32x4_extend_high_i16x8(u_hi_i16);
+      let v_lo_a = i32x4_extend_low_i16x8(v_lo_i16);
+      let v_lo_b = i32x4_extend_high_i16x8(v_lo_i16);
+      let v_hi_a = i32x4_extend_low_i16x8(v_hi_i16);
+      let v_hi_b = i32x4_extend_high_i16x8(v_hi_i16);
+
+      let u_d_lo_a = q15_shift(i32x4_add(i32x4_mul(u_lo_a, c_scale_v), rnd_v));
+      let u_d_lo_b = q15_shift(i32x4_add(i32x4_mul(u_lo_b, c_scale_v), rnd_v));
+      let u_d_hi_a = q15_shift(i32x4_add(i32x4_mul(u_hi_a, c_scale_v), rnd_v));
+      let u_d_hi_b = q15_shift(i32x4_add(i32x4_mul(u_hi_b, c_scale_v), rnd_v));
+      let v_d_lo_a = q15_shift(i32x4_add(i32x4_mul(v_lo_a, c_scale_v), rnd_v));
+      let v_d_lo_b = q15_shift(i32x4_add(i32x4_mul(v_lo_b, c_scale_v), rnd_v));
+      let v_d_hi_a = q15_shift(i32x4_add(i32x4_mul(v_hi_a, c_scale_v), rnd_v));
+      let v_d_hi_b = q15_shift(i32x4_add(i32x4_mul(v_hi_b, c_scale_v), rnd_v));
+
+      let r_chroma_lo = chroma_i16x8(cru, crv, u_d_lo_a, v_d_lo_a, u_d_lo_b, v_d_lo_b, rnd_v);
+      let r_chroma_hi = chroma_i16x8(cru, crv, u_d_hi_a, v_d_hi_a, u_d_hi_b, v_d_hi_b, rnd_v);
+      let g_chroma_lo = chroma_i16x8(cgu, cgv, u_d_lo_a, v_d_lo_a, u_d_lo_b, v_d_lo_b, rnd_v);
+      let g_chroma_hi = chroma_i16x8(cgu, cgv, u_d_hi_a, v_d_hi_a, u_d_hi_b, v_d_hi_b, rnd_v);
+      let b_chroma_lo = chroma_i16x8(cbu, cbv, u_d_lo_a, v_d_lo_a, u_d_lo_b, v_d_lo_b, rnd_v);
+      let b_chroma_hi = chroma_i16x8(cbu, cbv, u_d_hi_a, v_d_hi_a, u_d_hi_b, v_d_hi_b, rnd_v);
+
+      let y_scaled_lo = scale_y(y_low_i16, y_off_v, y_scale_v, rnd_v);
+      let y_scaled_hi = scale_y(y_high_i16, y_off_v, y_scale_v, rnd_v);
+
+      let r_lo = i16x8_add_sat(y_scaled_lo, r_chroma_lo);
+      let r_hi = i16x8_add_sat(y_scaled_hi, r_chroma_hi);
+      let g_lo = i16x8_add_sat(y_scaled_lo, g_chroma_lo);
+      let g_hi = i16x8_add_sat(y_scaled_hi, g_chroma_hi);
+      let b_lo = i16x8_add_sat(y_scaled_lo, b_chroma_lo);
+      let b_hi = i16x8_add_sat(y_scaled_hi, b_chroma_hi);
+
+      let b_u8 = u8x16_narrow_i16x8(b_lo, b_hi);
+      let g_u8 = u8x16_narrow_i16x8(g_lo, g_hi);
+      let r_u8 = u8x16_narrow_i16x8(r_lo, r_hi);
+
+      write_rgb_16(r_u8, g_u8, b_u8, rgb_out.as_mut_ptr().add(x * 3));
+
+      x += 16;
+    }
+
+    if x < width {
+      scalar::yuv_444p_n_to_rgb_row::<BITS>(
+        &y[x..width],
+        &u[x..width],
+        &v[x..width],
+        &mut rgb_out[x * 3..width * 3],
+        width - x,
+        matrix,
+        full_range,
+      );
+    }
+  }
+}
+
+/// WASM simd128 YUV 4:4:4 planar 10/12/14-bit → **native-depth u16** RGB.
+/// Const-generic over `BITS ∈ {10, 12, 14}`. 16 pixels per iter.
+///
+/// # Safety
+///
+/// Same as [`yuv_444p_n_to_rgb_row`] but `rgb_out: &mut [u16]`.
+#[inline]
+#[target_feature(enable = "simd128")]
+pub(crate) unsafe fn yuv_444p_n_to_rgb_u16_row<const BITS: u32>(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  rgb_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  const { assert!(BITS == 10 || BITS == 12 || BITS == 14) };
+  debug_assert!(y.len() >= width);
+  debug_assert!(u.len() >= width);
+  debug_assert!(v.len() >= width);
+  debug_assert!(rgb_out.len() >= width * 3);
+
+  let coeffs = scalar::Coefficients::for_matrix(matrix);
+  let (y_off, y_scale, c_scale) = scalar::range_params_n::<BITS, BITS>(full_range);
+  let bias = scalar::chroma_bias::<BITS>();
+  const RND: i32 = 1 << 14;
+  let out_max: i16 = ((1i32 << BITS) - 1) as i16;
+
+  unsafe {
+    let rnd_v = i32x4_splat(RND);
+    let y_off_v = i16x8_splat(y_off as i16);
+    let y_scale_v = i32x4_splat(y_scale);
+    let c_scale_v = i32x4_splat(c_scale);
+    let bias_v = i16x8_splat(bias as i16);
+    let mask_v = u16x8_splat(scalar::bits_mask::<BITS>());
+    let max_v = i16x8_splat(out_max);
+    let zero_v = i16x8_splat(0);
+    let cru = i32x4_splat(coeffs.r_u());
+    let crv = i32x4_splat(coeffs.r_v());
+    let cgu = i32x4_splat(coeffs.g_u());
+    let cgv = i32x4_splat(coeffs.g_v());
+    let cbu = i32x4_splat(coeffs.b_u());
+    let cbv = i32x4_splat(coeffs.b_v());
+
+    let mut x = 0usize;
+    while x + 16 <= width {
+      let y_low_i16 = v128_and(v128_load(y.as_ptr().add(x).cast()), mask_v);
+      let y_high_i16 = v128_and(v128_load(y.as_ptr().add(x + 8).cast()), mask_v);
+      let u_lo_vec = v128_and(v128_load(u.as_ptr().add(x).cast()), mask_v);
+      let u_hi_vec = v128_and(v128_load(u.as_ptr().add(x + 8).cast()), mask_v);
+      let v_lo_vec = v128_and(v128_load(v.as_ptr().add(x).cast()), mask_v);
+      let v_hi_vec = v128_and(v128_load(v.as_ptr().add(x + 8).cast()), mask_v);
+
+      let u_lo_i16 = i16x8_sub(u_lo_vec, bias_v);
+      let u_hi_i16 = i16x8_sub(u_hi_vec, bias_v);
+      let v_lo_i16 = i16x8_sub(v_lo_vec, bias_v);
+      let v_hi_i16 = i16x8_sub(v_hi_vec, bias_v);
+
+      let u_lo_a = i32x4_extend_low_i16x8(u_lo_i16);
+      let u_lo_b = i32x4_extend_high_i16x8(u_lo_i16);
+      let u_hi_a = i32x4_extend_low_i16x8(u_hi_i16);
+      let u_hi_b = i32x4_extend_high_i16x8(u_hi_i16);
+      let v_lo_a = i32x4_extend_low_i16x8(v_lo_i16);
+      let v_lo_b = i32x4_extend_high_i16x8(v_lo_i16);
+      let v_hi_a = i32x4_extend_low_i16x8(v_hi_i16);
+      let v_hi_b = i32x4_extend_high_i16x8(v_hi_i16);
+
+      let u_d_lo_a = q15_shift(i32x4_add(i32x4_mul(u_lo_a, c_scale_v), rnd_v));
+      let u_d_lo_b = q15_shift(i32x4_add(i32x4_mul(u_lo_b, c_scale_v), rnd_v));
+      let u_d_hi_a = q15_shift(i32x4_add(i32x4_mul(u_hi_a, c_scale_v), rnd_v));
+      let u_d_hi_b = q15_shift(i32x4_add(i32x4_mul(u_hi_b, c_scale_v), rnd_v));
+      let v_d_lo_a = q15_shift(i32x4_add(i32x4_mul(v_lo_a, c_scale_v), rnd_v));
+      let v_d_lo_b = q15_shift(i32x4_add(i32x4_mul(v_lo_b, c_scale_v), rnd_v));
+      let v_d_hi_a = q15_shift(i32x4_add(i32x4_mul(v_hi_a, c_scale_v), rnd_v));
+      let v_d_hi_b = q15_shift(i32x4_add(i32x4_mul(v_hi_b, c_scale_v), rnd_v));
+
+      let r_chroma_lo = chroma_i16x8(cru, crv, u_d_lo_a, v_d_lo_a, u_d_lo_b, v_d_lo_b, rnd_v);
+      let r_chroma_hi = chroma_i16x8(cru, crv, u_d_hi_a, v_d_hi_a, u_d_hi_b, v_d_hi_b, rnd_v);
+      let g_chroma_lo = chroma_i16x8(cgu, cgv, u_d_lo_a, v_d_lo_a, u_d_lo_b, v_d_lo_b, rnd_v);
+      let g_chroma_hi = chroma_i16x8(cgu, cgv, u_d_hi_a, v_d_hi_a, u_d_hi_b, v_d_hi_b, rnd_v);
+      let b_chroma_lo = chroma_i16x8(cbu, cbv, u_d_lo_a, v_d_lo_a, u_d_lo_b, v_d_lo_b, rnd_v);
+      let b_chroma_hi = chroma_i16x8(cbu, cbv, u_d_hi_a, v_d_hi_a, u_d_hi_b, v_d_hi_b, rnd_v);
+
+      let y_scaled_lo = scale_y(y_low_i16, y_off_v, y_scale_v, rnd_v);
+      let y_scaled_hi = scale_y(y_high_i16, y_off_v, y_scale_v, rnd_v);
+
+      let r_lo = clamp_u10_wasm(i16x8_add_sat(y_scaled_lo, r_chroma_lo), zero_v, max_v);
+      let r_hi = clamp_u10_wasm(i16x8_add_sat(y_scaled_hi, r_chroma_hi), zero_v, max_v);
+      let g_lo = clamp_u10_wasm(i16x8_add_sat(y_scaled_lo, g_chroma_lo), zero_v, max_v);
+      let g_hi = clamp_u10_wasm(i16x8_add_sat(y_scaled_hi, g_chroma_hi), zero_v, max_v);
+      let b_lo = clamp_u10_wasm(i16x8_add_sat(y_scaled_lo, b_chroma_lo), zero_v, max_v);
+      let b_hi = clamp_u10_wasm(i16x8_add_sat(y_scaled_hi, b_chroma_hi), zero_v, max_v);
+
+      let dst = rgb_out.as_mut_ptr().add(x * 3);
+      write_rgb_u16_8(r_lo, g_lo, b_lo, dst);
+      write_rgb_u16_8(r_hi, g_hi, b_hi, dst.add(24));
+
+      x += 16;
+    }
+
+    if x < width {
+      scalar::yuv_444p_n_to_rgb_u16_row::<BITS>(
+        &y[x..width],
+        &u[x..width],
+        &v[x..width],
+        &mut rgb_out[x * 3..width * 3],
+        width - x,
+        matrix,
+        full_range,
+      );
+    }
+  }
+}
+
+/// WASM simd128 YUV 4:4:4 planar **16-bit** → packed **u8** RGB.
+/// Stays on the i32 Q15 pipeline. 16 pixels per iter.
+///
+/// # Safety
+///
+/// 1. **simd128 must be enabled at compile time.**
+/// 2. `y.len() >= width`, `u.len() >= width`, `v.len() >= width`,
+///    `rgb_out.len() >= 3 * width`.
+#[inline]
+#[target_feature(enable = "simd128")]
+pub(crate) unsafe fn yuv_444p16_to_rgb_row(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  debug_assert!(y.len() >= width);
+  debug_assert!(u.len() >= width);
+  debug_assert!(v.len() >= width);
+  debug_assert!(rgb_out.len() >= width * 3);
+
+  let coeffs = scalar::Coefficients::for_matrix(matrix);
+  let (y_off, y_scale, c_scale) = scalar::range_params_n::<16, 8>(full_range);
+  const RND: i32 = 1 << 14;
+
+  unsafe {
+    let rnd_v = i32x4_splat(RND);
+    let y_off32_v = i32x4_splat(y_off);
+    let y_scale_v = i32x4_splat(y_scale);
+    let c_scale_v = i32x4_splat(c_scale);
+    let bias16_v = i16x8_splat(-32768i16);
+    let cru = i32x4_splat(coeffs.r_u());
+    let crv = i32x4_splat(coeffs.r_v());
+    let cgu = i32x4_splat(coeffs.g_u());
+    let cgv = i32x4_splat(coeffs.g_v());
+    let cbu = i32x4_splat(coeffs.b_u());
+    let cbv = i32x4_splat(coeffs.b_v());
+
+    let mut x = 0usize;
+    while x + 16 <= width {
+      let y_low = v128_load(y.as_ptr().add(x).cast());
+      let y_high = v128_load(y.as_ptr().add(x + 8).cast());
+      let u_lo_vec = v128_load(u.as_ptr().add(x).cast());
+      let u_hi_vec = v128_load(u.as_ptr().add(x + 8).cast());
+      let v_lo_vec = v128_load(v.as_ptr().add(x).cast());
+      let v_hi_vec = v128_load(v.as_ptr().add(x + 8).cast());
+
+      let u_lo_i16 = i16x8_sub(u_lo_vec, bias16_v);
+      let u_hi_i16 = i16x8_sub(u_hi_vec, bias16_v);
+      let v_lo_i16 = i16x8_sub(v_lo_vec, bias16_v);
+      let v_hi_i16 = i16x8_sub(v_hi_vec, bias16_v);
+
+      let u_lo_a = i32x4_extend_low_i16x8(u_lo_i16);
+      let u_lo_b = i32x4_extend_high_i16x8(u_lo_i16);
+      let u_hi_a = i32x4_extend_low_i16x8(u_hi_i16);
+      let u_hi_b = i32x4_extend_high_i16x8(u_hi_i16);
+      let v_lo_a = i32x4_extend_low_i16x8(v_lo_i16);
+      let v_lo_b = i32x4_extend_high_i16x8(v_lo_i16);
+      let v_hi_a = i32x4_extend_low_i16x8(v_hi_i16);
+      let v_hi_b = i32x4_extend_high_i16x8(v_hi_i16);
+
+      let u_d_lo_a = q15_shift(i32x4_add(i32x4_mul(u_lo_a, c_scale_v), rnd_v));
+      let u_d_lo_b = q15_shift(i32x4_add(i32x4_mul(u_lo_b, c_scale_v), rnd_v));
+      let u_d_hi_a = q15_shift(i32x4_add(i32x4_mul(u_hi_a, c_scale_v), rnd_v));
+      let u_d_hi_b = q15_shift(i32x4_add(i32x4_mul(u_hi_b, c_scale_v), rnd_v));
+      let v_d_lo_a = q15_shift(i32x4_add(i32x4_mul(v_lo_a, c_scale_v), rnd_v));
+      let v_d_lo_b = q15_shift(i32x4_add(i32x4_mul(v_lo_b, c_scale_v), rnd_v));
+      let v_d_hi_a = q15_shift(i32x4_add(i32x4_mul(v_hi_a, c_scale_v), rnd_v));
+      let v_d_hi_b = q15_shift(i32x4_add(i32x4_mul(v_hi_b, c_scale_v), rnd_v));
+
+      let r_chroma_lo = chroma_i16x8(cru, crv, u_d_lo_a, v_d_lo_a, u_d_lo_b, v_d_lo_b, rnd_v);
+      let r_chroma_hi = chroma_i16x8(cru, crv, u_d_hi_a, v_d_hi_a, u_d_hi_b, v_d_hi_b, rnd_v);
+      let g_chroma_lo = chroma_i16x8(cgu, cgv, u_d_lo_a, v_d_lo_a, u_d_lo_b, v_d_lo_b, rnd_v);
+      let g_chroma_hi = chroma_i16x8(cgu, cgv, u_d_hi_a, v_d_hi_a, u_d_hi_b, v_d_hi_b, rnd_v);
+      let b_chroma_lo = chroma_i16x8(cbu, cbv, u_d_lo_a, v_d_lo_a, u_d_lo_b, v_d_lo_b, rnd_v);
+      let b_chroma_hi = chroma_i16x8(cbu, cbv, u_d_hi_a, v_d_hi_a, u_d_hi_b, v_d_hi_b, rnd_v);
+
+      let y_scaled_lo = scale_y_u16_wasm(y_low, y_off32_v, y_scale_v, rnd_v);
+      let y_scaled_hi = scale_y_u16_wasm(y_high, y_off32_v, y_scale_v, rnd_v);
+
+      let r_lo = i16x8_add_sat(y_scaled_lo, r_chroma_lo);
+      let r_hi = i16x8_add_sat(y_scaled_hi, r_chroma_hi);
+      let g_lo = i16x8_add_sat(y_scaled_lo, g_chroma_lo);
+      let g_hi = i16x8_add_sat(y_scaled_hi, g_chroma_hi);
+      let b_lo = i16x8_add_sat(y_scaled_lo, b_chroma_lo);
+      let b_hi = i16x8_add_sat(y_scaled_hi, b_chroma_hi);
+
+      let r_u8 = u8x16_narrow_i16x8(r_lo, r_hi);
+      let g_u8 = u8x16_narrow_i16x8(g_lo, g_hi);
+      let b_u8 = u8x16_narrow_i16x8(b_lo, b_hi);
+
+      write_rgb_16(r_u8, g_u8, b_u8, rgb_out.as_mut_ptr().add(x * 3));
+      x += 16;
+    }
+
+    if x < width {
+      scalar::yuv_444p16_to_rgb_row(
+        &y[x..width],
+        &u[x..width],
+        &v[x..width],
+        &mut rgb_out[x * 3..width * 3],
+        width - x,
+        matrix,
+        full_range,
+      );
+    }
+  }
+}
+
+/// WASM simd128 YUV 4:4:4 planar **16-bit** → packed **u16** RGB.
+/// Falls through to scalar — simd128 has no native `i64x2` arithmetic
+/// shift, and the `srai64_15` bias trick at 128 bits (single i64 pair
+/// per lane) is not cheaper than scalar. Same rationale as
+/// [`yuv_420p16_to_rgb_u16_row`].
+///
+/// # Safety
+///
+/// Same as [`yuv_444p16_to_rgb_row`] but `rgb_out: &mut [u16]`.
+#[inline]
+#[target_feature(enable = "simd128")]
+pub(crate) unsafe fn yuv_444p16_to_rgb_u16_row(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  rgb_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  debug_assert!(y.len() >= width);
+  debug_assert!(u.len() >= width);
+  debug_assert!(v.len() >= width);
+  debug_assert!(rgb_out.len() >= width * 3);
+
+  let coeffs = scalar::Coefficients::for_matrix(matrix);
+  let (y_off, y_scale, c_scale) = scalar::range_params_n::<16, 16>(full_range);
+  const RND_I64: i64 = 1 << 14;
+  const RND_I32: i32 = 1 << 14;
+
+  unsafe {
+    let rnd_i64 = i64x2_splat(RND_I64);
+    let rnd_i32 = i32x4_splat(RND_I32);
+    let y_off32 = i32x4_splat(y_off);
+    let y_scale_i64 = i64x2_splat(y_scale as i64);
+    let c_scale_i32 = i32x4_splat(c_scale);
+    let bias16 = i16x8_splat(-32768i16);
+    let cru = i64x2_extend_low_i32x4(i32x4_splat(coeffs.r_u()));
+    let crv = i64x2_extend_low_i32x4(i32x4_splat(coeffs.r_v()));
+    let cgu = i64x2_extend_low_i32x4(i32x4_splat(coeffs.g_u()));
+    let cgv = i64x2_extend_low_i32x4(i32x4_splat(coeffs.g_v()));
+    let cbu = i64x2_extend_low_i32x4(i32x4_splat(coeffs.b_u()));
+    let cbv = i64x2_extend_low_i32x4(i32x4_splat(coeffs.b_v()));
+
+    let mut x = 0usize;
+    while x + 8 <= width {
+      // 8 Y + 8 U + 8 V per iter. 4:4:4 is 1:1 — no chroma dup.
+      let y_vec = v128_load(y.as_ptr().add(x).cast());
+      let u_vec = v128_load(u.as_ptr().add(x).cast());
+      let v_vec = v128_load(v.as_ptr().add(x).cast());
+
+      let u_i16 = i16x8_sub(u_vec, bias16);
+      let v_i16 = i16x8_sub(v_vec, bias16);
+
+      // Widen each i16x8 → two i32x4 halves.
+      let u_lo_i32 = i32x4_extend_low_i16x8(u_i16);
+      let u_hi_i32 = i32x4_extend_high_i16x8(u_i16);
+      let v_lo_i32 = i32x4_extend_low_i16x8(v_i16);
+      let v_hi_i32 = i32x4_extend_high_i16x8(v_i16);
+
+      let u_d_lo = i32x4_shr(i32x4_add(i32x4_mul(u_lo_i32, c_scale_i32), rnd_i32), 15);
+      let u_d_hi = i32x4_shr(i32x4_add(i32x4_mul(u_hi_i32, c_scale_i32), rnd_i32), 15);
+      let v_d_lo = i32x4_shr(i32x4_add(i32x4_mul(v_lo_i32, c_scale_i32), rnd_i32), 15);
+      let v_d_hi = i32x4_shr(i32x4_add(i32x4_mul(v_hi_i32, c_scale_i32), rnd_i32), 15);
+
+      // 4 chroma_i64x2 calls per channel (2 halves × 2 sub-halves).
+      let u_d_lo_lo = i64x2_extend_low_i32x4(u_d_lo);
+      let u_d_lo_hi = i64x2_extend_high_i32x4(u_d_lo);
+      let u_d_hi_lo = i64x2_extend_low_i32x4(u_d_hi);
+      let u_d_hi_hi = i64x2_extend_high_i32x4(u_d_hi);
+      let v_d_lo_lo = i64x2_extend_low_i32x4(v_d_lo);
+      let v_d_lo_hi = i64x2_extend_high_i32x4(v_d_lo);
+      let v_d_hi_lo = i64x2_extend_low_i32x4(v_d_hi);
+      let v_d_hi_hi = i64x2_extend_high_i32x4(v_d_hi);
+
+      let r_ch_lo_lo = chroma_i64x2_wasm(cru, crv, u_d_lo_lo, v_d_lo_lo, rnd_i64);
+      let r_ch_lo_hi = chroma_i64x2_wasm(cru, crv, u_d_lo_hi, v_d_lo_hi, rnd_i64);
+      let r_ch_hi_lo = chroma_i64x2_wasm(cru, crv, u_d_hi_lo, v_d_hi_lo, rnd_i64);
+      let r_ch_hi_hi = chroma_i64x2_wasm(cru, crv, u_d_hi_hi, v_d_hi_hi, rnd_i64);
+      let g_ch_lo_lo = chroma_i64x2_wasm(cgu, cgv, u_d_lo_lo, v_d_lo_lo, rnd_i64);
+      let g_ch_lo_hi = chroma_i64x2_wasm(cgu, cgv, u_d_lo_hi, v_d_lo_hi, rnd_i64);
+      let g_ch_hi_lo = chroma_i64x2_wasm(cgu, cgv, u_d_hi_lo, v_d_hi_lo, rnd_i64);
+      let g_ch_hi_hi = chroma_i64x2_wasm(cgu, cgv, u_d_hi_hi, v_d_hi_hi, rnd_i64);
+      let b_ch_lo_lo = chroma_i64x2_wasm(cbu, cbv, u_d_lo_lo, v_d_lo_lo, rnd_i64);
+      let b_ch_lo_hi = chroma_i64x2_wasm(cbu, cbv, u_d_lo_hi, v_d_lo_hi, rnd_i64);
+      let b_ch_hi_lo = chroma_i64x2_wasm(cbu, cbv, u_d_hi_lo, v_d_hi_lo, rnd_i64);
+      let b_ch_hi_hi = chroma_i64x2_wasm(cbu, cbv, u_d_hi_hi, v_d_hi_hi, rnd_i64);
+
+      // Combine each pair into i32x4 → 8 chroma values as (lo, hi).
+      let r_ch_lo = combine_i64x2_pair_to_i32x4(r_ch_lo_lo, r_ch_lo_hi);
+      let r_ch_hi = combine_i64x2_pair_to_i32x4(r_ch_hi_lo, r_ch_hi_hi);
+      let g_ch_lo = combine_i64x2_pair_to_i32x4(g_ch_lo_lo, g_ch_lo_hi);
+      let g_ch_hi = combine_i64x2_pair_to_i32x4(g_ch_hi_lo, g_ch_hi_hi);
+      let b_ch_lo = combine_i64x2_pair_to_i32x4(b_ch_lo_lo, b_ch_lo_hi);
+      let b_ch_hi = combine_i64x2_pair_to_i32x4(b_ch_hi_lo, b_ch_hi_hi);
+
+      // Y: widen 8 u16 → 2 × i32x4, subtract y_off, scale in i64.
+      let y_lo_u32 = u32x4_extend_low_u16x8(y_vec);
+      let y_hi_u32 = u32x4_extend_high_u16x8(y_vec);
+      let y_lo_i32 = i32x4_sub(y_lo_u32, y_off32);
+      let y_hi_i32 = i32x4_sub(y_hi_u32, y_off32);
+
+      let y_lo_scaled = scale_y_i32x4_i64_wasm(y_lo_i32, y_scale_i64, rnd_i64);
+      let y_hi_scaled = scale_y_i32x4_i64_wasm(y_hi_i32, y_scale_i64, rnd_i64);
+
+      // Add Y + chroma (no dup — 4:4:4 is 1:1). Saturating narrow to u16.
+      let r_u16 = u16x8_narrow_i32x4(
+        i32x4_add(y_lo_scaled, r_ch_lo),
+        i32x4_add(y_hi_scaled, r_ch_hi),
+      );
+      let g_u16 = u16x8_narrow_i32x4(
+        i32x4_add(y_lo_scaled, g_ch_lo),
+        i32x4_add(y_hi_scaled, g_ch_hi),
+      );
+      let b_u16 = u16x8_narrow_i32x4(
+        i32x4_add(y_lo_scaled, b_ch_lo),
+        i32x4_add(y_hi_scaled, b_ch_hi),
+      );
+
+      write_rgb_u16_8(r_u16, g_u16, b_u16, rgb_out.as_mut_ptr().add(x * 3));
+      x += 8;
+    }
+
+    if x < width {
+      scalar::yuv_444p16_to_rgb_u16_row(
+        &y[x..width],
+        &u[x..width],
+        &v[x..width],
+        &mut rgb_out[x * 3..width * 3],
+        width - x,
+        matrix,
+        full_range,
+      );
+    }
+  }
 }
 
 /// Writes 8 pixels of packed `u16` RGB (24 `u16` = 48 bytes) using
@@ -1498,6 +1972,70 @@ fn scale_y_u16_wasm(y_u16: v128, y_off32_v: v128, y_scale_v: v128, rnd_v: v128) 
   i16x8_narrow_i32x4(lo, hi)
 }
 
+/// Computes 2 × i64 chroma products with the Q15 shift using native
+/// wasm simd128 `i64x2_mul` + `i64x2_shr` (signed arithmetic right
+/// shift). All inputs are i64x2; `cu_i64` / `cv_i64` are the
+/// coefficient broadcast widened once per row via
+/// `i64x2_extend_low_i32x4`.
+#[inline(always)]
+fn chroma_i64x2_wasm(
+  cu_i64: v128,
+  cv_i64: v128,
+  u_d_i64: v128,
+  v_d_i64: v128,
+  rnd_i64: v128,
+) -> v128 {
+  let sum = i64x2_add(
+    i64x2_add(i64x2_mul(cu_i64, u_d_i64), i64x2_mul(cv_i64, v_d_i64)),
+    rnd_i64,
+  );
+  i64x2_shr(sum, 15)
+}
+
+/// Combines two i64x2 vectors into an i32x4 of their low 32 bits.
+/// Valid when each i64 fits in i32 (true for our Q15-shifted chroma
+/// and Y-scale results).
+///
+/// Uses `i8x16_shuffle` since wasm simd128 does not provide a direct
+/// i64x2 → i32x2 narrow primitive.
+#[inline(always)]
+fn combine_i64x2_pair_to_i32x4(lo: v128, hi: v128) -> v128 {
+  // Byte indices: low 4 bytes of each i64 lane.
+  i8x16_shuffle::<0, 1, 2, 3, 8, 9, 10, 11, 16, 17, 18, 19, 24, 25, 26, 27>(lo, hi)
+}
+
+/// Duplicates each i32 lane of `chroma` into a pair for the 4:2:0 u16
+/// output pipeline: `[c0, c1, c2, c3]` →
+/// Return.0 = `[c0, c0, c1, c1]`, Return.1 = `[c2, c2, c3, c3]`.
+#[inline(always)]
+fn chroma_dup_i32x4_u16(chroma: v128) -> (v128, v128) {
+  let lo = i8x16_shuffle::<0, 1, 2, 3, 0, 1, 2, 3, 4, 5, 6, 7, 4, 5, 6, 7>(chroma, chroma);
+  let hi =
+    i8x16_shuffle::<8, 9, 10, 11, 8, 9, 10, 11, 12, 13, 14, 15, 12, 13, 14, 15>(chroma, chroma);
+  (lo, hi)
+}
+
+/// `(y_minus_off * y_scale + RND) >> 15` computed in i64 for all 4
+/// lanes of an i32x4 Y stream, returning i32x4.
+#[inline(always)]
+fn scale_y_i32x4_i64_wasm(y_minus_off: v128, y_scale_i64: v128, rnd_i64: v128) -> v128 {
+  let lo = i64x2_shr(
+    i64x2_add(
+      i64x2_mul(y_scale_i64, i64x2_extend_low_i32x4(y_minus_off)),
+      rnd_i64,
+    ),
+    15,
+  );
+  let hi = i64x2_shr(
+    i64x2_add(
+      i64x2_mul(y_scale_i64, i64x2_extend_high_i32x4(y_minus_off)),
+      rnd_i64,
+    ),
+    15,
+  );
+  combine_i64x2_pair_to_i32x4(lo, hi)
+}
+
 /// WASM simd128 YUV 4:2:0 16-bit → packed **8-bit** RGB. 16 pixels per iteration.
 /// UV centering via wrapping 0x8000 trick; unsigned Y widening.
 ///
@@ -1624,7 +2162,114 @@ pub(crate) unsafe fn yuv_420p16_to_rgb_u16_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  scalar::yuv_420p16_to_rgb_u16_row(y, u_half, v_half, rgb_out, width, matrix, full_range);
+  debug_assert_eq!(width & 1, 0);
+  debug_assert!(y.len() >= width);
+  debug_assert!(u_half.len() >= width / 2);
+  debug_assert!(v_half.len() >= width / 2);
+  debug_assert!(rgb_out.len() >= width * 3);
+
+  let coeffs = scalar::Coefficients::for_matrix(matrix);
+  let (y_off, y_scale, c_scale) = scalar::range_params_n::<16, 16>(full_range);
+  const RND_I64: i64 = 1 << 14;
+  const RND_I32: i32 = 1 << 14;
+
+  unsafe {
+    let rnd_i64 = i64x2_splat(RND_I64);
+    let rnd_i32 = i32x4_splat(RND_I32);
+    let y_off32 = i32x4_splat(y_off);
+    let y_scale_i64 = i64x2_splat(y_scale as i64);
+    let c_scale_i32 = i32x4_splat(c_scale);
+    let bias16 = i16x8_splat(-32768i16);
+    // Coefficients widened once to i64x2 (value replicated, so extend_low
+    // suffices — both i64 lanes receive the same coeff).
+    let cru = i64x2_extend_low_i32x4(i32x4_splat(coeffs.r_u()));
+    let crv = i64x2_extend_low_i32x4(i32x4_splat(coeffs.r_v()));
+    let cgu = i64x2_extend_low_i32x4(i32x4_splat(coeffs.g_u()));
+    let cgv = i64x2_extend_low_i32x4(i32x4_splat(coeffs.g_v()));
+    let cbu = i64x2_extend_low_i32x4(i32x4_splat(coeffs.b_u()));
+    let cbv = i64x2_extend_low_i32x4(i32x4_splat(coeffs.b_v()));
+
+    let mut x = 0usize;
+    while x + 8 <= width {
+      // 8 Y pixels / 4 chroma pairs per iter (i64x2 constraint).
+      let y_vec = v128_load(y.as_ptr().add(x).cast());
+      // Load 4 UV samples each = 8 bytes. v128_load reads 16 bytes;
+      // we use the low 8 and ignore the high — see debug_assert on
+      // u_half.len().
+      let u_vec = v128_load(u_half.as_ptr().add(x / 2).cast());
+      let v_vec = v128_load(v_half.as_ptr().add(x / 2).cast());
+
+      let u_i16 = i16x8_sub(u_vec, bias16);
+      let v_i16 = i16x8_sub(v_vec, bias16);
+
+      let u_i32 = i32x4_extend_low_i16x8(u_i16);
+      let v_i32 = i32x4_extend_low_i16x8(v_i16);
+
+      let u_d = i32x4_shr(i32x4_add(i32x4_mul(u_i32, c_scale_i32), rnd_i32), 15);
+      let v_d = i32x4_shr(i32x4_add(i32x4_mul(v_i32, c_scale_i32), rnd_i32), 15);
+
+      // Widen to 2 × i64x2 for the chroma i64 pipeline.
+      let u_d_lo = i64x2_extend_low_i32x4(u_d);
+      let u_d_hi = i64x2_extend_high_i32x4(u_d);
+      let v_d_lo = i64x2_extend_low_i32x4(v_d);
+      let v_d_hi = i64x2_extend_high_i32x4(v_d);
+
+      let r_ch_lo = chroma_i64x2_wasm(cru, crv, u_d_lo, v_d_lo, rnd_i64);
+      let r_ch_hi = chroma_i64x2_wasm(cru, crv, u_d_hi, v_d_hi, rnd_i64);
+      let g_ch_lo = chroma_i64x2_wasm(cgu, cgv, u_d_lo, v_d_lo, rnd_i64);
+      let g_ch_hi = chroma_i64x2_wasm(cgu, cgv, u_d_hi, v_d_hi, rnd_i64);
+      let b_ch_lo = chroma_i64x2_wasm(cbu, cbv, u_d_lo, v_d_lo, rnd_i64);
+      let b_ch_hi = chroma_i64x2_wasm(cbu, cbv, u_d_hi, v_d_hi, rnd_i64);
+
+      // Combine i64x2 pairs → i32x4 [r0, r1, r2, r3].
+      let r_ch_i32 = combine_i64x2_pair_to_i32x4(r_ch_lo, r_ch_hi);
+      let g_ch_i32 = combine_i64x2_pair_to_i32x4(g_ch_lo, g_ch_hi);
+      let b_ch_i32 = combine_i64x2_pair_to_i32x4(b_ch_lo, b_ch_hi);
+
+      // Dup for 2 Y per chroma pair.
+      let (r_dup_lo, r_dup_hi) = chroma_dup_i32x4_u16(r_ch_i32);
+      let (g_dup_lo, g_dup_hi) = chroma_dup_i32x4_u16(g_ch_i32);
+      let (b_dup_lo, b_dup_hi) = chroma_dup_i32x4_u16(b_ch_i32);
+
+      // Y: widen 8 u16 → 2 × i32x4, subtract y_off, scale in i64.
+      let y_lo_u32 = u32x4_extend_low_u16x8(y_vec);
+      let y_hi_u32 = u32x4_extend_high_u16x8(y_vec);
+      let y_lo_i32 = i32x4_sub(y_lo_u32, y_off32);
+      let y_hi_i32 = i32x4_sub(y_hi_u32, y_off32);
+
+      let y_lo_scaled = scale_y_i32x4_i64_wasm(y_lo_i32, y_scale_i64, rnd_i64);
+      let y_hi_scaled = scale_y_i32x4_i64_wasm(y_hi_i32, y_scale_i64, rnd_i64);
+
+      // Add Y + chroma, saturating narrow i32 → u16.
+      let r_u16 = u16x8_narrow_i32x4(
+        i32x4_add(y_lo_scaled, r_dup_lo),
+        i32x4_add(y_hi_scaled, r_dup_hi),
+      );
+      let g_u16 = u16x8_narrow_i32x4(
+        i32x4_add(y_lo_scaled, g_dup_lo),
+        i32x4_add(y_hi_scaled, g_dup_hi),
+      );
+      let b_u16 = u16x8_narrow_i32x4(
+        i32x4_add(y_lo_scaled, b_dup_lo),
+        i32x4_add(y_hi_scaled, b_dup_hi),
+      );
+
+      write_rgb_u16_8(r_u16, g_u16, b_u16, rgb_out.as_mut_ptr().add(x * 3));
+      x += 8;
+    }
+
+    if x < width {
+      scalar::yuv_420p16_to_rgb_u16_row(
+        &y[x..width],
+        &u_half[x / 2..width / 2],
+        &v_half[x / 2..width / 2],
+        &mut rgb_out[x * 3..width * 3],
+        width - x,
+        matrix,
+        full_range,
+      );
+    }
+  }
 }
 
 /// WASM simd128 P016 → packed **8-bit** RGB. 16 pixels per iteration.
@@ -1744,7 +2389,114 @@ pub(crate) unsafe fn p16_to_rgb_u16_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  scalar::p16_to_rgb_u16_row(y, uv_half, rgb_out, width, matrix, full_range);
+  debug_assert_eq!(width & 1, 0);
+  debug_assert!(y.len() >= width);
+  debug_assert!(uv_half.len() >= width);
+  debug_assert!(rgb_out.len() >= width * 3);
+
+  let coeffs = scalar::Coefficients::for_matrix(matrix);
+  let (y_off, y_scale, c_scale) = scalar::range_params_n::<16, 16>(full_range);
+  const RND_I64: i64 = 1 << 14;
+  const RND_I32: i32 = 1 << 14;
+
+  unsafe {
+    let rnd_i64 = i64x2_splat(RND_I64);
+    let rnd_i32 = i32x4_splat(RND_I32);
+    let y_off32 = i32x4_splat(y_off);
+    let y_scale_i64 = i64x2_splat(y_scale as i64);
+    let c_scale_i32 = i32x4_splat(c_scale);
+    let bias16 = i16x8_splat(-32768i16);
+    let cru = i64x2_extend_low_i32x4(i32x4_splat(coeffs.r_u()));
+    let crv = i64x2_extend_low_i32x4(i32x4_splat(coeffs.r_v()));
+    let cgu = i64x2_extend_low_i32x4(i32x4_splat(coeffs.g_u()));
+    let cgv = i64x2_extend_low_i32x4(i32x4_splat(coeffs.g_v()));
+    let cbu = i64x2_extend_low_i32x4(i32x4_splat(coeffs.b_u()));
+    let cbv = i64x2_extend_low_i32x4(i32x4_splat(coeffs.b_v()));
+
+    let mut x = 0usize;
+    while x + 8 <= width {
+      // 8 Y + 4 UV pairs (= 8 u16 = 16 bytes). Deinterleave via
+      // `i8x16_shuffle`: [U0,V0,U1,V1,U2,V2,U3,V3] →
+      // [U0,U1,U2,U3, V0,V1,V2,V3].
+      let y_vec = v128_load(y.as_ptr().add(x).cast());
+      let uv_raw = v128_load(uv_half.as_ptr().add(x).cast());
+      let uv_split =
+        i8x16_shuffle::<0, 1, 4, 5, 8, 9, 12, 13, 2, 3, 6, 7, 10, 11, 14, 15>(uv_raw, uv_raw);
+      // u occupies the low 8 bytes, v the high 8.
+      let u_vec = i8x16_shuffle::<0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23>(
+        uv_split,
+        i16x8_splat(0),
+      );
+      let v_vec = i8x16_shuffle::<8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23>(
+        uv_split,
+        i16x8_splat(0),
+      );
+
+      let u_i16 = i16x8_sub(u_vec, bias16);
+      let v_i16 = i16x8_sub(v_vec, bias16);
+
+      let u_i32 = i32x4_extend_low_i16x8(u_i16);
+      let v_i32 = i32x4_extend_low_i16x8(v_i16);
+
+      let u_d = i32x4_shr(i32x4_add(i32x4_mul(u_i32, c_scale_i32), rnd_i32), 15);
+      let v_d = i32x4_shr(i32x4_add(i32x4_mul(v_i32, c_scale_i32), rnd_i32), 15);
+
+      let u_d_lo = i64x2_extend_low_i32x4(u_d);
+      let u_d_hi = i64x2_extend_high_i32x4(u_d);
+      let v_d_lo = i64x2_extend_low_i32x4(v_d);
+      let v_d_hi = i64x2_extend_high_i32x4(v_d);
+
+      let r_ch_lo = chroma_i64x2_wasm(cru, crv, u_d_lo, v_d_lo, rnd_i64);
+      let r_ch_hi = chroma_i64x2_wasm(cru, crv, u_d_hi, v_d_hi, rnd_i64);
+      let g_ch_lo = chroma_i64x2_wasm(cgu, cgv, u_d_lo, v_d_lo, rnd_i64);
+      let g_ch_hi = chroma_i64x2_wasm(cgu, cgv, u_d_hi, v_d_hi, rnd_i64);
+      let b_ch_lo = chroma_i64x2_wasm(cbu, cbv, u_d_lo, v_d_lo, rnd_i64);
+      let b_ch_hi = chroma_i64x2_wasm(cbu, cbv, u_d_hi, v_d_hi, rnd_i64);
+
+      let r_ch_i32 = combine_i64x2_pair_to_i32x4(r_ch_lo, r_ch_hi);
+      let g_ch_i32 = combine_i64x2_pair_to_i32x4(g_ch_lo, g_ch_hi);
+      let b_ch_i32 = combine_i64x2_pair_to_i32x4(b_ch_lo, b_ch_hi);
+
+      let (r_dup_lo, r_dup_hi) = chroma_dup_i32x4_u16(r_ch_i32);
+      let (g_dup_lo, g_dup_hi) = chroma_dup_i32x4_u16(g_ch_i32);
+      let (b_dup_lo, b_dup_hi) = chroma_dup_i32x4_u16(b_ch_i32);
+
+      let y_lo_u32 = u32x4_extend_low_u16x8(y_vec);
+      let y_hi_u32 = u32x4_extend_high_u16x8(y_vec);
+      let y_lo_i32 = i32x4_sub(y_lo_u32, y_off32);
+      let y_hi_i32 = i32x4_sub(y_hi_u32, y_off32);
+
+      let y_lo_scaled = scale_y_i32x4_i64_wasm(y_lo_i32, y_scale_i64, rnd_i64);
+      let y_hi_scaled = scale_y_i32x4_i64_wasm(y_hi_i32, y_scale_i64, rnd_i64);
+
+      let r_u16 = u16x8_narrow_i32x4(
+        i32x4_add(y_lo_scaled, r_dup_lo),
+        i32x4_add(y_hi_scaled, r_dup_hi),
+      );
+      let g_u16 = u16x8_narrow_i32x4(
+        i32x4_add(y_lo_scaled, g_dup_lo),
+        i32x4_add(y_hi_scaled, g_dup_hi),
+      );
+      let b_u16 = u16x8_narrow_i32x4(
+        i32x4_add(y_lo_scaled, b_dup_lo),
+        i32x4_add(y_hi_scaled, b_dup_hi),
+      );
+
+      write_rgb_u16_8(r_u16, g_u16, b_u16, rgb_out.as_mut_ptr().add(x * 3));
+      x += 8;
+    }
+
+    if x < width {
+      scalar::p16_to_rgb_u16_row(
+        &y[x..width],
+        &uv_half[x..width],
+        &mut rgb_out[x * 3..width * 3],
+        width - x,
+        matrix,
+        full_range,
+      );
+    }
+  }
 }
 
 // ===== BGR ↔ RGB byte swap ==============================================
@@ -2212,6 +2964,132 @@ mod tests {
     // Odd widths validate the 4:4:4 no-parity contract.
     for w in [1usize, 3, 15, 17, 32, 33, 1920, 1921] {
       check_yuv_444_equivalence(w, ColorMatrix::Bt709, false);
+    }
+  }
+
+  // ---- yuv_444p_n<BITS> + yuv_444p16 equivalence ----------------------
+
+  fn check_yuv_444p_n_equivalence<const BITS: u32>(
+    width: usize,
+    matrix: ColorMatrix,
+    full_range: bool,
+  ) {
+    let max_val = (1u16 << BITS) - 1;
+    let y: std::vec::Vec<u16> = (0..width)
+      .map(|i| ((i * 37 + 11) as u16) & max_val)
+      .collect();
+    let u: std::vec::Vec<u16> = (0..width)
+      .map(|i| ((i * 53 + 23) as u16) & max_val)
+      .collect();
+    let v: std::vec::Vec<u16> = (0..width)
+      .map(|i| ((i * 71 + 91) as u16) & max_val)
+      .collect();
+    let mut rgb_scalar = std::vec![0u8; width * 3];
+    let mut rgb_wasm = std::vec![0u8; width * 3];
+    let mut u16_scalar = std::vec![0u16; width * 3];
+    let mut u16_wasm = std::vec![0u16; width * 3];
+
+    scalar::yuv_444p_n_to_rgb_row::<BITS>(&y, &u, &v, &mut rgb_scalar, width, matrix, full_range);
+    scalar::yuv_444p_n_to_rgb_u16_row::<BITS>(
+      &y,
+      &u,
+      &v,
+      &mut u16_scalar,
+      width,
+      matrix,
+      full_range,
+    );
+    unsafe {
+      yuv_444p_n_to_rgb_row::<BITS>(&y, &u, &v, &mut rgb_wasm, width, matrix, full_range);
+      yuv_444p_n_to_rgb_u16_row::<BITS>(&y, &u, &v, &mut u16_wasm, width, matrix, full_range);
+    }
+    assert_eq!(
+      rgb_scalar, rgb_wasm,
+      "simd128 yuv_444p_n<{BITS}> u8 ≠ scalar"
+    );
+    assert_eq!(
+      u16_scalar, u16_wasm,
+      "simd128 yuv_444p_n<{BITS}> u16 ≠ scalar"
+    );
+  }
+
+  #[test]
+  fn simd128_yuv_444p10_matches_scalar_all_matrices() {
+    for m in [
+      ColorMatrix::Bt601,
+      ColorMatrix::Bt709,
+      ColorMatrix::Bt2020Ncl,
+      ColorMatrix::Smpte240m,
+      ColorMatrix::Fcc,
+      ColorMatrix::YCgCo,
+    ] {
+      for full in [true, false] {
+        check_yuv_444p_n_equivalence::<10>(16, m, full);
+      }
+    }
+  }
+
+  #[test]
+  fn simd128_yuv_444p12_matches_scalar_all_matrices() {
+    for m in [ColorMatrix::Bt709, ColorMatrix::Bt2020Ncl] {
+      for full in [true, false] {
+        check_yuv_444p_n_equivalence::<12>(16, m, full);
+      }
+    }
+  }
+
+  #[test]
+  fn simd128_yuv_444p14_matches_scalar_all_matrices() {
+    for m in [ColorMatrix::Bt709, ColorMatrix::Bt2020Ncl] {
+      for full in [true, false] {
+        check_yuv_444p_n_equivalence::<14>(16, m, full);
+      }
+    }
+  }
+
+  #[test]
+  fn simd128_yuv_444p_n_matches_scalar_widths() {
+    for w in [1usize, 3, 15, 17, 32, 33, 1920, 1921] {
+      check_yuv_444p_n_equivalence::<10>(w, ColorMatrix::Bt709, false);
+    }
+  }
+
+  fn check_yuv_444p16_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+    let y: std::vec::Vec<u16> = (0..width).map(|i| (i * 2027 + 11) as u16).collect();
+    let u: std::vec::Vec<u16> = (0..width).map(|i| (i * 2671 + 23) as u16).collect();
+    let v: std::vec::Vec<u16> = (0..width).map(|i| (i * 3329 + 91) as u16).collect();
+    let mut rgb_scalar = std::vec![0u8; width * 3];
+    let mut rgb_wasm = std::vec![0u8; width * 3];
+
+    scalar::yuv_444p16_to_rgb_row(&y, &u, &v, &mut rgb_scalar, width, matrix, full_range);
+    unsafe {
+      yuv_444p16_to_rgb_row(&y, &u, &v, &mut rgb_wasm, width, matrix, full_range);
+    }
+    assert_eq!(rgb_scalar, rgb_wasm, "simd128 yuv_444p16 u8 ≠ scalar");
+    // u16-output path delegates to scalar on wasm — no SIMD to compare
+    // against beyond the direct passthrough.
+  }
+
+  #[test]
+  fn simd128_yuv_444p16_matches_scalar_all_matrices() {
+    for m in [
+      ColorMatrix::Bt601,
+      ColorMatrix::Bt709,
+      ColorMatrix::Bt2020Ncl,
+      ColorMatrix::Smpte240m,
+      ColorMatrix::Fcc,
+      ColorMatrix::YCgCo,
+    ] {
+      for full in [true, false] {
+        check_yuv_444p16_equivalence(16, m, full);
+      }
+    }
+  }
+
+  #[test]
+  fn simd128_yuv_444p16_matches_scalar_widths() {
+    for w in [1usize, 3, 15, 17, 32, 33, 1920, 1921] {
+      check_yuv_444p16_equivalence(w, ColorMatrix::Bt709, false);
     }
   }
 

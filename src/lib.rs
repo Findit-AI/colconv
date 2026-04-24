@@ -59,14 +59,16 @@
 //! - **Q15 i32 family** — 8-bit kernels (`yuv_420_to_rgb_row`,
 //!   `yuv_444_to_rgb_row`, `nv12_to_rgb_row`, `nv24_to_rgb_row` etc.)
 //!   and 10/12/14-bit kernels (`yuv_420p_n_to_rgb_*<BITS>`,
-//!   `yuv_444p_n_to_rgb_*<BITS>`, `p_n_to_rgb_*<BITS>`). [`Yuv422p`]
-//!   (and the [`Yuv422p10`] / [`Yuv422p12`] / [`Yuv422p14`] family)
-//!   reuses [`Yuv420p`]'s per-row kernels (4:2:2 differs only in the
-//!   vertical walker); same for [`Nv16`] ↔ [`Nv12`]. [`Yuv444p`] and
-//!   [`Yuv444p10`] / [`Yuv444p12`] / [`Yuv444p14`] use a dedicated
-//!   4:4:4 kernel family (no horizontal chroma duplication step);
-//!   [`Nv24`] and [`Nv42`] share a 4:4:4 kernel family via a
-//!   `SWAP_UV` const generic.
+//!   `yuv_444p_n_to_rgb_*<BITS>`, `p_n_to_rgb_*<BITS>`). Native SIMD
+//!   on every backend (NEON / SSE4.1 / AVX2 / AVX-512 / wasm
+//!   simd128). [`Yuv422p`] (and the [`Yuv422p10`] / [`Yuv422p12`] /
+//!   [`Yuv422p14`] family) reuses [`Yuv420p`]'s per-row kernels
+//!   (4:2:2 differs only in the vertical walker); same for
+//!   [`Nv16`] ↔ [`Nv12`]. [`Yuv444p`] and [`Yuv444p10`] /
+//!   [`Yuv444p12`] / [`Yuv444p14`] use a dedicated 4:4:4 kernel
+//!   family (no horizontal chroma duplication step); [`Nv24`] and
+//!   [`Nv42`] share a 4:4:4 kernel family via a `SWAP_UV` const
+//!   generic.
 //! - **16-bit family** — dedicated `yuv_420p16_to_rgb_*`,
 //!   `yuv444p16_to_rgb_*`, `p16_to_rgb_*`. [`Yuv422p16`] reuses the
 //!   4:2:0 16-bit kernels by shape equivalence. The **u8-output**
@@ -80,17 +82,13 @@
 //!
 //! Every format above has a native SIMD backend for each supported
 //! target (NEON on aarch64; SSE4.1 / AVX2 / AVX-512 on x86_64; wasm
-//! simd128). Exceptions:
-//! - **16-bit u16 output on AVX2**: delegates to the SSE4.1 kernel
-//!   — AVX2 lacks `_mm256_srai_epi64`, so the `srai64_15` bias trick
-//!   would have to be duplicated at 256 bits for marginal gain.
-//! - **16-bit u16 output on wasm simd128**: falls through to scalar
-//!   — the single-lane i64 arithmetic is cheaper scalar.
-//! - **`yuv_444p_n_*` (10/12/14-bit 4:4:4) and `yuv444p16_*` on
-//!   x86 / wasm**: NEON ships native; x86 (SSE4.1 / AVX2 / AVX-512)
-//!   and wasm simd128 currently fall through to scalar (Ship 6c
-//!   follow-up). The 8-bit 4:4:4 path (`yuv_444_to_rgb_row`) is
-//!   native across all arches.
+//! simd128). Every u8-output and u16-output path has a native
+//! implementation on every backend — including the 16-bit u16-output
+//! paths for `Yuv420p16`, `P016`, and `Yuv444p16`, which use the
+//! backend-native i64 arithmetic (native `_mm512_srai_epi64` on
+//! AVX-512 and `i64x2_shr` on wasm; `srai64_15` bias trick on SSE4.1
+//! and AVX2 because those ISAs lack native i64 arithmetic right
+//! shift).
 //!
 //! # Not yet shipped (follow-up)
 //!

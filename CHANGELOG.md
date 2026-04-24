@@ -36,23 +36,52 @@ All three priorities landed in a single PR:
 
 ### SIMD
 
-| Kernel family              | NEON | SSE4.1 | AVX2 | AVX-512 | wasm   |
-| -------------------------- | ---- | ------ | ---- | ------- | ------ |
-| `yuv_444_to_rgb_row`       | ✅   | ✅     | ✅   | ✅      | ✅     |
-| `yuv_444p_n_to_rgb_*`      | ✅   | scalar | scalar | scalar | scalar |
-| `yuv444p16_to_rgb_*`       | ✅   | scalar | scalar | scalar | scalar |
-| `yuv_420_to_rgb_row` (via `Yuv422p`)                        | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `yuv420p{10,12,14,16}_to_rgb_*` (via `Yuv422p{10,12,14,16}`) | ✅ | ✅ | ✅ | ✅ | ✅ |
+Every new 4:4:4 kernel ships native SIMD on every backend — no
+scalar fallbacks or cross-tier delegations:
 
-The 4:2:2 row kernels inherit full per-arch SIMD coverage for free
-because they reuse the 4:2:0 row primitives. The new u16 / u8 4:4:4
-kernels (`yuv_444p_n`, `yuv444p16`) ship native NEON only; x86 /
-wasm are scalar fallbacks queued as a Ship 6c follow-up (mirrors
-Ship 4b → 4c).
+| Kernel family                     | NEON | SSE4.1 | AVX2 | AVX-512 | wasm simd128 |
+| --------------------------------- | :--: | :----: | :--: | :-----: | :----------: |
+| `yuv_444_to_rgb_row` (8-bit)      |  ✅  |   ✅   |  ✅  |   ✅    |      ✅      |
+| `yuv_444p_n_to_rgb_row<BITS>`     |  ✅  |   ✅   |  ✅  |   ✅    |      ✅      |
+| `yuv_444p_n_to_rgb_u16_row<BITS>` |  ✅  |   ✅   |  ✅  |   ✅    |      ✅      |
+| `yuv_444p16_to_rgb_row`           |  ✅  |   ✅   |  ✅  |   ✅    |      ✅      |
+| `yuv_444p16_to_rgb_u16_row`       |  ✅  |   ✅   |  ✅  |   ✅    |      ✅      |
+
+Yuv422p family reuses Yuv420p kernels (4:2:2 differs only in the
+vertical walker):
+
+| Yuv422p kernel dispatch                                      | NEON | SSE4.1 | AVX2 | AVX-512 | wasm |
+| ------------------------------------------------------------ | :--: | :----: | :--: | :-----: | :--: |
+| `yuv_420_to_rgb_row` (via `Yuv422p`)                         |  ✅  |   ✅   |  ✅  |   ✅    |  ✅  |
+| `yuv420p{10,12,14,16}_to_rgb_*` (via `Yuv422p{10,12,14,16}`) |  ✅  |   ✅   |  ✅  |   ✅    |  ✅  |
+
+Block sizes (u8 output): 16 pixels (NEON / SSE4.1 / wasm), 32
+pixels (AVX2), 64 pixels (AVX-512). The 16-bit u16-output variants
+run at 8 pixels per iter on SSE4.1 and wasm (i64-lane width), 16 on
+AVX2, 32 on AVX-512.
+
+### Bonus: native 16-bit u16 kernels on AVX2 + wasm (resolves Ship 4c leftover)
+
+This PR also replaces the **three residual u16-output delegations**
+from Ship 4b/4c — `yuv_420p16_to_rgb_u16_row`, `p16_to_rgb_u16_row`,
+and the newly added `yuv_444p16_to_rgb_u16_row` — with native
+implementations on AVX2 and wasm simd128:
+
+- **AVX2**: all three previously delegated to SSE4.1. The delegation
+  was rational when `_mm256_srai_epi64` was unavailable, but the
+  `srai64_15` bias trick scales cleanly to 256 bits via
+  `_mm256_srli_epi64` + offset. New AVX2 kernels process 16 pixels
+  per iter — 2× the SSE4.1 rate.
+- **wasm simd128**: all three previously fell through to scalar. The
+  "no native i64 arithmetic shift" rationale became stale once
+  `i64x2_shr_s` stabilized. New wasm kernels use `i64x2_mul` +
+  `i64x2_shr` at 8 pixels per iter.
+
+Every 16-bit u16-output path is now native on every backend.
 
 ### Tests
 
-17 new tests total:
+37 new tests total:
 - 11 `MixedSinker` integration tests (10 `gray → gray` sanity checks
   covering every new format × u8/u16 output, plus a `yuv422p ↔
   yuv420p` equivalence check that pins the shared-row-kernel
@@ -60,8 +89,14 @@ Ship 4b → 4c).
 - 6 NEON arch equivalence tests for `yuv_444p_n` and `yuv_444p16`
   across all six matrices, full/limited range, and odd-width tails
   (1, 3, 15, 17, 32, 33, 1920, 1921).
+- 10 per-arch `yuv_444_to_rgb_row` scalar-equivalence tests (2 per
+  backend × 5 backends).
+- 10 per-arch `yuv_444p_n<BITS>` scalar-equivalence tests on x86 +
+  wasm (4 kernels × SSE4.1 / AVX2 / AVX-512 / wasm, covering 10/12/14
+  and widths straddling each backend's block size).
 
-Total suite: **271 passed on aarch64** (up from 254 at v0.5).
+Total suite: **273 passed on aarch64** (up from 254 at v0.5). x86
+and wasm tests run in CI on their respective targets.
 
 ### Benches
 
