@@ -496,10 +496,12 @@ pub(crate) fn yuv_444p_n_to_rgb_row<const BITS: u32>(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  debug_assert!(
-    BITS == 10 || BITS == 12 || BITS == 14,
-    "yuv_444p_n_to_rgb_row only supports BITS in {{10, 12, 14}}"
-  );
+  // Compile-time guard — fails monomorphization for any BITS outside
+  // {10, 12, 14}. The 16-bit path lives in `yuv_444p16_to_rgb_row`
+  // (i32 u8-output kernel family). Without this guard a caller
+  // invoking ::<16> would reach the NEON clamp where
+  // `(1 << BITS) - 1 as i16` silently wraps to -1.
+  const { assert!(BITS == 10 || BITS == 12 || BITS == 14) };
   debug_assert!(y.len() >= width, "y row too short");
   debug_assert!(u.len() >= width, "u row too short");
   debug_assert!(v.len() >= width, "v row too short");
@@ -543,10 +545,10 @@ pub(crate) fn yuv_444p_n_to_rgb_u16_row<const BITS: u32>(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  debug_assert!(
-    BITS == 10 || BITS == 12 || BITS == 14,
-    "yuv_444p_n_to_rgb_u16_row only supports BITS in {{10, 12, 14}}"
-  );
+  // Compile-time guard — see note on `yuv_444p_n_to_rgb_row`. The
+  // 16-bit u16-output path is `yuv_444p16_to_rgb_u16_row` (i64
+  // chroma family).
+  const { assert!(BITS == 10 || BITS == 12 || BITS == 14) };
   debug_assert!(y.len() >= width, "y row too short");
   debug_assert!(u.len() >= width, "u row too short");
   debug_assert!(v.len() >= width, "v row too short");

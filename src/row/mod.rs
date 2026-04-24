@@ -557,9 +557,17 @@ pub fn yuv_444_to_rgb_row(
 /// YUV 4:4:4 planar 10/12/14-bit → **u8** RGB dispatcher. Const
 /// generic over `BITS ∈ {10, 12, 14}`. NEON native; x86/wasm backends
 /// currently fall through to scalar (follow-up).
+///
+/// Crate-private — external callers use the concrete
+/// [`yuv444p10_to_rgb_row`] / [`yuv444p12_to_rgb_row`] /
+/// [`yuv444p14_to_rgb_row`] wrappers, which pin `BITS` to a
+/// supported value. This avoids the 16-bit footgun (`(1 << 16) - 1`
+/// truncates to `-1` when cast to `i16` in the SIMD clamp), and
+/// matches the [`yuv420p10_to_rgb_row`] family's convention of
+/// keeping the `<BITS>` generic internal.
 #[cfg_attr(not(tarpaulin), inline(always))]
 #[allow(clippy::too_many_arguments)]
-pub fn yuv_444p_n_to_rgb_row<const BITS: u32>(
+pub(crate) fn yuv_444p_n_to_rgb_row<const BITS: u32>(
   y: &[u16],
   u: &[u16],
   v: &[u16],
@@ -596,9 +604,13 @@ pub fn yuv_444p_n_to_rgb_row<const BITS: u32>(
 /// YUV 4:4:4 planar 10/12/14-bit → **native-depth u16** RGB dispatcher.
 /// Const generic over `BITS ∈ {10, 12, 14}`. Low-bit-packed output.
 /// NEON native; x86/wasm fall through to scalar (follow-up).
+///
+/// Crate-private — see the note on [`yuv_444p_n_to_rgb_row`]. The
+/// 16-bit path is [`yuv444p16_to_rgb_u16_row`], which uses a
+/// dedicated i64-chroma kernel family.
 #[cfg_attr(not(tarpaulin), inline(always))]
 #[allow(clippy::too_many_arguments)]
-pub fn yuv_444p_n_to_rgb_u16_row<const BITS: u32>(
+pub(crate) fn yuv_444p_n_to_rgb_u16_row<const BITS: u32>(
   y: &[u16],
   u: &[u16],
   v: &[u16],
@@ -608,10 +620,11 @@ pub fn yuv_444p_n_to_rgb_u16_row<const BITS: u32>(
   full_range: bool,
   use_simd: bool,
 ) {
+  let rgb_min = rgb_row_elems(width);
   assert!(y.len() >= width, "y row too short");
   assert!(u.len() >= width, "u row too short");
   assert!(v.len() >= width, "v row too short");
-  assert!(rgb_out.len() >= 3 * width, "rgb_out row too short");
+  assert!(rgb_out.len() >= rgb_min, "rgb_out row too short");
 
   if use_simd {
     cfg_select! {
@@ -631,8 +644,8 @@ pub fn yuv_444p_n_to_rgb_u16_row<const BITS: u32>(
   scalar::yuv_444p_n_to_rgb_u16_row::<BITS>(y, u, v, rgb_out, width, matrix, full_range);
 }
 
-/// YUV 4:4:4 planar 10-bit → u8 RGB. Thin wrapper over
-/// [`yuv_444p_n_to_rgb_row`]`::<10>`.
+/// YUV 4:4:4 planar 10-bit → u8 RGB. Thin wrapper over the
+/// crate-internal `yuv_444p_n_to_rgb_row::<10>`.
 #[cfg_attr(not(tarpaulin), inline(always))]
 #[allow(clippy::too_many_arguments)]
 pub fn yuv444p10_to_rgb_row(
@@ -782,10 +795,11 @@ pub fn yuv444p16_to_rgb_u16_row(
   full_range: bool,
   use_simd: bool,
 ) {
+  let rgb_min = rgb_row_elems(width);
   assert!(y.len() >= width, "y row too short");
   assert!(u.len() >= width, "u row too short");
   assert!(v.len() >= width, "v row too short");
-  assert!(rgb_out.len() >= 3 * width, "rgb_out row too short");
+  assert!(rgb_out.len() >= rgb_min, "rgb_out row too short");
 
   if use_simd {
     cfg_select! {
@@ -2219,5 +2233,45 @@ mod overflow_tests {
     let input: [u8; 0] = [];
     let mut output: [u8; 0] = [];
     bgr_to_rgb_row(&input, &mut output, OVERFLOW_WIDTH, false);
+  }
+
+  #[cfg(target_pointer_width = "32")]
+  #[test]
+  #[should_panic(expected = "overflows usize")]
+  fn yuv_444p_n_u16_dispatcher_rejects_width_times_3_overflow() {
+    let y: [u16; 0] = [];
+    let u: [u16; 0] = [];
+    let v: [u16; 0] = [];
+    let mut rgb: [u16; 0] = [];
+    yuv_444p_n_to_rgb_u16_row::<10>(
+      &y,
+      &u,
+      &v,
+      &mut rgb,
+      OVERFLOW_WIDTH,
+      ColorMatrix::Bt601,
+      true,
+      false,
+    );
+  }
+
+  #[cfg(target_pointer_width = "32")]
+  #[test]
+  #[should_panic(expected = "overflows usize")]
+  fn yuv444p16_u16_dispatcher_rejects_width_times_3_overflow() {
+    let y: [u16; 0] = [];
+    let u: [u16; 0] = [];
+    let v: [u16; 0] = [];
+    let mut rgb: [u16; 0] = [];
+    yuv444p16_to_rgb_u16_row(
+      &y,
+      &u,
+      &v,
+      &mut rgb,
+      OVERFLOW_WIDTH,
+      ColorMatrix::Bt601,
+      true,
+      false,
+    );
   }
 }
