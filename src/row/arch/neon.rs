@@ -38,9 +38,9 @@ use core::arch::aarch64::{
   vcombine_s16, vcombine_s32, vcombine_u8, vcombine_u16, vcvtq_f32_u32, vcvtq_u32_f32, vdivq_f32,
   vdup_n_s32, vdupq_n_f32, vdupq_n_s16, vdupq_n_s32, vdupq_n_s64, vdupq_n_u16, vget_high_s16,
   vget_high_s32, vget_high_u8, vget_high_u16, vget_low_s16, vget_low_s32, vget_low_u8,
-  vget_low_u16, vld1_u8, vld1q_u8, vld1q_u16, vld2_u8, vld2q_u16, vld3q_u8, vmaxq_f32, vmaxq_s16,
-  vminq_f32, vminq_s16, vmovl_s16, vmovl_u8, vmovl_u16, vmovn_s64, vmovn_u16, vmovn_u32, vmull_s32,
-  vmulq_f32, vmulq_s32, vmvnq_u32, vqaddq_s16, vqmovn_s32, vqmovun_s16, vqmovun_s32,
+  vget_low_u16, vld1_u8, vld1q_u8, vld1q_u16, vld2_u8, vld2q_u8, vld2q_u16, vld3q_u8, vmaxq_f32,
+  vmaxq_s16, vminq_f32, vminq_s16, vmovl_s16, vmovl_u8, vmovl_u16, vmovn_s64, vmovn_u16, vmovn_u32,
+  vmull_s32, vmulq_f32, vmulq_s32, vmvnq_u32, vqaddq_s16, vqmovn_s32, vqmovun_s16, vqmovun_s32,
   vreinterpretq_s16_u16, vreinterpretq_s32_u32, vreinterpretq_u16_s16, vshlq_u16, vshrq_n_s32,
   vshrq_n_s64, vst1q_u8, vst3q_u8, vst3q_u16, vsubq_f32, vsubq_s16, vsubq_s32, vzip1q_s16,
   vzip1q_s32, vzip2q_s16, vzip2q_s32,
@@ -948,6 +948,199 @@ unsafe fn nv12_or_nv21_to_rgb_row_impl<const SWAP_UV: bool>(
         scalar::nv12_to_rgb_row(
           &y[x..width],
           &uv_or_vu_half[x..width],
+          &mut rgb_out[x * 3..width * 3],
+          width - x,
+          matrix,
+          full_range,
+        );
+      }
+    }
+  }
+}
+
+/// NEON NV24 → packed RGB (UV-ordered, 4:4:4). Thin wrapper over
+/// [`nv24_or_nv42_to_rgb_row_impl`] with `SWAP_UV = false`.
+///
+/// # Safety
+///
+/// Same as [`nv24_or_nv42_to_rgb_row_impl`].
+#[inline]
+#[target_feature(enable = "neon")]
+pub(crate) unsafe fn nv24_to_rgb_row(
+  y: &[u8],
+  uv: &[u8],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  // SAFETY: caller obligations forwarded to the shared impl.
+  unsafe {
+    nv24_or_nv42_to_rgb_row_impl::<false>(y, uv, rgb_out, width, matrix, full_range);
+  }
+}
+
+/// NEON NV42 → packed RGB (VU-ordered, 4:4:4). Thin wrapper over
+/// [`nv24_or_nv42_to_rgb_row_impl`] with `SWAP_UV = true`.
+///
+/// # Safety
+///
+/// Same as [`nv24_or_nv42_to_rgb_row_impl`].
+#[inline]
+#[target_feature(enable = "neon")]
+pub(crate) unsafe fn nv42_to_rgb_row(
+  y: &[u8],
+  vu: &[u8],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  // SAFETY: caller obligations forwarded to the shared impl.
+  unsafe {
+    nv24_or_nv42_to_rgb_row_impl::<true>(y, vu, rgb_out, width, matrix, full_range);
+  }
+}
+
+/// Shared NEON NV24/NV42 kernel (4:4:4 semi-planar). Unlike
+/// [`nv12_or_nv21_to_rgb_row_impl`], chroma is not subsampled — one
+/// UV pair per Y pixel, so the chroma-duplication step (`vzip*`)
+/// disappears: compute 16 chroma values per 16 Y pixels directly.
+///
+/// `SWAP_UV = false` selects NV24 (even byte = U, odd = V);
+/// `SWAP_UV = true` selects NV42 (even = V, odd = U).
+///
+/// # Safety
+///
+/// 1. **NEON must be available on the current CPU.**
+/// 2. `y.len() >= width`.
+/// 3. `uv_or_vu.len() >= 2 * width` (one UV pair per Y pixel =
+///    `2 * width` bytes).
+/// 4. `rgb_out.len() >= 3 * width`.
+///
+/// No width parity constraint (4:4:4).
+#[inline]
+#[target_feature(enable = "neon")]
+unsafe fn nv24_or_nv42_to_rgb_row_impl<const SWAP_UV: bool>(
+  y: &[u8],
+  uv_or_vu: &[u8],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  debug_assert!(y.len() >= width);
+  debug_assert!(uv_or_vu.len() >= 2 * width);
+  debug_assert!(rgb_out.len() >= width * 3);
+
+  let coeffs = scalar::Coefficients::for_matrix(matrix);
+  let (y_off, y_scale, c_scale) = scalar::range_params(full_range);
+  const RND: i32 = 1 << 14;
+
+  // SAFETY: NEON availability is the caller's obligation; all pointer
+  // adds below are bounded by the `while x + 16 <= width` loop and
+  // the caller-promised slice lengths.
+  unsafe {
+    let rnd_v = vdupq_n_s32(RND);
+    let y_off_v = vdupq_n_s16(y_off as i16);
+    let y_scale_v = vdupq_n_s32(y_scale);
+    let c_scale_v = vdupq_n_s32(c_scale);
+    let mid128 = vdupq_n_s16(128);
+    let cru = vdupq_n_s32(coeffs.r_u());
+    let crv = vdupq_n_s32(coeffs.r_v());
+    let cgu = vdupq_n_s32(coeffs.g_u());
+    let cgv = vdupq_n_s32(coeffs.g_v());
+    let cbu = vdupq_n_s32(coeffs.b_u());
+    let cbv = vdupq_n_s32(coeffs.b_v());
+
+    let mut x = 0usize;
+    while x + 16 <= width {
+      let y_vec = vld1q_u8(y.as_ptr().add(x));
+      // 16 Y pixels → 16 chroma pairs = 32 bytes. `vld2q_u8`
+      // deinterleaves 32 bytes into (even-offset, odd-offset) — 16
+      // bytes each.
+      let uv_pair = vld2q_u8(uv_or_vu.as_ptr().add(x * 2));
+      let (u_vec, v_vec) = if SWAP_UV {
+        (uv_pair.1, uv_pair.0)
+      } else {
+        (uv_pair.0, uv_pair.1)
+      };
+
+      // Widen Y, U, V halves to i16x8.
+      let y_lo = vreinterpretq_s16_u16(vmovl_u8(vget_low_u8(y_vec)));
+      let y_hi = vreinterpretq_s16_u16(vmovl_u8(vget_high_u8(y_vec)));
+
+      let u_lo_i16 = vsubq_s16(vreinterpretq_s16_u16(vmovl_u8(vget_low_u8(u_vec))), mid128);
+      let u_hi_i16 = vsubq_s16(vreinterpretq_s16_u16(vmovl_u8(vget_high_u8(u_vec))), mid128);
+      let v_lo_i16 = vsubq_s16(vreinterpretq_s16_u16(vmovl_u8(vget_low_u8(v_vec))), mid128);
+      let v_hi_i16 = vsubq_s16(vreinterpretq_s16_u16(vmovl_u8(vget_high_u8(v_vec))), mid128);
+
+      // Widen each i16x8 to two i32x4 halves for the Q15 multiply.
+      let u_lo_a = vmovl_s16(vget_low_s16(u_lo_i16));
+      let u_lo_b = vmovl_s16(vget_high_s16(u_lo_i16));
+      let u_hi_a = vmovl_s16(vget_low_s16(u_hi_i16));
+      let u_hi_b = vmovl_s16(vget_high_s16(u_hi_i16));
+      let v_lo_a = vmovl_s16(vget_low_s16(v_lo_i16));
+      let v_lo_b = vmovl_s16(vget_high_s16(v_lo_i16));
+      let v_hi_a = vmovl_s16(vget_low_s16(v_hi_i16));
+      let v_hi_b = vmovl_s16(vget_high_s16(v_hi_i16));
+
+      // u_d / v_d = (u * c_scale + RND) >> 15 — i32x4 lanes.
+      let u_d_lo_a = q15_shift(vaddq_s32(vmulq_s32(u_lo_a, c_scale_v), rnd_v));
+      let u_d_lo_b = q15_shift(vaddq_s32(vmulq_s32(u_lo_b, c_scale_v), rnd_v));
+      let u_d_hi_a = q15_shift(vaddq_s32(vmulq_s32(u_hi_a, c_scale_v), rnd_v));
+      let u_d_hi_b = q15_shift(vaddq_s32(vmulq_s32(u_hi_b, c_scale_v), rnd_v));
+      let v_d_lo_a = q15_shift(vaddq_s32(vmulq_s32(v_lo_a, c_scale_v), rnd_v));
+      let v_d_lo_b = q15_shift(vaddq_s32(vmulq_s32(v_lo_b, c_scale_v), rnd_v));
+      let v_d_hi_a = q15_shift(vaddq_s32(vmulq_s32(v_hi_a, c_scale_v), rnd_v));
+      let v_d_hi_b = q15_shift(vaddq_s32(vmulq_s32(v_hi_b, c_scale_v), rnd_v));
+
+      // Compute chroma per channel — 8 results covering 8 Y pixels
+      // per half (no duplication, since UV is 1:1 with Y).
+      let r_chroma_lo = chroma_i16x8(cru, crv, u_d_lo_a, v_d_lo_a, u_d_lo_b, v_d_lo_b, rnd_v);
+      let r_chroma_hi = chroma_i16x8(cru, crv, u_d_hi_a, v_d_hi_a, u_d_hi_b, v_d_hi_b, rnd_v);
+      let g_chroma_lo = chroma_i16x8(cgu, cgv, u_d_lo_a, v_d_lo_a, u_d_lo_b, v_d_lo_b, rnd_v);
+      let g_chroma_hi = chroma_i16x8(cgu, cgv, u_d_hi_a, v_d_hi_a, u_d_hi_b, v_d_hi_b, rnd_v);
+      let b_chroma_lo = chroma_i16x8(cbu, cbv, u_d_lo_a, v_d_lo_a, u_d_lo_b, v_d_lo_b, rnd_v);
+      let b_chroma_hi = chroma_i16x8(cbu, cbv, u_d_hi_a, v_d_hi_a, u_d_hi_b, v_d_hi_b, rnd_v);
+
+      let y_scaled_lo = scale_y(y_lo, y_off_v, y_scale_v, rnd_v);
+      let y_scaled_hi = scale_y(y_hi, y_off_v, y_scale_v, rnd_v);
+
+      let b_u8 = vcombine_u8(
+        vqmovun_s16(vqaddq_s16(y_scaled_lo, b_chroma_lo)),
+        vqmovun_s16(vqaddq_s16(y_scaled_hi, b_chroma_hi)),
+      );
+      let g_u8 = vcombine_u8(
+        vqmovun_s16(vqaddq_s16(y_scaled_lo, g_chroma_lo)),
+        vqmovun_s16(vqaddq_s16(y_scaled_hi, g_chroma_hi)),
+      );
+      let r_u8 = vcombine_u8(
+        vqmovun_s16(vqaddq_s16(y_scaled_lo, r_chroma_lo)),
+        vqmovun_s16(vqaddq_s16(y_scaled_hi, r_chroma_hi)),
+      );
+
+      let rgb = uint8x16x3_t(r_u8, g_u8, b_u8);
+      vst3q_u8(rgb_out.as_mut_ptr().add(x * 3), rgb);
+
+      x += 16;
+    }
+
+    // Scalar tail for 0..15 leftover pixels.
+    if x < width {
+      if SWAP_UV {
+        scalar::nv42_to_rgb_row(
+          &y[x..width],
+          &uv_or_vu[x * 2..width * 2],
+          &mut rgb_out[x * 3..width * 3],
+          width - x,
+          matrix,
+          full_range,
+        );
+      } else {
+        scalar::nv24_to_rgb_row(
+          &y[x..width],
+          &uv_or_vu[x * 2..width * 2],
           &mut rgb_out[x * 3..width * 3],
           width - x,
           matrix,
@@ -2210,6 +2403,159 @@ mod tests {
     for w in [16usize, 30, 64, 1920] {
       check_nv21_matches_nv12_with_swapped_uv(w, ColorMatrix::Bt709, false);
       check_nv21_matches_nv12_with_swapped_uv(w, ColorMatrix::YCgCo, true);
+    }
+  }
+
+  // ---- nv24_to_rgb_row / nv42_to_rgb_row equivalence ------------------
+
+  fn check_nv24_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+    let y: std::vec::Vec<u8> = (0..width).map(|i| ((i * 37 + 11) & 0xFF) as u8).collect();
+    // NV24: 1 UV pair per Y pixel → 2*width bytes.
+    let uv: std::vec::Vec<u8> = (0..width)
+      .flat_map(|i| {
+        [
+          ((i * 53 + 23) & 0xFF) as u8, // U_i
+          ((i * 71 + 91) & 0xFF) as u8, // V_i
+        ]
+      })
+      .collect();
+    let mut rgb_scalar = std::vec![0u8; width * 3];
+    let mut rgb_neon = std::vec![0u8; width * 3];
+
+    scalar::nv24_to_rgb_row(&y, &uv, &mut rgb_scalar, width, matrix, full_range);
+    unsafe {
+      nv24_to_rgb_row(&y, &uv, &mut rgb_neon, width, matrix, full_range);
+    }
+
+    if rgb_scalar != rgb_neon {
+      let first_diff = rgb_scalar
+        .iter()
+        .zip(rgb_neon.iter())
+        .position(|(a, b)| a != b)
+        .unwrap();
+      panic!(
+        "NEON NV24 diverges from scalar at byte {first_diff} (width={width}, matrix={matrix:?}, full_range={full_range}): scalar={} neon={}",
+        rgb_scalar[first_diff], rgb_neon[first_diff]
+      );
+    }
+  }
+
+  fn check_nv42_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+    let y: std::vec::Vec<u8> = (0..width).map(|i| ((i * 37 + 11) & 0xFF) as u8).collect();
+    // NV42: V first, then U (byte-swapped).
+    let vu: std::vec::Vec<u8> = (0..width)
+      .flat_map(|i| {
+        [
+          ((i * 53 + 23) & 0xFF) as u8, // V_i
+          ((i * 71 + 91) & 0xFF) as u8, // U_i
+        ]
+      })
+      .collect();
+    let mut rgb_scalar = std::vec![0u8; width * 3];
+    let mut rgb_neon = std::vec![0u8; width * 3];
+
+    scalar::nv42_to_rgb_row(&y, &vu, &mut rgb_scalar, width, matrix, full_range);
+    unsafe {
+      nv42_to_rgb_row(&y, &vu, &mut rgb_neon, width, matrix, full_range);
+    }
+
+    if rgb_scalar != rgb_neon {
+      let first_diff = rgb_scalar
+        .iter()
+        .zip(rgb_neon.iter())
+        .position(|(a, b)| a != b)
+        .unwrap();
+      panic!(
+        "NEON NV42 diverges from scalar at byte {first_diff} (width={width}, matrix={matrix:?}, full_range={full_range}): scalar={} neon={}",
+        rgb_scalar[first_diff], rgb_neon[first_diff]
+      );
+    }
+  }
+
+  /// NV42 kernel on a byte-swapped UV stream must match NV24 on the
+  /// original — validates the `SWAP_UV` const generic.
+  fn check_nv42_matches_nv24_with_swapped_uv(width: usize, matrix: ColorMatrix, full_range: bool) {
+    let y: std::vec::Vec<u8> = (0..width).map(|i| ((i * 37 + 11) & 0xFF) as u8).collect();
+    let uv: std::vec::Vec<u8> = (0..width)
+      .flat_map(|i| [((i * 53 + 23) & 0xFF) as u8, ((i * 71 + 91) & 0xFF) as u8])
+      .collect();
+    let mut vu = std::vec![0u8; 2 * width];
+    for i in 0..width {
+      vu[2 * i] = uv[2 * i + 1];
+      vu[2 * i + 1] = uv[2 * i];
+    }
+
+    let mut rgb_nv24 = std::vec![0u8; width * 3];
+    let mut rgb_nv42 = std::vec![0u8; width * 3];
+    unsafe {
+      nv24_to_rgb_row(&y, &uv, &mut rgb_nv24, width, matrix, full_range);
+      nv42_to_rgb_row(&y, &vu, &mut rgb_nv42, width, matrix, full_range);
+    }
+    assert_eq!(
+      rgb_nv24, rgb_nv42,
+      "NV42 should produce identical output to NV24 with byte-swapped chroma (width={width}, matrix={matrix:?})"
+    );
+  }
+
+  #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
+  fn nv24_neon_matches_scalar_all_matrices_16() {
+    for m in [
+      ColorMatrix::Bt601,
+      ColorMatrix::Bt709,
+      ColorMatrix::Bt2020Ncl,
+      ColorMatrix::Smpte240m,
+      ColorMatrix::Fcc,
+      ColorMatrix::YCgCo,
+    ] {
+      for full in [true, false] {
+        check_nv24_equivalence(16, m, full);
+      }
+    }
+  }
+
+  #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
+  fn nv24_neon_matches_scalar_widths() {
+    // Odd widths validate the no-parity-constraint contract (NV24 is
+    // 4:4:4, no chroma pairing) and force non-multiple-of-16 scalar
+    // tails.
+    for w in [1usize, 3, 15, 17, 32, 33, 1920, 1921] {
+      check_nv24_equivalence(w, ColorMatrix::Bt709, false);
+    }
+  }
+
+  #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
+  fn nv42_neon_matches_scalar_all_matrices_16() {
+    for m in [
+      ColorMatrix::Bt601,
+      ColorMatrix::Bt709,
+      ColorMatrix::Bt2020Ncl,
+      ColorMatrix::Smpte240m,
+      ColorMatrix::Fcc,
+      ColorMatrix::YCgCo,
+    ] {
+      for full in [true, false] {
+        check_nv42_equivalence(16, m, full);
+      }
+    }
+  }
+
+  #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
+  fn nv42_neon_matches_scalar_widths() {
+    for w in [1usize, 3, 15, 17, 32, 33, 1920, 1921] {
+      check_nv42_equivalence(w, ColorMatrix::Bt709, false);
+    }
+  }
+
+  #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
+  fn nv42_neon_matches_nv24_swapped() {
+    for w in [16usize, 17, 33, 64, 1920] {
+      check_nv42_matches_nv24_with_swapped_uv(w, ColorMatrix::Bt709, false);
+      check_nv42_matches_nv24_with_swapped_uv(w, ColorMatrix::YCgCo, true);
     }
   }
 

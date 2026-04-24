@@ -1133,13 +1133,11 @@ impl PixelSink for MixedSinker<'_, Nv24> {
     // NV24 UV row is `2 * width` bytes. `checked_mul` covers the
     // boundary where `2 * width` could overflow `usize` on 32-bit
     // targets with very large widths.
-    let uv_expected = w
-      .checked_mul(2)
-      .ok_or(MixedSinkerError::GeometryOverflow {
-        width: w,
-        height: h,
-        channels: 2,
-      })?;
+    let uv_expected = w.checked_mul(2).ok_or(MixedSinkerError::GeometryOverflow {
+      width: w,
+      height: h,
+      channels: 2,
+    })?;
     if row.uv().len() != uv_expected {
       return Err(MixedSinkerError::RowShapeMismatch {
         which: RowSlice::UvFull,
@@ -1255,13 +1253,11 @@ impl PixelSink for MixedSinker<'_, Nv42> {
         actual: row.y().len(),
       });
     }
-    let vu_expected = w
-      .checked_mul(2)
-      .ok_or(MixedSinkerError::GeometryOverflow {
-        width: w,
-        height: h,
-        channels: 2,
-      })?;
+    let vu_expected = w.checked_mul(2).ok_or(MixedSinkerError::GeometryOverflow {
+      width: w,
+      height: h,
+      channels: 2,
+    })?;
     if row.vu().len() != vu_expected {
       return Err(MixedSinkerError::RowShapeMismatch {
         which: RowSlice::VuFull,
@@ -4004,7 +4000,9 @@ mod tests {
     let w = 33usize; // deliberately odd to exercise the no-parity-constraint path
     let h = 8usize;
     let yp: Vec<u8> = (0..w * h).map(|i| ((i * 37 + 11) & 0xFF) as u8).collect();
-    let uv_nv24: Vec<u8> = (0..2 * w * h).map(|i| ((i * 53 + 23) & 0xFF) as u8).collect();
+    let uv_nv24: Vec<u8> = (0..2 * w * h)
+      .map(|i| ((i * 53 + 23) & 0xFF) as u8)
+      .collect();
     // Build NV42 chroma by swapping each (U, V) pair.
     let mut vu_nv42 = std::vec![0u8; 2 * w * h];
     for i in 0..w * h {

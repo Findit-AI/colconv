@@ -343,9 +343,55 @@ pub fn nv24_to_rgb_row(
   assert!(uv.len() >= 2 * width, "uv row too short");
   assert!(rgb_out.len() >= rgb_min, "rgb_out row too short");
 
-  // SIMD backends land in the follow-up step; preserve the parameter
-  // so the signature is stable.
-  let _ = use_simd;
+  if use_simd {
+    cfg_select! {
+      target_arch = "aarch64" => {
+        if neon_available() {
+          // SAFETY: `neon_available()` verified NEON is present.
+          unsafe {
+            arch::neon::nv24_to_rgb_row(y, uv, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+      },
+      target_arch = "x86_64" => {
+        if avx512_available() {
+          // SAFETY: AVX‑512BW verified.
+          unsafe {
+            arch::x86_avx512::nv24_to_rgb_row(y, uv, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+        if avx2_available() {
+          // SAFETY: AVX2 verified.
+          unsafe {
+            arch::x86_avx2::nv24_to_rgb_row(y, uv, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+        if sse41_available() {
+          // SAFETY: SSE4.1 verified.
+          unsafe {
+            arch::x86_sse41::nv24_to_rgb_row(y, uv, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+      },
+      target_arch = "wasm32" => {
+        if simd128_available() {
+          // SAFETY: simd128 verified at compile time.
+          unsafe {
+            arch::wasm_simd128::nv24_to_rgb_row(y, uv, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+      },
+      _ => {
+        // Targets without a SIMD backend fall through to scalar.
+      }
+    }
+  }
+
   scalar::nv24_to_rgb_row(y, uv, rgb_out, width, matrix, full_range);
 }
 
@@ -367,7 +413,55 @@ pub fn nv42_to_rgb_row(
   assert!(vu.len() >= 2 * width, "vu row too short");
   assert!(rgb_out.len() >= rgb_min, "rgb_out row too short");
 
-  let _ = use_simd;
+  if use_simd {
+    cfg_select! {
+      target_arch = "aarch64" => {
+        if neon_available() {
+          // SAFETY: NEON verified.
+          unsafe {
+            arch::neon::nv42_to_rgb_row(y, vu, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+      },
+      target_arch = "x86_64" => {
+        if avx512_available() {
+          // SAFETY: AVX‑512BW verified.
+          unsafe {
+            arch::x86_avx512::nv42_to_rgb_row(y, vu, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+        if avx2_available() {
+          // SAFETY: AVX2 verified.
+          unsafe {
+            arch::x86_avx2::nv42_to_rgb_row(y, vu, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+        if sse41_available() {
+          // SAFETY: SSE4.1 verified.
+          unsafe {
+            arch::x86_sse41::nv42_to_rgb_row(y, vu, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+      },
+      target_arch = "wasm32" => {
+        if simd128_available() {
+          // SAFETY: simd128 verified at compile time.
+          unsafe {
+            arch::wasm_simd128::nv42_to_rgb_row(y, vu, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+      },
+      _ => {
+        // Targets without a SIMD backend fall through to scalar.
+      }
+    }
+  }
+
   scalar::nv42_to_rgb_row(y, vu, rgb_out, width, matrix, full_range);
 }
 
