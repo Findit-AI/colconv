@@ -3191,6 +3191,61 @@ mod tests {
     }
   }
 
+  // ---- yuv_444_to_rgb_row equivalence ---------------------------------
+
+  fn check_yuv_444_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+    let y: std::vec::Vec<u8> = (0..width).map(|i| ((i * 37 + 11) & 0xFF) as u8).collect();
+    let u: std::vec::Vec<u8> = (0..width).map(|i| ((i * 53 + 23) & 0xFF) as u8).collect();
+    let v: std::vec::Vec<u8> = (0..width).map(|i| ((i * 71 + 91) & 0xFF) as u8).collect();
+    let mut rgb_scalar = std::vec![0u8; width * 3];
+    let mut rgb_neon = std::vec![0u8; width * 3];
+
+    scalar::yuv_444_to_rgb_row(&y, &u, &v, &mut rgb_scalar, width, matrix, full_range);
+    unsafe {
+      yuv_444_to_rgb_row(&y, &u, &v, &mut rgb_neon, width, matrix, full_range);
+    }
+
+    if rgb_scalar != rgb_neon {
+      let first_diff = rgb_scalar
+        .iter()
+        .zip(rgb_neon.iter())
+        .position(|(a, b)| a != b)
+        .unwrap();
+      panic!(
+        "NEON yuv_444 diverges from scalar at byte {first_diff} (width={width}, matrix={matrix:?}, full_range={full_range}): scalar={} neon={}",
+        rgb_scalar[first_diff], rgb_neon[first_diff]
+      );
+    }
+  }
+
+  #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
+  fn yuv_444_neon_matches_scalar_all_matrices_16() {
+    for m in [
+      ColorMatrix::Bt601,
+      ColorMatrix::Bt709,
+      ColorMatrix::Bt2020Ncl,
+      ColorMatrix::Smpte240m,
+      ColorMatrix::Fcc,
+      ColorMatrix::YCgCo,
+    ] {
+      for full in [true, false] {
+        check_yuv_444_equivalence(16, m, full);
+      }
+    }
+  }
+
+  #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
+  fn yuv_444_neon_matches_scalar_widths() {
+    // Odd widths validate the no-parity-constraint contract (4:4:4
+    // chroma is 1:1 with Y, not paired) and force non-multiple-of-16
+    // scalar tails.
+    for w in [1usize, 3, 15, 17, 32, 33, 1920, 1921] {
+      check_yuv_444_equivalence(w, ColorMatrix::Bt709, false);
+    }
+  }
+
   // ---- rgb_to_hsv_row equivalence ------------------------------------
 
   fn check_hsv_equivalence(rgb: &[u8], width: usize) {

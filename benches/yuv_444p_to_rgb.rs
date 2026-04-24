@@ -2,8 +2,10 @@
 //!
 //! 4:4:4 has its own per-row kernel family — chroma is 1:1 with Y
 //! (no horizontal duplication step), so the main loop is a touch
-//! simpler than 4:2:0. Native NEON backend on aarch64; x86 / wasm
-//! fall through to scalar on this path.
+//! simpler than 4:2:0. Native SIMD on every backend (NEON on
+//! aarch64; SSE4.1 / AVX2 / AVX-512 on x86_64; wasm simd128).
+//! Scalar fallback when SIMD is unavailable or disabled via
+//! `use_simd=false`.
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;
