@@ -728,6 +728,83 @@ pub(crate) fn yuv_420p16_to_rgb_u16_row(
   }
 }
 
+/// YUV 4:4:4 planar **16‑bit** → packed **8‑bit** RGB. Same i32
+/// chroma pipeline as 10/12/14 (output‑range scaling keeps `coeff × u_d`
+/// inside i32 for u8 target). 1:1 chroma per Y pixel, no width parity.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn yuv_444p16_to_rgb_row(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  debug_assert!(y.len() >= width, "y row too short");
+  debug_assert!(u.len() >= width, "u row too short");
+  debug_assert!(v.len() >= width, "v row too short");
+  debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
+
+  let coeffs = Coefficients::for_matrix(matrix);
+  let (y_off, y_scale, c_scale) = range_params_n::<16, 8>(full_range);
+  let bias = chroma_bias::<16>();
+
+  for x in 0..width {
+    let u_d = q15_scale(u[x] as i32 - bias, c_scale);
+    let v_d = q15_scale(v[x] as i32 - bias, c_scale);
+
+    let r_chroma = q15_chroma(coeffs.r_u(), u_d, coeffs.r_v(), v_d);
+    let g_chroma = q15_chroma(coeffs.g_u(), u_d, coeffs.g_v(), v_d);
+    let b_chroma = q15_chroma(coeffs.b_u(), u_d, coeffs.b_v(), v_d);
+
+    let y0 = q15_scale(y[x] as i32 - y_off, y_scale);
+    rgb_out[x * 3] = clamp_u8(y0 + r_chroma);
+    rgb_out[x * 3 + 1] = clamp_u8(y0 + g_chroma);
+    rgb_out[x * 3 + 2] = clamp_u8(y0 + b_chroma);
+  }
+}
+
+/// YUV 4:4:4 planar **16‑bit** → packed **native‑depth `u16`** RGB.
+/// Widens chroma matrix multiply to i64 (Bt2020 `b_u × u_d` reaches
+/// ~2.31·10⁹ at limited‑range 16→u16 — overflows i32). Y path widens
+/// via [`q15_scale64`] to handle unclamped Y samples above the
+/// limited‑range nominal max.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn yuv_444p16_to_rgb_u16_row(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  rgb_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  debug_assert!(y.len() >= width, "y row too short");
+  debug_assert!(u.len() >= width, "u row too short");
+  debug_assert!(v.len() >= width, "v row too short");
+  debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
+
+  let coeffs = Coefficients::for_matrix(matrix);
+  let (y_off, y_scale, c_scale) = range_params_n::<16, 16>(full_range);
+  let bias = chroma_bias::<16>();
+  let out_max: i32 = 0xFFFF;
+
+  for x in 0..width {
+    let u_d = q15_scale(u[x] as i32 - bias, c_scale);
+    let v_d = q15_scale(v[x] as i32 - bias, c_scale);
+
+    let r_chroma = q15_chroma64(coeffs.r_u(), u_d, coeffs.r_v(), v_d);
+    let g_chroma = q15_chroma64(coeffs.g_u(), u_d, coeffs.g_v(), v_d);
+    let b_chroma = q15_chroma64(coeffs.b_u(), u_d, coeffs.b_v(), v_d);
+
+    let y0 = q15_scale64(y[x] as i32 - y_off, y_scale);
+    rgb_out[x * 3] = (y0 + r_chroma).clamp(0, out_max) as u16;
+    rgb_out[x * 3 + 1] = (y0 + g_chroma).clamp(0, out_max) as u16;
+    rgb_out[x * 3 + 2] = (y0 + b_chroma).clamp(0, out_max) as u16;
+  }
+}
+
 /// Converts one row of **P016** (semi-planar 4:2:0 with UV
 /// interleaved, full `u16` samples) to **8-bit** packed RGB. At 16
 /// bits there is no "high-bit-packed" vs "low-bit-packed" distinction

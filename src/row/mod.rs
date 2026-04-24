@@ -699,6 +699,55 @@ pub fn yuv444p14_to_rgb_u16_row(
   yuv_444p_n_to_rgb_u16_row::<14>(y, u, v, rgb_out, width, matrix, full_range, use_simd);
 }
 
+/// YUV 4:4:4 planar **16-bit** → packed **u8** RGB. Uses the
+/// parallel 16-bit kernel family (same Q15 i32 output-range pipeline
+/// as [`yuv_420p16_to_rgb_row`] but with 1:1 chroma per pixel).
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn yuv444p16_to_rgb_row(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  use_simd: bool,
+) {
+  let rgb_min = rgb_row_bytes(width);
+  assert!(y.len() >= width, "y row too short");
+  assert!(u.len() >= width, "u row too short");
+  assert!(v.len() >= width, "v row too short");
+  assert!(rgb_out.len() >= rgb_min, "rgb_out row too short");
+
+  let _ = use_simd;
+  scalar::yuv_444p16_to_rgb_row(y, u, v, rgb_out, width, matrix, full_range);
+}
+
+/// YUV 4:4:4 planar **16-bit** → packed **u16** RGB (full-range
+/// output in `[0, 65535]`). Widens chroma multiply-add + Y scale to
+/// i64 to avoid i32 overflow at 16-bit limited range.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn yuv444p16_to_rgb_u16_row(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  rgb_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  use_simd: bool,
+) {
+  assert!(y.len() >= width, "y row too short");
+  assert!(u.len() >= width, "u row too short");
+  assert!(v.len() >= width, "v row too short");
+  assert!(rgb_out.len() >= 3 * width, "rgb_out row too short");
+
+  let _ = use_simd;
+  scalar::yuv_444p16_to_rgb_u16_row(y, u, v, rgb_out, width, matrix, full_range);
+}
+
 /// Converts one row of **10‑bit** YUV 4:2:0 to packed **8‑bit** RGB.
 ///
 /// Samples are `u16` with 10 active bits in the low bits of each
