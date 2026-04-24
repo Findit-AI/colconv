@@ -3900,6 +3900,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn nv24_rgb_only_converts_gray_to_gray() {
     let (yp, uvp) = solid_nv24_frame(16, 8, 128, 128, 128);
     let src = Nv24Frame::new(&yp, &uvp, 16, 8, 16, 32);
@@ -3916,6 +3920,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn nv24_mixed_all_three_outputs_populated() {
     let (yp, uvp) = solid_nv24_frame(16, 8, 200, 128, 128);
     let src = Nv24Frame::new(&yp, &uvp, 16, 8, 16, 32);
@@ -3944,6 +3952,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn nv24_accepts_odd_width() {
     // 4:4:4 removes the width parity constraint. A 17-wide frame
     // should round-trip cleanly.
@@ -3977,6 +3989,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn nv42_rgb_only_converts_gray_to_gray() {
     let (yp, vup) = solid_nv42_frame(16, 8, 128, 128, 128);
     let src = Nv42Frame::new(&yp, &vup, 16, 8, 16, 32);
@@ -3993,6 +4009,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn nv42_matches_nv24_mixed_sinker_with_swapped_chroma() {
     // Cross-format parity: for the same Y plane and byte-swapped
     // interleaved chroma, NV24 and NV42 must produce identical RGB
