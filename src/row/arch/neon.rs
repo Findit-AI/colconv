@@ -1969,6 +1969,7 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn neon_matches_scalar_all_matrices_16() {
     for m in [
       ColorMatrix::Bt601,
@@ -1985,6 +1986,7 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn neon_matches_scalar_width_32() {
     check_equivalence(32, ColorMatrix::Bt601, true);
     check_equivalence(32, ColorMatrix::Bt709, false);
@@ -1992,11 +1994,13 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn neon_matches_scalar_width_1920() {
     check_equivalence(1920, ColorMatrix::Bt709, false);
   }
 
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn neon_matches_scalar_odd_tail_widths() {
     // Widths that leave a non‑trivial scalar tail (non‑multiple of 16).
     for w in [18usize, 30, 34, 1922] {
@@ -2067,6 +2071,7 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn nv12_neon_matches_scalar_all_matrices_16() {
     for m in [
       ColorMatrix::Bt601,
@@ -2083,11 +2088,13 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn nv12_neon_matches_scalar_width_1920() {
     check_nv12_equivalence(1920, ColorMatrix::Bt709, false);
   }
 
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn nv12_neon_matches_scalar_odd_tail_widths() {
     for w in [18usize, 30, 34, 1922] {
       check_nv12_equivalence(w, ColorMatrix::Bt601, false);
@@ -2095,6 +2102,7 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn nv12_neon_matches_yuv420p_neon() {
     for w in [16usize, 30, 64, 1920] {
       check_nv12_matches_yuv420p(w, ColorMatrix::Bt709, false);
@@ -2172,6 +2180,7 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn nv21_neon_matches_scalar_all_matrices_16() {
     for m in [
       ColorMatrix::Bt601,
@@ -2188,6 +2197,7 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn nv21_neon_matches_scalar_widths() {
     for w in [32usize, 1920, 18, 30, 34, 1922] {
       check_nv21_equivalence(w, ColorMatrix::Bt709, false);
@@ -2195,6 +2205,7 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn nv21_neon_matches_nv12_swapped() {
     for w in [16usize, 30, 64, 1920] {
       check_nv21_matches_nv12_with_swapped_uv(w, ColorMatrix::Bt709, false);
@@ -2203,13 +2214,7 @@ mod tests {
   }
 
   // ---- rgb_to_hsv_row equivalence ------------------------------------
-  //
-  // Miri (macOS aarch64 in CI) does not support the LLVM NEON f32
-  // intrinsics used by the HSV SIMD kernel (e.g. `vmaxq_f32` →
-  // `llvm.aarch64.neon.fmax.v4f32`). Gate these tests under
-  // `not(miri)` so Miri still exercises the rest of the NEON suite.
 
-  #[cfg(not(miri))]
   fn check_hsv_equivalence(rgb: &[u8], width: usize) {
     let mut h_scalar = std::vec![0u8; width];
     let mut s_scalar = std::vec![0u8; width];
@@ -2261,21 +2266,21 @@ mod tests {
   }
 
   #[test]
-  #[cfg(not(miri))]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn hsv_neon_matches_scalar_pseudo_random_16() {
     let rgb = pseudo_random_bgr(16);
     check_hsv_equivalence(&rgb, 16);
   }
 
   #[test]
-  #[cfg(not(miri))]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn hsv_neon_matches_scalar_pseudo_random_1920() {
     let rgb = pseudo_random_bgr(1920);
     check_hsv_equivalence(&rgb, 1920);
   }
 
   #[test]
-  #[cfg(not(miri))]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn hsv_neon_matches_scalar_tail_widths() {
     // Widths that force a non‑trivial scalar tail (non‑multiple of 16).
     for w in [1usize, 7, 15, 17, 31, 1921] {
@@ -2285,7 +2290,7 @@ mod tests {
   }
 
   #[test]
-  #[cfg(not(miri))]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn hsv_neon_matches_scalar_primaries_and_edges() {
     // Primary colors, grays, near‑saturation — exercise each hue branch
     // and the v==0, delta==0, h<0 wrap paths.
@@ -2349,6 +2354,7 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn swap_neon_matches_scalar_widths() {
     for w in [1usize, 15, 16, 17, 31, 32, 1920, 1921] {
       check_swap_equivalence(w);
@@ -2356,6 +2362,7 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn swap_is_self_inverse() {
     let input = pseudo_random_bgr(64);
     let mut round_trip = std::vec![0u8; 64 * 3];
@@ -2429,6 +2436,7 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn neon_p10_u8_matches_scalar_all_matrices_16() {
     for m in [
       ColorMatrix::Bt601,
@@ -2445,6 +2453,7 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn neon_p10_u16_matches_scalar_all_matrices_16() {
     for m in [
       ColorMatrix::Bt601,
@@ -2461,6 +2470,7 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn neon_p10_matches_scalar_odd_tail_widths() {
     for w in [18usize, 30, 34, 1922] {
       check_p10_u8_equivalence(w, ColorMatrix::Bt601, false);
@@ -2469,6 +2479,7 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn neon_p10_matches_scalar_1920() {
     check_p10_u8_equivalence(1920, ColorMatrix::Bt709, false);
     check_p10_u16_equivalence(1920, ColorMatrix::Bt2020Ncl, false);
@@ -2490,6 +2501,7 @@ mod tests {
   /// Each variant runs through every color matrix × range × both
   /// output paths (u8 + native‑depth u16) and asserts byte equality.
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn neon_p10_matches_scalar_on_out_of_range_samples() {
     let width = 32;
 
@@ -2638,6 +2650,7 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn neon_p010_u8_matches_scalar_all_matrices_16() {
     for m in [
       ColorMatrix::Bt601,
@@ -2654,6 +2667,7 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn neon_p010_u16_matches_scalar_all_matrices_16() {
     for m in [
       ColorMatrix::Bt601,
@@ -2670,6 +2684,7 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn neon_p010_matches_scalar_odd_tail_widths() {
     for w in [18usize, 30, 34, 1922] {
       check_p010_u8_equivalence(w, ColorMatrix::Bt601, false);
@@ -2678,6 +2693,7 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn neon_p010_matches_scalar_1920() {
     check_p010_u8_equivalence(1920, ColorMatrix::Bt709, false);
     check_p010_u16_equivalence(1920, ColorMatrix::Bt2020Ncl, false);
@@ -2690,6 +2706,7 @@ mod tests {
   /// only the high 10 bits, so any low‑6‑bits data gets deterministically
   /// discarded in both paths.
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn neon_p010_matches_scalar_on_mispacked_input() {
     let width = 32;
 
@@ -2841,6 +2858,7 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn neon_p12_matches_scalar_all_matrices() {
     for m in [
       ColorMatrix::Bt601,
@@ -2860,6 +2878,7 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn neon_p14_matches_scalar_all_matrices() {
     for m in [
       ColorMatrix::Bt601,
@@ -2877,6 +2896,7 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn neon_p12_matches_scalar_tail_widths() {
     for w in [18usize, 30, 34, 1922] {
       check_planar_u8_neon_equivalence_n::<12>(w, ColorMatrix::Bt601, false);
@@ -2887,6 +2907,7 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn neon_p14_matches_scalar_tail_widths() {
     for w in [18usize, 30, 34, 1922] {
       check_planar_u8_neon_equivalence_n::<14>(w, ColorMatrix::Bt601, false);
