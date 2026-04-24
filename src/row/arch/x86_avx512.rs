@@ -1351,6 +1351,165 @@ unsafe fn nv24_or_nv42_to_rgb_row_impl<const SWAP_UV: bool>(
   }
 }
 
+/// AVX-512 YUV 4:4:4 planar → packed RGB. 64 Y pixels + 64 U + 64 V
+/// per iteration. Same arithmetic as [`nv24_to_rgb_row`] with U / V
+/// loaded directly from separate planes (no deinterleave step).
+///
+/// # Safety
+///
+/// 1. **AVX-512F + AVX-512BW must be available.**
+/// 2. `y.len() >= width`, `u.len() >= width`, `v.len() >= width`,
+///    `rgb_out.len() >= 3 * width`.
+#[inline]
+#[target_feature(enable = "avx512f,avx512bw")]
+pub(crate) unsafe fn yuv_444_to_rgb_row(
+  y: &[u8],
+  u: &[u8],
+  v: &[u8],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  debug_assert!(y.len() >= width);
+  debug_assert!(u.len() >= width);
+  debug_assert!(v.len() >= width);
+  debug_assert!(rgb_out.len() >= width * 3);
+
+  let coeffs = scalar::Coefficients::for_matrix(matrix);
+  let (y_off, y_scale, c_scale) = scalar::range_params(full_range);
+  const RND: i32 = 1 << 14;
+
+  unsafe {
+    let rnd_v = _mm512_set1_epi32(RND);
+    let y_off_v = _mm512_set1_epi16(y_off as i16);
+    let y_scale_v = _mm512_set1_epi32(y_scale);
+    let c_scale_v = _mm512_set1_epi32(c_scale);
+    let mid128 = _mm512_set1_epi16(128);
+    let cru = _mm512_set1_epi32(coeffs.r_u());
+    let crv = _mm512_set1_epi32(coeffs.r_v());
+    let cgu = _mm512_set1_epi32(coeffs.g_u());
+    let cgv = _mm512_set1_epi32(coeffs.g_v());
+    let cbu = _mm512_set1_epi32(coeffs.b_u());
+    let cbv = _mm512_set1_epi32(coeffs.b_v());
+
+    let pack_fixup = _mm512_setr_epi64(0, 2, 4, 6, 1, 3, 5, 7);
+
+    let mut x = 0usize;
+    while x + 64 <= width {
+      let y_vec = _mm512_loadu_si512(y.as_ptr().add(x).cast());
+      // 4:4:4: 64 U + 64 V directly, no deinterleave.
+      let u_vec = _mm512_loadu_si512(u.as_ptr().add(x).cast());
+      let v_vec = _mm512_loadu_si512(v.as_ptr().add(x).cast());
+
+      // Widen low / high halves of U / V (32 bytes each) to i16x32.
+      let u_lo_i16 = _mm512_sub_epi16(_mm512_cvtepu8_epi16(_mm512_castsi512_si256(u_vec)), mid128);
+      let u_hi_i16 = _mm512_sub_epi16(
+        _mm512_cvtepu8_epi16(_mm512_extracti64x4_epi64::<1>(u_vec)),
+        mid128,
+      );
+      let v_lo_i16 = _mm512_sub_epi16(_mm512_cvtepu8_epi16(_mm512_castsi512_si256(v_vec)), mid128);
+      let v_hi_i16 = _mm512_sub_epi16(
+        _mm512_cvtepu8_epi16(_mm512_extracti64x4_epi64::<1>(v_vec)),
+        mid128,
+      );
+
+      let u_lo_a = _mm512_cvtepi16_epi32(_mm512_castsi512_si256(u_lo_i16));
+      let u_lo_b = _mm512_cvtepi16_epi32(_mm512_extracti64x4_epi64::<1>(u_lo_i16));
+      let u_hi_a = _mm512_cvtepi16_epi32(_mm512_castsi512_si256(u_hi_i16));
+      let u_hi_b = _mm512_cvtepi16_epi32(_mm512_extracti64x4_epi64::<1>(u_hi_i16));
+      let v_lo_a = _mm512_cvtepi16_epi32(_mm512_castsi512_si256(v_lo_i16));
+      let v_lo_b = _mm512_cvtepi16_epi32(_mm512_extracti64x4_epi64::<1>(v_lo_i16));
+      let v_hi_a = _mm512_cvtepi16_epi32(_mm512_castsi512_si256(v_hi_i16));
+      let v_hi_b = _mm512_cvtepi16_epi32(_mm512_extracti64x4_epi64::<1>(v_hi_i16));
+
+      let u_d_lo_a = q15_shift(_mm512_add_epi32(
+        _mm512_mullo_epi32(u_lo_a, c_scale_v),
+        rnd_v,
+      ));
+      let u_d_lo_b = q15_shift(_mm512_add_epi32(
+        _mm512_mullo_epi32(u_lo_b, c_scale_v),
+        rnd_v,
+      ));
+      let u_d_hi_a = q15_shift(_mm512_add_epi32(
+        _mm512_mullo_epi32(u_hi_a, c_scale_v),
+        rnd_v,
+      ));
+      let u_d_hi_b = q15_shift(_mm512_add_epi32(
+        _mm512_mullo_epi32(u_hi_b, c_scale_v),
+        rnd_v,
+      ));
+      let v_d_lo_a = q15_shift(_mm512_add_epi32(
+        _mm512_mullo_epi32(v_lo_a, c_scale_v),
+        rnd_v,
+      ));
+      let v_d_lo_b = q15_shift(_mm512_add_epi32(
+        _mm512_mullo_epi32(v_lo_b, c_scale_v),
+        rnd_v,
+      ));
+      let v_d_hi_a = q15_shift(_mm512_add_epi32(
+        _mm512_mullo_epi32(v_hi_a, c_scale_v),
+        rnd_v,
+      ));
+      let v_d_hi_b = q15_shift(_mm512_add_epi32(
+        _mm512_mullo_epi32(v_hi_b, c_scale_v),
+        rnd_v,
+      ));
+
+      let r_chroma_lo = chroma_i16x32(
+        cru, crv, u_d_lo_a, v_d_lo_a, u_d_lo_b, v_d_lo_b, rnd_v, pack_fixup,
+      );
+      let r_chroma_hi = chroma_i16x32(
+        cru, crv, u_d_hi_a, v_d_hi_a, u_d_hi_b, v_d_hi_b, rnd_v, pack_fixup,
+      );
+      let g_chroma_lo = chroma_i16x32(
+        cgu, cgv, u_d_lo_a, v_d_lo_a, u_d_lo_b, v_d_lo_b, rnd_v, pack_fixup,
+      );
+      let g_chroma_hi = chroma_i16x32(
+        cgu, cgv, u_d_hi_a, v_d_hi_a, u_d_hi_b, v_d_hi_b, rnd_v, pack_fixup,
+      );
+      let b_chroma_lo = chroma_i16x32(
+        cbu, cbv, u_d_lo_a, v_d_lo_a, u_d_lo_b, v_d_lo_b, rnd_v, pack_fixup,
+      );
+      let b_chroma_hi = chroma_i16x32(
+        cbu, cbv, u_d_hi_a, v_d_hi_a, u_d_hi_b, v_d_hi_b, rnd_v, pack_fixup,
+      );
+
+      let y_low_i16 = _mm512_cvtepu8_epi16(_mm512_castsi512_si256(y_vec));
+      let y_high_i16 = _mm512_cvtepu8_epi16(_mm512_extracti64x4_epi64::<1>(y_vec));
+      let y_scaled_lo = scale_y(y_low_i16, y_off_v, y_scale_v, rnd_v, pack_fixup);
+      let y_scaled_hi = scale_y(y_high_i16, y_off_v, y_scale_v, rnd_v, pack_fixup);
+
+      let b_lo = _mm512_adds_epi16(y_scaled_lo, b_chroma_lo);
+      let b_hi = _mm512_adds_epi16(y_scaled_hi, b_chroma_hi);
+      let g_lo = _mm512_adds_epi16(y_scaled_lo, g_chroma_lo);
+      let g_hi = _mm512_adds_epi16(y_scaled_hi, g_chroma_hi);
+      let r_lo = _mm512_adds_epi16(y_scaled_lo, r_chroma_lo);
+      let r_hi = _mm512_adds_epi16(y_scaled_hi, r_chroma_hi);
+
+      let b_u8 = narrow_u8x64(b_lo, b_hi, pack_fixup);
+      let g_u8 = narrow_u8x64(g_lo, g_hi, pack_fixup);
+      let r_u8 = narrow_u8x64(r_lo, r_hi, pack_fixup);
+
+      write_rgb_64(r_u8, g_u8, b_u8, rgb_out.as_mut_ptr().add(x * 3));
+
+      x += 64;
+    }
+
+    if x < width {
+      scalar::yuv_444_to_rgb_row(
+        &y[x..width],
+        &u[x..width],
+        &v[x..width],
+        &mut rgb_out[x * 3..width * 3],
+        width - x,
+        matrix,
+        full_range,
+      );
+    }
+  }
+}
+
 // ---- helpers (inlined into the target_feature‑enabled caller) ----------
 
 /// `>>_a 15` shift (arithmetic, sign‑extending).

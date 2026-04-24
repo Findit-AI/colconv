@@ -477,15 +477,15 @@ pub fn nv42_to_rgb_row(
   scalar::nv42_to_rgb_row(y, vu, rgb_out, width, matrix, full_range);
 }
 
-/// Converts one row of YUV 4:4:4 planar to packed RGB.
+/// Converts one row of YUV 4:4:4 planar to packed RGB. Dispatches
+/// to the best available SIMD backend for the current target.
 ///
 /// Same numerical contract as [`yuv_420_to_rgb_row`]; the difference
 /// is 4:4:4 chroma — one U / V pair per Y pixel, full-width chroma
 /// planes, no chroma upsampling, no width parity constraint. See
 /// `scalar::yuv_444_to_rgb_row` for the reference implementation.
 ///
-/// SIMD backends are wired in Phase 2 of this PR; `use_simd` is
-/// accepted now so the signature matches the rest of the family.
+/// `use_simd = false` forces the scalar reference path.
 #[cfg_attr(not(tarpaulin), inline(always))]
 #[allow(clippy::too_many_arguments)]
 pub fn yuv_444_to_rgb_row(
@@ -504,9 +504,53 @@ pub fn yuv_444_to_rgb_row(
   assert!(v.len() >= width, "v row too short");
   assert!(rgb_out.len() >= rgb_min, "rgb_out row too short");
 
-  // SIMD backends land in Phase 2; preserve the parameter so the
-  // signature is stable.
-  let _ = use_simd;
+  if use_simd {
+    cfg_select! {
+      target_arch = "aarch64" => {
+        if neon_available() {
+          // SAFETY: `neon_available()` verified NEON is present.
+          unsafe {
+            arch::neon::yuv_444_to_rgb_row(y, u, v, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+      },
+      target_arch = "x86_64" => {
+        if avx512_available() {
+          // SAFETY: AVX-512BW verified.
+          unsafe {
+            arch::x86_avx512::yuv_444_to_rgb_row(y, u, v, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+        if avx2_available() {
+          // SAFETY: AVX2 verified.
+          unsafe {
+            arch::x86_avx2::yuv_444_to_rgb_row(y, u, v, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+        if sse41_available() {
+          // SAFETY: SSE4.1 verified.
+          unsafe {
+            arch::x86_sse41::yuv_444_to_rgb_row(y, u, v, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+      },
+      target_arch = "wasm32" => {
+        if simd128_available() {
+          // SAFETY: simd128 verified at compile time.
+          unsafe {
+            arch::wasm_simd128::yuv_444_to_rgb_row(y, u, v, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+      },
+      _ => {}
+    }
+  }
+
   scalar::yuv_444_to_rgb_row(y, u, v, rgb_out, width, matrix, full_range);
 }
 

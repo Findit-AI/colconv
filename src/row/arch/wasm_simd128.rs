@@ -1240,6 +1240,121 @@ unsafe fn nv24_or_nv42_to_rgb_row_impl<const SWAP_UV: bool>(
   }
 }
 
+/// wasm simd128 YUV 4:4:4 planar → packed RGB. 16 Y + 16 U + 16 V
+/// per iteration. Same arithmetic as [`nv24_to_rgb_row`] but U and V
+/// come from separate planes (no deinterleave).
+///
+/// # Safety
+///
+/// 1. **simd128 must be available** (compile-time `target_feature`).
+/// 2. `y.len() >= width`, `u.len() >= width`, `v.len() >= width`,
+///    `rgb_out.len() >= 3 * width`.
+#[inline]
+#[target_feature(enable = "simd128")]
+pub(crate) unsafe fn yuv_444_to_rgb_row(
+  y: &[u8],
+  u: &[u8],
+  v: &[u8],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  debug_assert!(y.len() >= width);
+  debug_assert!(u.len() >= width);
+  debug_assert!(v.len() >= width);
+  debug_assert!(rgb_out.len() >= width * 3);
+
+  let coeffs = scalar::Coefficients::for_matrix(matrix);
+  let (y_off, y_scale, c_scale) = scalar::range_params(full_range);
+  const RND: i32 = 1 << 14;
+
+  unsafe {
+    let rnd_v = i32x4_splat(RND);
+    let y_off_v = i16x8_splat(y_off as i16);
+    let y_scale_v = i32x4_splat(y_scale);
+    let c_scale_v = i32x4_splat(c_scale);
+    let mid128 = i16x8_splat(128);
+    let cru = i32x4_splat(coeffs.r_u());
+    let crv = i32x4_splat(coeffs.r_v());
+    let cgu = i32x4_splat(coeffs.g_u());
+    let cgv = i32x4_splat(coeffs.g_v());
+    let cbu = i32x4_splat(coeffs.b_u());
+    let cbv = i32x4_splat(coeffs.b_v());
+
+    let mut x = 0usize;
+    while x + 16 <= width {
+      let y_vec = v128_load(y.as_ptr().add(x).cast());
+      // 4:4:4: 16 U + 16 V directly (no deinterleave).
+      let u_vec = v128_load(u.as_ptr().add(x).cast());
+      let v_vec = v128_load(v.as_ptr().add(x).cast());
+
+      // Widen low / high halves of U / V to i16x8 and subtract 128.
+      let u_lo_i16 = i16x8_sub(u16x8_extend_low_u8x16(u_vec), mid128);
+      let u_hi_i16 = i16x8_sub(u16x8_extend_high_u8x16(u_vec), mid128);
+      let v_lo_i16 = i16x8_sub(u16x8_extend_low_u8x16(v_vec), mid128);
+      let v_hi_i16 = i16x8_sub(u16x8_extend_high_u8x16(v_vec), mid128);
+
+      let u_lo_a = i32x4_extend_low_i16x8(u_lo_i16);
+      let u_lo_b = i32x4_extend_high_i16x8(u_lo_i16);
+      let u_hi_a = i32x4_extend_low_i16x8(u_hi_i16);
+      let u_hi_b = i32x4_extend_high_i16x8(u_hi_i16);
+      let v_lo_a = i32x4_extend_low_i16x8(v_lo_i16);
+      let v_lo_b = i32x4_extend_high_i16x8(v_lo_i16);
+      let v_hi_a = i32x4_extend_low_i16x8(v_hi_i16);
+      let v_hi_b = i32x4_extend_high_i16x8(v_hi_i16);
+
+      let u_d_lo_a = q15_shift(i32x4_add(i32x4_mul(u_lo_a, c_scale_v), rnd_v));
+      let u_d_lo_b = q15_shift(i32x4_add(i32x4_mul(u_lo_b, c_scale_v), rnd_v));
+      let u_d_hi_a = q15_shift(i32x4_add(i32x4_mul(u_hi_a, c_scale_v), rnd_v));
+      let u_d_hi_b = q15_shift(i32x4_add(i32x4_mul(u_hi_b, c_scale_v), rnd_v));
+      let v_d_lo_a = q15_shift(i32x4_add(i32x4_mul(v_lo_a, c_scale_v), rnd_v));
+      let v_d_lo_b = q15_shift(i32x4_add(i32x4_mul(v_lo_b, c_scale_v), rnd_v));
+      let v_d_hi_a = q15_shift(i32x4_add(i32x4_mul(v_hi_a, c_scale_v), rnd_v));
+      let v_d_hi_b = q15_shift(i32x4_add(i32x4_mul(v_hi_b, c_scale_v), rnd_v));
+
+      let r_chroma_lo = chroma_i16x8(cru, crv, u_d_lo_a, v_d_lo_a, u_d_lo_b, v_d_lo_b, rnd_v);
+      let r_chroma_hi = chroma_i16x8(cru, crv, u_d_hi_a, v_d_hi_a, u_d_hi_b, v_d_hi_b, rnd_v);
+      let g_chroma_lo = chroma_i16x8(cgu, cgv, u_d_lo_a, v_d_lo_a, u_d_lo_b, v_d_lo_b, rnd_v);
+      let g_chroma_hi = chroma_i16x8(cgu, cgv, u_d_hi_a, v_d_hi_a, u_d_hi_b, v_d_hi_b, rnd_v);
+      let b_chroma_lo = chroma_i16x8(cbu, cbv, u_d_lo_a, v_d_lo_a, u_d_lo_b, v_d_lo_b, rnd_v);
+      let b_chroma_hi = chroma_i16x8(cbu, cbv, u_d_hi_a, v_d_hi_a, u_d_hi_b, v_d_hi_b, rnd_v);
+
+      let y_low_i16 = u8_low_to_i16x8(y_vec);
+      let y_high_i16 = u8_high_to_i16x8(y_vec);
+      let y_scaled_lo = scale_y(y_low_i16, y_off_v, y_scale_v, rnd_v);
+      let y_scaled_hi = scale_y(y_high_i16, y_off_v, y_scale_v, rnd_v);
+
+      let b_lo = i16x8_add_sat(y_scaled_lo, b_chroma_lo);
+      let b_hi = i16x8_add_sat(y_scaled_hi, b_chroma_hi);
+      let g_lo = i16x8_add_sat(y_scaled_lo, g_chroma_lo);
+      let g_hi = i16x8_add_sat(y_scaled_hi, g_chroma_hi);
+      let r_lo = i16x8_add_sat(y_scaled_lo, r_chroma_lo);
+      let r_hi = i16x8_add_sat(y_scaled_hi, r_chroma_hi);
+
+      let b_u8 = u8x16_narrow_i16x8(b_lo, b_hi);
+      let g_u8 = u8x16_narrow_i16x8(g_lo, g_hi);
+      let r_u8 = u8x16_narrow_i16x8(r_lo, r_hi);
+
+      write_rgb_16(r_u8, g_u8, b_u8, rgb_out.as_mut_ptr().add(x * 3));
+
+      x += 16;
+    }
+
+    if x < width {
+      scalar::yuv_444_to_rgb_row(
+        &y[x..width],
+        &u[x..width],
+        &v[x..width],
+        &mut rgb_out[x * 3..width * 3],
+        width - x,
+        matrix,
+        full_range,
+      );
+    }
+  }
+}
+
 // ---- helpers -----------------------------------------------------------
 
 /// `>>_a 15` shift (arithmetic, sign‑extending).
