@@ -554,6 +554,151 @@ pub fn yuv_444_to_rgb_row(
   scalar::yuv_444_to_rgb_row(y, u, v, rgb_out, width, matrix, full_range);
 }
 
+/// YUV 4:4:4 planar 10/12/14-bit → **u8** RGB dispatcher. Const
+/// generic over `BITS ∈ {10, 12, 14}`. Scalar-only for Phase 3 of
+/// this PR; SIMD backends wire in Phase 3c.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn yuv_444p_n_to_rgb_row<const BITS: u32>(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  use_simd: bool,
+) {
+  let rgb_min = rgb_row_bytes(width);
+  assert!(y.len() >= width, "y row too short");
+  assert!(u.len() >= width, "u row too short");
+  assert!(v.len() >= width, "v row too short");
+  assert!(rgb_out.len() >= rgb_min, "rgb_out row too short");
+
+  let _ = use_simd;
+  scalar::yuv_444p_n_to_rgb_row::<BITS>(y, u, v, rgb_out, width, matrix, full_range);
+}
+
+/// YUV 4:4:4 planar 10/12/14-bit → **native-depth u16** RGB dispatcher.
+/// Const generic over `BITS ∈ {10, 12, 14}`. Low-bit-packed output.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn yuv_444p_n_to_rgb_u16_row<const BITS: u32>(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  rgb_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  use_simd: bool,
+) {
+  assert!(y.len() >= width, "y row too short");
+  assert!(u.len() >= width, "u row too short");
+  assert!(v.len() >= width, "v row too short");
+  assert!(rgb_out.len() >= 3 * width, "rgb_out row too short");
+
+  let _ = use_simd;
+  scalar::yuv_444p_n_to_rgb_u16_row::<BITS>(y, u, v, rgb_out, width, matrix, full_range);
+}
+
+/// YUV 4:4:4 planar 10-bit → u8 RGB. Thin wrapper over
+/// [`yuv_444p_n_to_rgb_row`]`::<10>`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn yuv444p10_to_rgb_row(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  use_simd: bool,
+) {
+  yuv_444p_n_to_rgb_row::<10>(y, u, v, rgb_out, width, matrix, full_range, use_simd);
+}
+
+/// YUV 4:4:4 planar 10-bit → native-depth u16 RGB.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn yuv444p10_to_rgb_u16_row(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  rgb_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  use_simd: bool,
+) {
+  yuv_444p_n_to_rgb_u16_row::<10>(y, u, v, rgb_out, width, matrix, full_range, use_simd);
+}
+
+/// YUV 4:4:4 planar 12-bit → u8 RGB.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn yuv444p12_to_rgb_row(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  use_simd: bool,
+) {
+  yuv_444p_n_to_rgb_row::<12>(y, u, v, rgb_out, width, matrix, full_range, use_simd);
+}
+
+/// YUV 4:4:4 planar 12-bit → native-depth u16 RGB.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn yuv444p12_to_rgb_u16_row(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  rgb_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  use_simd: bool,
+) {
+  yuv_444p_n_to_rgb_u16_row::<12>(y, u, v, rgb_out, width, matrix, full_range, use_simd);
+}
+
+/// YUV 4:4:4 planar 14-bit → u8 RGB.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn yuv444p14_to_rgb_row(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  use_simd: bool,
+) {
+  yuv_444p_n_to_rgb_row::<14>(y, u, v, rgb_out, width, matrix, full_range, use_simd);
+}
+
+/// YUV 4:4:4 planar 14-bit → native-depth u16 RGB.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn yuv444p14_to_rgb_u16_row(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  rgb_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  use_simd: bool,
+) {
+  yuv_444p_n_to_rgb_u16_row::<14>(y, u, v, rgb_out, width, matrix, full_range, use_simd);
+}
+
 /// Converts one row of **10‑bit** YUV 4:2:0 to packed **8‑bit** RGB.
 ///
 /// Samples are `u16` with 10 active bits in the low bits of each

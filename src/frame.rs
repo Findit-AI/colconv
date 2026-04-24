@@ -2827,6 +2827,392 @@ pub enum Yuv420pFrame16Plane {
   V,
 }
 
+/// A validated planar 4:2:2 `u16`-backed frame, generic over
+/// `const BITS: u32 ∈ {10, 12, 14, 16}`. Samples are low-bit-packed
+/// (the `BITS` active bits sit in the **low** bits of each `u16`).
+///
+/// Layout mirrors [`Yuv420pFrame16`] but with chroma half-width,
+/// **full-height**: `u.len() >= u_stride * height`. The per-row
+/// kernel contract is identical to the 4:2:0 family — the 4:2:2
+/// difference lives in the walker (chroma row matches Y row instead
+/// of `Y / 2`).
+///
+/// All strides are in **samples** (`u16` elements). Use the
+/// [`Yuv422p10Frame`] / [`Yuv422p12Frame`] / [`Yuv422p14Frame`] /
+/// [`Yuv422p16Frame`] aliases at call sites.
+#[derive(Debug, Clone, Copy)]
+pub struct Yuv422pFrame16<'a, const BITS: u32> {
+  y: &'a [u16],
+  u: &'a [u16],
+  v: &'a [u16],
+  width: u32,
+  height: u32,
+  y_stride: u32,
+  u_stride: u32,
+  v_stride: u32,
+}
+
+impl<'a, const BITS: u32> Yuv422pFrame16<'a, BITS> {
+  /// Constructs a new [`Yuv422pFrame16`].
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  #[allow(clippy::too_many_arguments)]
+  pub const fn try_new(
+    y: &'a [u16],
+    u: &'a [u16],
+    v: &'a [u16],
+    width: u32,
+    height: u32,
+    y_stride: u32,
+    u_stride: u32,
+    v_stride: u32,
+  ) -> Result<Self, Yuv420pFrame16Error> {
+    if BITS != 10 && BITS != 12 && BITS != 14 && BITS != 16 {
+      return Err(Yuv420pFrame16Error::UnsupportedBits { bits: BITS });
+    }
+    if width == 0 || height == 0 {
+      return Err(Yuv420pFrame16Error::ZeroDimension { width, height });
+    }
+    if width & 1 != 0 {
+      return Err(Yuv420pFrame16Error::OddWidth { width });
+    }
+    if y_stride < width {
+      return Err(Yuv420pFrame16Error::YStrideTooSmall { width, y_stride });
+    }
+    let chroma_width = width.div_ceil(2);
+    if u_stride < chroma_width {
+      return Err(Yuv420pFrame16Error::UStrideTooSmall {
+        chroma_width,
+        u_stride,
+      });
+    }
+    if v_stride < chroma_width {
+      return Err(Yuv420pFrame16Error::VStrideTooSmall {
+        chroma_width,
+        v_stride,
+      });
+    }
+
+    let y_min = match (y_stride as usize).checked_mul(height as usize) {
+      Some(v) => v,
+      None => {
+        return Err(Yuv420pFrame16Error::GeometryOverflow {
+          stride: y_stride,
+          rows: height,
+        });
+      }
+    };
+    if y.len() < y_min {
+      return Err(Yuv420pFrame16Error::YPlaneTooShort {
+        expected: y_min,
+        actual: y.len(),
+      });
+    }
+    // 4:2:2: chroma is **full-height** (no `div_ceil(2)`).
+    let u_min = match (u_stride as usize).checked_mul(height as usize) {
+      Some(v) => v,
+      None => {
+        return Err(Yuv420pFrame16Error::GeometryOverflow {
+          stride: u_stride,
+          rows: height,
+        });
+      }
+    };
+    if u.len() < u_min {
+      return Err(Yuv420pFrame16Error::UPlaneTooShort {
+        expected: u_min,
+        actual: u.len(),
+      });
+    }
+    let v_min = match (v_stride as usize).checked_mul(height as usize) {
+      Some(v) => v,
+      None => {
+        return Err(Yuv420pFrame16Error::GeometryOverflow {
+          stride: v_stride,
+          rows: height,
+        });
+      }
+    };
+    if v.len() < v_min {
+      return Err(Yuv420pFrame16Error::VPlaneTooShort {
+        expected: v_min,
+        actual: v.len(),
+      });
+    }
+
+    Ok(Self {
+      y,
+      u,
+      v,
+      width,
+      height,
+      y_stride,
+      u_stride,
+      v_stride,
+    })
+  }
+
+  /// Constructs a new [`Yuv422pFrame16`], panicking on invalid inputs.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  #[allow(clippy::too_many_arguments)]
+  pub const fn new(
+    y: &'a [u16],
+    u: &'a [u16],
+    v: &'a [u16],
+    width: u32,
+    height: u32,
+    y_stride: u32,
+    u_stride: u32,
+    v_stride: u32,
+  ) -> Self {
+    match Self::try_new(y, u, v, width, height, y_stride, u_stride, v_stride) {
+      Ok(frame) => frame,
+      Err(_) => panic!("invalid Yuv422pFrame16 dimensions or plane lengths"),
+    }
+  }
+
+  /// Y plane (`u16` elements).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn y(&self) -> &'a [u16] {
+    self.y
+  }
+  /// U plane. Half-width, full-height.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn u(&self) -> &'a [u16] {
+    self.u
+  }
+  /// V plane. Half-width, full-height.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn v(&self) -> &'a [u16] {
+    self.v
+  }
+  /// Frame width in pixels. Always even.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn width(&self) -> u32 {
+    self.width
+  }
+  /// Frame height in pixels.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn height(&self) -> u32 {
+    self.height
+  }
+  /// Y‑plane stride in samples.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn y_stride(&self) -> u32 {
+    self.y_stride
+  }
+  /// U‑plane stride in samples.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn u_stride(&self) -> u32 {
+    self.u_stride
+  }
+  /// V‑plane stride in samples.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn v_stride(&self) -> u32 {
+    self.v_stride
+  }
+  /// The `BITS` const parameter.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn bits(&self) -> u32 {
+    BITS
+  }
+}
+
+/// 4:2:2 planar, 10-bit. Alias over [`Yuv422pFrame16`]`<10>`.
+pub type Yuv422p10Frame<'a> = Yuv422pFrame16<'a, 10>;
+/// 4:2:2 planar, 12-bit. Alias over [`Yuv422pFrame16`]`<12>`.
+pub type Yuv422p12Frame<'a> = Yuv422pFrame16<'a, 12>;
+/// 4:2:2 planar, 14-bit. Alias over [`Yuv422pFrame16`]`<14>`.
+pub type Yuv422p14Frame<'a> = Yuv422pFrame16<'a, 14>;
+/// 4:2:2 planar, 16-bit. Alias over [`Yuv422pFrame16`]`<16>`. Uses
+/// the parallel i64 kernel family (see `yuv_422p16_to_rgb_*`).
+pub type Yuv422p16Frame<'a> = Yuv422pFrame16<'a, 16>;
+
+/// A validated planar 4:4:4 `u16`-backed frame, generic over
+/// `const BITS: u32 ∈ {10, 12, 14, 16}`. All three planes are
+/// full-size. No width parity constraint.
+#[derive(Debug, Clone, Copy)]
+pub struct Yuv444pFrame16<'a, const BITS: u32> {
+  y: &'a [u16],
+  u: &'a [u16],
+  v: &'a [u16],
+  width: u32,
+  height: u32,
+  y_stride: u32,
+  u_stride: u32,
+  v_stride: u32,
+}
+
+impl<'a, const BITS: u32> Yuv444pFrame16<'a, BITS> {
+  /// Constructs a new [`Yuv444pFrame16`].
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  #[allow(clippy::too_many_arguments)]
+  pub const fn try_new(
+    y: &'a [u16],
+    u: &'a [u16],
+    v: &'a [u16],
+    width: u32,
+    height: u32,
+    y_stride: u32,
+    u_stride: u32,
+    v_stride: u32,
+  ) -> Result<Self, Yuv420pFrame16Error> {
+    if BITS != 10 && BITS != 12 && BITS != 14 && BITS != 16 {
+      return Err(Yuv420pFrame16Error::UnsupportedBits { bits: BITS });
+    }
+    if width == 0 || height == 0 {
+      return Err(Yuv420pFrame16Error::ZeroDimension { width, height });
+    }
+    if y_stride < width {
+      return Err(Yuv420pFrame16Error::YStrideTooSmall { width, y_stride });
+    }
+    // 4:4:4: chroma stride ≥ width (not width / 2).
+    if u_stride < width {
+      return Err(Yuv420pFrame16Error::UStrideTooSmall {
+        chroma_width: width,
+        u_stride,
+      });
+    }
+    if v_stride < width {
+      return Err(Yuv420pFrame16Error::VStrideTooSmall {
+        chroma_width: width,
+        v_stride,
+      });
+    }
+
+    let y_min = match (y_stride as usize).checked_mul(height as usize) {
+      Some(v) => v,
+      None => {
+        return Err(Yuv420pFrame16Error::GeometryOverflow {
+          stride: y_stride,
+          rows: height,
+        });
+      }
+    };
+    if y.len() < y_min {
+      return Err(Yuv420pFrame16Error::YPlaneTooShort {
+        expected: y_min,
+        actual: y.len(),
+      });
+    }
+    let u_min = match (u_stride as usize).checked_mul(height as usize) {
+      Some(v) => v,
+      None => {
+        return Err(Yuv420pFrame16Error::GeometryOverflow {
+          stride: u_stride,
+          rows: height,
+        });
+      }
+    };
+    if u.len() < u_min {
+      return Err(Yuv420pFrame16Error::UPlaneTooShort {
+        expected: u_min,
+        actual: u.len(),
+      });
+    }
+    let v_min = match (v_stride as usize).checked_mul(height as usize) {
+      Some(v) => v,
+      None => {
+        return Err(Yuv420pFrame16Error::GeometryOverflow {
+          stride: v_stride,
+          rows: height,
+        });
+      }
+    };
+    if v.len() < v_min {
+      return Err(Yuv420pFrame16Error::VPlaneTooShort {
+        expected: v_min,
+        actual: v.len(),
+      });
+    }
+
+    Ok(Self {
+      y,
+      u,
+      v,
+      width,
+      height,
+      y_stride,
+      u_stride,
+      v_stride,
+    })
+  }
+
+  /// Constructs a new [`Yuv444pFrame16`], panicking on invalid inputs.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  #[allow(clippy::too_many_arguments)]
+  pub const fn new(
+    y: &'a [u16],
+    u: &'a [u16],
+    v: &'a [u16],
+    width: u32,
+    height: u32,
+    y_stride: u32,
+    u_stride: u32,
+    v_stride: u32,
+  ) -> Self {
+    match Self::try_new(y, u, v, width, height, y_stride, u_stride, v_stride) {
+      Ok(frame) => frame,
+      Err(_) => panic!("invalid Yuv444pFrame16 dimensions or plane lengths"),
+    }
+  }
+
+  /// Y plane.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn y(&self) -> &'a [u16] {
+    self.y
+  }
+  /// U plane. Full-width, full-height.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn u(&self) -> &'a [u16] {
+    self.u
+  }
+  /// V plane. Full-width, full-height.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn v(&self) -> &'a [u16] {
+    self.v
+  }
+  /// Frame width in pixels. No parity constraint.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn width(&self) -> u32 {
+    self.width
+  }
+  /// Frame height in pixels.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn height(&self) -> u32 {
+    self.height
+  }
+  /// Y‑plane stride in samples.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn y_stride(&self) -> u32 {
+    self.y_stride
+  }
+  /// U‑plane stride in samples.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn u_stride(&self) -> u32 {
+    self.u_stride
+  }
+  /// V‑plane stride in samples.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn v_stride(&self) -> u32 {
+    self.v_stride
+  }
+  /// The `BITS` const parameter.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn bits(&self) -> u32 {
+    BITS
+  }
+}
+
+/// 4:4:4 planar, 10-bit. Alias over [`Yuv444pFrame16`]`<10>`.
+pub type Yuv444p10Frame<'a> = Yuv444pFrame16<'a, 10>;
+/// 4:4:4 planar, 12-bit. Alias over [`Yuv444pFrame16`]`<12>`.
+pub type Yuv444p12Frame<'a> = Yuv444pFrame16<'a, 12>;
+/// 4:4:4 planar, 14-bit. Alias over [`Yuv444pFrame16`]`<14>`.
+pub type Yuv444p14Frame<'a> = Yuv444pFrame16<'a, 14>;
+/// 4:4:4 planar, 16-bit. Alias over [`Yuv444pFrame16`]`<16>`. Uses
+/// the parallel i64 kernel family (see `yuv_444p16_to_rgb_*`).
+pub type Yuv444p16Frame<'a> = Yuv444pFrame16<'a, 16>;
+
 /// Errors returned by [`Yuv420pFrame::try_new`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Error)]
 #[non_exhaustive]

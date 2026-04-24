@@ -477,6 +477,102 @@ pub(crate) fn yuv_420p_n_to_rgb_u16_row<const BITS: u32>(
   }
 }
 
+/// YUV 4:4:4 planar high‑bit‑depth → **u8** packed RGB. Const‑generic
+/// over `BITS ∈ {10, 12, 14}`. 1:1 chroma per Y pixel (no chroma
+/// pair, no upsampling). Math is identical to
+/// [`yuv_420p_n_to_rgb_row`] except each pixel gets its own U / V.
+///
+/// # Panics (debug builds)
+///
+/// - `y.len() >= width`, `u.len() >= width`, `v.len() >= width`,
+///   `rgb_out.len() >= 3 * width`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn yuv_444p_n_to_rgb_row<const BITS: u32>(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  debug_assert!(
+    BITS == 10 || BITS == 12 || BITS == 14,
+    "yuv_444p_n_to_rgb_row only supports BITS in {{10, 12, 14}}"
+  );
+  debug_assert!(y.len() >= width, "y row too short");
+  debug_assert!(u.len() >= width, "u row too short");
+  debug_assert!(v.len() >= width, "v row too short");
+  debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
+
+  let coeffs = Coefficients::for_matrix(matrix);
+  let (y_off, y_scale, c_scale) = range_params_n::<BITS, 8>(full_range);
+  let bias = chroma_bias::<BITS>();
+  let mask = bits_mask::<BITS>();
+
+  for x in 0..width {
+    // 4:4:4: one UV pair per pixel, no subsampling.
+    let u_d = q15_scale((u[x] & mask) as i32 - bias, c_scale);
+    let v_d = q15_scale((v[x] & mask) as i32 - bias, c_scale);
+
+    let r_chroma = q15_chroma(coeffs.r_u(), u_d, coeffs.r_v(), v_d);
+    let g_chroma = q15_chroma(coeffs.g_u(), u_d, coeffs.g_v(), v_d);
+    let b_chroma = q15_chroma(coeffs.b_u(), u_d, coeffs.b_v(), v_d);
+
+    let y0 = q15_scale((y[x] & mask) as i32 - y_off, y_scale);
+    rgb_out[x * 3] = clamp_u8(y0 + r_chroma);
+    rgb_out[x * 3 + 1] = clamp_u8(y0 + g_chroma);
+    rgb_out[x * 3 + 2] = clamp_u8(y0 + b_chroma);
+  }
+}
+
+/// YUV 4:4:4 planar high‑bit‑depth → **native‑depth `u16`** packed RGB.
+/// Const‑generic over `BITS ∈ {10, 12, 14}`. Low‑bit‑packed output.
+///
+/// # Panics (debug builds)
+///
+/// - `y.len() >= width`, `u.len() >= width`, `v.len() >= width`,
+///   `rgb_out.len() >= 3 * width`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn yuv_444p_n_to_rgb_u16_row<const BITS: u32>(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  rgb_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  debug_assert!(
+    BITS == 10 || BITS == 12 || BITS == 14,
+    "yuv_444p_n_to_rgb_u16_row only supports BITS in {{10, 12, 14}}"
+  );
+  debug_assert!(y.len() >= width, "y row too short");
+  debug_assert!(u.len() >= width, "u row too short");
+  debug_assert!(v.len() >= width, "v row too short");
+  debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
+
+  let coeffs = Coefficients::for_matrix(matrix);
+  let (y_off, y_scale, c_scale) = range_params_n::<BITS, BITS>(full_range);
+  let bias = chroma_bias::<BITS>();
+  let out_max: i32 = (1i32 << BITS) - 1;
+  let mask = bits_mask::<BITS>();
+
+  for x in 0..width {
+    let u_d = q15_scale((u[x] & mask) as i32 - bias, c_scale);
+    let v_d = q15_scale((v[x] & mask) as i32 - bias, c_scale);
+
+    let r_chroma = q15_chroma(coeffs.r_u(), u_d, coeffs.r_v(), v_d);
+    let g_chroma = q15_chroma(coeffs.g_u(), u_d, coeffs.g_v(), v_d);
+    let b_chroma = q15_chroma(coeffs.b_u(), u_d, coeffs.b_v(), v_d);
+
+    let y0 = q15_scale((y[x] & mask) as i32 - y_off, y_scale);
+    rgb_out[x * 3] = (y0 + r_chroma).clamp(0, out_max) as u16;
+    rgb_out[x * 3 + 1] = (y0 + g_chroma).clamp(0, out_max) as u16;
+    rgb_out[x * 3 + 2] = (y0 + b_chroma).clamp(0, out_max) as u16;
+  }
+}
+
 // ---- 16-bit YUV 4:2:0 → RGB (parallel kernel family) -------------------
 //
 // At 16 bits the chroma multiply-add `c_u * u_d + c_v * v_d` splits
