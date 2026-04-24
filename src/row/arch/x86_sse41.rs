@@ -989,7 +989,24 @@ fn scale_y_u16(y_u16: __m128i, y_off_v: __m128i, y_scale_v: __m128i, rnd_v: __m1
 }
 
 /// `srai64_15(x) = srli64_15(x + 2^32) - 2^17` — arithmetic right-shift
-/// by 15 for i64x2, valid for `x >= -2^31`. No `_mm_srai_epi64` in SSE4.1.
+/// by 15 for i64x2. Mathematically valid for `x >= -2^32` (i.e.
+/// `x + 2^32 >= 0` so the unsigned shift matches the signed one).
+/// No `_mm_srai_epi64` in SSE4.1, so AVX2/AVX-512 u16 paths delegate
+/// to the SSE4.1 kernel that uses this helper.
+///
+/// Callers: both u16 callers stay strictly inside this domain.
+/// - **Chroma sum** `c_u * u_d + c_v * v_d + RND` reaches at most
+///   `|c|_max * |u_d|_max ≈ 61655 * 37449 ≈ 2.31·10⁹` across all
+///   supported matrices at 16-bit limited range (Bt2020Ncl b_u is
+///   the tightest case). `|x| ≤ 2.31·10⁹ < 2^32`.
+/// - **Y scale** `(y - y_off) * y_scale + RND` reaches at most
+///   `61439 * ~38290 ≈ 2.35·10⁹` at 16-bit limited range. Still
+///   `|x| < 2^32`.
+///
+/// The scalar comment's pessimistic `~4.3·10⁹` upper bound
+/// overcounts by summing `|c_u|+|c_v|` against the same worst-case
+/// chroma; in practice only one of the two is near the peak per
+/// output channel.
 #[inline(always)]
 fn srai64_15(x: __m128i) -> __m128i {
   unsafe {

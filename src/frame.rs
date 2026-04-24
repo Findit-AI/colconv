@@ -810,9 +810,8 @@ pub type P010FramePlane = PnFramePlane;
 #[non_exhaustive]
 pub enum PnFrameError {
   /// `BITS` was not one of the supported high‑bit‑packed depths
-  /// (10, 12). 14 exists in the planar `yuv420p14le` family but not
-  /// as a Pn hardware output; 16 would need a different kernel
-  /// family.
+  /// (10, 12, 16). 14 exists in the planar `yuv420p14le` family but
+  /// not as a Pn hardware output.
   #[error("unsupported BITS ({bits}) for PnFrame; must be 10, 12, or 16")]
   UnsupportedBits {
     /// The unsupported value of the `BITS` const parameter.
@@ -1526,9 +1525,9 @@ pub type Yuv420p16Frame<'a> = Yuv420pFrame16<'a, 16>;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Error)]
 #[non_exhaustive]
 pub enum Yuv420pFrame16Error {
-  /// `BITS` was not one of the supported depths (10, 12, 14). 8‑bit
-  /// frames should use [`Yuv420pFrame`]; 16‑bit needs a separate
-  /// kernel family (see [`Yuv420pFrame16`] docs).
+  /// `BITS` was not one of the supported depths (10, 12, 14, 16).
+  /// 8‑bit frames should use [`Yuv420pFrame`]; 16‑bit is supported,
+  /// but uses a different kernel family (see [`Yuv420pFrame16`] docs).
   #[error("unsupported BITS ({bits}) for Yuv420pFrame16; must be 10, 12, 14, or 16")]
   UnsupportedBits {
     /// The unsupported value of the `BITS` const parameter.

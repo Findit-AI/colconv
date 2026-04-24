@@ -1,10 +1,11 @@
-//! Per‑row YUV 4:2:0 16‑bit → packed RGB throughput baseline.
+//! Per‑row YUV 4:2:0 16‑bit → packed RGB throughput benchmark.
 //!
 //! Mirrors [`yuv_420p10_to_rgb`] but feeds 16‑bit samples (full `u16`
-//! range). Until the 16‑bit SIMD backends land the `use_simd` toggle
-//! resolves to the same scalar path on both arms — the bench still
-//! surfaces scalar throughput / cache behavior at 1080p / 4K widths
-//! so a future SIMD PR can compare against a recorded baseline.
+//! range). The benchmark exercises both `use_simd = false` and
+//! `use_simd = true`; when 16‑bit SIMD backends are available, the
+//! public row dispatchers take the SIMD path on the `true` arm.
+//! This captures scalar and SIMD-dispatched throughput / cache
+//! behavior at 1080p / 4K widths.
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;

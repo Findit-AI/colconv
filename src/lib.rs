@@ -61,9 +61,10 @@
 //! - **Packed RGB sources** (`Rgb24`, `Bgr24`, `Rgba`, `Bgra`,
 //!   `Rgba1010102`, etc.).
 //! - **SIMD backends for 16-bit** — NEON, SSE4.1, AVX2, AVX-512,
-//!   and wasm simd128 currently fall through to the scalar 16-bit
-//!   kernels. SIMD acceleration lands per-backend in follow-up PRs
-//!   (NEON first, then x86 tiers, then wasm).
+//!   and wasm simd128 ship 16-bit row kernels. The x86/NEON paths
+//!   cover both u8 and u16 outputs; the wasm u16-output paths still
+//!   fall through to the scalar 16-bit kernel while u8 output is
+//!   vectorized.
 //!
 //! See [`yuv`] for the per-format module-level breakdown and
 //! [`frame`] for the validated frame types plus the `BITS` const

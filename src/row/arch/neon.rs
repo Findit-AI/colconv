@@ -2203,7 +2203,13 @@ mod tests {
   }
 
   // ---- rgb_to_hsv_row equivalence ------------------------------------
+  //
+  // Miri (macOS aarch64 in CI) does not support the LLVM NEON f32
+  // intrinsics used by the HSV SIMD kernel (e.g. `vmaxq_f32` →
+  // `llvm.aarch64.neon.fmax.v4f32`). Gate these tests under
+  // `not(miri)` so Miri still exercises the rest of the NEON suite.
 
+  #[cfg(not(miri))]
   fn check_hsv_equivalence(rgb: &[u8], width: usize) {
     let mut h_scalar = std::vec![0u8; width];
     let mut s_scalar = std::vec![0u8; width];
@@ -2255,18 +2261,21 @@ mod tests {
   }
 
   #[test]
+  #[cfg(not(miri))]
   fn hsv_neon_matches_scalar_pseudo_random_16() {
     let rgb = pseudo_random_bgr(16);
     check_hsv_equivalence(&rgb, 16);
   }
 
   #[test]
+  #[cfg(not(miri))]
   fn hsv_neon_matches_scalar_pseudo_random_1920() {
     let rgb = pseudo_random_bgr(1920);
     check_hsv_equivalence(&rgb, 1920);
   }
 
   #[test]
+  #[cfg(not(miri))]
   fn hsv_neon_matches_scalar_tail_widths() {
     // Widths that force a non‑trivial scalar tail (non‑multiple of 16).
     for w in [1usize, 7, 15, 17, 31, 1921] {
@@ -2276,6 +2285,7 @@ mod tests {
   }
 
   #[test]
+  #[cfg(not(miri))]
   fn hsv_neon_matches_scalar_primaries_and_edges() {
     // Primary colors, grays, near‑saturation — exercise each hue branch
     // and the v==0, delta==0, h<0 wrap paths.
