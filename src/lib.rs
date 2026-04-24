@@ -28,43 +28,58 @@
 //!
 //! Shipped (all 4:2:0 subsampling):
 //!
-//! | Family           | Bit depth | Packing                | FFmpeg name           |
-//! | ---------------- | --------- | ---------------------- | --------------------- |
-//! | [`Yuv420p`]      |  8        | planar                 | `yuv420p`             |
-//! | [`Nv12`]         |  8        | semi-planar UV         | `nv12`                |
-//! | [`Nv21`]         |  8        | semi-planar VU         | `nv21`                |
-//! | [`Yuv420p10`]    | 10        | planar, low-packed     | `yuv420p10le`         |
-//! | [`Yuv420p12`]    | 12        | planar, low-packed     | `yuv420p12le`         |
-//! | [`Yuv420p14`]    | 14        | planar, low-packed     | `yuv420p14le`         |
-//! | [`Yuv420p16`]    | 16        | planar                 | `yuv420p16le`         |
-//! | [`P010`]         | 10        | semi-planar, high-packed | `p010le`            |
-//! | [`P012`]         | 12        | semi-planar, high-packed | `p012le`            |
-//! | [`P016`]         | 16        | semi-planar            | `p016le`              |
+//! | Family           | Bit depth | Subsampling | Packing                  | FFmpeg name           |
+//! | ---------------- | --------- | ----------- | ------------------------ | --------------------- |
+//! | [`Yuv420p`]      |  8        | 4:2:0       | planar                   | `yuv420p`             |
+//! | [`Nv12`]         |  8        | 4:2:0       | semi-planar UV           | `nv12`                |
+//! | [`Nv21`]         |  8        | 4:2:0       | semi-planar VU           | `nv21`                |
+//! | [`Nv16`]         |  8        | 4:2:2       | semi-planar UV           | `nv16`                |
+//! | [`Nv24`]         |  8        | 4:4:4       | semi-planar UV           | `nv24`                |
+//! | [`Nv42`]         |  8        | 4:4:4       | semi-planar VU           | `nv42`                |
+//! | [`Yuv420p10`]    | 10        | 4:2:0       | planar, low-packed       | `yuv420p10le`         |
+//! | [`Yuv420p12`]    | 12        | 4:2:0       | planar, low-packed       | `yuv420p12le`         |
+//! | [`Yuv420p14`]    | 14        | 4:2:0       | planar, low-packed       | `yuv420p14le`         |
+//! | [`Yuv420p16`]    | 16        | 4:2:0       | planar                   | `yuv420p16le`         |
+//! | [`P010`]         | 10        | 4:2:0       | semi-planar, high-packed | `p010le`              |
+//! | [`P012`]         | 12        | 4:2:0       | semi-planar, high-packed | `p012le`              |
+//! | [`P016`]         | 16        | 4:2:0       | semi-planar              | `p016le`              |
 //!
 //! # Kernel families
 //!
-//! - **Q15 i32 family** — 8-bit kernels (`yuv_420_to_rgb_row` etc.)
-//!   and 10/12/14-bit kernels (`yuv_420p_n_to_rgb_*<BITS>` and
-//!   `p_n_to_rgb_*<BITS>`).
+//! - **Q15 i32 family** — 8-bit kernels (`yuv_420_to_rgb_row`,
+//!   `nv12_to_rgb_row`, `nv24_to_rgb_row` etc.) and 10/12/14-bit
+//!   kernels (`yuv_420p_n_to_rgb_*<BITS>` and `p_n_to_rgb_*<BITS>`).
+//!   [`Nv16`] reuses [`Nv12`]'s per-row kernel (4:2:2 differs only
+//!   in the vertical walker); [`Nv24`] and [`Nv42`] share a 4:4:4
+//!   kernel family via a `SWAP_UV` const generic.
 //! - **16-bit family** — dedicated `yuv_420p16_to_rgb_*` /
 //!   `p16_to_rgb_*`. The **u8-output** kernels stay on i32
 //!   (output-range scaling keeps `coeff × u_d` within i32). The
 //!   **u16-output** kernels widen the chroma matrix multiply-add to
-//!   i64 to avoid the ~3.7·10⁹ chroma sum overflowing i32 at
-//!   `BITS == 16`.
+//!   i64 to avoid the ~2.31·10⁹ chroma-channel sum overflowing i32
+//!   at `BITS == 16`; the Y path also widens to i64 to handle
+//!   limited-range unclamped samples.
 //!
-//! Not yet shipped (follow-up):
+//! # SIMD coverage
 //!
-//! - **4:2:2 and 4:4:4** (`Yuv422p`, `Yuv444p`, `Nv16`, `Nv24`,
-//!   `Nv42`) — share the Q15 math but need their own row walkers
-//!   for the different chroma subsampling / stride.
+//! Every format above has a native SIMD backend for each supported
+//! target (NEON on aarch64; SSE4.1 / AVX2 / AVX-512 on x86_64; wasm
+//! simd128). Exceptions:
+//! - **16-bit u16 output on AVX2**: delegates to the SSE4.1 kernel
+//!   — AVX2 lacks `_mm256_srai_epi64`, so the `srai64_15` bias trick
+//!   would have to be duplicated at 256 bits for marginal gain.
+//! - **16-bit u16 output on wasm simd128**: falls through to scalar
+//!   — the single-lane i64 arithmetic is cheaper scalar.
+//!
+//! # Not yet shipped (follow-up)
+//!
+//! - **Planar 4:2:2 / 4:4:4** (`Yuv422p`, `Yuv444p`) — would share
+//!   the 4:2:2 / 4:4:4 row math with their semi-planar peers but
+//!   need their own row walkers.
 //! - **Packed RGB sources** (`Rgb24`, `Bgr24`, `Rgba`, `Bgra`,
 //!   `Rgba1010102`, etc.).
-//! - **SIMD backends for 16-bit** — NEON, SSE4.1, AVX2, AVX-512,
-//!   and wasm simd128 ship 16-bit row kernels. The x86/NEON paths
-//!   cover both u8 and u16 outputs; the wasm u16-output paths still
-//!   fall through to the scalar 16-bit kernel while u8 output is
-//!   vectorized.
+//! - **u16 semi-planar 4:2:2 / 4:4:4** (`P210`, `P216`, `P410`,
+//!   `P416`) — would reuse the 16-bit `PnFrame` pattern.
 //!
 //! See [`yuv`] for the per-format module-level breakdown and
 //! [`frame`] for the validated frame types plus the `BITS` const
@@ -73,7 +88,10 @@
 //!
 //! [`Yuv420p`]: crate::yuv::Yuv420p
 //! [`Nv12`]: crate::yuv::Nv12
+//! [`Nv16`]: crate::yuv::Nv16
 //! [`Nv21`]: crate::yuv::Nv21
+//! [`Nv24`]: crate::yuv::Nv24
+//! [`Nv42`]: crate::yuv::Nv42
 //! [`Yuv420p10`]: crate::yuv::Yuv420p10
 //! [`Yuv420p12`]: crate::yuv::Yuv420p12
 //! [`Yuv420p14`]: crate::yuv::Yuv420p14

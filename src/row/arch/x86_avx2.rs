@@ -1985,6 +1985,104 @@ mod tests {
     }
   }
 
+  // ---- nv24_to_rgb_row / nv42_to_rgb_row equivalence ------------------
+
+  fn check_nv24_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+    let y: std::vec::Vec<u8> = (0..width).map(|i| ((i * 37 + 11) & 0xFF) as u8).collect();
+    let uv: std::vec::Vec<u8> = (0..width)
+      .flat_map(|i| [((i * 53 + 23) & 0xFF) as u8, ((i * 71 + 91) & 0xFF) as u8])
+      .collect();
+    let mut rgb_scalar = std::vec![0u8; width * 3];
+    let mut rgb_avx2 = std::vec![0u8; width * 3];
+
+    scalar::nv24_to_rgb_row(&y, &uv, &mut rgb_scalar, width, matrix, full_range);
+    unsafe {
+      nv24_to_rgb_row(&y, &uv, &mut rgb_avx2, width, matrix, full_range);
+    }
+    assert_eq!(
+      rgb_scalar, rgb_avx2,
+      "AVX2 NV24 ≠ scalar (width={width}, matrix={matrix:?}, full_range={full_range})"
+    );
+  }
+
+  fn check_nv42_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+    let y: std::vec::Vec<u8> = (0..width).map(|i| ((i * 37 + 11) & 0xFF) as u8).collect();
+    let vu: std::vec::Vec<u8> = (0..width)
+      .flat_map(|i| [((i * 53 + 23) & 0xFF) as u8, ((i * 71 + 91) & 0xFF) as u8])
+      .collect();
+    let mut rgb_scalar = std::vec![0u8; width * 3];
+    let mut rgb_avx2 = std::vec![0u8; width * 3];
+
+    scalar::nv42_to_rgb_row(&y, &vu, &mut rgb_scalar, width, matrix, full_range);
+    unsafe {
+      nv42_to_rgb_row(&y, &vu, &mut rgb_avx2, width, matrix, full_range);
+    }
+    assert_eq!(
+      rgb_scalar, rgb_avx2,
+      "AVX2 NV42 ≠ scalar (width={width}, matrix={matrix:?}, full_range={full_range})"
+    );
+  }
+
+  #[test]
+  fn avx2_nv24_matches_scalar_all_matrices_32() {
+    if !std::arch::is_x86_feature_detected!("avx2") {
+      return;
+    }
+    for m in [
+      ColorMatrix::Bt601,
+      ColorMatrix::Bt709,
+      ColorMatrix::Bt2020Ncl,
+      ColorMatrix::Smpte240m,
+      ColorMatrix::Fcc,
+      ColorMatrix::YCgCo,
+    ] {
+      for full in [true, false] {
+        check_nv24_equivalence(32, m, full);
+      }
+    }
+  }
+
+  #[test]
+  fn avx2_nv24_matches_scalar_widths() {
+    if !std::arch::is_x86_feature_detected!("avx2") {
+      return;
+    }
+    // 32 / 64 → main loop; 33 / 65 → main + 1-px tail; 31 → pure
+    // scalar tail (< block size); 1920 → wide.
+    for w in [31usize, 32, 33, 63, 64, 65, 1920, 1921] {
+      check_nv24_equivalence(w, ColorMatrix::Bt709, false);
+    }
+  }
+
+  #[test]
+  fn avx2_nv42_matches_scalar_all_matrices_32() {
+    if !std::arch::is_x86_feature_detected!("avx2") {
+      return;
+    }
+    for m in [
+      ColorMatrix::Bt601,
+      ColorMatrix::Bt709,
+      ColorMatrix::Bt2020Ncl,
+      ColorMatrix::Smpte240m,
+      ColorMatrix::Fcc,
+      ColorMatrix::YCgCo,
+    ] {
+      for full in [true, false] {
+        check_nv42_equivalence(32, m, full);
+      }
+    }
+  }
+
+  #[test]
+  fn avx2_nv42_matches_scalar_widths() {
+    if !std::arch::is_x86_feature_detected!("avx2") {
+      return;
+    }
+    for w in [31usize, 32, 33, 63, 64, 65, 1920, 1921] {
+      check_nv42_equivalence(w, ColorMatrix::Bt709, false);
+    }
+  }
+
   // ---- bgr_rgb_swap_row equivalence -----------------------------------
 
   fn check_swap_equivalence(width: usize) {
