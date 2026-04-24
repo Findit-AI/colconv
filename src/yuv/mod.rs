@@ -59,6 +59,7 @@
 //!   family of `*_to` kernels feeding a new row‑shape subtrait.
 
 mod nv12;
+mod nv16;
 mod nv21;
 mod p010;
 mod p012;
@@ -70,6 +71,7 @@ mod yuv420p14;
 mod yuv420p16;
 
 pub use nv12::{Nv12, Nv12Row, Nv12Sink, nv12_to};
+pub use nv16::{Nv16, Nv16Row, Nv16Sink, nv16_to};
 pub use nv21::{Nv21, Nv21Row, Nv21Sink, nv21_to};
 pub use p010::{P010, P010Row, P010Sink, p010_to};
 pub use p012::{P012, P012Row, P012Sink, p012_to};
