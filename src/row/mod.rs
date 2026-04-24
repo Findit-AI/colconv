@@ -477,6 +477,39 @@ pub fn nv42_to_rgb_row(
   scalar::nv42_to_rgb_row(y, vu, rgb_out, width, matrix, full_range);
 }
 
+/// Converts one row of YUV 4:4:4 planar to packed RGB.
+///
+/// Same numerical contract as [`yuv_420_to_rgb_row`]; the difference
+/// is 4:4:4 chroma — one U / V pair per Y pixel, full-width chroma
+/// planes, no chroma upsampling, no width parity constraint. See
+/// `scalar::yuv_444_to_rgb_row` for the reference implementation.
+///
+/// SIMD backends are wired in Phase 2 of this PR; `use_simd` is
+/// accepted now so the signature matches the rest of the family.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn yuv_444_to_rgb_row(
+  y: &[u8],
+  u: &[u8],
+  v: &[u8],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  use_simd: bool,
+) {
+  let rgb_min = rgb_row_bytes(width);
+  assert!(y.len() >= width, "y row too short");
+  assert!(u.len() >= width, "u row too short");
+  assert!(v.len() >= width, "v row too short");
+  assert!(rgb_out.len() >= rgb_min, "rgb_out row too short");
+
+  // SIMD backends land in Phase 2; preserve the parameter so the
+  // signature is stable.
+  let _ = use_simd;
+  scalar::yuv_444_to_rgb_row(y, u, v, rgb_out, width, matrix, full_range);
+}
+
 /// Converts one row of **10‑bit** YUV 4:2:0 to packed **8‑bit** RGB.
 ///
 /// Samples are `u16` with 10 active bits in the low bits of each

@@ -246,6 +246,50 @@ fn nv24_or_nv42_to_rgb_row_impl<const SWAP_UV: bool>(
   }
 }
 
+/// YUV 4:4:4 planar → packed RGB. One UV pair per Y pixel, U/V from
+/// separate planes. Same arithmetic as
+/// [`nv24_to_rgb_row`] (4:4:4 semi-planar) but without the
+/// deinterleave step — U and V come pre-separated.
+///
+/// # Panics (debug builds)
+///
+/// - `y.len() >= width`, `u.len() >= width`, `v.len() >= width`,
+///   `rgb_out.len() >= 3 * width`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn yuv_444_to_rgb_row(
+  y: &[u8],
+  u: &[u8],
+  v: &[u8],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  debug_assert!(y.len() >= width, "y row too short");
+  debug_assert!(u.len() >= width, "u row too short");
+  debug_assert!(v.len() >= width, "v row too short");
+  debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
+
+  let coeffs = Coefficients::for_matrix(matrix);
+  let (y_off, y_scale, c_scale) = range_params(full_range);
+  const RND: i32 = 1 << 14;
+
+  for x in 0..width {
+    // 4:4:4: one UV pair per pixel, no subsampling.
+    let u_d = ((u[x] as i32 - 128) * c_scale + RND) >> 15;
+    let v_d = ((v[x] as i32 - 128) * c_scale + RND) >> 15;
+
+    let r_chroma = (coeffs.r_u() * u_d + coeffs.r_v() * v_d + RND) >> 15;
+    let g_chroma = (coeffs.g_u() * u_d + coeffs.g_v() * v_d + RND) >> 15;
+    let b_chroma = (coeffs.b_u() * u_d + coeffs.b_v() * v_d + RND) >> 15;
+
+    let y0 = ((y[x] as i32 - y_off) * y_scale + RND) >> 15;
+    rgb_out[x * 3] = clamp_u8(y0 + r_chroma);
+    rgb_out[x * 3 + 1] = clamp_u8(y0 + g_chroma);
+    rgb_out[x * 3 + 2] = clamp_u8(y0 + b_chroma);
+  }
+}
+
 #[cfg_attr(not(tarpaulin), inline(always))]
 fn clamp_u8(v: i32) -> u8 {
   v.clamp(0, 255) as u8
