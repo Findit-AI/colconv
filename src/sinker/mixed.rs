@@ -28,14 +28,15 @@ use crate::{
   HsvBuffers, PixelSink, SourceFormat,
   row::{
     nv12_to_rgb_row, nv21_to_rgb_row, p010_to_rgb_row, p010_to_rgb_u16_row, p012_to_rgb_row,
-    p012_to_rgb_u16_row, rgb_to_hsv_row, yuv_420_to_rgb_row, yuv420p10_to_rgb_row,
-    yuv420p10_to_rgb_u16_row, yuv420p12_to_rgb_row, yuv420p12_to_rgb_u16_row, yuv420p14_to_rgb_row,
-    yuv420p14_to_rgb_u16_row,
+    p012_to_rgb_u16_row, p016_to_rgb_row, p016_to_rgb_u16_row, rgb_to_hsv_row, yuv_420_to_rgb_row,
+    yuv420p10_to_rgb_row, yuv420p10_to_rgb_u16_row, yuv420p12_to_rgb_row, yuv420p12_to_rgb_u16_row,
+    yuv420p14_to_rgb_row, yuv420p14_to_rgb_u16_row, yuv420p16_to_rgb_row, yuv420p16_to_rgb_u16_row,
   },
   yuv::{
     Nv12, Nv12Row, Nv12Sink, Nv21, Nv21Row, Nv21Sink, P010, P010Row, P010Sink, P012, P012Row,
-    P012Sink, Yuv420p, Yuv420p10, Yuv420p10Row, Yuv420p10Sink, Yuv420p12, Yuv420p12Row,
-    Yuv420p12Sink, Yuv420p14, Yuv420p14Row, Yuv420p14Sink, Yuv420pRow, Yuv420pSink,
+    P012Sink, P016, P016Row, P016Sink, Yuv420p, Yuv420p10, Yuv420p10Row, Yuv420p10Sink, Yuv420p12,
+    Yuv420p12Row, Yuv420p12Sink, Yuv420p14, Yuv420p14Row, Yuv420p14Sink, Yuv420p16, Yuv420p16Row,
+    Yuv420p16Sink, Yuv420pRow, Yuv420pSink,
   },
 };
 
@@ -269,6 +270,24 @@ pub enum RowSlice {
   /// `width / 2` elements.
   #[display("V Half 14")]
   VHalf14,
+  /// Full‑width Y row of a **16‑bit** source — used for both the
+  /// planar ([`Yuv420p16`](crate::yuv::Yuv420p16)) and semi‑planar
+  /// ([`P016`](crate::yuv::P016)) families. At 16 bits there is no
+  /// high‑vs‑low packing distinction.
+  #[display("Y16")]
+  Y16,
+  /// Half‑width U row of a **16‑bit** planar source. `u16` samples,
+  /// `width / 2` elements.
+  #[display("U Half 16")]
+  UHalf16,
+  /// Half‑width V row of a **16‑bit** planar source. `u16` samples,
+  /// `width / 2` elements.
+  #[display("V Half 16")]
+  VHalf16,
+  /// Half‑width interleaved UV row of a **16‑bit semi‑planar** source
+  /// ([`P016`](crate::yuv::P016)). `u16` samples, `width` elements.
+  #[display("UV Half 16")]
+  UvHalf16,
 }
 
 /// A sink that writes any subset of `{RGB, Luma, HSV}` into
@@ -1879,6 +1898,357 @@ impl PixelSink for MixedSinker<'_, P012> {
   }
 }
 
+// ---- Yuv420p16 impl ----------------------------------------------------
+
+impl<'a> MixedSinker<'a, Yuv420p16> {
+  /// Attaches a packed **`u16`** RGB output buffer. Produces 16‑bit
+  /// output (values in `[0, 65535]` — full `u16` range). Length is
+  /// measured in `u16` **elements** (`width × height × 3`).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn with_rgb_u16(mut self, buf: &'a mut [u16]) -> Result<Self, MixedSinkerError> {
+    self.set_rgb_u16(buf)?;
+    Ok(self)
+  }
+
+  /// In-place variant of [`with_rgb_u16`](Self::with_rgb_u16).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn set_rgb_u16(&mut self, buf: &'a mut [u16]) -> Result<&mut Self, MixedSinkerError> {
+    let expected_elements = self.frame_bytes(3)?;
+    if buf.len() < expected_elements {
+      return Err(MixedSinkerError::RgbU16BufferTooShort {
+        expected: expected_elements,
+        actual: buf.len(),
+      });
+    }
+    self.rgb_u16 = Some(buf);
+    Ok(self)
+  }
+}
+
+impl Yuv420p16Sink for MixedSinker<'_, Yuv420p16> {}
+
+impl PixelSink for MixedSinker<'_, Yuv420p16> {
+  type Input<'r> = Yuv420p16Row<'r>;
+  type Error = MixedSinkerError;
+
+  fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
+    if self.width & 1 != 0 {
+      return Err(MixedSinkerError::OddWidth { width: self.width });
+    }
+    check_dimensions_match(self.width, self.height, width, height)
+  }
+
+  fn process(&mut self, row: Yuv420p16Row<'_>) -> Result<(), Self::Error> {
+    // Luma downshift is `>> 8` — top 8 bits of the 16-bit Y value.
+    const BITS: u32 = 16;
+
+    let w = self.width;
+    let h = self.height;
+    let idx = row.row();
+    let use_simd = self.simd;
+
+    if w & 1 != 0 {
+      return Err(MixedSinkerError::OddWidth { width: w });
+    }
+    if row.y().len() != w {
+      return Err(MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::Y16,
+        row: idx,
+        expected: w,
+        actual: row.y().len(),
+      });
+    }
+    if row.u_half().len() != w / 2 {
+      return Err(MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::UHalf16,
+        row: idx,
+        expected: w / 2,
+        actual: row.u_half().len(),
+      });
+    }
+    if row.v_half().len() != w / 2 {
+      return Err(MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::VHalf16,
+        row: idx,
+        expected: w / 2,
+        actual: row.v_half().len(),
+      });
+    }
+    if idx >= self.height {
+      return Err(MixedSinkerError::RowIndexOutOfRange {
+        row: idx,
+        configured_height: self.height,
+      });
+    }
+
+    let Self {
+      rgb,
+      rgb_u16,
+      luma,
+      hsv,
+      rgb_scratch,
+      ..
+    } = self;
+
+    let one_plane_start = idx * w;
+    let one_plane_end = one_plane_start + w;
+
+    if let Some(luma) = luma.as_deref_mut() {
+      let dst = &mut luma[one_plane_start..one_plane_end];
+      for (d, &s) in dst.iter_mut().zip(row.y().iter()) {
+        *d = (s >> (BITS - 8)) as u8;
+      }
+    }
+
+    if let Some(buf) = rgb_u16.as_deref_mut() {
+      let rgb_plane_end =
+        one_plane_end
+          .checked_mul(3)
+          .ok_or(MixedSinkerError::GeometryOverflow {
+            width: w,
+            height: h,
+            channels: 3,
+          })?;
+      let rgb_plane_start = one_plane_start * 3;
+      yuv420p16_to_rgb_u16_row(
+        row.y(),
+        row.u_half(),
+        row.v_half(),
+        &mut buf[rgb_plane_start..rgb_plane_end],
+        w,
+        row.matrix(),
+        row.full_range(),
+        use_simd,
+      );
+    }
+
+    let want_rgb = rgb.is_some();
+    let want_hsv = hsv.is_some();
+    if !want_rgb && !want_hsv {
+      return Ok(());
+    }
+
+    let rgb_row: &mut [u8] = match rgb.as_deref_mut() {
+      Some(buf) => {
+        let rgb_plane_end =
+          one_plane_end
+            .checked_mul(3)
+            .ok_or(MixedSinkerError::GeometryOverflow {
+              width: w,
+              height: h,
+              channels: 3,
+            })?;
+        let rgb_plane_start = one_plane_start * 3;
+        &mut buf[rgb_plane_start..rgb_plane_end]
+      }
+      None => {
+        let rgb_row_bytes = w.checked_mul(3).ok_or(MixedSinkerError::GeometryOverflow {
+          width: w,
+          height: h,
+          channels: 3,
+        })?;
+        if rgb_scratch.len() < rgb_row_bytes {
+          rgb_scratch.resize(rgb_row_bytes, 0);
+        }
+        &mut rgb_scratch[..rgb_row_bytes]
+      }
+    };
+
+    yuv420p16_to_rgb_row(
+      row.y(),
+      row.u_half(),
+      row.v_half(),
+      rgb_row,
+      w,
+      row.matrix(),
+      row.full_range(),
+      use_simd,
+    );
+
+    if let Some(hsv) = hsv.as_mut() {
+      rgb_to_hsv_row(
+        rgb_row,
+        &mut hsv.h[one_plane_start..one_plane_end],
+        &mut hsv.s[one_plane_start..one_plane_end],
+        &mut hsv.v[one_plane_start..one_plane_end],
+        w,
+        use_simd,
+      );
+    }
+    Ok(())
+  }
+}
+
+// ---- P016 impl ---------------------------------------------------------
+
+impl<'a> MixedSinker<'a, P016> {
+  /// Attaches a packed **`u16`** RGB output buffer. Produces 16‑bit
+  /// output in `[0, 65535]` — at 16 bits there is no high‑ vs
+  /// low‑packing distinction, so the output matches
+  /// [`MixedSinker<Yuv420p16>::with_rgb_u16`] numerically.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn with_rgb_u16(mut self, buf: &'a mut [u16]) -> Result<Self, MixedSinkerError> {
+    self.set_rgb_u16(buf)?;
+    Ok(self)
+  }
+
+  /// In-place variant of [`with_rgb_u16`](Self::with_rgb_u16).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn set_rgb_u16(&mut self, buf: &'a mut [u16]) -> Result<&mut Self, MixedSinkerError> {
+    let expected_elements = self.frame_bytes(3)?;
+    if buf.len() < expected_elements {
+      return Err(MixedSinkerError::RgbU16BufferTooShort {
+        expected: expected_elements,
+        actual: buf.len(),
+      });
+    }
+    self.rgb_u16 = Some(buf);
+    Ok(self)
+  }
+}
+
+impl P016Sink for MixedSinker<'_, P016> {}
+
+impl PixelSink for MixedSinker<'_, P016> {
+  type Input<'r> = P016Row<'r>;
+  type Error = MixedSinkerError;
+
+  fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
+    if self.width & 1 != 0 {
+      return Err(MixedSinkerError::OddWidth { width: self.width });
+    }
+    check_dimensions_match(self.width, self.height, width, height)
+  }
+
+  fn process(&mut self, row: P016Row<'_>) -> Result<(), Self::Error> {
+    let w = self.width;
+    let h = self.height;
+    let idx = row.row();
+    let use_simd = self.simd;
+
+    if w & 1 != 0 {
+      return Err(MixedSinkerError::OddWidth { width: w });
+    }
+    if row.y().len() != w {
+      return Err(MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::Y16,
+        row: idx,
+        expected: w,
+        actual: row.y().len(),
+      });
+    }
+    if row.uv_half().len() != w {
+      return Err(MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::UvHalf16,
+        row: idx,
+        expected: w,
+        actual: row.uv_half().len(),
+      });
+    }
+    if idx >= self.height {
+      return Err(MixedSinkerError::RowIndexOutOfRange {
+        row: idx,
+        configured_height: self.height,
+      });
+    }
+
+    let Self {
+      rgb,
+      rgb_u16,
+      luma,
+      hsv,
+      rgb_scratch,
+      ..
+    } = self;
+
+    let one_plane_start = idx * w;
+    let one_plane_end = one_plane_start + w;
+
+    // Luma: 16‑bit Y value >> 8 is the top byte.
+    if let Some(luma) = luma.as_deref_mut() {
+      let dst = &mut luma[one_plane_start..one_plane_end];
+      for (d, &s) in dst.iter_mut().zip(row.y().iter()) {
+        *d = (s >> 8) as u8;
+      }
+    }
+
+    if let Some(buf) = rgb_u16.as_deref_mut() {
+      let rgb_plane_end =
+        one_plane_end
+          .checked_mul(3)
+          .ok_or(MixedSinkerError::GeometryOverflow {
+            width: w,
+            height: h,
+            channels: 3,
+          })?;
+      let rgb_plane_start = one_plane_start * 3;
+      p016_to_rgb_u16_row(
+        row.y(),
+        row.uv_half(),
+        &mut buf[rgb_plane_start..rgb_plane_end],
+        w,
+        row.matrix(),
+        row.full_range(),
+        use_simd,
+      );
+    }
+
+    let want_rgb = rgb.is_some();
+    let want_hsv = hsv.is_some();
+    if !want_rgb && !want_hsv {
+      return Ok(());
+    }
+
+    let rgb_row: &mut [u8] = match rgb.as_deref_mut() {
+      Some(buf) => {
+        let rgb_plane_end =
+          one_plane_end
+            .checked_mul(3)
+            .ok_or(MixedSinkerError::GeometryOverflow {
+              width: w,
+              height: h,
+              channels: 3,
+            })?;
+        let rgb_plane_start = one_plane_start * 3;
+        &mut buf[rgb_plane_start..rgb_plane_end]
+      }
+      None => {
+        let rgb_row_bytes = w.checked_mul(3).ok_or(MixedSinkerError::GeometryOverflow {
+          width: w,
+          height: h,
+          channels: 3,
+        })?;
+        if rgb_scratch.len() < rgb_row_bytes {
+          rgb_scratch.resize(rgb_row_bytes, 0);
+        }
+        &mut rgb_scratch[..rgb_row_bytes]
+      }
+    };
+
+    p016_to_rgb_row(
+      row.y(),
+      row.uv_half(),
+      rgb_row,
+      w,
+      row.matrix(),
+      row.full_range(),
+      use_simd,
+    );
+
+    if let Some(hsv) = hsv.as_mut() {
+      rgb_to_hsv_row(
+        rgb_row,
+        &mut hsv.h[one_plane_start..one_plane_end],
+        &mut hsv.s[one_plane_start..one_plane_end],
+        &mut hsv.v[one_plane_start..one_plane_end],
+        w,
+        use_simd,
+      );
+    }
+    Ok(())
+  }
+}
+
 /// Returns `Ok(())` iff the walker's frame dimensions exactly match
 /// the sinker's configured dimensions. Called from
 /// [`PixelSink::begin_frame`] on both `MixedSinker<Yuv420p>` and
@@ -1917,11 +2287,12 @@ mod tests {
   use crate::{
     ColorMatrix,
     frame::{
-      Nv12Frame, Nv21Frame, P010Frame, P012Frame, Yuv420p10Frame, Yuv420p12Frame, Yuv420p14Frame,
-      Yuv420pFrame,
+      Nv12Frame, Nv21Frame, P010Frame, P012Frame, P016Frame, Yuv420p10Frame, Yuv420p12Frame,
+      Yuv420p14Frame, Yuv420p16Frame, Yuv420pFrame,
     },
     yuv::{
-      nv12_to, nv21_to, p010_to, p012_to, yuv420p_to, yuv420p10_to, yuv420p12_to, yuv420p14_to,
+      nv12_to, nv21_to, p010_to, p012_to, p016_to, yuv420p_to, yuv420p10_to, yuv420p12_to,
+      yuv420p14_to, yuv420p16_to,
     },
   };
 
@@ -1944,6 +2315,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn luma_only_copies_y_plane() {
     let (yp, up, vp) = solid_yuv420p_frame(16, 8, 42, 128, 128);
     let src = Yuv420pFrame::new(&yp, &up, &vp, 16, 8, 16, 8, 8);
@@ -1958,6 +2333,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn rgb_only_converts_gray_to_gray() {
     // Neutral chroma → gray RGB; solid Y=128 → ~128 in every RGB byte.
     let (yp, up, vp) = solid_yuv420p_frame(16, 8, 128, 128, 128);
@@ -1977,6 +2356,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn hsv_only_allocates_scratch_and_produces_gray_hsv() {
     // Neutral gray → H=0, S=0, V=~128. No RGB buffer provided.
     let (yp, up, vp) = solid_yuv420p_frame(16, 8, 128, 128, 128);
@@ -1996,6 +2379,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn mixed_all_three_outputs_populated() {
     let (yp, up, vp) = solid_yuv420p_frame(16, 8, 200, 128, 128);
     let src = Yuv420pFrame::new(&yp, &up, &vp, 16, 8, 16, 8, 8);
@@ -2027,6 +2414,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn rgb_with_hsv_uses_user_buffer_not_scratch() {
     // When caller provides RGB, the scratch should remain empty (Vec len 0).
     let (yp, up, vp) = solid_yuv420p_frame(16, 8, 100, 128, 128);
@@ -2051,6 +2442,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn with_simd_false_matches_with_simd_true() {
     // A/B test: same frame, one sinker forces scalar, the other uses
     // SIMD. NEON is bit‑exact to scalar so outputs must match.
@@ -2088,6 +2483,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn stride_padded_source_reads_correct_pixels() {
     // 16×8 frame, Y stride 32 (padding), chroma stride 16.
     let w = 16usize;
@@ -2151,6 +2550,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn nv12_luma_only_copies_y_plane() {
     let (yp, uvp) = solid_nv12_frame(16, 8, 42, 128, 128);
     let src = Nv12Frame::new(&yp, &uvp, 16, 8, 16, 16);
@@ -2165,6 +2568,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn nv12_rgb_only_converts_gray_to_gray() {
     let (yp, uvp) = solid_nv12_frame(16, 8, 128, 128, 128);
     let src = Nv12Frame::new(&yp, &uvp, 16, 8, 16, 16);
@@ -2181,6 +2588,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn nv12_mixed_all_three_outputs_populated() {
     let (yp, uvp) = solid_nv12_frame(16, 8, 200, 128, 128);
     let src = Nv12Frame::new(&yp, &uvp, 16, 8, 16, 16);
@@ -2209,6 +2620,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn nv12_with_simd_false_matches_with_simd_true() {
     // 32×16 pseudo-random frame so the SIMD path exercises its main
     // loop and the scalar path processes the full width too.
@@ -2244,6 +2659,10 @@ mod tests {
   // surface as `Err(MixedSinkerError::*BufferTooShort)` / `HsvPlaneTooShort`.
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn attach_short_rgb_returns_err() {
     let mut rgb = std::vec![0u8; 16 * 8 * 3 - 1]; // 1 byte short
     let err = MixedSinker::<Yuv420p>::new(16, 8)
@@ -2260,6 +2679,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn attach_short_luma_returns_err() {
     let mut luma = std::vec![0u8; 16 * 8 - 1];
     let err = MixedSinker::<Yuv420p>::new(16, 8)
@@ -2276,6 +2699,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn attach_short_hsv_returns_err() {
     let mut h = std::vec![0u8; 16 * 8];
     let mut s = std::vec![0u8; 16 * 8];
@@ -2295,6 +2722,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn taller_frame_returns_err_before_any_row_written() {
     // Sink sized for 16×8, feed a 16×10 frame. `begin_frame` returns
     // `Err(DimensionMismatch)` before row 0 — no partial writes.
@@ -2325,6 +2756,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn shorter_frame_returns_err_before_any_row_written() {
     // Sink sized 16×8, frame is 16×4. Without the `begin_frame`
     // preflight, the walker would silently process 4 rows and leave
@@ -2357,6 +2792,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn nv12_width_mismatch_returns_err() {
     let (yp, uvp) = solid_nv12_frame(16, 8, 42, 128, 128);
     let src = Nv12Frame::new(&yp, &uvp, 16, 8, 16, 16);
@@ -2380,6 +2819,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn yuv420p_width_mismatch_returns_err() {
     let (yp, up, vp) = solid_yuv420p_frame(16, 8, 42, 128, 128);
     let src = Yuv420pFrame::new(&yp, &up, &vp, 16, 8, 16, 8, 8);
@@ -2405,6 +2848,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn nv12_shorter_frame_returns_err_before_any_row_written() {
     let (yp, uvp) = solid_nv12_frame(16, 4, 42, 128, 128);
     let src = Nv12Frame::new(&yp, &uvp, 16, 4, 16, 16);
@@ -2427,6 +2874,10 @@ mod tests {
   /// Sanity check that an Infallible sink (compile-time proof of
   /// no-error) compiles and runs. Mirrors the trait-docs pattern.
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn infallible_sink_compiles_and_runs() {
     use core::convert::Infallible;
 
@@ -2460,6 +2911,10 @@ mod tests {
   // by constructing rows manually and calling `process`.
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn yuv420p_process_rejects_short_y_slice() {
     let mut rgb = std::vec![0u8; 16 * 8 * 3];
     let mut sink = MixedSinker::<Yuv420p>::new(16, 8)
@@ -2483,6 +2938,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn yuv420p_process_rejects_short_u_half() {
     let mut rgb = std::vec![0u8; 16 * 8 * 3];
     let mut sink = MixedSinker::<Yuv420p>::new(16, 8)
@@ -2505,6 +2964,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn yuv420p_process_rejects_out_of_range_row_idx() {
     let mut rgb = std::vec![0u8; 16 * 8 * 3];
     let mut sink = MixedSinker::<Yuv420p>::new(16, 8)
@@ -2527,6 +2990,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn yuv420p_odd_width_sink_returns_err_at_begin_frame() {
     // A sink configured with an odd width would later panic inside
     // `yuv_420_to_rgb_row` (which asserts `width & 1 == 0`). The
@@ -2553,6 +3020,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn yuv420p_odd_width_sink_returns_err_at_direct_process() {
     // Direct `process` caller bypassing `begin_frame`. Process must
     // still reject odd width before calling the kernel.
@@ -2569,6 +3040,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn nv12_odd_width_sink_returns_err_at_begin_frame() {
     let w = 15usize;
     let h = 8usize;
@@ -2579,6 +3054,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn nv12_odd_width_sink_returns_err_at_direct_process() {
     let mut rgb = std::vec![0u8; 16 * 8 * 3];
     let mut sink = MixedSinker::<Nv12>::new(15, 8).with_rgb(&mut rgb).unwrap();
@@ -2590,6 +3069,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn nv12_process_rejects_short_uv_slice() {
     let mut rgb = std::vec![0u8; 16 * 8 * 3];
     let mut sink = MixedSinker::<Nv12>::new(16, 8).with_rgb(&mut rgb).unwrap();
@@ -2609,6 +3092,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn nv12_process_rejects_out_of_range_row_idx() {
     let mut rgb = std::vec![0u8; 16 * 8 * 3];
     let mut sink = MixedSinker::<Nv12>::new(16, 8).with_rgb(&mut rgb).unwrap();
@@ -2626,6 +3113,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn nv12_matches_yuv420p_mixed_sinker() {
     // Cross-format guarantee: an NV12 frame built from the same U / V
     // bytes as a Yuv420p frame produces byte-identical RGB output via
@@ -2688,6 +3179,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn nv21_luma_only_copies_y_plane() {
     let (yp, vup) = solid_nv21_frame(16, 8, 42, 128, 128);
     let src = Nv21Frame::new(&yp, &vup, 16, 8, 16, 16);
@@ -2702,6 +3197,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn nv21_rgb_only_converts_gray_to_gray() {
     let (yp, vup) = solid_nv21_frame(16, 8, 128, 128, 128);
     let src = Nv21Frame::new(&yp, &vup, 16, 8, 16, 16);
@@ -2718,6 +3217,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn nv21_mixed_all_three_outputs_populated() {
     let (yp, vup) = solid_nv21_frame(16, 8, 200, 128, 128);
     let src = Nv21Frame::new(&yp, &vup, 16, 8, 16, 16);
@@ -2746,6 +3249,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn nv21_matches_nv12_mixed_sinker_with_swapped_chroma() {
     // Cross-format guarantee: an NV21 frame built from the same U / V
     // bytes as an NV12 frame (just byte-swapped in the chroma plane)
@@ -2810,6 +3317,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn yuv420p10_rgb_u8_only_gray_is_gray() {
     // 10-bit mid-gray: Y=512, UV=512 → 8-bit RGB ≈ 128 on every channel.
     let (yp, up, vp) = solid_yuv420p10_frame(16, 8, 512, 512, 512);
@@ -2829,6 +3340,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn yuv420p10_rgb_u16_only_native_depth_gray() {
     // Same mid-gray frame → u16 RGB output in native 10-bit depth, so
     // each channel should be ≈ 512 (the 10-bit mid).
@@ -2851,6 +3366,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn yuv420p10_rgb_u8_and_u16_both_populated() {
     // 10-bit full-range white: Y=1023, UV=512. Both buffers should
     // fill with their respective "white" values (255 for u8, 1023 for
@@ -2872,6 +3391,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn yuv420p10_luma_downshifts_to_8bit() {
     // Y=512 at 10 bits → 512 >> 2 = 128 at 8 bits.
     let (yp, up, vp) = solid_yuv420p10_frame(16, 8, 512, 512, 512);
@@ -2887,6 +3410,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn yuv420p10_hsv_from_gray_is_zero_hue_zero_sat() {
     // HSV derived from the internal u8 RGB scratch: neutral gray →
     // H=0, S=0, V≈128. Exercises the "HSV without RGB" scratch path
@@ -2908,6 +3435,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn yuv420p10_rgb_u16_too_short_returns_err() {
     let mut rgb = std::vec![0u16; 10]; // Way too small.
     let err = MixedSinker::<Yuv420p10>::new(16, 8)
@@ -2918,6 +3449,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn yuv420p10_with_simd_false_matches_with_simd_true() {
     // The SIMD toggle exercises scalar-vs-SIMD dispatch. Both paths
     // must produce byte-identical results on both outputs.
@@ -2972,6 +3507,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn p010_rgb_u8_only_gray_is_gray() {
     // 10-bit mid-gray Y=512, UV=512 → ~128 u8 RGB across the frame.
     let (yp, uvp) = solid_p010_frame(16, 8, 512, 512, 512);
@@ -2989,6 +3528,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn p010_rgb_u16_only_native_depth_gray() {
     // Output u16 is yuv420p10le-packed (10-bit in low 10) even though
     // the input is P010-packed.
@@ -3013,6 +3556,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn p010_rgb_u8_and_u16_both_populated() {
     // 10-bit full-range white: Y=1023, UV=512. Both buffers fill in
     // one call.
@@ -3033,6 +3580,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn p010_luma_downshifts_to_8bit() {
     // Y=512 at 10 bits, P010-packed (0x8000). After >> 8, the 8-bit
     // luma is 0x80 = 128.
@@ -3049,6 +3600,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn p010_matches_yuv420p10_mixed_sinker_with_shifted_samples() {
     // Logical equivalence: same samples fed through the two formats
     // (low-packed as yuv420p10, high-packed as P010) must produce
@@ -3079,6 +3634,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn p010_rgb_u16_too_short_returns_err() {
     let mut rgb = std::vec![0u16; 10];
     let err = MixedSinker::<P010>::new(16, 8)
@@ -3089,6 +3648,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn p010_with_simd_false_matches_with_simd_true() {
     // Stubs delegate to scalar so simd=true and simd=false produce
     // byte-identical output for now. Real SIMD backends will replace
@@ -3144,6 +3707,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn yuv420p12_rgb_u8_only_gray_is_gray() {
     let (yp, up, vp) = solid_yuv420p12_frame(16, 8, 2048, 2048, 2048);
     let src = Yuv420p12Frame::new(&yp, &up, &vp, 16, 8, 16, 8, 8);
@@ -3162,6 +3729,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn yuv420p12_rgb_u16_only_native_depth_gray() {
     let (yp, up, vp) = solid_yuv420p12_frame(16, 8, 2048, 2048, 2048);
     let src = Yuv420p12Frame::new(&yp, &up, &vp, 16, 8, 16, 8, 8);
@@ -3182,6 +3753,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn yuv420p12_rgb_u8_and_u16_both_populated() {
     // Full-range white: Y=4095, UV=2048.
     let (yp, up, vp) = solid_yuv420p12_frame(16, 8, 4095, 2048, 2048);
@@ -3201,6 +3776,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn yuv420p12_luma_downshifts_to_8bit() {
     // Y=2048 at 12 bits → 2048 >> (12 - 8) = 128 at 8 bits.
     let (yp, up, vp) = solid_yuv420p12_frame(16, 8, 2048, 2048, 2048);
@@ -3216,6 +3795,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn yuv420p12_hsv_from_gray_is_zero_hue_zero_sat() {
     let (yp, up, vp) = solid_yuv420p12_frame(16, 8, 2048, 2048, 2048);
     let src = Yuv420p12Frame::new(&yp, &up, &vp, 16, 8, 16, 8, 8);
@@ -3234,6 +3817,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn yuv420p12_rgb_u16_too_short_returns_err() {
     let mut rgb = std::vec![0u16; 10];
     let err = MixedSinker::<Yuv420p12>::new(16, 8)
@@ -3244,6 +3831,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn yuv420p12_with_simd_false_matches_with_simd_true() {
     let (yp, up, vp) = solid_yuv420p12_frame(64, 16, 2400, 1600, 2800);
     let src = Yuv420p12Frame::new(&yp, &up, &vp, 64, 16, 64, 32, 32);
@@ -3292,6 +3883,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn yuv420p14_rgb_u8_only_gray_is_gray() {
     // 14-bit mid-gray: Y=UV=8192.
     let (yp, up, vp) = solid_yuv420p14_frame(16, 8, 8192, 8192, 8192);
@@ -3311,6 +3906,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn yuv420p14_rgb_u16_only_native_depth_gray() {
     let (yp, up, vp) = solid_yuv420p14_frame(16, 8, 8192, 8192, 8192);
     let src = Yuv420p14Frame::new(&yp, &up, &vp, 16, 8, 16, 8, 8);
@@ -3330,6 +3929,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn yuv420p14_luma_downshifts_to_8bit() {
     // Y=8192 at 14 bits → 8192 >> (14 - 8) = 128.
     let (yp, up, vp) = solid_yuv420p14_frame(16, 8, 8192, 8192, 8192);
@@ -3345,6 +3948,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn yuv420p14_rgb_u8_and_u16_both_populated() {
     let (yp, up, vp) = solid_yuv420p14_frame(16, 8, 16383, 8192, 8192);
     let src = Yuv420p14Frame::new(&yp, &up, &vp, 16, 8, 16, 8, 8);
@@ -3363,6 +3970,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn yuv420p14_with_simd_false_matches_with_simd_true() {
     let (yp, up, vp) = solid_yuv420p14_frame(64, 16, 9600, 6400, 11200);
     let src = Yuv420p14Frame::new(&yp, &up, &vp, 64, 16, 64, 32, 32);
@@ -3415,6 +4026,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn p012_rgb_u8_only_gray_is_gray() {
     let (yp, uvp) = solid_p012_frame(16, 8, 2048, 2048, 2048);
     let src = P012Frame::new(&yp, &uvp, 16, 8, 16, 16);
@@ -3431,6 +4046,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn p012_rgb_u16_only_native_depth_gray() {
     // Output is low-bit-packed 12-bit (yuv420p12le convention).
     let (yp, uvp) = solid_p012_frame(16, 8, 2048, 2048, 2048);
@@ -3454,6 +4073,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn p012_rgb_u8_and_u16_both_populated() {
     let (yp, uvp) = solid_p012_frame(16, 8, 4095, 2048, 2048);
     let src = P012Frame::new(&yp, &uvp, 16, 8, 16, 16);
@@ -3472,6 +4095,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn p012_luma_downshifts_to_8bit() {
     // Y=2048 at 12 bits, P012-packed (2048 << 4 = 0x8000). After >> 8,
     // the 8-bit luma is 0x80 = 128 — same accessor as P010 since both
@@ -3489,6 +4116,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn p012_matches_yuv420p12_mixed_sinker_with_shifted_samples() {
     // Logical equivalence — same 12-bit samples fed through both
     // layouts must produce byte-identical u8 RGB.
@@ -3518,6 +4149,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn p012_rgb_u16_too_short_returns_err() {
     let mut rgb = std::vec![0u16; 10];
     let err = MixedSinker::<P012>::new(16, 8)
@@ -3528,6 +4163,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn p012_with_simd_false_matches_with_simd_true() {
     let (yp, uvp) = solid_p012_frame(64, 16, 2400, 1600, 2800);
     let src = P012Frame::new(&yp, &uvp, 64, 16, 64, 64);
@@ -3550,6 +4189,358 @@ mod tests {
       .with_rgb_u16(&mut rgb_u16_simd)
       .unwrap();
     p012_to(&src, false, ColorMatrix::Bt709, &mut s_simd).unwrap();
+
+    assert_eq!(rgb_scalar, rgb_simd);
+    assert_eq!(rgb_u16_scalar, rgb_u16_simd);
+  }
+
+  // ---- Yuv420p16 ---------------------------------------------------------
+  //
+  // Planar 16-bit, full u16 range. Mid-gray is Y=UV=32768; full-range
+  // white luma is 65535.
+
+  fn solid_yuv420p16_frame(
+    width: u32,
+    height: u32,
+    y: u16,
+    u: u16,
+    v: u16,
+  ) -> (Vec<u16>, Vec<u16>, Vec<u16>) {
+    let w = width as usize;
+    let h = height as usize;
+    let cw = w / 2;
+    let ch = h / 2;
+    (
+      std::vec![y; w * h],
+      std::vec![u; cw * ch],
+      std::vec![v; cw * ch],
+    )
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn yuv420p16_rgb_u8_only_gray_is_gray() {
+    let (yp, up, vp) = solid_yuv420p16_frame(16, 8, 32768, 32768, 32768);
+    let src = Yuv420p16Frame::new(&yp, &up, &vp, 16, 8, 16, 8, 8);
+
+    let mut rgb = std::vec![0u8; 16 * 8 * 3];
+    let mut sink = MixedSinker::<Yuv420p16>::new(16, 8)
+      .with_rgb(&mut rgb)
+      .unwrap();
+    yuv420p16_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+    for px in rgb.chunks(3) {
+      assert!(px[0].abs_diff(128) <= 1);
+      assert_eq!(px[0], px[1]);
+      assert_eq!(px[1], px[2]);
+    }
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn yuv420p16_rgb_u16_only_native_depth_gray() {
+    let (yp, up, vp) = solid_yuv420p16_frame(16, 8, 32768, 32768, 32768);
+    let src = Yuv420p16Frame::new(&yp, &up, &vp, 16, 8, 16, 8, 8);
+
+    let mut rgb = std::vec![0u16; 16 * 8 * 3];
+    let mut sink = MixedSinker::<Yuv420p16>::new(16, 8)
+      .with_rgb_u16(&mut rgb)
+      .unwrap();
+    yuv420p16_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+    for px in rgb.chunks(3) {
+      assert!(px[0].abs_diff(32768) <= 1, "got {px:?}");
+      assert_eq!(px[0], px[1]);
+      assert_eq!(px[1], px[2]);
+    }
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn yuv420p16_rgb_u8_and_u16_both_populated() {
+    // Full-range white: Y=65535, UV=32768.
+    let (yp, up, vp) = solid_yuv420p16_frame(16, 8, 65535, 32768, 32768);
+    let src = Yuv420p16Frame::new(&yp, &up, &vp, 16, 8, 16, 8, 8);
+
+    let mut rgb_u8 = std::vec![0u8; 16 * 8 * 3];
+    let mut rgb_u16 = std::vec![0u16; 16 * 8 * 3];
+    let mut sink = MixedSinker::<Yuv420p16>::new(16, 8)
+      .with_rgb(&mut rgb_u8)
+      .unwrap()
+      .with_rgb_u16(&mut rgb_u16)
+      .unwrap();
+    yuv420p16_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+    assert!(rgb_u8.iter().all(|&c| c == 255));
+    assert!(rgb_u16.iter().all(|&c| c == 65535));
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn yuv420p16_luma_downshifts_to_8bit() {
+    // Y=32768 at 16 bits → 32768 >> (16 - 8) = 128.
+    let (yp, up, vp) = solid_yuv420p16_frame(16, 8, 32768, 32768, 32768);
+    let src = Yuv420p16Frame::new(&yp, &up, &vp, 16, 8, 16, 8, 8);
+
+    let mut luma = std::vec![0u8; 16 * 8];
+    let mut sink = MixedSinker::<Yuv420p16>::new(16, 8)
+      .with_luma(&mut luma)
+      .unwrap();
+    yuv420p16_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+    assert!(luma.iter().all(|&l| l == 128));
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn yuv420p16_hsv_from_gray_is_zero_hue_zero_sat() {
+    let (yp, up, vp) = solid_yuv420p16_frame(16, 8, 32768, 32768, 32768);
+    let src = Yuv420p16Frame::new(&yp, &up, &vp, 16, 8, 16, 8, 8);
+
+    let mut h = std::vec![0xFFu8; 16 * 8];
+    let mut s = std::vec![0xFFu8; 16 * 8];
+    let mut v = std::vec![0xFFu8; 16 * 8];
+    let mut sink = MixedSinker::<Yuv420p16>::new(16, 8)
+      .with_hsv(&mut h, &mut s, &mut v)
+      .unwrap();
+    yuv420p16_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+    assert!(h.iter().all(|&b| b == 0));
+    assert!(s.iter().all(|&b| b == 0));
+    assert!(v.iter().all(|&b| b.abs_diff(128) <= 1));
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn yuv420p16_rgb_u16_too_short_returns_err() {
+    let mut rgb = std::vec![0u16; 10];
+    let err = MixedSinker::<Yuv420p16>::new(16, 8)
+      .with_rgb_u16(&mut rgb)
+      .err()
+      .unwrap();
+    assert!(matches!(err, MixedSinkerError::RgbU16BufferTooShort { .. }));
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn yuv420p16_with_simd_false_matches_with_simd_true() {
+    let (yp, up, vp) = solid_yuv420p16_frame(64, 16, 40000, 20000, 45000);
+    let src = Yuv420p16Frame::new(&yp, &up, &vp, 64, 16, 64, 32, 32);
+
+    let mut rgb_scalar = std::vec![0u8; 64 * 16 * 3];
+    let mut rgb_u16_scalar = std::vec![0u16; 64 * 16 * 3];
+    let mut s_scalar = MixedSinker::<Yuv420p16>::new(64, 16)
+      .with_simd(false)
+      .with_rgb(&mut rgb_scalar)
+      .unwrap()
+      .with_rgb_u16(&mut rgb_u16_scalar)
+      .unwrap();
+    yuv420p16_to(&src, false, ColorMatrix::Bt709, &mut s_scalar).unwrap();
+
+    let mut rgb_simd = std::vec![0u8; 64 * 16 * 3];
+    let mut rgb_u16_simd = std::vec![0u16; 64 * 16 * 3];
+    let mut s_simd = MixedSinker::<Yuv420p16>::new(64, 16)
+      .with_rgb(&mut rgb_simd)
+      .unwrap()
+      .with_rgb_u16(&mut rgb_u16_simd)
+      .unwrap();
+    yuv420p16_to(&src, false, ColorMatrix::Bt709, &mut s_simd).unwrap();
+
+    assert_eq!(rgb_scalar, rgb_simd);
+    assert_eq!(rgb_u16_scalar, rgb_u16_simd);
+  }
+
+  // ---- P016 --------------------------------------------------------------
+
+  fn solid_p016_frame(width: u32, height: u32, y: u16, u: u16, v: u16) -> (Vec<u16>, Vec<u16>) {
+    let w = width as usize;
+    let h = height as usize;
+    let cw = w / 2;
+    let ch = h / 2;
+    // At 16 bits there's no shift — samples go in raw.
+    let y_plane = std::vec![y; w * h];
+    let uv: Vec<u16> = (0..cw * ch).flat_map(|_| [u, v]).collect();
+    (y_plane, uv)
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn p016_rgb_u8_only_gray_is_gray() {
+    let (yp, uvp) = solid_p016_frame(16, 8, 32768, 32768, 32768);
+    let src = P016Frame::new(&yp, &uvp, 16, 8, 16, 16);
+
+    let mut rgb = std::vec![0u8; 16 * 8 * 3];
+    let mut sink = MixedSinker::<P016>::new(16, 8).with_rgb(&mut rgb).unwrap();
+    p016_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+    for px in rgb.chunks(3) {
+      assert!(px[0].abs_diff(128) <= 1);
+      assert_eq!(px[0], px[1]);
+      assert_eq!(px[1], px[2]);
+    }
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn p016_rgb_u16_only_native_depth_gray() {
+    let (yp, uvp) = solid_p016_frame(16, 8, 32768, 32768, 32768);
+    let src = P016Frame::new(&yp, &uvp, 16, 8, 16, 16);
+
+    let mut rgb = std::vec![0u16; 16 * 8 * 3];
+    let mut sink = MixedSinker::<P016>::new(16, 8)
+      .with_rgb_u16(&mut rgb)
+      .unwrap();
+    p016_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+    for px in rgb.chunks(3) {
+      assert!(px[0].abs_diff(32768) <= 1, "got {px:?}");
+      assert_eq!(px[0], px[1]);
+      assert_eq!(px[1], px[2]);
+    }
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn p016_rgb_u8_and_u16_both_populated() {
+    let (yp, uvp) = solid_p016_frame(16, 8, 65535, 32768, 32768);
+    let src = P016Frame::new(&yp, &uvp, 16, 8, 16, 16);
+
+    let mut rgb_u8 = std::vec![0u8; 16 * 8 * 3];
+    let mut rgb_u16 = std::vec![0u16; 16 * 8 * 3];
+    let mut sink = MixedSinker::<P016>::new(16, 8)
+      .with_rgb(&mut rgb_u8)
+      .unwrap()
+      .with_rgb_u16(&mut rgb_u16)
+      .unwrap();
+    p016_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+    assert!(rgb_u8.iter().all(|&c| c == 255));
+    assert!(rgb_u16.iter().all(|&c| c == 65535));
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn p016_luma_downshifts_to_8bit() {
+    let (yp, uvp) = solid_p016_frame(16, 8, 32768, 32768, 32768);
+    let src = P016Frame::new(&yp, &uvp, 16, 8, 16, 16);
+
+    let mut luma = std::vec![0u8; 16 * 8];
+    let mut sink = MixedSinker::<P016>::new(16, 8)
+      .with_luma(&mut luma)
+      .unwrap();
+    p016_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+    assert!(luma.iter().all(|&l| l == 128));
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn p016_matches_yuv420p16_mixed_sinker() {
+    // At 16 bits P016 and yuv420p16 are numerically identical —
+    // the packing distinction degenerates when every bit is active.
+    // Only the plane count / interleave layout differs.
+    let w = 16u32;
+    let h = 8u32;
+    let y = 40000u16;
+    let u = 20000u16;
+    let v = 45000u16;
+
+    let (yp_p16, up_p16, vp_p16) = solid_yuv420p16_frame(w, h, y, u, v);
+    let src_p16 = Yuv420p16Frame::new(&yp_p16, &up_p16, &vp_p16, w, h, w, w / 2, w / 2);
+
+    let (yp_p016, uvp_p016) = solid_p016_frame(w, h, y, u, v);
+    let src_p016 = P016Frame::new(&yp_p016, &uvp_p016, w, h, w, w);
+
+    let mut rgb_yuv = std::vec![0u8; (w * h * 3) as usize];
+    let mut rgb_p016 = std::vec![0u8; (w * h * 3) as usize];
+    let mut s_yuv = MixedSinker::<Yuv420p16>::new(w as usize, h as usize)
+      .with_rgb(&mut rgb_yuv)
+      .unwrap();
+    let mut s_p016 = MixedSinker::<P016>::new(w as usize, h as usize)
+      .with_rgb(&mut rgb_p016)
+      .unwrap();
+    yuv420p16_to(&src_p16, true, ColorMatrix::Bt709, &mut s_yuv).unwrap();
+    p016_to(&src_p016, true, ColorMatrix::Bt709, &mut s_p016).unwrap();
+    assert_eq!(rgb_yuv, rgb_p016);
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn p016_rgb_u16_too_short_returns_err() {
+    let mut rgb = std::vec![0u16; 10];
+    let err = MixedSinker::<P016>::new(16, 8)
+      .with_rgb_u16(&mut rgb)
+      .err()
+      .unwrap();
+    assert!(matches!(err, MixedSinkerError::RgbU16BufferTooShort { .. }));
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn p016_with_simd_false_matches_with_simd_true() {
+    let (yp, uvp) = solid_p016_frame(64, 16, 40000, 20000, 45000);
+    let src = P016Frame::new(&yp, &uvp, 64, 16, 64, 64);
+
+    let mut rgb_scalar = std::vec![0u8; 64 * 16 * 3];
+    let mut rgb_u16_scalar = std::vec![0u16; 64 * 16 * 3];
+    let mut s_scalar = MixedSinker::<P016>::new(64, 16)
+      .with_simd(false)
+      .with_rgb(&mut rgb_scalar)
+      .unwrap()
+      .with_rgb_u16(&mut rgb_u16_scalar)
+      .unwrap();
+    p016_to(&src, false, ColorMatrix::Bt709, &mut s_scalar).unwrap();
+
+    let mut rgb_simd = std::vec![0u8; 64 * 16 * 3];
+    let mut rgb_u16_simd = std::vec![0u16; 64 * 16 * 3];
+    let mut s_simd = MixedSinker::<P016>::new(64, 16)
+      .with_rgb(&mut rgb_simd)
+      .unwrap()
+      .with_rgb_u16(&mut rgb_u16_simd)
+      .unwrap();
+    p016_to(&src, false, ColorMatrix::Bt709, &mut s_simd).unwrap();
 
     assert_eq!(rgb_scalar, rgb_simd);
     assert_eq!(rgb_u16_scalar, rgb_u16_simd);

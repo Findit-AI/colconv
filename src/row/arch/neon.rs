@@ -33,14 +33,17 @@
 //! 8. Saturate‑narrow to u8x16 and interleave with `vst3q_u8`.
 
 use core::arch::aarch64::{
-  float32x4_t, int16x8_t, int32x4_t, uint8x16_t, uint8x16x3_t, uint16x8_t, uint16x8x3_t, vaddq_f32,
-  vaddq_s32, vandq_u16, vbslq_f32, vceqq_f32, vcltq_f32, vcombine_s16, vcombine_u8, vcombine_u16,
-  vcvtq_f32_u32, vcvtq_u32_f32, vdivq_f32, vdupq_n_f32, vdupq_n_s16, vdupq_n_s32, vdupq_n_u16,
-  vget_high_s16, vget_high_u8, vget_high_u16, vget_low_s16, vget_low_u8, vget_low_u16, vld1_u8,
-  vld1q_u8, vld1q_u16, vld2_u8, vld2q_u16, vld3q_u8, vmaxq_f32, vmaxq_s16, vminq_f32, vminq_s16,
-  vmovl_s16, vmovl_u8, vmovl_u16, vmovn_u16, vmovn_u32, vmulq_f32, vmulq_s32, vmvnq_u32,
-  vqaddq_s16, vqmovn_s32, vqmovun_s16, vreinterpretq_s16_u16, vreinterpretq_u16_s16, vshlq_u16,
-  vshrq_n_s32, vst1q_u8, vst3q_u8, vst3q_u16, vsubq_f32, vsubq_s16, vzip1q_s16, vzip2q_s16,
+  float32x4_t, int16x8_t, int32x2_t, int32x4_t, int64x2_t, uint8x16_t, uint8x16x3_t, uint16x8_t,
+  uint16x8x3_t, vaddq_f32, vaddq_s32, vaddq_s64, vandq_u16, vbslq_f32, vceqq_f32, vcltq_f32,
+  vcombine_s16, vcombine_s32, vcombine_u8, vcombine_u16, vcvtq_f32_u32, vcvtq_u32_f32, vdivq_f32,
+  vdup_n_s32, vdupq_n_f32, vdupq_n_s16, vdupq_n_s32, vdupq_n_s64, vdupq_n_u16, vget_high_s16,
+  vget_high_s32, vget_high_u8, vget_high_u16, vget_low_s16, vget_low_s32, vget_low_u8,
+  vget_low_u16, vld1_u8, vld1q_u8, vld1q_u16, vld2_u8, vld2q_u16, vld3q_u8, vmaxq_f32, vmaxq_s16,
+  vminq_f32, vminq_s16, vmovl_s16, vmovl_u8, vmovl_u16, vmovn_s64, vmovn_u16, vmovn_u32, vmull_s32,
+  vmulq_f32, vmulq_s32, vmvnq_u32, vqaddq_s16, vqmovn_s32, vqmovun_s16, vqmovun_s32,
+  vreinterpretq_s16_u16, vreinterpretq_s32_u32, vreinterpretq_u16_s16, vshlq_u16, vshrq_n_s32,
+  vshrq_n_s64, vst1q_u8, vst3q_u8, vst3q_u16, vsubq_f32, vsubq_s16, vsubq_s32, vzip1q_s16,
+  vzip1q_s32, vzip2q_s16, vzip2q_s32,
 };
 
 use crate::{ColorMatrix, row::scalar};
@@ -1022,6 +1025,656 @@ fn scale_y(
   }
 }
 
+// ===== 16-bit YUV → RGB ==================================================
+//
+// At 16-bit, two precision issues arise compared to the 10/12/14-bit generic:
+//
+// 1. The chroma bias (32768) and full-range u16 values (0..65535) do not fit
+//    in i16, so all bias-subtractions happen in i32 after unsigned widening
+//    (`vmovl_u16` → `vreinterpretq_s32_u32`).
+//
+// 2. For u16 output: `c_scale ≈ 37445` (limited range), so `coeff * u_d`
+//    reaches ~2.17×10⁹ > i32 max; `y_scale ≈ 38304`, so `(y−y_off)*y_scale`
+//    reaches ~2.35×10⁹ > i32 max. Both Y and chroma are widened to i64 via
+//    `vmull_s32` and shifted back with `vshrq_n_s64::<15>`.
+//
+// For u8 output: `c_scale ≈ 127`, so i32 is sufficient throughout.
+
+/// NEON 16-bit planar YUV 4:2:0 → packed 8-bit RGB.
+///
+/// Byte-identical to [`scalar::yuv_420p16_to_rgb_row`].
+///
+/// # Safety
+///
+/// 1. NEON must be available on the current CPU.
+/// 2. `width & 1 == 0`.
+/// 3. `y.len() >= width`, `u_half.len() >= width / 2`,
+///    `v_half.len() >= width / 2`, `rgb_out.len() >= 3 * width`.
+#[inline]
+#[target_feature(enable = "neon")]
+pub(crate) unsafe fn yuv_420p16_to_rgb_row(
+  y: &[u16],
+  u_half: &[u16],
+  v_half: &[u16],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  debug_assert_eq!(width & 1, 0);
+  debug_assert!(y.len() >= width);
+  debug_assert!(u_half.len() >= width / 2);
+  debug_assert!(v_half.len() >= width / 2);
+  debug_assert!(rgb_out.len() >= width * 3);
+
+  let coeffs = scalar::Coefficients::for_matrix(matrix);
+  let (y_off, y_scale, c_scale) = scalar::range_params_n::<16, 8>(full_range);
+  let bias = scalar::chroma_bias::<16>(); // = 32768
+  const RND: i32 = 1 << 14;
+
+  unsafe {
+    let rnd_v = vdupq_n_s32(RND);
+    let y_off_v = vdupq_n_s32(y_off);
+    let y_scale_v = vdupq_n_s32(y_scale);
+    let c_scale_v = vdupq_n_s32(c_scale);
+    let bias_v = vdupq_n_s32(bias);
+    let cru = vdupq_n_s32(coeffs.r_u());
+    let crv = vdupq_n_s32(coeffs.r_v());
+    let cgu = vdupq_n_s32(coeffs.g_u());
+    let cgv = vdupq_n_s32(coeffs.g_v());
+    let cbu = vdupq_n_s32(coeffs.b_u());
+    let cbv = vdupq_n_s32(coeffs.b_v());
+
+    let mut x = 0usize;
+    while x + 16 <= width {
+      let y_vec_lo = vld1q_u16(y.as_ptr().add(x));
+      let y_vec_hi = vld1q_u16(y.as_ptr().add(x + 8));
+      let u_vec = vld1q_u16(u_half.as_ptr().add(x / 2));
+      let v_vec = vld1q_u16(v_half.as_ptr().add(x / 2));
+
+      // Unsigned-widen U/V to i32, subtract bias (32768 — does not fit i16).
+      let u_lo_i32 = vsubq_s32(
+        vreinterpretq_s32_u32(vmovl_u16(vget_low_u16(u_vec))),
+        bias_v,
+      );
+      let u_hi_i32 = vsubq_s32(
+        vreinterpretq_s32_u32(vmovl_u16(vget_high_u16(u_vec))),
+        bias_v,
+      );
+      let v_lo_i32 = vsubq_s32(
+        vreinterpretq_s32_u32(vmovl_u16(vget_low_u16(v_vec))),
+        bias_v,
+      );
+      let v_hi_i32 = vsubq_s32(
+        vreinterpretq_s32_u32(vmovl_u16(vget_high_u16(v_vec))),
+        bias_v,
+      );
+
+      let u_d_lo = q15_shift(vaddq_s32(vmulq_s32(u_lo_i32, c_scale_v), rnd_v));
+      let u_d_hi = q15_shift(vaddq_s32(vmulq_s32(u_hi_i32, c_scale_v), rnd_v));
+      let v_d_lo = q15_shift(vaddq_s32(vmulq_s32(v_lo_i32, c_scale_v), rnd_v));
+      let v_d_hi = q15_shift(vaddq_s32(vmulq_s32(v_hi_i32, c_scale_v), rnd_v));
+
+      // i32 chroma is enough for u8 output (c_scale ≈ 127 keeps u_d small).
+      let r_chroma = chroma_i16x8(cru, crv, u_d_lo, v_d_lo, u_d_hi, v_d_hi, rnd_v);
+      let g_chroma = chroma_i16x8(cgu, cgv, u_d_lo, v_d_lo, u_d_hi, v_d_hi, rnd_v);
+      let b_chroma = chroma_i16x8(cbu, cbv, u_d_lo, v_d_lo, u_d_hi, v_d_hi, rnd_v);
+
+      let r_dup_lo = vzip1q_s16(r_chroma, r_chroma);
+      let r_dup_hi = vzip2q_s16(r_chroma, r_chroma);
+      let g_dup_lo = vzip1q_s16(g_chroma, g_chroma);
+      let g_dup_hi = vzip2q_s16(g_chroma, g_chroma);
+      let b_dup_lo = vzip1q_s16(b_chroma, b_chroma);
+      let b_dup_hi = vzip2q_s16(b_chroma, b_chroma);
+
+      let y_scaled_lo = scale_y_u16_to_i16(y_vec_lo, y_off_v, y_scale_v, rnd_v);
+      let y_scaled_hi = scale_y_u16_to_i16(y_vec_hi, y_off_v, y_scale_v, rnd_v);
+
+      let r_u8 = vcombine_u8(
+        vqmovun_s16(vqaddq_s16(y_scaled_lo, r_dup_lo)),
+        vqmovun_s16(vqaddq_s16(y_scaled_hi, r_dup_hi)),
+      );
+      let g_u8 = vcombine_u8(
+        vqmovun_s16(vqaddq_s16(y_scaled_lo, g_dup_lo)),
+        vqmovun_s16(vqaddq_s16(y_scaled_hi, g_dup_hi)),
+      );
+      let b_u8 = vcombine_u8(
+        vqmovun_s16(vqaddq_s16(y_scaled_lo, b_dup_lo)),
+        vqmovun_s16(vqaddq_s16(y_scaled_hi, b_dup_hi)),
+      );
+
+      vst3q_u8(
+        rgb_out.as_mut_ptr().add(x * 3),
+        uint8x16x3_t(r_u8, g_u8, b_u8),
+      );
+      x += 16;
+    }
+
+    if x < width {
+      scalar::yuv_420p16_to_rgb_row(
+        &y[x..width],
+        &u_half[x / 2..width / 2],
+        &v_half[x / 2..width / 2],
+        &mut rgb_out[x * 3..width * 3],
+        width - x,
+        matrix,
+        full_range,
+      );
+    }
+  }
+}
+
+/// NEON 16-bit planar YUV 4:2:0 → packed native-depth u16 RGB.
+///
+/// Both Y scaling and chroma multiply run in i64 (via `vmull_s32` +
+/// `vshrq_n_s64::<15>`) to avoid i32 overflow at 16-bit limited-range scales.
+/// Byte-identical to [`scalar::yuv_420p16_to_rgb_u16_row`].
+///
+/// # Safety
+///
+/// 1. NEON must be available.
+/// 2. `width & 1 == 0`.
+/// 3. `y.len() >= width`, `u_half.len() >= width / 2`,
+///    `v_half.len() >= width / 2`, `rgb_out.len() >= 3 * width`.
+#[inline]
+#[target_feature(enable = "neon")]
+pub(crate) unsafe fn yuv_420p16_to_rgb_u16_row(
+  y: &[u16],
+  u_half: &[u16],
+  v_half: &[u16],
+  rgb_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  debug_assert_eq!(width & 1, 0);
+  debug_assert!(y.len() >= width);
+  debug_assert!(u_half.len() >= width / 2);
+  debug_assert!(v_half.len() >= width / 2);
+  debug_assert!(rgb_out.len() >= width * 3);
+
+  let coeffs = scalar::Coefficients::for_matrix(matrix);
+  let (y_off, y_scale, c_scale) = scalar::range_params_n::<16, 16>(full_range);
+  let bias = scalar::chroma_bias::<16>();
+  const RND: i32 = 1 << 14;
+
+  unsafe {
+    let rnd_v = vdupq_n_s32(RND);
+    let rnd64 = vdupq_n_s64(RND as i64);
+    let y_off_v = vdupq_n_s32(y_off);
+    let y_scale_d = vdup_n_s32(y_scale); // int32x2_t for vmull_s32
+    let c_scale_v = vdupq_n_s32(c_scale);
+    let bias_v = vdupq_n_s32(bias);
+    let cru = vdupq_n_s32(coeffs.r_u());
+    let crv = vdupq_n_s32(coeffs.r_v());
+    let cgu = vdupq_n_s32(coeffs.g_u());
+    let cgv = vdupq_n_s32(coeffs.g_v());
+    let cbu = vdupq_n_s32(coeffs.b_u());
+    let cbv = vdupq_n_s32(coeffs.b_v());
+
+    let mut x = 0usize;
+    while x + 16 <= width {
+      let y_vec_lo = vld1q_u16(y.as_ptr().add(x));
+      let y_vec_hi = vld1q_u16(y.as_ptr().add(x + 8));
+      let u_vec = vld1q_u16(u_half.as_ptr().add(x / 2));
+      let v_vec = vld1q_u16(v_half.as_ptr().add(x / 2));
+
+      let u_lo_i32 = vsubq_s32(
+        vreinterpretq_s32_u32(vmovl_u16(vget_low_u16(u_vec))),
+        bias_v,
+      );
+      let u_hi_i32 = vsubq_s32(
+        vreinterpretq_s32_u32(vmovl_u16(vget_high_u16(u_vec))),
+        bias_v,
+      );
+      let v_lo_i32 = vsubq_s32(
+        vreinterpretq_s32_u32(vmovl_u16(vget_low_u16(v_vec))),
+        bias_v,
+      );
+      let v_hi_i32 = vsubq_s32(
+        vreinterpretq_s32_u32(vmovl_u16(vget_high_u16(v_vec))),
+        bias_v,
+      );
+
+      let u_d_lo = q15_shift(vaddq_s32(vmulq_s32(u_lo_i32, c_scale_v), rnd_v));
+      let u_d_hi = q15_shift(vaddq_s32(vmulq_s32(u_hi_i32, c_scale_v), rnd_v));
+      let v_d_lo = q15_shift(vaddq_s32(vmulq_s32(v_lo_i32, c_scale_v), rnd_v));
+      let v_d_hi = q15_shift(vaddq_s32(vmulq_s32(v_hi_i32, c_scale_v), rnd_v));
+
+      // i64 chroma: coeff * u_d can reach ~2.17×10⁹ at 16-bit scales.
+      let r_ch_lo = chroma_i64x4(cru, crv, u_d_lo, v_d_lo, rnd64);
+      let r_ch_hi = chroma_i64x4(cru, crv, u_d_hi, v_d_hi, rnd64);
+      let g_ch_lo = chroma_i64x4(cgu, cgv, u_d_lo, v_d_lo, rnd64);
+      let g_ch_hi = chroma_i64x4(cgu, cgv, u_d_hi, v_d_hi, rnd64);
+      let b_ch_lo = chroma_i64x4(cbu, cbv, u_d_lo, v_d_lo, rnd64);
+      let b_ch_hi = chroma_i64x4(cbu, cbv, u_d_hi, v_d_hi, rnd64);
+
+      // Duplicate each chroma value into the slot for its 2 Y pixels.
+      let r_cd_lo0 = vzip1q_s32(r_ch_lo, r_ch_lo);
+      let r_cd_lo1 = vzip2q_s32(r_ch_lo, r_ch_lo);
+      let r_cd_hi0 = vzip1q_s32(r_ch_hi, r_ch_hi);
+      let r_cd_hi1 = vzip2q_s32(r_ch_hi, r_ch_hi);
+      let g_cd_lo0 = vzip1q_s32(g_ch_lo, g_ch_lo);
+      let g_cd_lo1 = vzip2q_s32(g_ch_lo, g_ch_lo);
+      let g_cd_hi0 = vzip1q_s32(g_ch_hi, g_ch_hi);
+      let g_cd_hi1 = vzip2q_s32(g_ch_hi, g_ch_hi);
+      let b_cd_lo0 = vzip1q_s32(b_ch_lo, b_ch_lo);
+      let b_cd_lo1 = vzip2q_s32(b_ch_lo, b_ch_lo);
+      let b_cd_hi0 = vzip1q_s32(b_ch_hi, b_ch_hi);
+      let b_cd_hi1 = vzip2q_s32(b_ch_hi, b_ch_hi);
+
+      // i64 Y: (y - y_off) * y_scale can reach ~2.35×10⁹ at limited range.
+      let y_lo_0 = vreinterpretq_s32_u32(vmovl_u16(vget_low_u16(y_vec_lo)));
+      let y_lo_1 = vreinterpretq_s32_u32(vmovl_u16(vget_high_u16(y_vec_lo)));
+      let y_hi_0 = vreinterpretq_s32_u32(vmovl_u16(vget_low_u16(y_vec_hi)));
+      let y_hi_1 = vreinterpretq_s32_u32(vmovl_u16(vget_high_u16(y_vec_hi)));
+      let ys_lo_0 = scale_y_u16_i64(y_lo_0, y_off_v, y_scale_d, rnd64);
+      let ys_lo_1 = scale_y_u16_i64(y_lo_1, y_off_v, y_scale_d, rnd64);
+      let ys_hi_0 = scale_y_u16_i64(y_hi_0, y_off_v, y_scale_d, rnd64);
+      let ys_hi_1 = scale_y_u16_i64(y_hi_1, y_off_v, y_scale_d, rnd64);
+
+      // Add Y + chroma; vqmovun_s32 saturates i32→u16 (clamps to [0, 65535]).
+      let r_lo_u16 = vcombine_u16(
+        vqmovun_s32(vaddq_s32(ys_lo_0, r_cd_lo0)),
+        vqmovun_s32(vaddq_s32(ys_lo_1, r_cd_lo1)),
+      );
+      let r_hi_u16 = vcombine_u16(
+        vqmovun_s32(vaddq_s32(ys_hi_0, r_cd_hi0)),
+        vqmovun_s32(vaddq_s32(ys_hi_1, r_cd_hi1)),
+      );
+      let g_lo_u16 = vcombine_u16(
+        vqmovun_s32(vaddq_s32(ys_lo_0, g_cd_lo0)),
+        vqmovun_s32(vaddq_s32(ys_lo_1, g_cd_lo1)),
+      );
+      let g_hi_u16 = vcombine_u16(
+        vqmovun_s32(vaddq_s32(ys_hi_0, g_cd_hi0)),
+        vqmovun_s32(vaddq_s32(ys_hi_1, g_cd_hi1)),
+      );
+      let b_lo_u16 = vcombine_u16(
+        vqmovun_s32(vaddq_s32(ys_lo_0, b_cd_lo0)),
+        vqmovun_s32(vaddq_s32(ys_lo_1, b_cd_lo1)),
+      );
+      let b_hi_u16 = vcombine_u16(
+        vqmovun_s32(vaddq_s32(ys_hi_0, b_cd_hi0)),
+        vqmovun_s32(vaddq_s32(ys_hi_1, b_cd_hi1)),
+      );
+
+      vst3q_u16(
+        rgb_out.as_mut_ptr().add(x * 3),
+        uint16x8x3_t(r_lo_u16, g_lo_u16, b_lo_u16),
+      );
+      vst3q_u16(
+        rgb_out.as_mut_ptr().add(x * 3 + 24),
+        uint16x8x3_t(r_hi_u16, g_hi_u16, b_hi_u16),
+      );
+      x += 16;
+    }
+
+    if x < width {
+      scalar::yuv_420p16_to_rgb_u16_row(
+        &y[x..width],
+        &u_half[x / 2..width / 2],
+        &v_half[x / 2..width / 2],
+        &mut rgb_out[x * 3..width * 3],
+        width - x,
+        matrix,
+        full_range,
+      );
+    }
+  }
+}
+
+/// NEON P016 (semi-planar 16-bit) → packed 8-bit RGB.
+///
+/// UV is interleaved (`U0, V0, U1, V1, …`), split via `vld2q_u16`.
+/// Byte-identical to [`scalar::p16_to_rgb_row`].
+///
+/// # Safety
+///
+/// 1. NEON must be available.
+/// 2. `width & 1 == 0`.
+/// 3. `y.len() >= width`, `uv_half.len() >= width`, `rgb_out.len() >= 3 * width`.
+#[inline]
+#[target_feature(enable = "neon")]
+pub(crate) unsafe fn p16_to_rgb_row(
+  y: &[u16],
+  uv_half: &[u16],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  debug_assert_eq!(width & 1, 0);
+  debug_assert!(y.len() >= width);
+  debug_assert!(uv_half.len() >= width);
+  debug_assert!(rgb_out.len() >= width * 3);
+
+  let coeffs = scalar::Coefficients::for_matrix(matrix);
+  let (y_off, y_scale, c_scale) = scalar::range_params_n::<16, 8>(full_range);
+  let bias = scalar::chroma_bias::<16>();
+  const RND: i32 = 1 << 14;
+
+  unsafe {
+    let rnd_v = vdupq_n_s32(RND);
+    let y_off_v = vdupq_n_s32(y_off);
+    let y_scale_v = vdupq_n_s32(y_scale);
+    let c_scale_v = vdupq_n_s32(c_scale);
+    let bias_v = vdupq_n_s32(bias);
+    let cru = vdupq_n_s32(coeffs.r_u());
+    let crv = vdupq_n_s32(coeffs.r_v());
+    let cgu = vdupq_n_s32(coeffs.g_u());
+    let cgv = vdupq_n_s32(coeffs.g_v());
+    let cbu = vdupq_n_s32(coeffs.b_u());
+    let cbv = vdupq_n_s32(coeffs.b_v());
+
+    let mut x = 0usize;
+    while x + 16 <= width {
+      let y_vec_lo = vld1q_u16(y.as_ptr().add(x));
+      let y_vec_hi = vld1q_u16(y.as_ptr().add(x + 8));
+      let uv_pair = vld2q_u16(uv_half.as_ptr().add(x));
+      let u_vec = uv_pair.0;
+      let v_vec = uv_pair.1;
+
+      let u_lo_i32 = vsubq_s32(
+        vreinterpretq_s32_u32(vmovl_u16(vget_low_u16(u_vec))),
+        bias_v,
+      );
+      let u_hi_i32 = vsubq_s32(
+        vreinterpretq_s32_u32(vmovl_u16(vget_high_u16(u_vec))),
+        bias_v,
+      );
+      let v_lo_i32 = vsubq_s32(
+        vreinterpretq_s32_u32(vmovl_u16(vget_low_u16(v_vec))),
+        bias_v,
+      );
+      let v_hi_i32 = vsubq_s32(
+        vreinterpretq_s32_u32(vmovl_u16(vget_high_u16(v_vec))),
+        bias_v,
+      );
+
+      let u_d_lo = q15_shift(vaddq_s32(vmulq_s32(u_lo_i32, c_scale_v), rnd_v));
+      let u_d_hi = q15_shift(vaddq_s32(vmulq_s32(u_hi_i32, c_scale_v), rnd_v));
+      let v_d_lo = q15_shift(vaddq_s32(vmulq_s32(v_lo_i32, c_scale_v), rnd_v));
+      let v_d_hi = q15_shift(vaddq_s32(vmulq_s32(v_hi_i32, c_scale_v), rnd_v));
+
+      let r_chroma = chroma_i16x8(cru, crv, u_d_lo, v_d_lo, u_d_hi, v_d_hi, rnd_v);
+      let g_chroma = chroma_i16x8(cgu, cgv, u_d_lo, v_d_lo, u_d_hi, v_d_hi, rnd_v);
+      let b_chroma = chroma_i16x8(cbu, cbv, u_d_lo, v_d_lo, u_d_hi, v_d_hi, rnd_v);
+
+      let r_dup_lo = vzip1q_s16(r_chroma, r_chroma);
+      let r_dup_hi = vzip2q_s16(r_chroma, r_chroma);
+      let g_dup_lo = vzip1q_s16(g_chroma, g_chroma);
+      let g_dup_hi = vzip2q_s16(g_chroma, g_chroma);
+      let b_dup_lo = vzip1q_s16(b_chroma, b_chroma);
+      let b_dup_hi = vzip2q_s16(b_chroma, b_chroma);
+
+      let y_scaled_lo = scale_y_u16_to_i16(y_vec_lo, y_off_v, y_scale_v, rnd_v);
+      let y_scaled_hi = scale_y_u16_to_i16(y_vec_hi, y_off_v, y_scale_v, rnd_v);
+
+      let r_u8 = vcombine_u8(
+        vqmovun_s16(vqaddq_s16(y_scaled_lo, r_dup_lo)),
+        vqmovun_s16(vqaddq_s16(y_scaled_hi, r_dup_hi)),
+      );
+      let g_u8 = vcombine_u8(
+        vqmovun_s16(vqaddq_s16(y_scaled_lo, g_dup_lo)),
+        vqmovun_s16(vqaddq_s16(y_scaled_hi, g_dup_hi)),
+      );
+      let b_u8 = vcombine_u8(
+        vqmovun_s16(vqaddq_s16(y_scaled_lo, b_dup_lo)),
+        vqmovun_s16(vqaddq_s16(y_scaled_hi, b_dup_hi)),
+      );
+
+      vst3q_u8(
+        rgb_out.as_mut_ptr().add(x * 3),
+        uint8x16x3_t(r_u8, g_u8, b_u8),
+      );
+      x += 16;
+    }
+
+    if x < width {
+      scalar::p16_to_rgb_row(
+        &y[x..width],
+        &uv_half[x..width],
+        &mut rgb_out[x * 3..width * 3],
+        width - x,
+        matrix,
+        full_range,
+      );
+    }
+  }
+}
+
+/// NEON P016 (semi-planar 16-bit) → packed native-depth u16 RGB.
+///
+/// Byte-identical to [`scalar::p16_to_rgb_u16_row`].
+///
+/// # Safety
+///
+/// 1. NEON must be available.
+/// 2. `width & 1 == 0`.
+/// 3. `y.len() >= width`, `uv_half.len() >= width`, `rgb_out.len() >= 3 * width`.
+#[inline]
+#[target_feature(enable = "neon")]
+pub(crate) unsafe fn p16_to_rgb_u16_row(
+  y: &[u16],
+  uv_half: &[u16],
+  rgb_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  debug_assert_eq!(width & 1, 0);
+  debug_assert!(y.len() >= width);
+  debug_assert!(uv_half.len() >= width);
+  debug_assert!(rgb_out.len() >= width * 3);
+
+  let coeffs = scalar::Coefficients::for_matrix(matrix);
+  let (y_off, y_scale, c_scale) = scalar::range_params_n::<16, 16>(full_range);
+  let bias = scalar::chroma_bias::<16>();
+  const RND: i32 = 1 << 14;
+
+  unsafe {
+    let rnd_v = vdupq_n_s32(RND);
+    let rnd64 = vdupq_n_s64(RND as i64);
+    let y_off_v = vdupq_n_s32(y_off);
+    let y_scale_d = vdup_n_s32(y_scale);
+    let c_scale_v = vdupq_n_s32(c_scale);
+    let bias_v = vdupq_n_s32(bias);
+    let cru = vdupq_n_s32(coeffs.r_u());
+    let crv = vdupq_n_s32(coeffs.r_v());
+    let cgu = vdupq_n_s32(coeffs.g_u());
+    let cgv = vdupq_n_s32(coeffs.g_v());
+    let cbu = vdupq_n_s32(coeffs.b_u());
+    let cbv = vdupq_n_s32(coeffs.b_v());
+
+    let mut x = 0usize;
+    while x + 16 <= width {
+      let y_vec_lo = vld1q_u16(y.as_ptr().add(x));
+      let y_vec_hi = vld1q_u16(y.as_ptr().add(x + 8));
+      let uv_pair = vld2q_u16(uv_half.as_ptr().add(x));
+      let u_vec = uv_pair.0;
+      let v_vec = uv_pair.1;
+
+      let u_lo_i32 = vsubq_s32(
+        vreinterpretq_s32_u32(vmovl_u16(vget_low_u16(u_vec))),
+        bias_v,
+      );
+      let u_hi_i32 = vsubq_s32(
+        vreinterpretq_s32_u32(vmovl_u16(vget_high_u16(u_vec))),
+        bias_v,
+      );
+      let v_lo_i32 = vsubq_s32(
+        vreinterpretq_s32_u32(vmovl_u16(vget_low_u16(v_vec))),
+        bias_v,
+      );
+      let v_hi_i32 = vsubq_s32(
+        vreinterpretq_s32_u32(vmovl_u16(vget_high_u16(v_vec))),
+        bias_v,
+      );
+
+      let u_d_lo = q15_shift(vaddq_s32(vmulq_s32(u_lo_i32, c_scale_v), rnd_v));
+      let u_d_hi = q15_shift(vaddq_s32(vmulq_s32(u_hi_i32, c_scale_v), rnd_v));
+      let v_d_lo = q15_shift(vaddq_s32(vmulq_s32(v_lo_i32, c_scale_v), rnd_v));
+      let v_d_hi = q15_shift(vaddq_s32(vmulq_s32(v_hi_i32, c_scale_v), rnd_v));
+
+      let r_ch_lo = chroma_i64x4(cru, crv, u_d_lo, v_d_lo, rnd64);
+      let r_ch_hi = chroma_i64x4(cru, crv, u_d_hi, v_d_hi, rnd64);
+      let g_ch_lo = chroma_i64x4(cgu, cgv, u_d_lo, v_d_lo, rnd64);
+      let g_ch_hi = chroma_i64x4(cgu, cgv, u_d_hi, v_d_hi, rnd64);
+      let b_ch_lo = chroma_i64x4(cbu, cbv, u_d_lo, v_d_lo, rnd64);
+      let b_ch_hi = chroma_i64x4(cbu, cbv, u_d_hi, v_d_hi, rnd64);
+
+      let r_cd_lo0 = vzip1q_s32(r_ch_lo, r_ch_lo);
+      let r_cd_lo1 = vzip2q_s32(r_ch_lo, r_ch_lo);
+      let r_cd_hi0 = vzip1q_s32(r_ch_hi, r_ch_hi);
+      let r_cd_hi1 = vzip2q_s32(r_ch_hi, r_ch_hi);
+      let g_cd_lo0 = vzip1q_s32(g_ch_lo, g_ch_lo);
+      let g_cd_lo1 = vzip2q_s32(g_ch_lo, g_ch_lo);
+      let g_cd_hi0 = vzip1q_s32(g_ch_hi, g_ch_hi);
+      let g_cd_hi1 = vzip2q_s32(g_ch_hi, g_ch_hi);
+      let b_cd_lo0 = vzip1q_s32(b_ch_lo, b_ch_lo);
+      let b_cd_lo1 = vzip2q_s32(b_ch_lo, b_ch_lo);
+      let b_cd_hi0 = vzip1q_s32(b_ch_hi, b_ch_hi);
+      let b_cd_hi1 = vzip2q_s32(b_ch_hi, b_ch_hi);
+
+      let y_lo_0 = vreinterpretq_s32_u32(vmovl_u16(vget_low_u16(y_vec_lo)));
+      let y_lo_1 = vreinterpretq_s32_u32(vmovl_u16(vget_high_u16(y_vec_lo)));
+      let y_hi_0 = vreinterpretq_s32_u32(vmovl_u16(vget_low_u16(y_vec_hi)));
+      let y_hi_1 = vreinterpretq_s32_u32(vmovl_u16(vget_high_u16(y_vec_hi)));
+      let ys_lo_0 = scale_y_u16_i64(y_lo_0, y_off_v, y_scale_d, rnd64);
+      let ys_lo_1 = scale_y_u16_i64(y_lo_1, y_off_v, y_scale_d, rnd64);
+      let ys_hi_0 = scale_y_u16_i64(y_hi_0, y_off_v, y_scale_d, rnd64);
+      let ys_hi_1 = scale_y_u16_i64(y_hi_1, y_off_v, y_scale_d, rnd64);
+
+      let r_lo_u16 = vcombine_u16(
+        vqmovun_s32(vaddq_s32(ys_lo_0, r_cd_lo0)),
+        vqmovun_s32(vaddq_s32(ys_lo_1, r_cd_lo1)),
+      );
+      let r_hi_u16 = vcombine_u16(
+        vqmovun_s32(vaddq_s32(ys_hi_0, r_cd_hi0)),
+        vqmovun_s32(vaddq_s32(ys_hi_1, r_cd_hi1)),
+      );
+      let g_lo_u16 = vcombine_u16(
+        vqmovun_s32(vaddq_s32(ys_lo_0, g_cd_lo0)),
+        vqmovun_s32(vaddq_s32(ys_lo_1, g_cd_lo1)),
+      );
+      let g_hi_u16 = vcombine_u16(
+        vqmovun_s32(vaddq_s32(ys_hi_0, g_cd_hi0)),
+        vqmovun_s32(vaddq_s32(ys_hi_1, g_cd_hi1)),
+      );
+      let b_lo_u16 = vcombine_u16(
+        vqmovun_s32(vaddq_s32(ys_lo_0, b_cd_lo0)),
+        vqmovun_s32(vaddq_s32(ys_lo_1, b_cd_lo1)),
+      );
+      let b_hi_u16 = vcombine_u16(
+        vqmovun_s32(vaddq_s32(ys_hi_0, b_cd_hi0)),
+        vqmovun_s32(vaddq_s32(ys_hi_1, b_cd_hi1)),
+      );
+
+      vst3q_u16(
+        rgb_out.as_mut_ptr().add(x * 3),
+        uint16x8x3_t(r_lo_u16, g_lo_u16, b_lo_u16),
+      );
+      vst3q_u16(
+        rgb_out.as_mut_ptr().add(x * 3 + 24),
+        uint16x8x3_t(r_hi_u16, g_hi_u16, b_hi_u16),
+      );
+      x += 16;
+    }
+
+    if x < width {
+      scalar::p16_to_rgb_u16_row(
+        &y[x..width],
+        &uv_half[x..width],
+        &mut rgb_out[x * 3..width * 3],
+        width - x,
+        matrix,
+        full_range,
+      );
+    }
+  }
+}
+
+// ===== 16-bit helpers =====================================================
+
+/// Scale 8 u16 Y pixels to i16x8 for the 16-bit u8-output path.
+///
+/// Unsigned-widens via `vmovl_u16`, subtracts `y_off` in i32, multiplies
+/// by `y_scale` (small for u8 output — no i32 overflow), Q15-shifts, and
+/// narrows to i16x8 with `vqmovn_s32`.
+#[inline(always)]
+fn scale_y_u16_to_i16(
+  y_vec: uint16x8_t,
+  y_off_v: int32x4_t,
+  y_scale_v: int32x4_t,
+  rnd_v: int32x4_t,
+) -> int16x8_t {
+  unsafe {
+    let lo = vreinterpretq_s32_u32(vmovl_u16(vget_low_u16(y_vec)));
+    let hi = vreinterpretq_s32_u32(vmovl_u16(vget_high_u16(y_vec)));
+    let lo_s = vshrq_n_s32::<15>(vaddq_s32(
+      vmulq_s32(vsubq_s32(lo, y_off_v), y_scale_v),
+      rnd_v,
+    ));
+    let hi_s = vshrq_n_s32::<15>(vaddq_s32(
+      vmulq_s32(vsubq_s32(hi, y_off_v), y_scale_v),
+      rnd_v,
+    ));
+    vcombine_s16(vqmovn_s32(lo_s), vqmovn_s32(hi_s))
+  }
+}
+
+/// `(cu*u_d + cv*v_d + RND) >> 15` in i64 for 4 chroma values → i32x4.
+///
+/// Used by the 16-bit u16-output path where `coeff * u_d` exceeds i32.
+/// `vmull_s32` widens each 32×32 product to 64 bits, avoiding overflow.
+#[inline(always)]
+fn chroma_i64x4(
+  cu: int32x4_t,
+  cv: int32x4_t,
+  u_d: int32x4_t,
+  v_d: int32x4_t,
+  rnd64: int64x2_t,
+) -> int32x4_t {
+  unsafe {
+    let sum_lo = vshrq_n_s64::<15>(vaddq_s64(
+      vaddq_s64(
+        vmull_s32(vget_low_s32(cu), vget_low_s32(u_d)),
+        vmull_s32(vget_low_s32(cv), vget_low_s32(v_d)),
+      ),
+      rnd64,
+    ));
+    let sum_hi = vshrq_n_s64::<15>(vaddq_s64(
+      vaddq_s64(
+        vmull_s32(vget_high_s32(cu), vget_high_s32(u_d)),
+        vmull_s32(vget_high_s32(cv), vget_high_s32(v_d)),
+      ),
+      rnd64,
+    ));
+    vcombine_s32(vmovn_s64(sum_lo), vmovn_s64(sum_hi))
+  }
+}
+
+/// Scale 4 u16 Y pixels via i64 widening for the 16-bit u16-output path.
+///
+/// `(y - y_off) * y_scale` can reach ~2.35×10⁹ at 16-bit limited range,
+/// overflowing i32. `vmull_s32` widens to i64 before the Q15 shift.
+/// Input `y_u32` is already unsigned-widened and reinterpreted as i32.
+#[inline(always)]
+fn scale_y_u16_i64(
+  y_i32: int32x4_t,
+  y_off_v: int32x4_t,
+  y_scale_d: int32x2_t,
+  rnd64: int64x2_t,
+) -> int32x4_t {
+  unsafe {
+    let sub = vsubq_s32(y_i32, y_off_v);
+    let lo = vshrq_n_s64::<15>(vaddq_s64(vmull_s32(vget_low_s32(sub), y_scale_d), rnd64));
+    let hi = vshrq_n_s64::<15>(vaddq_s64(vmull_s32(vget_high_s32(sub), y_scale_d), rnd64));
+    vcombine_s32(vmovn_s64(lo), vmovn_s64(hi))
+  }
+}
+
 // ===== RGB → HSV =========================================================
 
 /// NEON RGB → planar HSV. Semantics match
@@ -1316,6 +1969,7 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn neon_matches_scalar_all_matrices_16() {
     for m in [
       ColorMatrix::Bt601,
@@ -1332,6 +1986,7 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn neon_matches_scalar_width_32() {
     check_equivalence(32, ColorMatrix::Bt601, true);
     check_equivalence(32, ColorMatrix::Bt709, false);
@@ -1339,11 +1994,13 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn neon_matches_scalar_width_1920() {
     check_equivalence(1920, ColorMatrix::Bt709, false);
   }
 
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn neon_matches_scalar_odd_tail_widths() {
     // Widths that leave a non‑trivial scalar tail (non‑multiple of 16).
     for w in [18usize, 30, 34, 1922] {
@@ -1414,6 +2071,7 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn nv12_neon_matches_scalar_all_matrices_16() {
     for m in [
       ColorMatrix::Bt601,
@@ -1430,11 +2088,13 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn nv12_neon_matches_scalar_width_1920() {
     check_nv12_equivalence(1920, ColorMatrix::Bt709, false);
   }
 
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn nv12_neon_matches_scalar_odd_tail_widths() {
     for w in [18usize, 30, 34, 1922] {
       check_nv12_equivalence(w, ColorMatrix::Bt601, false);
@@ -1442,6 +2102,7 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn nv12_neon_matches_yuv420p_neon() {
     for w in [16usize, 30, 64, 1920] {
       check_nv12_matches_yuv420p(w, ColorMatrix::Bt709, false);
@@ -1519,6 +2180,7 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn nv21_neon_matches_scalar_all_matrices_16() {
     for m in [
       ColorMatrix::Bt601,
@@ -1535,6 +2197,7 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn nv21_neon_matches_scalar_widths() {
     for w in [32usize, 1920, 18, 30, 34, 1922] {
       check_nv21_equivalence(w, ColorMatrix::Bt709, false);
@@ -1542,6 +2205,7 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn nv21_neon_matches_nv12_swapped() {
     for w in [16usize, 30, 64, 1920] {
       check_nv21_matches_nv12_with_swapped_uv(w, ColorMatrix::Bt709, false);
@@ -1602,18 +2266,21 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn hsv_neon_matches_scalar_pseudo_random_16() {
     let rgb = pseudo_random_bgr(16);
     check_hsv_equivalence(&rgb, 16);
   }
 
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn hsv_neon_matches_scalar_pseudo_random_1920() {
     let rgb = pseudo_random_bgr(1920);
     check_hsv_equivalence(&rgb, 1920);
   }
 
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn hsv_neon_matches_scalar_tail_widths() {
     // Widths that force a non‑trivial scalar tail (non‑multiple of 16).
     for w in [1usize, 7, 15, 17, 31, 1921] {
@@ -1623,6 +2290,7 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn hsv_neon_matches_scalar_primaries_and_edges() {
     // Primary colors, grays, near‑saturation — exercise each hue branch
     // and the v==0, delta==0, h<0 wrap paths.
@@ -1686,6 +2354,7 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn swap_neon_matches_scalar_widths() {
     for w in [1usize, 15, 16, 17, 31, 32, 1920, 1921] {
       check_swap_equivalence(w);
@@ -1693,6 +2362,7 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn swap_is_self_inverse() {
     let input = pseudo_random_bgr(64);
     let mut round_trip = std::vec![0u8; 64 * 3];
@@ -1766,6 +2436,7 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn neon_p10_u8_matches_scalar_all_matrices_16() {
     for m in [
       ColorMatrix::Bt601,
@@ -1782,6 +2453,7 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn neon_p10_u16_matches_scalar_all_matrices_16() {
     for m in [
       ColorMatrix::Bt601,
@@ -1798,6 +2470,7 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn neon_p10_matches_scalar_odd_tail_widths() {
     for w in [18usize, 30, 34, 1922] {
       check_p10_u8_equivalence(w, ColorMatrix::Bt601, false);
@@ -1806,6 +2479,7 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn neon_p10_matches_scalar_1920() {
     check_p10_u8_equivalence(1920, ColorMatrix::Bt709, false);
     check_p10_u16_equivalence(1920, ColorMatrix::Bt2020Ncl, false);
@@ -1827,6 +2501,7 @@ mod tests {
   /// Each variant runs through every color matrix × range × both
   /// output paths (u8 + native‑depth u16) and asserts byte equality.
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn neon_p10_matches_scalar_on_out_of_range_samples() {
     let width = 32;
 
@@ -1975,6 +2650,7 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn neon_p010_u8_matches_scalar_all_matrices_16() {
     for m in [
       ColorMatrix::Bt601,
@@ -1991,6 +2667,7 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn neon_p010_u16_matches_scalar_all_matrices_16() {
     for m in [
       ColorMatrix::Bt601,
@@ -2007,6 +2684,7 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn neon_p010_matches_scalar_odd_tail_widths() {
     for w in [18usize, 30, 34, 1922] {
       check_p010_u8_equivalence(w, ColorMatrix::Bt601, false);
@@ -2015,6 +2693,7 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn neon_p010_matches_scalar_1920() {
     check_p010_u8_equivalence(1920, ColorMatrix::Bt709, false);
     check_p010_u16_equivalence(1920, ColorMatrix::Bt2020Ncl, false);
@@ -2027,6 +2706,7 @@ mod tests {
   /// only the high 10 bits, so any low‑6‑bits data gets deterministically
   /// discarded in both paths.
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn neon_p010_matches_scalar_on_mispacked_input() {
     let width = 32;
 
@@ -2178,6 +2858,7 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn neon_p12_matches_scalar_all_matrices() {
     for m in [
       ColorMatrix::Bt601,
@@ -2197,6 +2878,7 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn neon_p14_matches_scalar_all_matrices() {
     for m in [
       ColorMatrix::Bt601,
@@ -2214,6 +2896,7 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn neon_p12_matches_scalar_tail_widths() {
     for w in [18usize, 30, 34, 1922] {
       check_planar_u8_neon_equivalence_n::<12>(w, ColorMatrix::Bt601, false);
@@ -2224,6 +2907,7 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn neon_p14_matches_scalar_tail_widths() {
     for w in [18usize, 30, 34, 1922] {
       check_planar_u8_neon_equivalence_n::<14>(w, ColorMatrix::Bt601, false);

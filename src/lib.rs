@@ -36,20 +36,35 @@
 //! | [`Yuv420p10`]    | 10        | planar, low-packed     | `yuv420p10le`         |
 //! | [`Yuv420p12`]    | 12        | planar, low-packed     | `yuv420p12le`         |
 //! | [`Yuv420p14`]    | 14        | planar, low-packed     | `yuv420p14le`         |
+//! | [`Yuv420p16`]    | 16        | planar                 | `yuv420p16le`         |
 //! | [`P010`]         | 10        | semi-planar, high-packed | `p010le`            |
 //! | [`P012`]         | 12        | semi-planar, high-packed | `p012le`            |
+//! | [`P016`]         | 16        | semi-planar            | `p016le`              |
+//!
+//! # Kernel families
+//!
+//! - **Q15 i32 family** — 8-bit kernels (`yuv_420_to_rgb_row` etc.)
+//!   and 10/12/14-bit kernels (`yuv_420p_n_to_rgb_*<BITS>` and
+//!   `p_n_to_rgb_*<BITS>`).
+//! - **16-bit family** — dedicated `yuv_420p16_to_rgb_*` /
+//!   `p16_to_rgb_*`. The **u8-output** kernels stay on i32
+//!   (output-range scaling keeps `coeff × u_d` within i32). The
+//!   **u16-output** kernels widen the chroma matrix multiply-add to
+//!   i64 to avoid the ~3.7·10⁹ chroma sum overflowing i32 at
+//!   `BITS == 16`.
 //!
 //! Not yet shipped (follow-up):
 //!
-//! - **16‑bit families** (`Yuv420p16` / `P016`) — require a separate
-//!   kernel family because the Q15 chroma_sum overflows i32 at
-//!   `BITS == 16`. Current scalar / SIMD kernels `debug_assert!` out
-//!   `BITS == 16` precisely to surface this.
 //! - **4:2:2 and 4:4:4** (`Yuv422p`, `Yuv444p`, `Nv16`, `Nv24`,
 //!   `Nv42`) — share the Q15 math but need their own row walkers
 //!   for the different chroma subsampling / stride.
 //! - **Packed RGB sources** (`Rgb24`, `Bgr24`, `Rgba`, `Bgra`,
 //!   `Rgba1010102`, etc.).
+//! - **SIMD backends for 16-bit** — NEON, SSE4.1, AVX2, AVX-512,
+//!   and wasm simd128 ship 16-bit row kernels. The x86/NEON paths
+//!   cover both u8 and u16 outputs; the wasm u16-output paths still
+//!   fall through to the scalar 16-bit kernel while u8 output is
+//!   vectorized.
 //!
 //! See [`yuv`] for the per-format module-level breakdown and
 //! [`frame`] for the validated frame types plus the `BITS` const
@@ -62,8 +77,10 @@
 //! [`Yuv420p10`]: crate::yuv::Yuv420p10
 //! [`Yuv420p12`]: crate::yuv::Yuv420p12
 //! [`Yuv420p14`]: crate::yuv::Yuv420p14
+//! [`Yuv420p16`]: crate::yuv::Yuv420p16
 //! [`P010`]: crate::yuv::P010
 //! [`P012`]: crate::yuv::P012
+//! [`P016`]: crate::yuv::P016
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
