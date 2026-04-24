@@ -170,6 +170,82 @@ fn nv12_or_nv21_to_rgb_row_impl<const SWAP_UV: bool>(
   }
 }
 
+/// NV24 (semi-planar 4:4:4, UV-ordered) → packed RGB. Thin wrapper
+/// over [`nv24_or_nv42_to_rgb_row_impl`] with `SWAP_UV = false`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn nv24_to_rgb_row(
+  y: &[u8],
+  uv: &[u8],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  nv24_or_nv42_to_rgb_row_impl::<false>(y, uv, rgb_out, width, matrix, full_range);
+}
+
+/// NV42 (semi-planar 4:4:4, VU-ordered) → packed RGB. Thin wrapper
+/// over [`nv24_or_nv42_to_rgb_row_impl`] with `SWAP_UV = true`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn nv42_to_rgb_row(
+  y: &[u8],
+  vu: &[u8],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  nv24_or_nv42_to_rgb_row_impl::<true>(y, vu, rgb_out, width, matrix, full_range);
+}
+
+/// Shared scalar kernel for NV24 (SWAP_UV=false) and NV42
+/// (SWAP_UV=true). Identical math and numerical contract to
+/// [`yuv_420_to_rgb_row`]; the difference from NV12/NV21 is
+/// 4:4:4 — one UV pair per Y pixel, no chroma upsampling.
+/// No width parity constraint.
+///
+/// # Panics (debug builds)
+///
+/// - `y.len() >= width`, `uv_or_vu.len() >= 2 * width`,
+///   `rgb_out.len() >= 3 * width`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+fn nv24_or_nv42_to_rgb_row_impl<const SWAP_UV: bool>(
+  y: &[u8],
+  uv_or_vu: &[u8],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  debug_assert!(y.len() >= width, "y row too short");
+  debug_assert!(uv_or_vu.len() >= 2 * width, "chroma row too short");
+  debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
+
+  let coeffs = Coefficients::for_matrix(matrix);
+  let (y_off, y_scale, c_scale) = range_params(full_range);
+  const RND: i32 = 1 << 14;
+
+  for x in 0..width {
+    // 4:4:4: one UV pair per pixel. No upsampling.
+    let (u_byte, v_byte) = if SWAP_UV {
+      (uv_or_vu[x * 2 + 1], uv_or_vu[x * 2])
+    } else {
+      (uv_or_vu[x * 2], uv_or_vu[x * 2 + 1])
+    };
+    let u_d = ((u_byte as i32 - 128) * c_scale + RND) >> 15;
+    let v_d = ((v_byte as i32 - 128) * c_scale + RND) >> 15;
+
+    let r_chroma = (coeffs.r_u() * u_d + coeffs.r_v() * v_d + RND) >> 15;
+    let g_chroma = (coeffs.g_u() * u_d + coeffs.g_v() * v_d + RND) >> 15;
+    let b_chroma = (coeffs.b_u() * u_d + coeffs.b_v() * v_d + RND) >> 15;
+
+    let y0 = ((y[x] as i32 - y_off) * y_scale + RND) >> 15;
+    rgb_out[x * 3] = clamp_u8(y0 + r_chroma);
+    rgb_out[x * 3 + 1] = clamp_u8(y0 + g_chroma);
+    rgb_out[x * 3 + 2] = clamp_u8(y0 + b_chroma);
+  }
+}
+
 #[cfg_attr(not(tarpaulin), inline(always))]
 fn clamp_u8(v: i32) -> u8 {
   v.clamp(0, 255) as u8

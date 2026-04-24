@@ -25,7 +25,19 @@ name = "nv12_to_rgb"
 harness = false
 
 [[bench]]
+name = "nv16_to_rgb"
+harness = false
+
+[[bench]]
 name = "nv21_to_rgb"
+harness = false
+
+[[bench]]
+name = "nv24_to_rgb"
+harness = false
+
+[[bench]]
+name = "nv42_to_rgb"
 harness = false
 
 [[bench]]

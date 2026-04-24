@@ -12,6 +12,19 @@
 //! - [`Nv21`](crate::yuv::Nv21) — 4:2:0 semi‑planar with **VU**-ordered
 //!   chroma (Android MediaCodec default).
 //!
+//! # Shipped (8-bit 4:2:2 / 4:4:4)
+//!
+//! - [`Nv16`](crate::yuv::Nv16) — 4:2:2 semi‑planar, UV‑ordered.
+//!   Reuses [`Nv12`](crate::yuv::Nv12)'s per‑row kernel; the 4:2:0
+//!   vs 4:2:2 difference is purely in the vertical walker.
+//! - [`Nv24`](crate::yuv::Nv24) — 4:4:4 semi‑planar, UV‑ordered.
+//!   Dedicated kernel family (chroma is 1:1 with Y, no
+//!   duplication step).
+//! - [`Nv42`](crate::yuv::Nv42) — 4:4:4 semi‑planar, **VU**‑ordered.
+//!   Shares kernels with [`Nv24`](crate::yuv::Nv24) via a `SWAP_UV`
+//!   const generic, the same way [`Nv21`](crate::yuv::Nv21) pairs
+//!   with [`Nv12`](crate::yuv::Nv12).
+//!
 //! # Shipped (high-bit-depth 4:2:0, low-bit-packed planar)
 //!
 //! - [`Yuv420p10`](crate::yuv::Yuv420p10) — 4:2:0 planar at 10 bits
@@ -50,16 +63,23 @@
 //!
 //! # Not yet shipped
 //!
-//! - **4:2:2 / 4:4:4** (`Yuv422p`, `Yuv444p`, `Nv16`, `Nv24`,
-//!   `Nv42`) — follow‑up, not yet started. They share the scalar
-//!   Q15 math but need their own row walkers (different chroma
-//!   subsampling / stride).
+//! - **Planar 4:2:2 / 4:4:4** (`Yuv422p`, `Yuv444p`) — semi‑planar
+//!   4:2:2 and 4:4:4 now ship as [`Nv16`](crate::yuv::Nv16) /
+//!   [`Nv24`](crate::yuv::Nv24) / [`Nv42`](crate::yuv::Nv42). The
+//!   planar equivalents would share the same row math but need their
+//!   own frame types and walkers.
+//! - **u16 semi‑planar 4:2:2 / 4:4:4** (`P210`, `P216`, `P410`,
+//!   `P416`) — follow‑up. Would reuse the 16‑bit u16 kernel family
+//!   from Ship 4b with 4:2:2 / 4:4:4 chroma strides.
 //! - **Packed RGB sources** (`Rgb24`, `Bgr24`, `Rgba`, `Bgra`,
 //!   `Rgba1010102`, etc.) — follow‑up. Will land as their own
 //!   family of `*_to` kernels feeding a new row‑shape subtrait.
 
 mod nv12;
+mod nv16;
 mod nv21;
+mod nv24;
+mod nv42;
 mod p010;
 mod p012;
 mod p016;
@@ -70,7 +90,10 @@ mod yuv420p14;
 mod yuv420p16;
 
 pub use nv12::{Nv12, Nv12Row, Nv12Sink, nv12_to};
+pub use nv16::{Nv16, Nv16Row, Nv16Sink, nv16_to};
 pub use nv21::{Nv21, Nv21Row, Nv21Sink, nv21_to};
+pub use nv24::{Nv24, Nv24Row, Nv24Sink, nv24_to};
+pub use nv42::{Nv42, Nv42Row, Nv42Sink, nv42_to};
 pub use p010::{P010, P010Row, P010Sink, p010_to};
 pub use p012::{P012, P012Row, P012Sink, p012_to};
 pub use p016::{P016, P016Row, P016Sink, p016_to};

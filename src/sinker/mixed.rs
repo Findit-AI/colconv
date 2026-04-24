@@ -27,16 +27,18 @@ use thiserror::Error;
 use crate::{
   HsvBuffers, PixelSink, SourceFormat,
   row::{
-    nv12_to_rgb_row, nv21_to_rgb_row, p010_to_rgb_row, p010_to_rgb_u16_row, p012_to_rgb_row,
-    p012_to_rgb_u16_row, p016_to_rgb_row, p016_to_rgb_u16_row, rgb_to_hsv_row, yuv_420_to_rgb_row,
-    yuv420p10_to_rgb_row, yuv420p10_to_rgb_u16_row, yuv420p12_to_rgb_row, yuv420p12_to_rgb_u16_row,
-    yuv420p14_to_rgb_row, yuv420p14_to_rgb_u16_row, yuv420p16_to_rgb_row, yuv420p16_to_rgb_u16_row,
+    nv12_to_rgb_row, nv21_to_rgb_row, nv24_to_rgb_row, nv42_to_rgb_row, p010_to_rgb_row,
+    p010_to_rgb_u16_row, p012_to_rgb_row, p012_to_rgb_u16_row, p016_to_rgb_row,
+    p016_to_rgb_u16_row, rgb_to_hsv_row, yuv_420_to_rgb_row, yuv420p10_to_rgb_row,
+    yuv420p10_to_rgb_u16_row, yuv420p12_to_rgb_row, yuv420p12_to_rgb_u16_row, yuv420p14_to_rgb_row,
+    yuv420p14_to_rgb_u16_row, yuv420p16_to_rgb_row, yuv420p16_to_rgb_u16_row,
   },
   yuv::{
-    Nv12, Nv12Row, Nv12Sink, Nv21, Nv21Row, Nv21Sink, P010, P010Row, P010Sink, P012, P012Row,
-    P012Sink, P016, P016Row, P016Sink, Yuv420p, Yuv420p10, Yuv420p10Row, Yuv420p10Sink, Yuv420p12,
-    Yuv420p12Row, Yuv420p12Sink, Yuv420p14, Yuv420p14Row, Yuv420p14Sink, Yuv420p16, Yuv420p16Row,
-    Yuv420p16Sink, Yuv420pRow, Yuv420pSink,
+    Nv12, Nv12Row, Nv12Sink, Nv16, Nv16Row, Nv16Sink, Nv21, Nv21Row, Nv21Sink, Nv24, Nv24Row,
+    Nv24Sink, Nv42, Nv42Row, Nv42Sink, P010, P010Row, P010Sink, P012, P012Row, P012Sink, P016,
+    P016Row, P016Sink, Yuv420p, Yuv420p10, Yuv420p10Row, Yuv420p10Sink, Yuv420p12, Yuv420p12Row,
+    Yuv420p12Sink, Yuv420p14, Yuv420p14Row, Yuv420p14Sink, Yuv420p16, Yuv420p16Row, Yuv420p16Sink,
+    Yuv420pRow, Yuv420pSink,
   },
 };
 
@@ -219,6 +221,17 @@ pub enum RowSlice {
   /// pairs — byte order swapped relative to [`Self::UvHalf`].
   #[display("VU Half")]
   VuHalf,
+  /// Full‑width interleaved UV plane in a semi‑planar **4:4:4** source
+  /// ([`Nv24`](crate::yuv::Nv24)). Each row is `U0, V0, U1, V1, …` for
+  /// `width` pairs (`2 * width` bytes). One UV pair per Y pixel — no
+  /// chroma subsampling.
+  #[display("UV Full")]
+  UvFull,
+  /// Full‑width interleaved VU plane in a semi‑planar **4:4:4** source
+  /// ([`Nv42`](crate::yuv::Nv42)). Each row is `V0, U0, V1, U1, …` for
+  /// `width` pairs — byte order swapped relative to [`Self::UvFull`].
+  #[display("VU Full")]
+  VuFull,
   /// Full‑width Y row of a **10‑bit** planar source ([`Yuv420p10`]).
   /// `u16` samples, `width` elements.
   #[display("Y10")]
@@ -834,6 +847,131 @@ impl PixelSink for MixedSinker<'_, Nv12> {
 
 impl Yuv420pSink for MixedSinker<'_, Yuv420p> {}
 
+// ---- Nv16 impl ----------------------------------------------------------
+//
+// 4:2:2 is 4:2:0's vertical‑axis twin: one UV row per Y row instead of
+// one per two. Per‑row math is identical, so this impl calls the same
+// `nv12_to_rgb_row` dispatcher — no new kernels needed.
+
+impl Nv16Sink for MixedSinker<'_, Nv16> {}
+
+impl PixelSink for MixedSinker<'_, Nv16> {
+  type Input<'r> = Nv16Row<'r>;
+  type Error = MixedSinkerError;
+
+  fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
+    if self.width & 1 != 0 {
+      return Err(MixedSinkerError::OddWidth { width: self.width });
+    }
+    check_dimensions_match(self.width, self.height, width, height)
+  }
+
+  fn process(&mut self, row: Nv16Row<'_>) -> Result<(), Self::Error> {
+    let w = self.width;
+    let h = self.height;
+    let idx = row.row();
+    let use_simd = self.simd;
+
+    if w & 1 != 0 {
+      return Err(MixedSinkerError::OddWidth { width: w });
+    }
+    if row.y().len() != w {
+      return Err(MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::Y,
+        row: idx,
+        expected: w,
+        actual: row.y().len(),
+      });
+    }
+    // NV16 UV row is `width` bytes of interleaved U/V — identical shape
+    // to NV12's `uv_half`.
+    if row.uv().len() != w {
+      return Err(MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::UvHalf,
+        row: idx,
+        expected: w,
+        actual: row.uv().len(),
+      });
+    }
+    if idx >= self.height {
+      return Err(MixedSinkerError::RowIndexOutOfRange {
+        row: idx,
+        configured_height: self.height,
+      });
+    }
+
+    let Self {
+      rgb,
+      luma,
+      hsv,
+      rgb_scratch,
+      ..
+    } = self;
+
+    let one_plane_start = idx * w;
+    let one_plane_end = one_plane_start + w;
+
+    if let Some(luma) = luma.as_deref_mut() {
+      luma[one_plane_start..one_plane_end].copy_from_slice(&row.y()[..w]);
+    }
+
+    let want_rgb = rgb.is_some();
+    let want_hsv = hsv.is_some();
+    if !want_rgb && !want_hsv {
+      return Ok(());
+    }
+
+    let rgb_row: &mut [u8] = match rgb.as_deref_mut() {
+      Some(buf) => {
+        let rgb_plane_end =
+          one_plane_end
+            .checked_mul(3)
+            .ok_or(MixedSinkerError::GeometryOverflow {
+              width: w,
+              height: h,
+              channels: 3,
+            })?;
+        let rgb_plane_start = one_plane_start * 3;
+        &mut buf[rgb_plane_start..rgb_plane_end]
+      }
+      None => {
+        let rgb_row_bytes = w.checked_mul(3).ok_or(MixedSinkerError::GeometryOverflow {
+          width: w,
+          height: h,
+          channels: 3,
+        })?;
+        if rgb_scratch.len() < rgb_row_bytes {
+          rgb_scratch.resize(rgb_row_bytes, 0);
+        }
+        &mut rgb_scratch[..rgb_row_bytes]
+      }
+    };
+
+    // Reuses the NV12 dispatcher — 4:2:2's row contract is identical.
+    nv12_to_rgb_row(
+      row.y(),
+      row.uv(),
+      rgb_row,
+      w,
+      row.matrix(),
+      row.full_range(),
+      use_simd,
+    );
+
+    if let Some(hsv) = hsv.as_mut() {
+      rgb_to_hsv_row(
+        rgb_row,
+        &mut hsv.h[one_plane_start..one_plane_end],
+        &mut hsv.s[one_plane_start..one_plane_end],
+        &mut hsv.v[one_plane_start..one_plane_end],
+        w,
+        use_simd,
+      );
+    }
+    Ok(())
+  }
+}
+
 // ---- Nv21 impl ----------------------------------------------------------
 //
 // Structurally identical to the Nv12 impl — the row primitives hide
@@ -940,6 +1078,251 @@ impl PixelSink for MixedSinker<'_, Nv21> {
     nv21_to_rgb_row(
       row.y(),
       row.vu_half(),
+      rgb_row,
+      w,
+      row.matrix(),
+      row.full_range(),
+      use_simd,
+    );
+
+    if let Some(hsv) = hsv.as_mut() {
+      rgb_to_hsv_row(
+        rgb_row,
+        &mut hsv.h[one_plane_start..one_plane_end],
+        &mut hsv.s[one_plane_start..one_plane_end],
+        &mut hsv.v[one_plane_start..one_plane_end],
+        w,
+        use_simd,
+      );
+    }
+    Ok(())
+  }
+}
+
+// ---- Nv24 impl ----------------------------------------------------------
+//
+// 4:4:4 semi-planar: UV plane is full-width (`2 * width` bytes per
+// row), one UV pair per Y pixel. No width parity constraint. Kernel
+// is its own family (`nv24_to_rgb_row`) since chroma is no longer
+// duplicated across columns.
+
+impl Nv24Sink for MixedSinker<'_, Nv24> {}
+
+impl PixelSink for MixedSinker<'_, Nv24> {
+  type Input<'r> = Nv24Row<'r>;
+  type Error = MixedSinkerError;
+
+  fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
+    check_dimensions_match(self.width, self.height, width, height)
+  }
+
+  fn process(&mut self, row: Nv24Row<'_>) -> Result<(), Self::Error> {
+    let w = self.width;
+    let h = self.height;
+    let idx = row.row();
+    let use_simd = self.simd;
+
+    if row.y().len() != w {
+      return Err(MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::Y,
+        row: idx,
+        expected: w,
+        actual: row.y().len(),
+      });
+    }
+    // NV24 UV row is `2 * width` bytes. `checked_mul` covers the
+    // boundary where `2 * width` could overflow `usize` on 32-bit
+    // targets with very large widths.
+    let uv_expected = w.checked_mul(2).ok_or(MixedSinkerError::GeometryOverflow {
+      width: w,
+      height: h,
+      channels: 2,
+    })?;
+    if row.uv().len() != uv_expected {
+      return Err(MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::UvFull,
+        row: idx,
+        expected: uv_expected,
+        actual: row.uv().len(),
+      });
+    }
+    if idx >= self.height {
+      return Err(MixedSinkerError::RowIndexOutOfRange {
+        row: idx,
+        configured_height: self.height,
+      });
+    }
+
+    let Self {
+      rgb,
+      luma,
+      hsv,
+      rgb_scratch,
+      ..
+    } = self;
+
+    let one_plane_start = idx * w;
+    let one_plane_end = one_plane_start + w;
+
+    if let Some(luma) = luma.as_deref_mut() {
+      luma[one_plane_start..one_plane_end].copy_from_slice(&row.y()[..w]);
+    }
+
+    let want_rgb = rgb.is_some();
+    let want_hsv = hsv.is_some();
+    if !want_rgb && !want_hsv {
+      return Ok(());
+    }
+
+    let rgb_row: &mut [u8] = match rgb.as_deref_mut() {
+      Some(buf) => {
+        let rgb_plane_end =
+          one_plane_end
+            .checked_mul(3)
+            .ok_or(MixedSinkerError::GeometryOverflow {
+              width: w,
+              height: h,
+              channels: 3,
+            })?;
+        let rgb_plane_start = one_plane_start * 3;
+        &mut buf[rgb_plane_start..rgb_plane_end]
+      }
+      None => {
+        let rgb_row_bytes = w.checked_mul(3).ok_or(MixedSinkerError::GeometryOverflow {
+          width: w,
+          height: h,
+          channels: 3,
+        })?;
+        if rgb_scratch.len() < rgb_row_bytes {
+          rgb_scratch.resize(rgb_row_bytes, 0);
+        }
+        &mut rgb_scratch[..rgb_row_bytes]
+      }
+    };
+
+    nv24_to_rgb_row(
+      row.y(),
+      row.uv(),
+      rgb_row,
+      w,
+      row.matrix(),
+      row.full_range(),
+      use_simd,
+    );
+
+    if let Some(hsv) = hsv.as_mut() {
+      rgb_to_hsv_row(
+        rgb_row,
+        &mut hsv.h[one_plane_start..one_plane_end],
+        &mut hsv.s[one_plane_start..one_plane_end],
+        &mut hsv.v[one_plane_start..one_plane_end],
+        w,
+        use_simd,
+      );
+    }
+    Ok(())
+  }
+}
+
+// ---- Nv42 impl ----------------------------------------------------------
+//
+// Structurally identical to the Nv24 impl — the row primitive hides
+// the V/U byte-order difference.
+
+impl Nv42Sink for MixedSinker<'_, Nv42> {}
+
+impl PixelSink for MixedSinker<'_, Nv42> {
+  type Input<'r> = Nv42Row<'r>;
+  type Error = MixedSinkerError;
+
+  fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
+    check_dimensions_match(self.width, self.height, width, height)
+  }
+
+  fn process(&mut self, row: Nv42Row<'_>) -> Result<(), Self::Error> {
+    let w = self.width;
+    let h = self.height;
+    let idx = row.row();
+    let use_simd = self.simd;
+
+    if row.y().len() != w {
+      return Err(MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::Y,
+        row: idx,
+        expected: w,
+        actual: row.y().len(),
+      });
+    }
+    let vu_expected = w.checked_mul(2).ok_or(MixedSinkerError::GeometryOverflow {
+      width: w,
+      height: h,
+      channels: 2,
+    })?;
+    if row.vu().len() != vu_expected {
+      return Err(MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::VuFull,
+        row: idx,
+        expected: vu_expected,
+        actual: row.vu().len(),
+      });
+    }
+    if idx >= self.height {
+      return Err(MixedSinkerError::RowIndexOutOfRange {
+        row: idx,
+        configured_height: self.height,
+      });
+    }
+
+    let Self {
+      rgb,
+      luma,
+      hsv,
+      rgb_scratch,
+      ..
+    } = self;
+
+    let one_plane_start = idx * w;
+    let one_plane_end = one_plane_start + w;
+
+    if let Some(luma) = luma.as_deref_mut() {
+      luma[one_plane_start..one_plane_end].copy_from_slice(&row.y()[..w]);
+    }
+
+    let want_rgb = rgb.is_some();
+    let want_hsv = hsv.is_some();
+    if !want_rgb && !want_hsv {
+      return Ok(());
+    }
+
+    let rgb_row: &mut [u8] = match rgb.as_deref_mut() {
+      Some(buf) => {
+        let rgb_plane_end =
+          one_plane_end
+            .checked_mul(3)
+            .ok_or(MixedSinkerError::GeometryOverflow {
+              width: w,
+              height: h,
+              channels: 3,
+            })?;
+        let rgb_plane_start = one_plane_start * 3;
+        &mut buf[rgb_plane_start..rgb_plane_end]
+      }
+      None => {
+        let rgb_row_bytes = w.checked_mul(3).ok_or(MixedSinkerError::GeometryOverflow {
+          width: w,
+          height: h,
+          channels: 3,
+        })?;
+        if rgb_scratch.len() < rgb_row_bytes {
+          rgb_scratch.resize(rgb_row_bytes, 0);
+        }
+        &mut rgb_scratch[..rgb_row_bytes]
+      }
+    };
+
+    nv42_to_rgb_row(
+      row.y(),
+      row.vu(),
       rgb_row,
       w,
       row.matrix(),
@@ -2287,12 +2670,12 @@ mod tests {
   use crate::{
     ColorMatrix,
     frame::{
-      Nv12Frame, Nv21Frame, P010Frame, P012Frame, P016Frame, Yuv420p10Frame, Yuv420p12Frame,
-      Yuv420p14Frame, Yuv420p16Frame, Yuv420pFrame,
+      Nv12Frame, Nv16Frame, Nv21Frame, Nv24Frame, Nv42Frame, P010Frame, P012Frame, P016Frame,
+      Yuv420p10Frame, Yuv420p12Frame, Yuv420p14Frame, Yuv420p16Frame, Yuv420pFrame,
     },
     yuv::{
-      nv12_to, nv21_to, p010_to, p012_to, p016_to, yuv420p_to, yuv420p10_to, yuv420p12_to,
-      yuv420p14_to, yuv420p16_to,
+      nv12_to, nv16_to, nv21_to, nv24_to, nv42_to, p010_to, p012_to, p016_to, yuv420p_to,
+      yuv420p10_to, yuv420p12_to, yuv420p14_to, yuv420p16_to,
     },
   };
 
@@ -3160,6 +3543,191 @@ mod tests {
     assert_eq!(rgb_yuv420p, rgb_nv12);
   }
 
+  // ---- NV16 MixedSinker ---------------------------------------------------
+  //
+  // 4:2:2: chroma is half-width, full-height. Per-row math is
+  // identical to NV12 (the impl calls `nv12_to_rgb_row`), so the
+  // tests mirror the NV12 set and add a cross-layout parity check
+  // against an NV12-shaped frame whose chroma rows are each
+  // duplicated (simulating 4:2:0 from 4:2:2 by vertical downsampling).
+
+  fn solid_nv16_frame(width: u32, height: u32, y: u8, u: u8, v: u8) -> (Vec<u8>, Vec<u8>) {
+    let w = width as usize;
+    let h = height as usize;
+    // NV16 UV is full-height (h rows, not h/2).
+    let mut uv = std::vec![0u8; w * h];
+    for row in 0..h {
+      for i in 0..w / 2 {
+        uv[row * w + i * 2] = u;
+        uv[row * w + i * 2 + 1] = v;
+      }
+    }
+    (std::vec![y; w * h], uv)
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn nv16_luma_only_copies_y_plane() {
+    let (yp, uvp) = solid_nv16_frame(16, 8, 42, 128, 128);
+    let src = Nv16Frame::new(&yp, &uvp, 16, 8, 16, 16);
+
+    let mut luma = std::vec![0u8; 16 * 8];
+    let mut sink = MixedSinker::<Nv16>::new(16, 8)
+      .with_luma(&mut luma)
+      .unwrap();
+    nv16_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+    assert!(luma.iter().all(|&y| y == 42));
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn nv16_rgb_only_converts_gray_to_gray() {
+    let (yp, uvp) = solid_nv16_frame(16, 8, 128, 128, 128);
+    let src = Nv16Frame::new(&yp, &uvp, 16, 8, 16, 16);
+
+    let mut rgb = std::vec![0u8; 16 * 8 * 3];
+    let mut sink = MixedSinker::<Nv16>::new(16, 8).with_rgb(&mut rgb).unwrap();
+    nv16_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+    for px in rgb.chunks(3) {
+      assert!(px[0].abs_diff(128) <= 1);
+      assert_eq!(px[0], px[1]);
+      assert_eq!(px[1], px[2]);
+    }
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn nv16_mixed_all_three_outputs_populated() {
+    let (yp, uvp) = solid_nv16_frame(16, 8, 200, 128, 128);
+    let src = Nv16Frame::new(&yp, &uvp, 16, 8, 16, 16);
+
+    let mut rgb = std::vec![0u8; 16 * 8 * 3];
+    let mut luma = std::vec![0u8; 16 * 8];
+    let mut h = std::vec![0u8; 16 * 8];
+    let mut s = std::vec![0u8; 16 * 8];
+    let mut v = std::vec![0u8; 16 * 8];
+    let mut sink = MixedSinker::<Nv16>::new(16, 8)
+      .with_rgb(&mut rgb)
+      .unwrap()
+      .with_luma(&mut luma)
+      .unwrap()
+      .with_hsv(&mut h, &mut s, &mut v)
+      .unwrap();
+    nv16_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+    assert!(luma.iter().all(|&y| y == 200));
+    for px in rgb.chunks(3) {
+      assert!(px[0].abs_diff(200) <= 1);
+    }
+    assert!(h.iter().all(|&b| b == 0));
+    assert!(s.iter().all(|&b| b == 0));
+    assert!(v.iter().all(|&b| b.abs_diff(200) <= 1));
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn nv16_with_simd_false_matches_with_simd_true() {
+    let w = 32usize;
+    let h = 16usize;
+    let yp: Vec<u8> = (0..w * h).map(|i| ((i * 37 + 11) & 0xFF) as u8).collect();
+    let uvp: Vec<u8> = (0..w * h).map(|i| ((i * 53 + 23) & 0xFF) as u8).collect();
+    let src = Nv16Frame::new(&yp, &uvp, w as u32, h as u32, w as u32, w as u32);
+
+    let mut rgb_simd = std::vec![0u8; w * h * 3];
+    let mut rgb_scalar = std::vec![0u8; w * h * 3];
+    let mut sink_simd = MixedSinker::<Nv16>::new(w, h)
+      .with_rgb(&mut rgb_simd)
+      .unwrap();
+    let mut sink_scalar = MixedSinker::<Nv16>::new(w, h)
+      .with_rgb(&mut rgb_scalar)
+      .unwrap()
+      .with_simd(false);
+    nv16_to(&src, false, ColorMatrix::Bt709, &mut sink_simd).unwrap();
+    nv16_to(&src, false, ColorMatrix::Bt709, &mut sink_scalar).unwrap();
+
+    assert_eq!(rgb_simd, rgb_scalar);
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn nv16_matches_nv12_mixed_sinker_with_duplicated_chroma() {
+    // Cross-layout parity: if we build an NV12 frame whose `uv_half`
+    // plane contains only the even NV16 chroma rows (row 0, 2, 4, …),
+    // the two frames must produce identical RGB output at every Y
+    // row. This validates that NV16's walker + NV12's row primitive
+    // yield the right 4:2:2 semantics (one UV row per Y row) on a
+    // 4:2:0 reference that shares chroma across row pairs.
+    let w = 32usize;
+    let h = 16usize;
+    let yp: Vec<u8> = (0..w * h).map(|i| ((i * 37 + 11) & 0xFF) as u8).collect();
+    let uv_nv16: Vec<u8> = (0..w * h).map(|i| ((i * 53 + 23) & 0xFF) as u8).collect();
+    // Build NV12 chroma by sampling only even NV16 chroma rows.
+    let mut uv_nv12 = std::vec![0u8; w * h / 2];
+    for c_row in 0..h / 2 {
+      let src_row = c_row * 2; // even NV16 chroma rows
+      uv_nv12[c_row * w..(c_row + 1) * w].copy_from_slice(&uv_nv16[src_row * w..(src_row + 1) * w]);
+    }
+    // …and make the NV16 odd chroma rows match their even neighbors so
+    // the 4:2:0 vertical upsample (same chroma for row pairs) matches
+    // what NV16 carries through.
+    let mut uv_nv16_aligned = uv_nv16.clone();
+    for c_row in 0..h / 2 {
+      let even_row = c_row * 2;
+      let odd_row = even_row + 1;
+      let (even, odd) = uv_nv16_aligned.split_at_mut(odd_row * w);
+      odd[..w].copy_from_slice(&even[even_row * w..even_row * w + w]);
+    }
+    let nv16_src = Nv16Frame::new(
+      &yp,
+      &uv_nv16_aligned,
+      w as u32,
+      h as u32,
+      w as u32,
+      w as u32,
+    );
+    let nv12_src = Nv12Frame::new(&yp, &uv_nv12, w as u32, h as u32, w as u32, w as u32);
+
+    let mut rgb_nv16 = std::vec![0u8; w * h * 3];
+    let mut rgb_nv12 = std::vec![0u8; w * h * 3];
+    let mut s_nv16 = MixedSinker::<Nv16>::new(w, h)
+      .with_rgb(&mut rgb_nv16)
+      .unwrap();
+    let mut s_nv12 = MixedSinker::<Nv12>::new(w, h)
+      .with_rgb(&mut rgb_nv12)
+      .unwrap();
+    nv16_to(&nv16_src, false, ColorMatrix::Bt709, &mut s_nv16).unwrap();
+    nv12_to(&nv12_src, false, ColorMatrix::Bt709, &mut s_nv12).unwrap();
+
+    assert_eq!(rgb_nv16, rgb_nv12);
+  }
+
+  #[test]
+  fn nv16_odd_width_sink_returns_err_at_begin_frame() {
+    let mut rgb = std::vec![0u8; 15 * 8 * 3];
+    let mut sink = MixedSinker::<Nv16>::new(15, 8).with_rgb(&mut rgb).unwrap();
+    let (yp, uvp) = solid_nv16_frame(16, 8, 0, 0, 0); // dummy 16-wide frame
+    let src = Nv16Frame::new(&yp, &uvp, 16, 8, 16, 16);
+    let err = nv16_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap_err();
+    assert!(matches!(err, MixedSinkerError::OddWidth { width: 15 }));
+  }
+
   // ---- NV21 MixedSinker ---------------------------------------------------
 
   fn solid_nv21_frame(width: u32, height: u32, y: u8, u: u8, v: u8) -> (Vec<u8>, Vec<u8>) {
@@ -3294,6 +3862,325 @@ mod tests {
     nv21_to(&nv21_src, false, ColorMatrix::Bt709, &mut s_nv21).unwrap();
 
     assert_eq!(rgb_nv12, rgb_nv21);
+  }
+
+  // ---- NV24 MixedSinker ---------------------------------------------------
+  //
+  // 4:4:4 semi-planar: UV row is `2 * width` bytes (one UV pair per
+  // Y pixel). Tests mirror the NV12 set plus one cross-format parity
+  // check against a synthetic NV42 frame (byte-swap the interleaved
+  // chroma → identical RGB output).
+
+  fn solid_nv24_frame(width: u32, height: u32, y: u8, u: u8, v: u8) -> (Vec<u8>, Vec<u8>) {
+    let w = width as usize;
+    let h = height as usize;
+    // UV row payload = `2 * width` bytes = `width` interleaved U/V pairs.
+    let mut uv = std::vec![0u8; 2 * w * h];
+    for row in 0..h {
+      for i in 0..w {
+        uv[row * 2 * w + i * 2] = u;
+        uv[row * 2 * w + i * 2 + 1] = v;
+      }
+    }
+    (std::vec![y; w * h], uv)
+  }
+
+  #[test]
+  fn nv24_luma_only_copies_y_plane() {
+    let (yp, uvp) = solid_nv24_frame(16, 8, 42, 128, 128);
+    let src = Nv24Frame::new(&yp, &uvp, 16, 8, 16, 32);
+
+    let mut luma = std::vec![0u8; 16 * 8];
+    let mut sink = MixedSinker::<Nv24>::new(16, 8)
+      .with_luma(&mut luma)
+      .unwrap();
+    nv24_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+    assert!(luma.iter().all(|&y| y == 42));
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn nv24_rgb_only_converts_gray_to_gray() {
+    let (yp, uvp) = solid_nv24_frame(16, 8, 128, 128, 128);
+    let src = Nv24Frame::new(&yp, &uvp, 16, 8, 16, 32);
+
+    let mut rgb = std::vec![0u8; 16 * 8 * 3];
+    let mut sink = MixedSinker::<Nv24>::new(16, 8).with_rgb(&mut rgb).unwrap();
+    nv24_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+    for px in rgb.chunks(3) {
+      assert!(px[0].abs_diff(128) <= 1);
+      assert_eq!(px[0], px[1]);
+      assert_eq!(px[1], px[2]);
+    }
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn nv24_mixed_all_three_outputs_populated() {
+    let (yp, uvp) = solid_nv24_frame(16, 8, 200, 128, 128);
+    let src = Nv24Frame::new(&yp, &uvp, 16, 8, 16, 32);
+
+    let mut rgb = std::vec![0u8; 16 * 8 * 3];
+    let mut luma = std::vec![0u8; 16 * 8];
+    let mut h = std::vec![0u8; 16 * 8];
+    let mut s = std::vec![0u8; 16 * 8];
+    let mut v = std::vec![0u8; 16 * 8];
+    let mut sink = MixedSinker::<Nv24>::new(16, 8)
+      .with_rgb(&mut rgb)
+      .unwrap()
+      .with_luma(&mut luma)
+      .unwrap()
+      .with_hsv(&mut h, &mut s, &mut v)
+      .unwrap();
+    nv24_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+    assert!(luma.iter().all(|&y| y == 200));
+    for px in rgb.chunks(3) {
+      assert!(px[0].abs_diff(200) <= 1);
+    }
+    assert!(h.iter().all(|&b| b == 0));
+    assert!(s.iter().all(|&b| b == 0));
+    assert!(v.iter().all(|&b| b.abs_diff(200) <= 1));
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn nv24_accepts_odd_width() {
+    // 4:4:4 removes the width parity constraint. A 17-wide frame
+    // should round-trip cleanly.
+    let (yp, uvp) = solid_nv24_frame(17, 8, 200, 128, 128);
+    let src = Nv24Frame::new(&yp, &uvp, 17, 8, 17, 34);
+
+    let mut rgb = std::vec![0u8; 17 * 8 * 3];
+    let mut sink = MixedSinker::<Nv24>::new(17, 8).with_rgb(&mut rgb).unwrap();
+    nv24_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+    for px in rgb.chunks(3) {
+      assert!(px[0].abs_diff(200) <= 1);
+    }
+  }
+
+  // ---- NV42 MixedSinker ---------------------------------------------------
+
+  fn solid_nv42_frame(width: u32, height: u32, y: u8, u: u8, v: u8) -> (Vec<u8>, Vec<u8>) {
+    let w = width as usize;
+    let h = height as usize;
+    // VU row payload = `2 * width` bytes = `width` interleaved V/U pairs
+    // (byte-swapped relative to NV24).
+    let mut vu = std::vec![0u8; 2 * w * h];
+    for row in 0..h {
+      for i in 0..w {
+        vu[row * 2 * w + i * 2] = v;
+        vu[row * 2 * w + i * 2 + 1] = u;
+      }
+    }
+    (std::vec![y; w * h], vu)
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn nv42_rgb_only_converts_gray_to_gray() {
+    let (yp, vup) = solid_nv42_frame(16, 8, 128, 128, 128);
+    let src = Nv42Frame::new(&yp, &vup, 16, 8, 16, 32);
+
+    let mut rgb = std::vec![0u8; 16 * 8 * 3];
+    let mut sink = MixedSinker::<Nv42>::new(16, 8).with_rgb(&mut rgb).unwrap();
+    nv42_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+    for px in rgb.chunks(3) {
+      assert!(px[0].abs_diff(128) <= 1);
+      assert_eq!(px[0], px[1]);
+      assert_eq!(px[1], px[2]);
+    }
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn nv42_matches_nv24_mixed_sinker_with_swapped_chroma() {
+    // Cross-format parity: for the same Y plane and byte-swapped
+    // interleaved chroma, NV24 and NV42 must produce identical RGB
+    // output. Mirrors the NV21↔NV12 test.
+    let w = 33usize; // deliberately odd to exercise the no-parity-constraint path
+    let h = 8usize;
+    let yp: Vec<u8> = (0..w * h).map(|i| ((i * 37 + 11) & 0xFF) as u8).collect();
+    let uv_nv24: Vec<u8> = (0..2 * w * h)
+      .map(|i| ((i * 53 + 23) & 0xFF) as u8)
+      .collect();
+    // Build NV42 chroma by swapping each (U, V) pair.
+    let mut vu_nv42 = std::vec![0u8; 2 * w * h];
+    for i in 0..w * h {
+      vu_nv42[i * 2] = uv_nv24[i * 2 + 1];
+      vu_nv42[i * 2 + 1] = uv_nv24[i * 2];
+    }
+    let nv24_src = Nv24Frame::new(&yp, &uv_nv24, w as u32, h as u32, w as u32, (2 * w) as u32);
+    let nv42_src = Nv42Frame::new(&yp, &vu_nv42, w as u32, h as u32, w as u32, (2 * w) as u32);
+
+    let mut rgb_nv24 = std::vec![0u8; w * h * 3];
+    let mut rgb_nv42 = std::vec![0u8; w * h * 3];
+    let mut s_nv24 = MixedSinker::<Nv24>::new(w, h)
+      .with_rgb(&mut rgb_nv24)
+      .unwrap();
+    let mut s_nv42 = MixedSinker::<Nv42>::new(w, h)
+      .with_rgb(&mut rgb_nv42)
+      .unwrap();
+    nv24_to(&nv24_src, false, ColorMatrix::Bt709, &mut s_nv24).unwrap();
+    nv42_to(&nv42_src, false, ColorMatrix::Bt709, &mut s_nv42).unwrap();
+
+    assert_eq!(rgb_nv24, rgb_nv42);
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn nv24_with_simd_false_matches_with_simd_true() {
+    // Widths chosen to force each backend's main loop AND its
+    // scalar-tail path:
+    // - 16, 17 → NEON/SSE4.1/wasm main (16-Y block), AVX2 + AVX-512 no main.
+    // - 32, 33 → AVX2 main (32-Y block), AVX-512 no main.
+    // - 64, 65 → AVX-512 main (64-Y block) once + optional 1-px tail.
+    // - 127, 128 → AVX-512 main twice, 127 also forces a 63-px tail.
+    // - 1920 → wide real-world baseline.
+    for &w in &[16usize, 17, 32, 33, 64, 65, 127, 128, 1920] {
+      let h = 4usize;
+      let yp: Vec<u8> = (0..w * h).map(|i| ((i * 37 + 11) & 0xFF) as u8).collect();
+      let uvp: Vec<u8> = (0..2 * w * h)
+        .map(|i| ((i * 53 + 23) & 0xFF) as u8)
+        .collect();
+      let src = Nv24Frame::new(&yp, &uvp, w as u32, h as u32, w as u32, (2 * w) as u32);
+
+      let mut rgb_simd = std::vec![0u8; w * h * 3];
+      let mut rgb_scalar = std::vec![0u8; w * h * 3];
+      let mut sink_simd = MixedSinker::<Nv24>::new(w, h)
+        .with_rgb(&mut rgb_simd)
+        .unwrap();
+      let mut sink_scalar = MixedSinker::<Nv24>::new(w, h)
+        .with_rgb(&mut rgb_scalar)
+        .unwrap()
+        .with_simd(false);
+      nv24_to(&src, false, ColorMatrix::Bt709, &mut sink_simd).unwrap();
+      nv24_to(&src, false, ColorMatrix::Bt709, &mut sink_scalar).unwrap();
+
+      assert_eq!(rgb_simd, rgb_scalar, "NV24 SIMD≠scalar at width {w}");
+    }
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn nv42_with_simd_false_matches_with_simd_true() {
+    // Same width coverage as the NV24 variant — exercises every
+    // backend's main loop + scalar tail for the `SWAP_UV = true`
+    // monomorphization.
+    for &w in &[16usize, 17, 32, 33, 64, 65, 127, 128, 1920] {
+      let h = 4usize;
+      let yp: Vec<u8> = (0..w * h).map(|i| ((i * 37 + 11) & 0xFF) as u8).collect();
+      let vup: Vec<u8> = (0..2 * w * h)
+        .map(|i| ((i * 53 + 23) & 0xFF) as u8)
+        .collect();
+      let src = Nv42Frame::new(&yp, &vup, w as u32, h as u32, w as u32, (2 * w) as u32);
+
+      let mut rgb_simd = std::vec![0u8; w * h * 3];
+      let mut rgb_scalar = std::vec![0u8; w * h * 3];
+      let mut sink_simd = MixedSinker::<Nv42>::new(w, h)
+        .with_rgb(&mut rgb_simd)
+        .unwrap();
+      let mut sink_scalar = MixedSinker::<Nv42>::new(w, h)
+        .with_rgb(&mut rgb_scalar)
+        .unwrap()
+        .with_simd(false);
+      nv42_to(&src, false, ColorMatrix::Bt709, &mut sink_simd).unwrap();
+      nv42_to(&src, false, ColorMatrix::Bt709, &mut sink_scalar).unwrap();
+
+      assert_eq!(rgb_simd, rgb_scalar, "NV42 SIMD≠scalar at width {w}");
+    }
+  }
+
+  #[test]
+  fn nv24_width_mismatch_returns_err() {
+    let mut rgb = std::vec![0u8; 16 * 8 * 3];
+    let mut sink = MixedSinker::<Nv24>::new(16, 8).with_rgb(&mut rgb).unwrap();
+    // 8-tall src matches the sink; width 17 vs sink's 16 triggers the
+    // mismatch in `begin_frame`.
+    let (yp, uvp) = solid_nv24_frame(17, 8, 0, 0, 0);
+    let src = Nv24Frame::new(&yp, &uvp, 17, 8, 17, 34);
+    let err = nv24_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap_err();
+    assert!(matches!(err, MixedSinkerError::DimensionMismatch { .. }));
+  }
+
+  #[test]
+  fn nv24_process_rejects_short_uv_slice() {
+    let mut rgb = std::vec![0u8; 16 * 8 * 3];
+    let mut sink = MixedSinker::<Nv24>::new(16, 8).with_rgb(&mut rgb).unwrap();
+    let y = [0u8; 16];
+    let uv = [128u8; 31]; // expected 2 * 16 = 32
+    let row = Nv24Row::new(&y, &uv, 0, ColorMatrix::Bt601, true);
+    let err = sink.process(row).err().unwrap();
+    assert_eq!(
+      err,
+      MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::UvFull,
+        row: 0,
+        expected: 32,
+        actual: 31,
+      }
+    );
+  }
+
+  #[test]
+  fn nv24_process_rejects_out_of_range_row_idx() {
+    let mut rgb = std::vec![0u8; 16 * 8 * 3];
+    let mut sink = MixedSinker::<Nv24>::new(16, 8).with_rgb(&mut rgb).unwrap();
+    let y = [0u8; 16];
+    let uv = [128u8; 32];
+    let row = Nv24Row::new(&y, &uv, 8, ColorMatrix::Bt601, true); // row 8 == height
+    let err = sink.process(row).err().unwrap();
+    assert_eq!(
+      err,
+      MixedSinkerError::RowIndexOutOfRange {
+        row: 8,
+        configured_height: 8,
+      }
+    );
+  }
+
+  #[test]
+  fn nv42_process_rejects_short_vu_slice() {
+    let mut rgb = std::vec![0u8; 16 * 8 * 3];
+    let mut sink = MixedSinker::<Nv42>::new(16, 8).with_rgb(&mut rgb).unwrap();
+    let y = [0u8; 16];
+    let vu = [128u8; 31]; // expected 32
+    let row = Nv42Row::new(&y, &vu, 0, ColorMatrix::Bt601, true);
+    let err = sink.process(row).err().unwrap();
+    assert_eq!(
+      err,
+      MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::VuFull,
+        row: 0,
+        expected: 32,
+        actual: 31,
+      }
+    );
   }
 
   // ---- Yuv420p10 --------------------------------------------------------
