@@ -555,8 +555,10 @@ pub fn yuv_444_to_rgb_row(
 }
 
 /// YUV 4:4:4 planar 10/12/14-bit → **u8** RGB dispatcher. Const
-/// generic over `BITS ∈ {10, 12, 14}`. NEON native; x86/wasm backends
-/// currently fall through to scalar (follow-up).
+/// generic over `BITS ∈ {10, 12, 14}`. Dispatches to the best
+/// available backend for the current target (NEON / SSE4.1 / AVX2 /
+/// AVX-512 / wasm simd128), falling back to scalar when no SIMD
+/// backend is available or `use_simd` is false.
 ///
 /// Crate-private — external callers use the concrete
 /// [`yuv444p10_to_rgb_row`] / [`yuv444p12_to_rgb_row`] /
@@ -635,7 +637,9 @@ pub(crate) fn yuv_444p_n_to_rgb_row<const BITS: u32>(
 
 /// YUV 4:4:4 planar 10/12/14-bit → **native-depth u16** RGB dispatcher.
 /// Const generic over `BITS ∈ {10, 12, 14}`. Low-bit-packed output.
-/// NEON native; x86/wasm fall through to scalar (follow-up).
+/// Dispatches to the best available backend (NEON / SSE4.1 / AVX2 /
+/// AVX-512 / wasm simd128), falling back to scalar when no SIMD
+/// backend is available or `use_simd` is false.
 ///
 /// Crate-private — see the note on [`yuv_444p_n_to_rgb_row`]. The
 /// 16-bit path is [`yuv444p16_to_rgb_u16_row`], which uses a
@@ -916,7 +920,6 @@ pub fn yuv444p16_to_rgb_u16_row(
           }
           return;
         }
-        // AVX2 delegates to SSE4.1 — AVX2 lacks `_mm256_srai_epi64`.
         if avx2_available() {
           // SAFETY: AVX2 verified.
           unsafe {

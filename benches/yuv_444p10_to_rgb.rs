@@ -1,8 +1,9 @@
 //! Per-row YUV 4:4:4 10-bit planar → packed RGB throughput baseline.
 //!
 //! Dedicated 4:4:4 `yuv_444p_n` kernel family — chroma is 1:1 with
-//! Y (no duplication step). Native NEON on aarch64; x86 / wasm fall
-//! through to scalar.
+//! Y (no duplication step). Native SIMD on every backend: NEON
+//! (aarch64), SSE4.1 / AVX2 / AVX-512 (x86_64), and wasm simd128.
+//! Scalar fallback when SIMD is unavailable or `use_simd=false`.
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;

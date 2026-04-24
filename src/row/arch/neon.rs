@@ -450,12 +450,12 @@ pub(crate) unsafe fn yuv_420p_n_to_rgb_u16_row<const BITS: u32>(
       // i16 bounds (irrelevant here: |sum| stays well inside i16
       // for BITS ≤ 14), so the subsequent max/min clamps to the
       // native bit depth.
-      let r_lo = clamp_u10(vqaddq_s16(y_scaled_lo, r_dup_lo), zero_v, max_v);
-      let r_hi = clamp_u10(vqaddq_s16(y_scaled_hi, r_dup_hi), zero_v, max_v);
-      let g_lo = clamp_u10(vqaddq_s16(y_scaled_lo, g_dup_lo), zero_v, max_v);
-      let g_hi = clamp_u10(vqaddq_s16(y_scaled_hi, g_dup_hi), zero_v, max_v);
-      let b_lo = clamp_u10(vqaddq_s16(y_scaled_lo, b_dup_lo), zero_v, max_v);
-      let b_hi = clamp_u10(vqaddq_s16(y_scaled_hi, b_dup_hi), zero_v, max_v);
+      let r_lo = clamp_u16_max(vqaddq_s16(y_scaled_lo, r_dup_lo), zero_v, max_v);
+      let r_hi = clamp_u16_max(vqaddq_s16(y_scaled_hi, r_dup_hi), zero_v, max_v);
+      let g_lo = clamp_u16_max(vqaddq_s16(y_scaled_lo, g_dup_lo), zero_v, max_v);
+      let g_hi = clamp_u16_max(vqaddq_s16(y_scaled_hi, g_dup_hi), zero_v, max_v);
+      let b_lo = clamp_u16_max(vqaddq_s16(y_scaled_lo, b_dup_lo), zero_v, max_v);
+      let b_hi = clamp_u16_max(vqaddq_s16(y_scaled_hi, b_dup_hi), zero_v, max_v);
 
       // Two interleaved u16 writes — each `vst3q_u16` covers 8 pixels.
       let rgb_lo = uint16x8x3_t(r_lo, g_lo, b_lo);
@@ -698,12 +698,12 @@ pub(crate) unsafe fn yuv_444p_n_to_rgb_u16_row<const BITS: u32>(
       let y_scaled_lo = scale_y(y_lo, y_off_v, y_scale_v, rnd_v);
       let y_scaled_hi = scale_y(y_hi, y_off_v, y_scale_v, rnd_v);
 
-      let r_lo = clamp_u10(vqaddq_s16(y_scaled_lo, r_chroma_lo), zero_v, max_v);
-      let r_hi = clamp_u10(vqaddq_s16(y_scaled_hi, r_chroma_hi), zero_v, max_v);
-      let g_lo = clamp_u10(vqaddq_s16(y_scaled_lo, g_chroma_lo), zero_v, max_v);
-      let g_hi = clamp_u10(vqaddq_s16(y_scaled_hi, g_chroma_hi), zero_v, max_v);
-      let b_lo = clamp_u10(vqaddq_s16(y_scaled_lo, b_chroma_lo), zero_v, max_v);
-      let b_hi = clamp_u10(vqaddq_s16(y_scaled_hi, b_chroma_hi), zero_v, max_v);
+      let r_lo = clamp_u16_max(vqaddq_s16(y_scaled_lo, r_chroma_lo), zero_v, max_v);
+      let r_hi = clamp_u16_max(vqaddq_s16(y_scaled_hi, r_chroma_hi), zero_v, max_v);
+      let g_lo = clamp_u16_max(vqaddq_s16(y_scaled_lo, g_chroma_lo), zero_v, max_v);
+      let g_hi = clamp_u16_max(vqaddq_s16(y_scaled_hi, g_chroma_hi), zero_v, max_v);
+      let b_lo = clamp_u16_max(vqaddq_s16(y_scaled_lo, b_chroma_lo), zero_v, max_v);
+      let b_hi = clamp_u16_max(vqaddq_s16(y_scaled_hi, b_chroma_hi), zero_v, max_v);
 
       let rgb_lo = uint16x8x3_t(r_lo, g_lo, b_lo);
       let rgb_hi = uint16x8x3_t(r_hi, g_hi, b_hi);
@@ -728,10 +728,10 @@ pub(crate) unsafe fn yuv_444p_n_to_rgb_u16_row<const BITS: u32>(
 }
 
 /// Clamps an i16x8 vector to `[0, max]` and reinterprets to u16x8.
-/// Used by the native‑depth u16 output paths to avoid `vqmovun_s16`'s
-/// u8 saturation.
+/// Used by native-depth u16 output paths (10/12/14 bit) to avoid
+/// `vqmovun_s16`'s u8 saturation.
 #[inline(always)]
-fn clamp_u10(v: int16x8_t, zero_v: int16x8_t, max_v: int16x8_t) -> uint16x8_t {
+fn clamp_u16_max(v: int16x8_t, zero_v: int16x8_t, max_v: int16x8_t) -> uint16x8_t {
   unsafe { vreinterpretq_u16_s16(vminq_s16(vmaxq_s16(v, zero_v), max_v)) }
 }
 
@@ -978,12 +978,12 @@ pub(crate) unsafe fn p_n_to_rgb_u16_row<const BITS: u32>(
       let y_scaled_lo = scale_y(y_lo, y_off_v, y_scale_v, rnd_v);
       let y_scaled_hi = scale_y(y_hi, y_off_v, y_scale_v, rnd_v);
 
-      let r_lo = clamp_u10(vqaddq_s16(y_scaled_lo, r_dup_lo), zero_v, max_v);
-      let r_hi = clamp_u10(vqaddq_s16(y_scaled_hi, r_dup_hi), zero_v, max_v);
-      let g_lo = clamp_u10(vqaddq_s16(y_scaled_lo, g_dup_lo), zero_v, max_v);
-      let g_hi = clamp_u10(vqaddq_s16(y_scaled_hi, g_dup_hi), zero_v, max_v);
-      let b_lo = clamp_u10(vqaddq_s16(y_scaled_lo, b_dup_lo), zero_v, max_v);
-      let b_hi = clamp_u10(vqaddq_s16(y_scaled_hi, b_dup_hi), zero_v, max_v);
+      let r_lo = clamp_u16_max(vqaddq_s16(y_scaled_lo, r_dup_lo), zero_v, max_v);
+      let r_hi = clamp_u16_max(vqaddq_s16(y_scaled_hi, r_dup_hi), zero_v, max_v);
+      let g_lo = clamp_u16_max(vqaddq_s16(y_scaled_lo, g_dup_lo), zero_v, max_v);
+      let g_hi = clamp_u16_max(vqaddq_s16(y_scaled_hi, g_dup_hi), zero_v, max_v);
+      let b_lo = clamp_u16_max(vqaddq_s16(y_scaled_lo, b_dup_lo), zero_v, max_v);
+      let b_hi = clamp_u16_max(vqaddq_s16(y_scaled_hi, b_dup_hi), zero_v, max_v);
 
       let rgb_lo = uint16x8x3_t(r_lo, g_lo, b_lo);
       let rgb_hi = uint16x8x3_t(r_hi, g_hi, b_hi);

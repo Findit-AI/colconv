@@ -458,12 +458,12 @@ pub(crate) unsafe fn yuv_420p_n_to_rgb_u16_row<const BITS: u32>(
       let y_scaled_hi = scale_y(y_high_i16, y_off_v, y_scale_v, rnd_v);
 
       // Per‑channel saturating add + explicit clamp to [0, 1023].
-      let r_lo = clamp_u10_x16(_mm256_adds_epi16(y_scaled_lo, r_dup_lo), zero_v, max_v);
-      let r_hi = clamp_u10_x16(_mm256_adds_epi16(y_scaled_hi, r_dup_hi), zero_v, max_v);
-      let g_lo = clamp_u10_x16(_mm256_adds_epi16(y_scaled_lo, g_dup_lo), zero_v, max_v);
-      let g_hi = clamp_u10_x16(_mm256_adds_epi16(y_scaled_hi, g_dup_hi), zero_v, max_v);
-      let b_lo = clamp_u10_x16(_mm256_adds_epi16(y_scaled_lo, b_dup_lo), zero_v, max_v);
-      let b_hi = clamp_u10_x16(_mm256_adds_epi16(y_scaled_hi, b_dup_hi), zero_v, max_v);
+      let r_lo = clamp_u16_max_x16(_mm256_adds_epi16(y_scaled_lo, r_dup_lo), zero_v, max_v);
+      let r_hi = clamp_u16_max_x16(_mm256_adds_epi16(y_scaled_hi, r_dup_hi), zero_v, max_v);
+      let g_lo = clamp_u16_max_x16(_mm256_adds_epi16(y_scaled_lo, g_dup_lo), zero_v, max_v);
+      let g_hi = clamp_u16_max_x16(_mm256_adds_epi16(y_scaled_hi, g_dup_hi), zero_v, max_v);
+      let b_lo = clamp_u16_max_x16(_mm256_adds_epi16(y_scaled_lo, b_dup_lo), zero_v, max_v);
+      let b_hi = clamp_u16_max_x16(_mm256_adds_epi16(y_scaled_hi, b_dup_hi), zero_v, max_v);
 
       // Four 8‑pixel u16 writes per 32‑pixel block. Each extracts a
       // 128‑bit half of an i16x16 channel and hands it to the shared
@@ -512,10 +512,11 @@ pub(crate) unsafe fn yuv_420p_n_to_rgb_u16_row<const BITS: u32>(
 }
 
 /// Clamps an `i16x16` vector to `[0, max]` via AVX2 `_mm256_min_epi16`
-/// / `_mm256_max_epi16`. Used by the 10‑bit u16 output path where
-/// `_mm256_packus_epi16` would incorrectly clip to u8.
+/// / `_mm256_max_epi16`. Used by native-depth u16 output paths
+/// (10/12/14 bit) where `_mm256_packus_epi16` would incorrectly
+/// clip to u8.
 #[inline(always)]
-fn clamp_u10_x16(v: __m256i, zero_v: __m256i, max_v: __m256i) -> __m256i {
+fn clamp_u16_max_x16(v: __m256i, zero_v: __m256i, max_v: __m256i) -> __m256i {
   unsafe { _mm256_min_epi16(_mm256_max_epi16(v, zero_v), max_v) }
 }
 
@@ -773,12 +774,12 @@ pub(crate) unsafe fn yuv_444p_n_to_rgb_u16_row<const BITS: u32>(
       let y_scaled_lo = scale_y(y_low_i16, y_off_v, y_scale_v, rnd_v);
       let y_scaled_hi = scale_y(y_high_i16, y_off_v, y_scale_v, rnd_v);
 
-      let r_lo = clamp_u10_x16(_mm256_adds_epi16(y_scaled_lo, r_chroma_lo), zero_v, max_v);
-      let r_hi = clamp_u10_x16(_mm256_adds_epi16(y_scaled_hi, r_chroma_hi), zero_v, max_v);
-      let g_lo = clamp_u10_x16(_mm256_adds_epi16(y_scaled_lo, g_chroma_lo), zero_v, max_v);
-      let g_hi = clamp_u10_x16(_mm256_adds_epi16(y_scaled_hi, g_chroma_hi), zero_v, max_v);
-      let b_lo = clamp_u10_x16(_mm256_adds_epi16(y_scaled_lo, b_chroma_lo), zero_v, max_v);
-      let b_hi = clamp_u10_x16(_mm256_adds_epi16(y_scaled_hi, b_chroma_hi), zero_v, max_v);
+      let r_lo = clamp_u16_max_x16(_mm256_adds_epi16(y_scaled_lo, r_chroma_lo), zero_v, max_v);
+      let r_hi = clamp_u16_max_x16(_mm256_adds_epi16(y_scaled_hi, r_chroma_hi), zero_v, max_v);
+      let g_lo = clamp_u16_max_x16(_mm256_adds_epi16(y_scaled_lo, g_chroma_lo), zero_v, max_v);
+      let g_hi = clamp_u16_max_x16(_mm256_adds_epi16(y_scaled_hi, g_chroma_hi), zero_v, max_v);
+      let b_lo = clamp_u16_max_x16(_mm256_adds_epi16(y_scaled_lo, b_chroma_lo), zero_v, max_v);
+      let b_hi = clamp_u16_max_x16(_mm256_adds_epi16(y_scaled_hi, b_chroma_hi), zero_v, max_v);
 
       let dst = rgb_out.as_mut_ptr().add(x * 3);
       write_rgb_u16_8(
@@ -1353,12 +1354,12 @@ pub(crate) unsafe fn p_n_to_rgb_u16_row<const BITS: u32>(
       let y_scaled_lo = scale_y(y_low_i16, y_off_v, y_scale_v, rnd_v);
       let y_scaled_hi = scale_y(y_high_i16, y_off_v, y_scale_v, rnd_v);
 
-      let r_lo = clamp_u10_x16(_mm256_adds_epi16(y_scaled_lo, r_dup_lo), zero_v, max_v);
-      let r_hi = clamp_u10_x16(_mm256_adds_epi16(y_scaled_hi, r_dup_hi), zero_v, max_v);
-      let g_lo = clamp_u10_x16(_mm256_adds_epi16(y_scaled_lo, g_dup_lo), zero_v, max_v);
-      let g_hi = clamp_u10_x16(_mm256_adds_epi16(y_scaled_hi, g_dup_hi), zero_v, max_v);
-      let b_lo = clamp_u10_x16(_mm256_adds_epi16(y_scaled_lo, b_dup_lo), zero_v, max_v);
-      let b_hi = clamp_u10_x16(_mm256_adds_epi16(y_scaled_hi, b_dup_hi), zero_v, max_v);
+      let r_lo = clamp_u16_max_x16(_mm256_adds_epi16(y_scaled_lo, r_dup_lo), zero_v, max_v);
+      let r_hi = clamp_u16_max_x16(_mm256_adds_epi16(y_scaled_hi, r_dup_hi), zero_v, max_v);
+      let g_lo = clamp_u16_max_x16(_mm256_adds_epi16(y_scaled_lo, g_dup_lo), zero_v, max_v);
+      let g_hi = clamp_u16_max_x16(_mm256_adds_epi16(y_scaled_hi, g_dup_hi), zero_v, max_v);
+      let b_lo = clamp_u16_max_x16(_mm256_adds_epi16(y_scaled_lo, b_dup_lo), zero_v, max_v);
+      let b_hi = clamp_u16_max_x16(_mm256_adds_epi16(y_scaled_hi, b_dup_hi), zero_v, max_v);
 
       let dst = rgb_out.as_mut_ptr().add(x * 3);
       write_rgb_u16_8(

@@ -2,7 +2,9 @@
 //!
 //! Dedicated 4:4:4 16-bit kernel family — chroma multiply widens to
 //! i64 to survive the 16-bit blue coefficient (see kernel-families
-//! notes in `yuv/mod.rs`). NEON native; x86 / wasm scalar-only.
+//! notes in `yuv/mod.rs`). Native SIMD on every backend: NEON
+//! (aarch64), SSE4.1 / AVX2 / AVX-512 (x86_64), and wasm simd128.
+//! Scalar fallback when SIMD is unavailable or `use_simd=false`.
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;

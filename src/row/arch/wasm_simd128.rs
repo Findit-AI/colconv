@@ -401,12 +401,12 @@ pub(crate) unsafe fn yuv_420p_n_to_rgb_u16_row<const BITS: u32>(
       let y_scaled_lo = scale_y(y_low_i16, y_off_v, y_scale_v, rnd_v);
       let y_scaled_hi = scale_y(y_high_i16, y_off_v, y_scale_v, rnd_v);
 
-      let r_lo = clamp_u10_wasm(i16x8_add_sat(y_scaled_lo, r_dup_lo), zero_v, max_v);
-      let r_hi = clamp_u10_wasm(i16x8_add_sat(y_scaled_hi, r_dup_hi), zero_v, max_v);
-      let g_lo = clamp_u10_wasm(i16x8_add_sat(y_scaled_lo, g_dup_lo), zero_v, max_v);
-      let g_hi = clamp_u10_wasm(i16x8_add_sat(y_scaled_hi, g_dup_hi), zero_v, max_v);
-      let b_lo = clamp_u10_wasm(i16x8_add_sat(y_scaled_lo, b_dup_lo), zero_v, max_v);
-      let b_hi = clamp_u10_wasm(i16x8_add_sat(y_scaled_hi, b_dup_hi), zero_v, max_v);
+      let r_lo = clamp_u16_max_wasm(i16x8_add_sat(y_scaled_lo, r_dup_lo), zero_v, max_v);
+      let r_hi = clamp_u16_max_wasm(i16x8_add_sat(y_scaled_hi, r_dup_hi), zero_v, max_v);
+      let g_lo = clamp_u16_max_wasm(i16x8_add_sat(y_scaled_lo, g_dup_lo), zero_v, max_v);
+      let g_hi = clamp_u16_max_wasm(i16x8_add_sat(y_scaled_hi, g_dup_hi), zero_v, max_v);
+      let b_lo = clamp_u16_max_wasm(i16x8_add_sat(y_scaled_lo, b_dup_lo), zero_v, max_v);
+      let b_hi = clamp_u16_max_wasm(i16x8_add_sat(y_scaled_hi, b_dup_hi), zero_v, max_v);
 
       let dst = rgb_out.as_mut_ptr().add(x * 3);
       write_rgb_u16_8(r_lo, g_lo, b_lo, dst);
@@ -429,10 +429,10 @@ pub(crate) unsafe fn yuv_420p_n_to_rgb_u16_row<const BITS: u32>(
   }
 }
 
-/// Clamps an i16x8 vector to `[0, max]`. Used by the 10‑bit u16
-/// output path.
+/// Clamps an i16x8 vector to `[0, max]`. Used by native-depth u16
+/// output paths (10/12/14 bit).
 #[inline(always)]
-fn clamp_u10_wasm(v: v128, zero_v: v128, max_v: v128) -> v128 {
+fn clamp_u16_max_wasm(v: v128, zero_v: v128, max_v: v128) -> v128 {
   i16x8_min(i16x8_max(v, zero_v), max_v)
 }
 
@@ -641,12 +641,12 @@ pub(crate) unsafe fn yuv_444p_n_to_rgb_u16_row<const BITS: u32>(
       let y_scaled_lo = scale_y(y_low_i16, y_off_v, y_scale_v, rnd_v);
       let y_scaled_hi = scale_y(y_high_i16, y_off_v, y_scale_v, rnd_v);
 
-      let r_lo = clamp_u10_wasm(i16x8_add_sat(y_scaled_lo, r_chroma_lo), zero_v, max_v);
-      let r_hi = clamp_u10_wasm(i16x8_add_sat(y_scaled_hi, r_chroma_hi), zero_v, max_v);
-      let g_lo = clamp_u10_wasm(i16x8_add_sat(y_scaled_lo, g_chroma_lo), zero_v, max_v);
-      let g_hi = clamp_u10_wasm(i16x8_add_sat(y_scaled_hi, g_chroma_hi), zero_v, max_v);
-      let b_lo = clamp_u10_wasm(i16x8_add_sat(y_scaled_lo, b_chroma_lo), zero_v, max_v);
-      let b_hi = clamp_u10_wasm(i16x8_add_sat(y_scaled_hi, b_chroma_hi), zero_v, max_v);
+      let r_lo = clamp_u16_max_wasm(i16x8_add_sat(y_scaled_lo, r_chroma_lo), zero_v, max_v);
+      let r_hi = clamp_u16_max_wasm(i16x8_add_sat(y_scaled_hi, r_chroma_hi), zero_v, max_v);
+      let g_lo = clamp_u16_max_wasm(i16x8_add_sat(y_scaled_lo, g_chroma_lo), zero_v, max_v);
+      let g_hi = clamp_u16_max_wasm(i16x8_add_sat(y_scaled_hi, g_chroma_hi), zero_v, max_v);
+      let b_lo = clamp_u16_max_wasm(i16x8_add_sat(y_scaled_lo, b_chroma_lo), zero_v, max_v);
+      let b_hi = clamp_u16_max_wasm(i16x8_add_sat(y_scaled_hi, b_chroma_hi), zero_v, max_v);
 
       let dst = rgb_out.as_mut_ptr().add(x * 3);
       write_rgb_u16_8(r_lo, g_lo, b_lo, dst);
@@ -1190,12 +1190,12 @@ pub(crate) unsafe fn p_n_to_rgb_u16_row<const BITS: u32>(
       let y_scaled_lo = scale_y(y_low_i16, y_off_v, y_scale_v, rnd_v);
       let y_scaled_hi = scale_y(y_high_i16, y_off_v, y_scale_v, rnd_v);
 
-      let r_lo = clamp_u10_wasm(i16x8_add_sat(y_scaled_lo, r_dup_lo), zero_v, max_v);
-      let r_hi = clamp_u10_wasm(i16x8_add_sat(y_scaled_hi, r_dup_hi), zero_v, max_v);
-      let g_lo = clamp_u10_wasm(i16x8_add_sat(y_scaled_lo, g_dup_lo), zero_v, max_v);
-      let g_hi = clamp_u10_wasm(i16x8_add_sat(y_scaled_hi, g_dup_hi), zero_v, max_v);
-      let b_lo = clamp_u10_wasm(i16x8_add_sat(y_scaled_lo, b_dup_lo), zero_v, max_v);
-      let b_hi = clamp_u10_wasm(i16x8_add_sat(y_scaled_hi, b_dup_hi), zero_v, max_v);
+      let r_lo = clamp_u16_max_wasm(i16x8_add_sat(y_scaled_lo, r_dup_lo), zero_v, max_v);
+      let r_hi = clamp_u16_max_wasm(i16x8_add_sat(y_scaled_hi, r_dup_hi), zero_v, max_v);
+      let g_lo = clamp_u16_max_wasm(i16x8_add_sat(y_scaled_lo, g_dup_lo), zero_v, max_v);
+      let g_hi = clamp_u16_max_wasm(i16x8_add_sat(y_scaled_hi, g_dup_hi), zero_v, max_v);
+      let b_lo = clamp_u16_max_wasm(i16x8_add_sat(y_scaled_lo, b_dup_lo), zero_v, max_v);
+      let b_hi = clamp_u16_max_wasm(i16x8_add_sat(y_scaled_hi, b_dup_hi), zero_v, max_v);
 
       let dst = rgb_out.as_mut_ptr().add(x * 3);
       write_rgb_u16_8(r_lo, g_lo, b_lo, dst);
@@ -3637,6 +3637,61 @@ mod tests {
     );
   }
 
+  /// u16-output equivalence for the 4:2:0 16-bit kernel. Uses
+  /// **exact-sized** chroma planes (`width / 2` samples) to catch
+  /// any over-read past the end of tight chroma rows — the
+  /// specific failure mode that originally shipped as a `v128_load`
+  /// (16-byte) read for only 4 u16 needed, now fixed via
+  /// `v128_load64_zero`.
+  fn check_yuv420p16_u16_simd128_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+    let y = p16_plane_wasm(width, 37);
+    let u = p16_plane_wasm(width / 2, 53);
+    let v = p16_plane_wasm(width / 2, 71);
+    let mut rgb_scalar = std::vec![0u16; width * 3];
+    let mut rgb_simd = std::vec![0u16; width * 3];
+    scalar::yuv_420p16_to_rgb_u16_row(&y, &u, &v, &mut rgb_scalar, width, matrix, full_range);
+    unsafe {
+      yuv_420p16_to_rgb_u16_row(&y, &u, &v, &mut rgb_simd, width, matrix, full_range);
+    }
+    assert_eq!(
+      rgb_scalar, rgb_simd,
+      "simd128 yuv420p16→u16 diverges (width={width}, matrix={matrix:?}, full_range={full_range})"
+    );
+  }
+
+  fn check_p16_u16_simd128_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+    let y = p16_plane_wasm(width, 37);
+    let u = p16_plane_wasm(width / 2, 53);
+    let v = p16_plane_wasm(width / 2, 71);
+    let uv = p010_uv_interleave(&u, &v);
+    let mut rgb_scalar = std::vec![0u16; width * 3];
+    let mut rgb_simd = std::vec![0u16; width * 3];
+    scalar::p16_to_rgb_u16_row(&y, &uv, &mut rgb_scalar, width, matrix, full_range);
+    unsafe {
+      p16_to_rgb_u16_row(&y, &uv, &mut rgb_simd, width, matrix, full_range);
+    }
+    assert_eq!(
+      rgb_scalar, rgb_simd,
+      "simd128 p016→u16 diverges (width={width}, matrix={matrix:?}, full_range={full_range})"
+    );
+  }
+
+  fn check_yuv444p16_u16_simd128_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+    let y = p16_plane_wasm(width, 37);
+    let u = p16_plane_wasm(width, 53);
+    let v = p16_plane_wasm(width, 71);
+    let mut rgb_scalar = std::vec![0u16; width * 3];
+    let mut rgb_simd = std::vec![0u16; width * 3];
+    scalar::yuv_444p16_to_rgb_u16_row(&y, &u, &v, &mut rgb_scalar, width, matrix, full_range);
+    unsafe {
+      yuv_444p16_to_rgb_u16_row(&y, &u, &v, &mut rgb_simd, width, matrix, full_range);
+    }
+    assert_eq!(
+      rgb_scalar, rgb_simd,
+      "simd128 yuv444p16→u16 diverges (width={width}, matrix={matrix:?}, full_range={full_range})"
+    );
+  }
+
   #[test]
   fn simd128_p16_matches_scalar_all_matrices() {
     for m in [
@@ -3666,5 +3721,39 @@ mod tests {
   fn simd128_p16_matches_scalar_1920() {
     check_yuv420p16_u8_simd128_equivalence(1920, ColorMatrix::Bt709, false);
     check_p16_u8_simd128_equivalence(1920, ColorMatrix::Bt2020Ncl, false);
+  }
+
+  #[test]
+  fn simd128_16bit_u16_matches_scalar_all_matrices() {
+    // Every new 16-bit u16-output path at the smallest block-aligned
+    // width (8 pixels for 420/p16, which matches the native SIMD
+    // iteration; 4:4:4 uses 8 too).
+    for m in [
+      ColorMatrix::Bt601,
+      ColorMatrix::Bt709,
+      ColorMatrix::Bt2020Ncl,
+      ColorMatrix::Smpte240m,
+      ColorMatrix::Fcc,
+      ColorMatrix::YCgCo,
+    ] {
+      for full in [true, false] {
+        check_yuv420p16_u16_simd128_equivalence(16, m, full);
+        check_p16_u16_simd128_equivalence(16, m, full);
+        check_yuv444p16_u16_simd128_equivalence(16, m, full);
+      }
+    }
+  }
+
+  #[test]
+  fn simd128_yuv420p16_u16_matches_scalar_tight_widths() {
+    // Tight widths explicitly stress over-read of half-width chroma
+    // planes (8 samples at width=16 → second 8-pixel SIMD iter reads
+    // chroma from offset 4, formerly `v128_load` of 8 samples = 8
+    // bytes past plane-end).
+    for w in [8usize, 10, 16, 18, 24, 26, 1920, 1922] {
+      check_yuv420p16_u16_simd128_equivalence(w, ColorMatrix::Bt709, false);
+      check_p16_u16_simd128_equivalence(w, ColorMatrix::Bt2020Ncl, true);
+      check_yuv444p16_u16_simd128_equivalence(w, ColorMatrix::Bt601, false);
+    }
   }
 }
