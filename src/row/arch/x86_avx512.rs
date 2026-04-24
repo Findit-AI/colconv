@@ -55,12 +55,12 @@
 use core::arch::x86_64::{
   __m128i, __m512i, _mm_cvtsi32_si128, _mm_setr_epi8, _mm256_loadu_si256, _mm512_add_epi32,
   _mm512_adds_epi16, _mm512_and_si512, _mm512_broadcast_i32x4, _mm512_castsi512_si128,
-  _mm512_castsi512_si256, _mm512_cvtepi16_epi32, _mm512_cvtepu16_epi32, _mm512_cvtepu8_epi16,
+  _mm512_castsi512_si256, _mm512_cvtepi16_epi32, _mm512_cvtepu8_epi16, _mm512_cvtepu16_epi32,
   _mm512_extracti32x4_epi32, _mm512_extracti64x4_epi64, _mm512_loadu_si512, _mm512_max_epi16,
   _mm512_min_epi16, _mm512_mullo_epi32, _mm512_packs_epi32, _mm512_packus_epi16,
   _mm512_permutex2var_epi64, _mm512_permutexvar_epi64, _mm512_set1_epi16, _mm512_set1_epi32,
-  _mm512_setr_epi64, _mm512_shuffle_epi8, _mm512_srai_epi32, _mm512_srl_epi16,
-  _mm512_sub_epi16, _mm512_sub_epi32, _mm512_unpackhi_epi16, _mm512_unpacklo_epi16,
+  _mm512_setr_epi64, _mm512_shuffle_epi8, _mm512_srai_epi32, _mm512_srl_epi16, _mm512_sub_epi16,
+  _mm512_sub_epi32, _mm512_unpackhi_epi16, _mm512_unpacklo_epi16,
 };
 
 use crate::{
@@ -1238,8 +1238,14 @@ fn scale_y_u16_avx512(
       _mm512_cvtepu16_epi32(_mm512_extracti64x4_epi64::<1>(y_u16x32)),
       y_off_v,
     );
-    let lo = _mm512_srai_epi32::<15>(_mm512_add_epi32(_mm512_mullo_epi32(y_lo_i32, y_scale_v), rnd));
-    let hi = _mm512_srai_epi32::<15>(_mm512_add_epi32(_mm512_mullo_epi32(y_hi_i32, y_scale_v), rnd));
+    let lo = _mm512_srai_epi32::<15>(_mm512_add_epi32(
+      _mm512_mullo_epi32(y_lo_i32, y_scale_v),
+      rnd,
+    ));
+    let hi = _mm512_srai_epi32::<15>(_mm512_add_epi32(
+      _mm512_mullo_epi32(y_hi_i32, y_scale_v),
+      rnd,
+    ));
     _mm512_permutexvar_epi64(pack_fixup, _mm512_packs_epi32(lo, hi))
   }
 }
@@ -1304,10 +1310,22 @@ pub(crate) unsafe fn yuv_420p16_to_rgb_row(
       let v_lo_i32 = _mm512_cvtepi16_epi32(_mm512_castsi512_si256(v_i16));
       let v_hi_i32 = _mm512_cvtepi16_epi32(_mm512_extracti64x4_epi64::<1>(v_i16));
 
-      let u_d_lo = q15_shift(_mm512_add_epi32(_mm512_mullo_epi32(u_lo_i32, c_scale_v), rnd_v));
-      let u_d_hi = q15_shift(_mm512_add_epi32(_mm512_mullo_epi32(u_hi_i32, c_scale_v), rnd_v));
-      let v_d_lo = q15_shift(_mm512_add_epi32(_mm512_mullo_epi32(v_lo_i32, c_scale_v), rnd_v));
-      let v_d_hi = q15_shift(_mm512_add_epi32(_mm512_mullo_epi32(v_hi_i32, c_scale_v), rnd_v));
+      let u_d_lo = q15_shift(_mm512_add_epi32(
+        _mm512_mullo_epi32(u_lo_i32, c_scale_v),
+        rnd_v,
+      ));
+      let u_d_hi = q15_shift(_mm512_add_epi32(
+        _mm512_mullo_epi32(u_hi_i32, c_scale_v),
+        rnd_v,
+      ));
+      let v_d_lo = q15_shift(_mm512_add_epi32(
+        _mm512_mullo_epi32(v_lo_i32, c_scale_v),
+        rnd_v,
+      ));
+      let v_d_hi = q15_shift(_mm512_add_epi32(
+        _mm512_mullo_epi32(v_hi_i32, c_scale_v),
+        rnd_v,
+      ));
 
       let r_chroma = chroma_i16x32(cru, crv, u_d_lo, v_d_lo, u_d_hi, v_d_hi, rnd_v, pack_fixup);
       let g_chroma = chroma_i16x32(cgu, cgv, u_d_lo, v_d_lo, u_d_hi, v_d_hi, rnd_v, pack_fixup);
@@ -1367,7 +1385,9 @@ pub(crate) unsafe fn yuv_420p16_to_rgb_u16_row(
   full_range: bool,
 ) {
   unsafe {
-    super::x86_sse41::yuv_420p16_to_rgb_u16_row(y, u_half, v_half, rgb_out, width, matrix, full_range);
+    super::x86_sse41::yuv_420p16_to_rgb_u16_row(
+      y, u_half, v_half, rgb_out, width, matrix, full_range,
+    );
   }
 }
 
@@ -1427,10 +1447,22 @@ pub(crate) unsafe fn p16_to_rgb_row(
       let v_lo_i32 = _mm512_cvtepi16_epi32(_mm512_castsi512_si256(v_i16));
       let v_hi_i32 = _mm512_cvtepi16_epi32(_mm512_extracti64x4_epi64::<1>(v_i16));
 
-      let u_d_lo = q15_shift(_mm512_add_epi32(_mm512_mullo_epi32(u_lo_i32, c_scale_v), rnd_v));
-      let u_d_hi = q15_shift(_mm512_add_epi32(_mm512_mullo_epi32(u_hi_i32, c_scale_v), rnd_v));
-      let v_d_lo = q15_shift(_mm512_add_epi32(_mm512_mullo_epi32(v_lo_i32, c_scale_v), rnd_v));
-      let v_d_hi = q15_shift(_mm512_add_epi32(_mm512_mullo_epi32(v_hi_i32, c_scale_v), rnd_v));
+      let u_d_lo = q15_shift(_mm512_add_epi32(
+        _mm512_mullo_epi32(u_lo_i32, c_scale_v),
+        rnd_v,
+      ));
+      let u_d_hi = q15_shift(_mm512_add_epi32(
+        _mm512_mullo_epi32(u_hi_i32, c_scale_v),
+        rnd_v,
+      ));
+      let v_d_lo = q15_shift(_mm512_add_epi32(
+        _mm512_mullo_epi32(v_lo_i32, c_scale_v),
+        rnd_v,
+      ));
+      let v_d_hi = q15_shift(_mm512_add_epi32(
+        _mm512_mullo_epi32(v_hi_i32, c_scale_v),
+        rnd_v,
+      ));
 
       let r_chroma = chroma_i16x32(cru, crv, u_d_lo, v_d_lo, u_d_hi, v_d_hi, rnd_v, pack_fixup);
       let g_chroma = chroma_i16x32(cgu, cgv, u_d_lo, v_d_lo, u_d_hi, v_d_hi, rnd_v, pack_fixup);

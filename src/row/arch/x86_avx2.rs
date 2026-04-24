@@ -40,12 +40,12 @@
 
 use core::arch::x86_64::{
   __m256i, _mm_cvtsi32_si128, _mm_loadu_si128, _mm256_add_epi32, _mm256_adds_epi16,
-  _mm256_and_si256, _mm256_castsi256_si128, _mm256_cvtepi16_epi32, _mm256_cvtepu16_epi32,
-  _mm256_cvtepu8_epi16, _mm256_extracti128_si256, _mm256_loadu_si256, _mm256_max_epi16,
+  _mm256_and_si256, _mm256_castsi256_si128, _mm256_cvtepi16_epi32, _mm256_cvtepu8_epi16,
+  _mm256_cvtepu16_epi32, _mm256_extracti128_si256, _mm256_loadu_si256, _mm256_max_epi16,
   _mm256_min_epi16, _mm256_mullo_epi32, _mm256_packs_epi32, _mm256_packus_epi16,
   _mm256_permute2x128_si256, _mm256_permute4x64_epi64, _mm256_set1_epi16, _mm256_set1_epi32,
-  _mm256_setr_epi8, _mm256_shuffle_epi8, _mm256_srai_epi32, _mm256_srl_epi16,
-  _mm256_sub_epi16, _mm256_sub_epi32, _mm256_unpackhi_epi16, _mm256_unpacklo_epi16,
+  _mm256_setr_epi8, _mm256_shuffle_epi8, _mm256_srai_epi32, _mm256_srl_epi16, _mm256_sub_epi16,
+  _mm256_sub_epi32, _mm256_unpackhi_epi16, _mm256_unpacklo_epi16,
 };
 
 use crate::{
@@ -1281,10 +1281,22 @@ pub(crate) unsafe fn yuv_420p16_to_rgb_row(
       let v_lo_i32 = _mm256_cvtepi16_epi32(_mm256_castsi256_si128(v_i16));
       let v_hi_i32 = _mm256_cvtepi16_epi32(_mm256_extracti128_si256::<1>(v_i16));
 
-      let u_d_lo = q15_shift(_mm256_add_epi32(_mm256_mullo_epi32(u_lo_i32, c_scale_v), rnd_v));
-      let u_d_hi = q15_shift(_mm256_add_epi32(_mm256_mullo_epi32(u_hi_i32, c_scale_v), rnd_v));
-      let v_d_lo = q15_shift(_mm256_add_epi32(_mm256_mullo_epi32(v_lo_i32, c_scale_v), rnd_v));
-      let v_d_hi = q15_shift(_mm256_add_epi32(_mm256_mullo_epi32(v_hi_i32, c_scale_v), rnd_v));
+      let u_d_lo = q15_shift(_mm256_add_epi32(
+        _mm256_mullo_epi32(u_lo_i32, c_scale_v),
+        rnd_v,
+      ));
+      let u_d_hi = q15_shift(_mm256_add_epi32(
+        _mm256_mullo_epi32(u_hi_i32, c_scale_v),
+        rnd_v,
+      ));
+      let v_d_lo = q15_shift(_mm256_add_epi32(
+        _mm256_mullo_epi32(v_lo_i32, c_scale_v),
+        rnd_v,
+      ));
+      let v_d_hi = q15_shift(_mm256_add_epi32(
+        _mm256_mullo_epi32(v_hi_i32, c_scale_v),
+        rnd_v,
+      ));
 
       let r_chroma = chroma_i16x16(cru, crv, u_d_lo, v_d_lo, u_d_hi, v_d_hi, rnd_v);
       let g_chroma = chroma_i16x16(cgu, cgv, u_d_lo, v_d_lo, u_d_hi, v_d_hi, rnd_v);
@@ -1344,7 +1356,9 @@ pub(crate) unsafe fn yuv_420p16_to_rgb_u16_row(
   full_range: bool,
 ) {
   unsafe {
-    super::x86_sse41::yuv_420p16_to_rgb_u16_row(y, u_half, v_half, rgb_out, width, matrix, full_range);
+    super::x86_sse41::yuv_420p16_to_rgb_u16_row(
+      y, u_half, v_half, rgb_out, width, matrix, full_range,
+    );
   }
 }
 
@@ -1403,10 +1417,22 @@ pub(crate) unsafe fn p16_to_rgb_row(
       let v_lo_i32 = _mm256_cvtepi16_epi32(_mm256_castsi256_si128(v_i16));
       let v_hi_i32 = _mm256_cvtepi16_epi32(_mm256_extracti128_si256::<1>(v_i16));
 
-      let u_d_lo = q15_shift(_mm256_add_epi32(_mm256_mullo_epi32(u_lo_i32, c_scale_v), rnd_v));
-      let u_d_hi = q15_shift(_mm256_add_epi32(_mm256_mullo_epi32(u_hi_i32, c_scale_v), rnd_v));
-      let v_d_lo = q15_shift(_mm256_add_epi32(_mm256_mullo_epi32(v_lo_i32, c_scale_v), rnd_v));
-      let v_d_hi = q15_shift(_mm256_add_epi32(_mm256_mullo_epi32(v_hi_i32, c_scale_v), rnd_v));
+      let u_d_lo = q15_shift(_mm256_add_epi32(
+        _mm256_mullo_epi32(u_lo_i32, c_scale_v),
+        rnd_v,
+      ));
+      let u_d_hi = q15_shift(_mm256_add_epi32(
+        _mm256_mullo_epi32(u_hi_i32, c_scale_v),
+        rnd_v,
+      ));
+      let v_d_lo = q15_shift(_mm256_add_epi32(
+        _mm256_mullo_epi32(v_lo_i32, c_scale_v),
+        rnd_v,
+      ));
+      let v_d_hi = q15_shift(_mm256_add_epi32(
+        _mm256_mullo_epi32(v_hi_i32, c_scale_v),
+        rnd_v,
+      ));
 
       let r_chroma = chroma_i16x16(cru, crv, u_d_lo, v_d_lo, u_d_hi, v_d_hi, rnd_v);
       let g_chroma = chroma_i16x16(cgu, cgv, u_d_lo, v_d_lo, u_d_hi, v_d_hi, rnd_v);

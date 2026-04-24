@@ -33,17 +33,17 @@
 //! 8. Saturate‑narrow to u8x16 and interleave with `vst3q_u8`.
 
 use core::arch::aarch64::{
-  float32x4_t, int16x8_t, int32x2_t, int32x4_t, int64x2_t, uint8x16_t, uint8x16x3_t,
-  uint16x8_t, uint16x8x3_t, vaddq_f32, vaddq_s32, vaddq_s64, vandq_u16, vbslq_f32,
-  vceqq_f32, vcltq_f32, vcombine_s16, vcombine_s32, vcombine_u8, vcombine_u16, vcvtq_f32_u32,
-  vcvtq_u32_f32, vdivq_f32, vdup_n_s32, vdupq_n_f32, vdupq_n_s16, vdupq_n_s32, vdupq_n_s64,
-  vdupq_n_u16, vget_high_s16, vget_high_s32, vget_high_u8, vget_high_u16, vget_low_s16,
-  vget_low_s32, vget_low_u8, vget_low_u16, vld1_u8, vld1q_u8, vld1q_u16, vld2_u8, vld2q_u16,
-  vld3q_u8, vmaxq_f32, vmaxq_s16, vminq_f32, vminq_s16, vmovl_s16, vmovl_u8, vmovl_u16,
-  vmovn_s64, vmovn_u16, vmovn_u32, vmulq_f32, vmulq_s32, vmull_s32, vmvnq_u32, vqaddq_s16,
-  vqmovn_s32, vqmovun_s16, vqmovun_s32, vreinterpretq_s16_u16, vreinterpretq_s32_u32,
-  vreinterpretq_u16_s16, vshlq_u16, vshrq_n_s32, vshrq_n_s64, vst1q_u8, vst3q_u8, vst3q_u16,
-  vsubq_f32, vsubq_s16, vsubq_s32, vzip1q_s16, vzip1q_s32, vzip2q_s16, vzip2q_s32,
+  float32x4_t, int16x8_t, int32x2_t, int32x4_t, int64x2_t, uint8x16_t, uint8x16x3_t, uint16x8_t,
+  uint16x8x3_t, vaddq_f32, vaddq_s32, vaddq_s64, vandq_u16, vbslq_f32, vceqq_f32, vcltq_f32,
+  vcombine_s16, vcombine_s32, vcombine_u8, vcombine_u16, vcvtq_f32_u32, vcvtq_u32_f32, vdivq_f32,
+  vdup_n_s32, vdupq_n_f32, vdupq_n_s16, vdupq_n_s32, vdupq_n_s64, vdupq_n_u16, vget_high_s16,
+  vget_high_s32, vget_high_u8, vget_high_u16, vget_low_s16, vget_low_s32, vget_low_u8,
+  vget_low_u16, vld1_u8, vld1q_u8, vld1q_u16, vld2_u8, vld2q_u16, vld3q_u8, vmaxq_f32, vmaxq_s16,
+  vminq_f32, vminq_s16, vmovl_s16, vmovl_u8, vmovl_u16, vmovn_s64, vmovn_u16, vmovn_u32, vmull_s32,
+  vmulq_f32, vmulq_s32, vmvnq_u32, vqaddq_s16, vqmovn_s32, vqmovun_s16, vqmovun_s32,
+  vreinterpretq_s16_u16, vreinterpretq_s32_u32, vreinterpretq_u16_s16, vshlq_u16, vshrq_n_s32,
+  vshrq_n_s64, vst1q_u8, vst3q_u8, vst3q_u16, vsubq_f32, vsubq_s16, vsubq_s32, vzip1q_s16,
+  vzip1q_s32, vzip2q_s16, vzip2q_s32,
 };
 
 use crate::{ColorMatrix, row::scalar};
@@ -1073,11 +1073,11 @@ pub(crate) unsafe fn yuv_420p16_to_rgb_row(
   const RND: i32 = 1 << 14;
 
   unsafe {
-    let rnd_v     = vdupq_n_s32(RND);
-    let y_off_v   = vdupq_n_s32(y_off);
+    let rnd_v = vdupq_n_s32(RND);
+    let y_off_v = vdupq_n_s32(y_off);
     let y_scale_v = vdupq_n_s32(y_scale);
     let c_scale_v = vdupq_n_s32(c_scale);
-    let bias_v    = vdupq_n_s32(bias);
+    let bias_v = vdupq_n_s32(bias);
     let cru = vdupq_n_s32(coeffs.r_u());
     let crv = vdupq_n_s32(coeffs.r_v());
     let cgu = vdupq_n_s32(coeffs.g_u());
@@ -1089,14 +1089,26 @@ pub(crate) unsafe fn yuv_420p16_to_rgb_row(
     while x + 16 <= width {
       let y_vec_lo = vld1q_u16(y.as_ptr().add(x));
       let y_vec_hi = vld1q_u16(y.as_ptr().add(x + 8));
-      let u_vec    = vld1q_u16(u_half.as_ptr().add(x / 2));
-      let v_vec    = vld1q_u16(v_half.as_ptr().add(x / 2));
+      let u_vec = vld1q_u16(u_half.as_ptr().add(x / 2));
+      let v_vec = vld1q_u16(v_half.as_ptr().add(x / 2));
 
       // Unsigned-widen U/V to i32, subtract bias (32768 — does not fit i16).
-      let u_lo_i32 = vsubq_s32(vreinterpretq_s32_u32(vmovl_u16(vget_low_u16(u_vec))),  bias_v);
-      let u_hi_i32 = vsubq_s32(vreinterpretq_s32_u32(vmovl_u16(vget_high_u16(u_vec))), bias_v);
-      let v_lo_i32 = vsubq_s32(vreinterpretq_s32_u32(vmovl_u16(vget_low_u16(v_vec))),  bias_v);
-      let v_hi_i32 = vsubq_s32(vreinterpretq_s32_u32(vmovl_u16(vget_high_u16(v_vec))), bias_v);
+      let u_lo_i32 = vsubq_s32(
+        vreinterpretq_s32_u32(vmovl_u16(vget_low_u16(u_vec))),
+        bias_v,
+      );
+      let u_hi_i32 = vsubq_s32(
+        vreinterpretq_s32_u32(vmovl_u16(vget_high_u16(u_vec))),
+        bias_v,
+      );
+      let v_lo_i32 = vsubq_s32(
+        vreinterpretq_s32_u32(vmovl_u16(vget_low_u16(v_vec))),
+        bias_v,
+      );
+      let v_hi_i32 = vsubq_s32(
+        vreinterpretq_s32_u32(vmovl_u16(vget_high_u16(v_vec))),
+        bias_v,
+      );
 
       let u_d_lo = q15_shift(vaddq_s32(vmulq_s32(u_lo_i32, c_scale_v), rnd_v));
       let u_d_hi = q15_shift(vaddq_s32(vmulq_s32(u_hi_i32, c_scale_v), rnd_v));
@@ -1131,7 +1143,10 @@ pub(crate) unsafe fn yuv_420p16_to_rgb_row(
         vqmovun_s16(vqaddq_s16(y_scaled_hi, b_dup_hi)),
       );
 
-      vst3q_u8(rgb_out.as_mut_ptr().add(x * 3), uint8x16x3_t(r_u8, g_u8, b_u8));
+      vst3q_u8(
+        rgb_out.as_mut_ptr().add(x * 3),
+        uint8x16x3_t(r_u8, g_u8, b_u8),
+      );
       x += 16;
     }
 
@@ -1184,12 +1199,12 @@ pub(crate) unsafe fn yuv_420p16_to_rgb_u16_row(
   const RND: i32 = 1 << 14;
 
   unsafe {
-    let rnd_v     = vdupq_n_s32(RND);
-    let rnd64     = vdupq_n_s64(RND as i64);
-    let y_off_v   = vdupq_n_s32(y_off);
+    let rnd_v = vdupq_n_s32(RND);
+    let rnd64 = vdupq_n_s64(RND as i64);
+    let y_off_v = vdupq_n_s32(y_off);
     let y_scale_d = vdup_n_s32(y_scale); // int32x2_t for vmull_s32
     let c_scale_v = vdupq_n_s32(c_scale);
-    let bias_v    = vdupq_n_s32(bias);
+    let bias_v = vdupq_n_s32(bias);
     let cru = vdupq_n_s32(coeffs.r_u());
     let crv = vdupq_n_s32(coeffs.r_v());
     let cgu = vdupq_n_s32(coeffs.g_u());
@@ -1201,13 +1216,25 @@ pub(crate) unsafe fn yuv_420p16_to_rgb_u16_row(
     while x + 16 <= width {
       let y_vec_lo = vld1q_u16(y.as_ptr().add(x));
       let y_vec_hi = vld1q_u16(y.as_ptr().add(x + 8));
-      let u_vec    = vld1q_u16(u_half.as_ptr().add(x / 2));
-      let v_vec    = vld1q_u16(v_half.as_ptr().add(x / 2));
+      let u_vec = vld1q_u16(u_half.as_ptr().add(x / 2));
+      let v_vec = vld1q_u16(v_half.as_ptr().add(x / 2));
 
-      let u_lo_i32 = vsubq_s32(vreinterpretq_s32_u32(vmovl_u16(vget_low_u16(u_vec))),  bias_v);
-      let u_hi_i32 = vsubq_s32(vreinterpretq_s32_u32(vmovl_u16(vget_high_u16(u_vec))), bias_v);
-      let v_lo_i32 = vsubq_s32(vreinterpretq_s32_u32(vmovl_u16(vget_low_u16(v_vec))),  bias_v);
-      let v_hi_i32 = vsubq_s32(vreinterpretq_s32_u32(vmovl_u16(vget_high_u16(v_vec))), bias_v);
+      let u_lo_i32 = vsubq_s32(
+        vreinterpretq_s32_u32(vmovl_u16(vget_low_u16(u_vec))),
+        bias_v,
+      );
+      let u_hi_i32 = vsubq_s32(
+        vreinterpretq_s32_u32(vmovl_u16(vget_high_u16(u_vec))),
+        bias_v,
+      );
+      let v_lo_i32 = vsubq_s32(
+        vreinterpretq_s32_u32(vmovl_u16(vget_low_u16(v_vec))),
+        bias_v,
+      );
+      let v_hi_i32 = vsubq_s32(
+        vreinterpretq_s32_u32(vmovl_u16(vget_high_u16(v_vec))),
+        bias_v,
+      );
 
       let u_d_lo = q15_shift(vaddq_s32(vmulq_s32(u_lo_i32, c_scale_v), rnd_v));
       let u_d_hi = q15_shift(vaddq_s32(vmulq_s32(u_hi_i32, c_scale_v), rnd_v));
@@ -1272,8 +1299,14 @@ pub(crate) unsafe fn yuv_420p16_to_rgb_u16_row(
         vqmovun_s32(vaddq_s32(ys_hi_1, b_cd_hi1)),
       );
 
-      vst3q_u16(rgb_out.as_mut_ptr().add(x * 3),      uint16x8x3_t(r_lo_u16, g_lo_u16, b_lo_u16));
-      vst3q_u16(rgb_out.as_mut_ptr().add(x * 3 + 24), uint16x8x3_t(r_hi_u16, g_hi_u16, b_hi_u16));
+      vst3q_u16(
+        rgb_out.as_mut_ptr().add(x * 3),
+        uint16x8x3_t(r_lo_u16, g_lo_u16, b_lo_u16),
+      );
+      vst3q_u16(
+        rgb_out.as_mut_ptr().add(x * 3 + 24),
+        uint16x8x3_t(r_hi_u16, g_hi_u16, b_hi_u16),
+      );
       x += 16;
     }
 
@@ -1322,11 +1355,11 @@ pub(crate) unsafe fn p16_to_rgb_row(
   const RND: i32 = 1 << 14;
 
   unsafe {
-    let rnd_v     = vdupq_n_s32(RND);
-    let y_off_v   = vdupq_n_s32(y_off);
+    let rnd_v = vdupq_n_s32(RND);
+    let y_off_v = vdupq_n_s32(y_off);
     let y_scale_v = vdupq_n_s32(y_scale);
     let c_scale_v = vdupq_n_s32(c_scale);
-    let bias_v    = vdupq_n_s32(bias);
+    let bias_v = vdupq_n_s32(bias);
     let cru = vdupq_n_s32(coeffs.r_u());
     let crv = vdupq_n_s32(coeffs.r_v());
     let cgu = vdupq_n_s32(coeffs.g_u());
@@ -1338,14 +1371,26 @@ pub(crate) unsafe fn p16_to_rgb_row(
     while x + 16 <= width {
       let y_vec_lo = vld1q_u16(y.as_ptr().add(x));
       let y_vec_hi = vld1q_u16(y.as_ptr().add(x + 8));
-      let uv_pair  = vld2q_u16(uv_half.as_ptr().add(x));
-      let u_vec    = uv_pair.0;
-      let v_vec    = uv_pair.1;
+      let uv_pair = vld2q_u16(uv_half.as_ptr().add(x));
+      let u_vec = uv_pair.0;
+      let v_vec = uv_pair.1;
 
-      let u_lo_i32 = vsubq_s32(vreinterpretq_s32_u32(vmovl_u16(vget_low_u16(u_vec))),  bias_v);
-      let u_hi_i32 = vsubq_s32(vreinterpretq_s32_u32(vmovl_u16(vget_high_u16(u_vec))), bias_v);
-      let v_lo_i32 = vsubq_s32(vreinterpretq_s32_u32(vmovl_u16(vget_low_u16(v_vec))),  bias_v);
-      let v_hi_i32 = vsubq_s32(vreinterpretq_s32_u32(vmovl_u16(vget_high_u16(v_vec))), bias_v);
+      let u_lo_i32 = vsubq_s32(
+        vreinterpretq_s32_u32(vmovl_u16(vget_low_u16(u_vec))),
+        bias_v,
+      );
+      let u_hi_i32 = vsubq_s32(
+        vreinterpretq_s32_u32(vmovl_u16(vget_high_u16(u_vec))),
+        bias_v,
+      );
+      let v_lo_i32 = vsubq_s32(
+        vreinterpretq_s32_u32(vmovl_u16(vget_low_u16(v_vec))),
+        bias_v,
+      );
+      let v_hi_i32 = vsubq_s32(
+        vreinterpretq_s32_u32(vmovl_u16(vget_high_u16(v_vec))),
+        bias_v,
+      );
 
       let u_d_lo = q15_shift(vaddq_s32(vmulq_s32(u_lo_i32, c_scale_v), rnd_v));
       let u_d_hi = q15_shift(vaddq_s32(vmulq_s32(u_hi_i32, c_scale_v), rnd_v));
@@ -1379,7 +1424,10 @@ pub(crate) unsafe fn p16_to_rgb_row(
         vqmovun_s16(vqaddq_s16(y_scaled_hi, b_dup_hi)),
       );
 
-      vst3q_u8(rgb_out.as_mut_ptr().add(x * 3), uint8x16x3_t(r_u8, g_u8, b_u8));
+      vst3q_u8(
+        rgb_out.as_mut_ptr().add(x * 3),
+        uint8x16x3_t(r_u8, g_u8, b_u8),
+      );
       x += 16;
     }
 
@@ -1426,12 +1474,12 @@ pub(crate) unsafe fn p16_to_rgb_u16_row(
   const RND: i32 = 1 << 14;
 
   unsafe {
-    let rnd_v     = vdupq_n_s32(RND);
-    let rnd64     = vdupq_n_s64(RND as i64);
-    let y_off_v   = vdupq_n_s32(y_off);
+    let rnd_v = vdupq_n_s32(RND);
+    let rnd64 = vdupq_n_s64(RND as i64);
+    let y_off_v = vdupq_n_s32(y_off);
     let y_scale_d = vdup_n_s32(y_scale);
     let c_scale_v = vdupq_n_s32(c_scale);
-    let bias_v    = vdupq_n_s32(bias);
+    let bias_v = vdupq_n_s32(bias);
     let cru = vdupq_n_s32(coeffs.r_u());
     let crv = vdupq_n_s32(coeffs.r_v());
     let cgu = vdupq_n_s32(coeffs.g_u());
@@ -1443,14 +1491,26 @@ pub(crate) unsafe fn p16_to_rgb_u16_row(
     while x + 16 <= width {
       let y_vec_lo = vld1q_u16(y.as_ptr().add(x));
       let y_vec_hi = vld1q_u16(y.as_ptr().add(x + 8));
-      let uv_pair  = vld2q_u16(uv_half.as_ptr().add(x));
-      let u_vec    = uv_pair.0;
-      let v_vec    = uv_pair.1;
+      let uv_pair = vld2q_u16(uv_half.as_ptr().add(x));
+      let u_vec = uv_pair.0;
+      let v_vec = uv_pair.1;
 
-      let u_lo_i32 = vsubq_s32(vreinterpretq_s32_u32(vmovl_u16(vget_low_u16(u_vec))),  bias_v);
-      let u_hi_i32 = vsubq_s32(vreinterpretq_s32_u32(vmovl_u16(vget_high_u16(u_vec))), bias_v);
-      let v_lo_i32 = vsubq_s32(vreinterpretq_s32_u32(vmovl_u16(vget_low_u16(v_vec))),  bias_v);
-      let v_hi_i32 = vsubq_s32(vreinterpretq_s32_u32(vmovl_u16(vget_high_u16(v_vec))), bias_v);
+      let u_lo_i32 = vsubq_s32(
+        vreinterpretq_s32_u32(vmovl_u16(vget_low_u16(u_vec))),
+        bias_v,
+      );
+      let u_hi_i32 = vsubq_s32(
+        vreinterpretq_s32_u32(vmovl_u16(vget_high_u16(u_vec))),
+        bias_v,
+      );
+      let v_lo_i32 = vsubq_s32(
+        vreinterpretq_s32_u32(vmovl_u16(vget_low_u16(v_vec))),
+        bias_v,
+      );
+      let v_hi_i32 = vsubq_s32(
+        vreinterpretq_s32_u32(vmovl_u16(vget_high_u16(v_vec))),
+        bias_v,
+      );
 
       let u_d_lo = q15_shift(vaddq_s32(vmulq_s32(u_lo_i32, c_scale_v), rnd_v));
       let u_d_hi = q15_shift(vaddq_s32(vmulq_s32(u_hi_i32, c_scale_v), rnd_v));
@@ -1511,8 +1571,14 @@ pub(crate) unsafe fn p16_to_rgb_u16_row(
         vqmovun_s32(vaddq_s32(ys_hi_1, b_cd_hi1)),
       );
 
-      vst3q_u16(rgb_out.as_mut_ptr().add(x * 3),      uint16x8x3_t(r_lo_u16, g_lo_u16, b_lo_u16));
-      vst3q_u16(rgb_out.as_mut_ptr().add(x * 3 + 24), uint16x8x3_t(r_hi_u16, g_hi_u16, b_hi_u16));
+      vst3q_u16(
+        rgb_out.as_mut_ptr().add(x * 3),
+        uint16x8x3_t(r_lo_u16, g_lo_u16, b_lo_u16),
+      );
+      vst3q_u16(
+        rgb_out.as_mut_ptr().add(x * 3 + 24),
+        uint16x8x3_t(r_hi_u16, g_hi_u16, b_hi_u16),
+      );
       x += 16;
     }
 
@@ -1546,8 +1612,14 @@ fn scale_y_u16_to_i16(
   unsafe {
     let lo = vreinterpretq_s32_u32(vmovl_u16(vget_low_u16(y_vec)));
     let hi = vreinterpretq_s32_u32(vmovl_u16(vget_high_u16(y_vec)));
-    let lo_s = vshrq_n_s32::<15>(vaddq_s32(vmulq_s32(vsubq_s32(lo, y_off_v), y_scale_v), rnd_v));
-    let hi_s = vshrq_n_s32::<15>(vaddq_s32(vmulq_s32(vsubq_s32(hi, y_off_v), y_scale_v), rnd_v));
+    let lo_s = vshrq_n_s32::<15>(vaddq_s32(
+      vmulq_s32(vsubq_s32(lo, y_off_v), y_scale_v),
+      rnd_v,
+    ));
+    let hi_s = vshrq_n_s32::<15>(vaddq_s32(
+      vmulq_s32(vsubq_s32(hi, y_off_v), y_scale_v),
+      rnd_v,
+    ));
     vcombine_s16(vqmovn_s32(lo_s), vqmovn_s32(hi_s))
   }
 }
@@ -1597,14 +1669,8 @@ fn scale_y_u16_i64(
 ) -> int32x4_t {
   unsafe {
     let sub = vsubq_s32(y_i32, y_off_v);
-    let lo = vshrq_n_s64::<15>(vaddq_s64(
-      vmull_s32(vget_low_s32(sub), y_scale_d),
-      rnd64,
-    ));
-    let hi = vshrq_n_s64::<15>(vaddq_s64(
-      vmull_s32(vget_high_s32(sub), y_scale_d),
-      rnd64,
-    ));
+    let lo = vshrq_n_s64::<15>(vaddq_s64(vmull_s32(vget_low_s32(sub), y_scale_d), rnd64));
+    let hi = vshrq_n_s64::<15>(vaddq_s64(vmull_s32(vget_high_s32(sub), y_scale_d), rnd64));
     vcombine_s32(vmovn_s64(lo), vmovn_s64(hi))
   }
 }

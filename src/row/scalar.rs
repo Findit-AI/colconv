@@ -388,6 +388,16 @@ fn q15_chroma64(c_u: i32, u_d: i32, c_v: i32, v_d: i32) -> i32 {
   ((sum + (1 << 14)) >> 15) as i32
 }
 
+/// `(sample * scale_q15 + RND) >> 15` computed in i64. For 16-bit
+/// samples at limited-range 16 → u16 scaling, `sample * y_scale` can
+/// reach ~2.35·10⁹ — just over i32::MAX — when unclamped `u16` input
+/// exceeds the nominal limited-range Y max. Result after the shift
+/// is bounded by ~65 536 so the final `as i32` narrow is lossless.
+#[cfg_attr(not(tarpaulin), inline(always))]
+fn q15_scale64(sample: i32, scale_q15: i32) -> i32 {
+  (((sample as i64) * (scale_q15 as i64) + (1 << 14)) >> 15) as i32
+}
+
 /// Converts one row of **16-bit** YUV 4:2:0 (samples in the full
 /// `u16` range) to **8-bit** packed RGB. At 16 → u8 the Q15 scale
 /// confines chroma to u8 range, so the i32 chroma pipeline used by
@@ -488,12 +498,12 @@ pub(crate) fn yuv_420p16_to_rgb_u16_row(
     let g_chroma = q15_chroma64(coeffs.g_u(), u_d, coeffs.g_v(), v_d);
     let b_chroma = q15_chroma64(coeffs.b_u(), u_d, coeffs.b_v(), v_d);
 
-    let y0 = q15_scale(y[x] as i32 - y_off, y_scale);
+    let y0 = q15_scale64(y[x] as i32 - y_off, y_scale);
     rgb_out[x * 3] = (y0 + r_chroma).clamp(0, out_max) as u16;
     rgb_out[x * 3 + 1] = (y0 + g_chroma).clamp(0, out_max) as u16;
     rgb_out[x * 3 + 2] = (y0 + b_chroma).clamp(0, out_max) as u16;
 
-    let y1 = q15_scale(y[x + 1] as i32 - y_off, y_scale);
+    let y1 = q15_scale64(y[x + 1] as i32 - y_off, y_scale);
     rgb_out[(x + 1) * 3] = (y1 + r_chroma).clamp(0, out_max) as u16;
     rgb_out[(x + 1) * 3 + 1] = (y1 + g_chroma).clamp(0, out_max) as u16;
     rgb_out[(x + 1) * 3 + 2] = (y1 + b_chroma).clamp(0, out_max) as u16;
@@ -593,12 +603,12 @@ pub(crate) fn p16_to_rgb_u16_row(
     let g_chroma = q15_chroma64(coeffs.g_u(), u_d, coeffs.g_v(), v_d);
     let b_chroma = q15_chroma64(coeffs.b_u(), u_d, coeffs.b_v(), v_d);
 
-    let y0 = q15_scale(y[x] as i32 - y_off, y_scale);
+    let y0 = q15_scale64(y[x] as i32 - y_off, y_scale);
     rgb_out[x * 3] = (y0 + r_chroma).clamp(0, out_max) as u16;
     rgb_out[x * 3 + 1] = (y0 + g_chroma).clamp(0, out_max) as u16;
     rgb_out[x * 3 + 2] = (y0 + b_chroma).clamp(0, out_max) as u16;
 
-    let y1 = q15_scale(y[x + 1] as i32 - y_off, y_scale);
+    let y1 = q15_scale64(y[x + 1] as i32 - y_off, y_scale);
     rgb_out[(x + 1) * 3] = (y1 + r_chroma).clamp(0, out_max) as u16;
     rgb_out[(x + 1) * 3 + 1] = (y1 + g_chroma).clamp(0, out_max) as u16;
     rgb_out[(x + 1) * 3 + 2] = (y1 + b_chroma).clamp(0, out_max) as u16;

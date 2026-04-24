@@ -39,11 +39,10 @@ use core::arch::wasm32::{
   f32x4_add, f32x4_convert_i32x4, f32x4_div, f32x4_eq, f32x4_lt, f32x4_max, f32x4_min, f32x4_mul,
   f32x4_splat, f32x4_sub, i8x16, i8x16_shuffle, i16x8_add_sat, i16x8_max, i16x8_min,
   i16x8_narrow_i32x4, i16x8_splat, i16x8_sub, i32x4_add, i32x4_extend_high_i16x8,
-  i32x4_extend_low_i16x8, i32x4_mul, i32x4_shr, i32x4_splat, i32x4_sub,
-  i32x4_trunc_sat_f32x4, u8x16_narrow_i16x8, u8x16_swizzle, u16x8_extend_high_u8x16,
-  u16x8_extend_low_u8x16, u16x8_load_extend_u8x8, u16x8_shr, u16x8_splat,
-  u32x4_extend_high_u16x8, u32x4_extend_low_u16x8, v128, v128_and, v128_bitselect,
-  v128_load, v128_or, v128_store,
+  i32x4_extend_low_i16x8, i32x4_mul, i32x4_shr, i32x4_splat, i32x4_sub, i32x4_trunc_sat_f32x4,
+  u8x16_narrow_i16x8, u8x16_swizzle, u16x8_extend_high_u8x16, u16x8_extend_low_u8x16,
+  u16x8_load_extend_u8x8, u16x8_shr, u16x8_splat, u32x4_extend_high_u16x8, u32x4_extend_low_u16x8,
+  v128, v128_and, v128_bitselect, v128_load, v128_or, v128_store,
 };
 
 use crate::{ColorMatrix, row::scalar};

@@ -37,13 +37,13 @@
 
 use core::arch::x86_64::{
   __m128i, _mm_add_epi32, _mm_add_epi64, _mm_adds_epi16, _mm_and_si128, _mm_cvtepi16_epi32,
-  _mm_cvtepu16_epi32, _mm_cvtepu8_epi16, _mm_cvtsi32_si128, _mm_loadl_epi64, _mm_loadu_si128,
-  _mm_max_epi16, _mm_min_epi16, _mm_mul_epi32, _mm_mullo_epi32, _mm_packs_epi32,
-  _mm_packus_epi16, _mm_packus_epi32, _mm_set1_epi16, _mm_set1_epi32, _mm_set1_epi64x,
-  _mm_setr_epi8, _mm_shuffle_epi32, _mm_shuffle_epi8, _mm_srai_epi32, _mm_srl_epi16,
-  _mm_srli_epi64, _mm_srli_si128, _mm_sub_epi16, _mm_sub_epi32, _mm_sub_epi64,
-  _mm_unpackhi_epi16, _mm_unpackhi_epi32, _mm_unpackhi_epi64, _mm_unpacklo_epi16,
-  _mm_unpacklo_epi32, _mm_unpacklo_epi64,
+  _mm_cvtepu8_epi16, _mm_cvtepu16_epi32, _mm_cvtsi32_si128, _mm_loadl_epi64, _mm_loadu_si128,
+  _mm_max_epi16, _mm_min_epi16, _mm_mul_epi32, _mm_mullo_epi32, _mm_packs_epi32, _mm_packus_epi16,
+  _mm_packus_epi32, _mm_set1_epi16, _mm_set1_epi32, _mm_set1_epi64x, _mm_setr_epi8,
+  _mm_shuffle_epi8, _mm_shuffle_epi32, _mm_srai_epi32, _mm_srl_epi16, _mm_srli_epi64,
+  _mm_srli_si128, _mm_sub_epi16, _mm_sub_epi32, _mm_sub_epi64, _mm_unpackhi_epi16,
+  _mm_unpackhi_epi32, _mm_unpackhi_epi64, _mm_unpacklo_epi16, _mm_unpacklo_epi32,
+  _mm_unpacklo_epi64,
 };
 
 use crate::{
@@ -1004,13 +1004,7 @@ fn srai64_15(x: __m128i) -> __m128i {
 /// Computes one i64x2 chroma channel from 2 × i64 (u_d, v_d) inputs.
 /// Returns i64x2 with [`srai64_15`]-shifted results.
 #[inline(always)]
-fn chroma_i64x2(
-  cu: __m128i,
-  cv: __m128i,
-  u_d: __m128i,
-  v_d: __m128i,
-  rnd_v: __m128i,
-) -> __m128i {
+fn chroma_i64x2(cu: __m128i, cv: __m128i, u_d: __m128i, v_d: __m128i, rnd_v: __m128i) -> __m128i {
   unsafe {
     srai64_15(_mm_add_epi64(
       _mm_add_epi64(_mm_mul_epi32(cu, u_d), _mm_mul_epi32(cv, v_d)),
@@ -1024,9 +1018,7 @@ fn chroma_i64x2(
 /// Returns i64x2 for the two even-indexed lanes.
 #[inline(always)]
 fn scale_y16_i64(y_minus_off: __m128i, y_scale_v: __m128i, rnd_v: __m128i) -> __m128i {
-  unsafe {
-    srai64_15(_mm_add_epi64(_mm_mul_epi32(y_minus_off, y_scale_v), rnd_v))
-  }
+  unsafe { srai64_15(_mm_add_epi64(_mm_mul_epi32(y_minus_off, y_scale_v), rnd_v)) }
 }
 
 // ===== 16-bit planar (YUV420P16) → RGB ===================================
@@ -1247,7 +1239,7 @@ pub(crate) unsafe fn yuv_420p16_to_rgb_u16_row(
 
       // Scale Y in i64 via pairs: process pixels 0-1, 2-3, 4-5, 6-7.
       // Load pairs of Y as 32-bit lanes for _mm_mul_epi32.
-      let y_lo_pair = _mm_cvtepu16_epi32(y_vec);           // [y0,y1,y2,y3] as i32
+      let y_lo_pair = _mm_cvtepu16_epi32(y_vec); // [y0,y1,y2,y3] as i32
       let y_hi_pair = _mm_cvtepu16_epi32(_mm_srli_si128::<8>(y_vec)); // [y4,y5,y6,y7]
 
       let y_lo_sub = _mm_sub_epi32(y_lo_pair, y_off_v);
@@ -1272,11 +1264,25 @@ pub(crate) unsafe fn yuv_420p16_to_rgb_u16_row(
       );
 
       // Add Y + chroma, saturate to u16 via _mm_packus_epi32.
-      let r_lo_u16 = _mm_packus_epi32(_mm_add_epi32(y_lo_i32, r_dup_lo), _mm_add_epi32(y_hi_i32, r_dup_hi));
-      let g_lo_u16 = _mm_packus_epi32(_mm_add_epi32(y_lo_i32, g_dup_lo), _mm_add_epi32(y_hi_i32, g_dup_hi));
-      let b_lo_u16 = _mm_packus_epi32(_mm_add_epi32(y_lo_i32, b_dup_lo), _mm_add_epi32(y_hi_i32, b_dup_hi));
+      let r_lo_u16 = _mm_packus_epi32(
+        _mm_add_epi32(y_lo_i32, r_dup_lo),
+        _mm_add_epi32(y_hi_i32, r_dup_hi),
+      );
+      let g_lo_u16 = _mm_packus_epi32(
+        _mm_add_epi32(y_lo_i32, g_dup_lo),
+        _mm_add_epi32(y_hi_i32, g_dup_hi),
+      );
+      let b_lo_u16 = _mm_packus_epi32(
+        _mm_add_epi32(y_lo_i32, b_dup_lo),
+        _mm_add_epi32(y_hi_i32, b_dup_hi),
+      );
 
-      write_rgb_u16_8(r_lo_u16, g_lo_u16, b_lo_u16, rgb_out.as_mut_ptr().add(x * 3));
+      write_rgb_u16_8(
+        r_lo_u16,
+        g_lo_u16,
+        b_lo_u16,
+        rgb_out.as_mut_ptr().add(x * 3),
+      );
       x += 8;
     }
 
@@ -1441,7 +1447,7 @@ pub(crate) unsafe fn p16_to_rgb_u16_row(
       // uv_half.len() >= width >= x + 8 guarantees 8 u16 readable.
       let uv_raw = _mm_loadu_si128(uv_half.as_ptr().add(x).cast());
       // [U0,V0,U1,V1,U2,V2,U3,V3] → [U0,U1,U2,U3, V0,V1,V2,V3]
-      let split_mask = _mm_setr_epi8(0,1,4,5,8,9,12,13, 2,3,6,7,10,11,14,15);
+      let split_mask = _mm_setr_epi8(0, 1, 4, 5, 8, 9, 12, 13, 2, 3, 6, 7, 10, 11, 14, 15);
       let uv_split = _mm_shuffle_epi8(uv_raw, split_mask);
       let u_vec4 = uv_split;
       let v_vec4 = _mm_srli_si128::<8>(uv_split);
@@ -1506,9 +1512,18 @@ pub(crate) unsafe fn p16_to_rgb_u16_row(
         _mm_unpackhi_epi32(y_hi_even, y_hi_odd),
       );
 
-      let r_u16 = _mm_packus_epi32(_mm_add_epi32(y_lo_i32, r_dup_lo), _mm_add_epi32(y_hi_i32, r_dup_hi));
-      let g_u16 = _mm_packus_epi32(_mm_add_epi32(y_lo_i32, g_dup_lo), _mm_add_epi32(y_hi_i32, g_dup_hi));
-      let b_u16 = _mm_packus_epi32(_mm_add_epi32(y_lo_i32, b_dup_lo), _mm_add_epi32(y_hi_i32, b_dup_hi));
+      let r_u16 = _mm_packus_epi32(
+        _mm_add_epi32(y_lo_i32, r_dup_lo),
+        _mm_add_epi32(y_hi_i32, r_dup_hi),
+      );
+      let g_u16 = _mm_packus_epi32(
+        _mm_add_epi32(y_lo_i32, g_dup_lo),
+        _mm_add_epi32(y_hi_i32, g_dup_hi),
+      );
+      let b_u16 = _mm_packus_epi32(
+        _mm_add_epi32(y_lo_i32, b_dup_lo),
+        _mm_add_epi32(y_hi_i32, b_dup_hi),
+      );
 
       write_rgb_u16_8(r_u16, g_u16, b_u16, rgb_out.as_mut_ptr().add(x * 3));
       x += 8;
