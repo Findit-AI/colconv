@@ -1787,10 +1787,14 @@ pub(crate) unsafe fn yuv_420p16_to_rgb_u16_row(
 
     let mut x = 0usize;
     while x + 32 <= width {
-      // 32 Y pixels / 16 chroma pairs per iter.
+      // 32 Y pixels / 16 chroma pairs per iter. The Y load is a
+      // full 512-bit read (32 × u16); UV only needs 16 × u16 per
+      // plane, so a 256-bit load is sufficient — a 512-bit load
+      // would read past the end of `u_half` / `v_half` on the last
+      // iteration where `x / 2 + 16 == u_half.len()`.
       let y_vec = _mm512_loadu_si512(y.as_ptr().add(x).cast());
-      let u_vec = _mm512_castsi512_si256(_mm512_loadu_si512(u_half.as_ptr().add(x / 2).cast()));
-      let v_vec = _mm512_castsi512_si256(_mm512_loadu_si512(v_half.as_ptr().add(x / 2).cast()));
+      let u_vec = _mm256_loadu_si256(u_half.as_ptr().add(x / 2).cast());
+      let v_vec = _mm256_loadu_si256(v_half.as_ptr().add(x / 2).cast());
 
       // Center UV by subtracting 32768 (wrapping i16 sub). Using
       // `_mm256_sub_epi16` with bias16 (which carries -32768 as i16):

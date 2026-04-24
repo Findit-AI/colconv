@@ -909,12 +909,17 @@ pub enum Nv24FrameError {
     /// Actual bytes supplied.
     actual: usize,
   },
-  /// `stride * rows` does not fit in `usize` / `u32`.
-  #[error("declared geometry overflows usize: stride={stride} * rows={rows}")]
+  /// Size arithmetic overflowed. Fires for either
+  /// `stride * rows` exceeding `usize::MAX` (the usual case) **or**
+  /// the `width * 2` computation for the UV-row-payload length
+  /// exceeding `u32::MAX` at extreme widths.
+  #[error("declared geometry overflows: stride={stride} * rows={rows}")]
   GeometryOverflow {
-    /// Stride of the plane whose size overflowed.
+    /// Stride (or `width`, for the `width * 2` overflow case) of
+    /// the dimension whose product overflowed.
     stride: u32,
-    /// Row count that overflowed against the stride.
+    /// Row count (or `2`, for the `width * 2` overflow case) that
+    /// overflowed against the stride.
     rows: u32,
   },
 }
@@ -1111,12 +1116,17 @@ pub enum Nv42FrameError {
     /// Actual bytes supplied.
     actual: usize,
   },
-  /// `stride * rows` does not fit in `usize` / `u32`.
-  #[error("declared geometry overflows usize: stride={stride} * rows={rows}")]
+  /// Size arithmetic overflowed. Fires for either
+  /// `stride * rows` exceeding `usize::MAX` (the usual case) **or**
+  /// the `width * 2` computation for the VU-row-payload length
+  /// exceeding `u32::MAX` at extreme widths.
+  #[error("declared geometry overflows: stride={stride} * rows={rows}")]
   GeometryOverflow {
-    /// Stride of the plane whose size overflowed.
+    /// Stride (or `width`, for the `width * 2` overflow case) of
+    /// the dimension whose product overflowed.
     stride: u32,
-    /// Row count that overflowed against the stride.
+    /// Row count (or `2`, for the `width * 2` overflow case) that
+    /// overflowed against the stride.
     rows: u32,
   },
 }

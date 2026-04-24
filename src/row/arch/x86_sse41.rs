@@ -1014,7 +1014,9 @@ unsafe fn nv24_or_nv42_to_rgb_row_impl<const SWAP_UV: bool>(
     let cbv = _mm_set1_epi32(coeffs.b_v());
 
     // Shuffle masks to deinterleave 16 UV bytes into 8 U + 8 V (low
-    // lanes). Pad upper 8 lanes with zeros via 0x80 index.
+    // lanes). The upper 8 lanes are zeroed by `_mm_shuffle_epi8`
+    // whenever the mask byte has its high bit set — `-1` (= `0xFF`)
+    // written here as a signed `i8` literal triggers that behavior.
     let even_mask = _mm_setr_epi8(0, 2, 4, 6, 8, 10, 12, 14, -1, -1, -1, -1, -1, -1, -1, -1);
     let odd_mask = _mm_setr_epi8(1, 3, 5, 7, 9, 11, 13, 15, -1, -1, -1, -1, -1, -1, -1, -1);
 
