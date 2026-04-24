@@ -26,7 +26,7 @@
 //!
 //! # Supported source formats
 //!
-//! Shipped (all 4:2:0 subsampling):
+//! Shipped (4:2:0, 4:2:2, and 4:4:4 subsampling):
 //!
 //! | Family           | Bit depth | Subsampling | Packing                  | FFmpeg name           |
 //! | ---------------- | --------- | ----------- | ------------------------ | --------------------- |
