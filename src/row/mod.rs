@@ -314,6 +314,63 @@ pub fn nv21_to_rgb_row(
   scalar::nv21_to_rgb_row(y, vu_half, rgb_out, width, matrix, full_range);
 }
 
+/// Converts one row of NV24 (semi‑planar 4:4:4, UV‑ordered) to packed
+/// RGB.
+///
+/// Same numerical contract as [`yuv_420_to_rgb_row`]; the difference
+/// from NV12 is 4:4:4 chroma — one UV pair per Y pixel, no chroma
+/// upsampling, and no width parity constraint. See
+/// `scalar::nv24_to_rgb_row` for the reference implementation.
+///
+/// `use_simd = false` forces the scalar reference path. SIMD backends
+/// are not yet wired for NV24; this parameter is accepted so the
+/// dispatch signature matches the rest of the family and is
+/// forward‑compatible with the SIMD follow‑up.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn nv24_to_rgb_row(
+  y: &[u8],
+  uv: &[u8],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  use_simd: bool,
+) {
+  let rgb_min = rgb_row_bytes(width);
+  assert!(y.len() >= width, "y row too short");
+  // NV24 chroma carries one UV pair per pixel = `2 * width` bytes.
+  assert!(uv.len() >= 2 * width, "uv row too short");
+  assert!(rgb_out.len() >= rgb_min, "rgb_out row too short");
+
+  // SIMD backends land in the follow-up step; preserve the parameter
+  // so the signature is stable.
+  let _ = use_simd;
+  scalar::nv24_to_rgb_row(y, uv, rgb_out, width, matrix, full_range);
+}
+
+/// Converts one row of NV42 (semi‑planar 4:4:4, VU‑ordered) to packed
+/// RGB. Same as [`nv24_to_rgb_row`] but with swapped chroma byte order.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn nv42_to_rgb_row(
+  y: &[u8],
+  vu: &[u8],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  use_simd: bool,
+) {
+  let rgb_min = rgb_row_bytes(width);
+  assert!(y.len() >= width, "y row too short");
+  assert!(vu.len() >= 2 * width, "vu row too short");
+  assert!(rgb_out.len() >= rgb_min, "rgb_out row too short");
+
+  let _ = use_simd;
+  scalar::nv42_to_rgb_row(y, vu, rgb_out, width, matrix, full_range);
+}
+
 /// Converts one row of **10‑bit** YUV 4:2:0 to packed **8‑bit** RGB.
 ///
 /// Samples are `u16` with 10 active bits in the low bits of each
