@@ -31,6 +31,8 @@
 //! | Family           | Bit depth | Subsampling | Packing                  | FFmpeg name           |
 //! | ---------------- | --------- | ----------- | ------------------------ | --------------------- |
 //! | [`Yuv420p`]      |  8        | 4:2:0       | planar                   | `yuv420p`             |
+//! | [`Yuv422p`]      |  8        | 4:2:2       | planar                   | `yuv422p`             |
+//! | [`Yuv444p`]      |  8        | 4:4:4       | planar                   | `yuv444p`             |
 //! | [`Nv12`]         |  8        | 4:2:0       | semi-planar UV           | `nv12`                |
 //! | [`Nv21`]         |  8        | 4:2:0       | semi-planar VU           | `nv21`                |
 //! | [`Nv16`]         |  8        | 4:2:2       | semi-planar UV           | `nv16`                |
@@ -40,6 +42,14 @@
 //! | [`Yuv420p12`]    | 12        | 4:2:0       | planar, low-packed       | `yuv420p12le`         |
 //! | [`Yuv420p14`]    | 14        | 4:2:0       | planar, low-packed       | `yuv420p14le`         |
 //! | [`Yuv420p16`]    | 16        | 4:2:0       | planar                   | `yuv420p16le`         |
+//! | [`Yuv422p10`]    | 10        | 4:2:2       | planar, low-packed       | `yuv422p10le`         |
+//! | [`Yuv422p12`]    | 12        | 4:2:2       | planar, low-packed       | `yuv422p12le`         |
+//! | [`Yuv422p14`]    | 14        | 4:2:2       | planar, low-packed       | `yuv422p14le`         |
+//! | [`Yuv422p16`]    | 16        | 4:2:2       | planar                   | `yuv422p16le`         |
+//! | [`Yuv444p10`]    | 10        | 4:4:4       | planar, low-packed       | `yuv444p10le`         |
+//! | [`Yuv444p12`]    | 12        | 4:4:4       | planar, low-packed       | `yuv444p12le`         |
+//! | [`Yuv444p14`]    | 14        | 4:4:4       | planar, low-packed       | `yuv444p14le`         |
+//! | [`Yuv444p16`]    | 16        | 4:4:4       | planar                   | `yuv444p16le`         |
 //! | [`P010`]         | 10        | 4:2:0       | semi-planar, high-packed | `p010le`              |
 //! | [`P012`]         | 12        | 4:2:0       | semi-planar, high-packed | `p012le`              |
 //! | [`P016`]         | 16        | 4:2:0       | semi-planar              | `p016le`              |
@@ -47,35 +57,41 @@
 //! # Kernel families
 //!
 //! - **Q15 i32 family** — 8-bit kernels (`yuv_420_to_rgb_row`,
-//!   `nv12_to_rgb_row`, `nv24_to_rgb_row` etc.) and 10/12/14-bit
-//!   kernels (`yuv_420p_n_to_rgb_*<BITS>` and `p_n_to_rgb_*<BITS>`).
-//!   [`Nv16`] reuses [`Nv12`]'s per-row kernel (4:2:2 differs only
-//!   in the vertical walker); [`Nv24`] and [`Nv42`] share a 4:4:4
-//!   kernel family via a `SWAP_UV` const generic.
-//! - **16-bit family** — dedicated `yuv_420p16_to_rgb_*` /
-//!   `p16_to_rgb_*`. The **u8-output** kernels stay on i32
-//!   (output-range scaling keeps `coeff × u_d` within i32). The
-//!   **u16-output** kernels widen the chroma matrix multiply-add to
-//!   i64 to avoid the ~2.31·10⁹ chroma-channel sum overflowing i32
-//!   at `BITS == 16`; the Y path also widens to i64 to handle
-//!   limited-range unclamped samples.
+//!   `yuv_444_to_rgb_row`, `nv12_to_rgb_row`, `nv24_to_rgb_row` etc.)
+//!   and 10/12/14-bit kernels (`yuv_420p_n_to_rgb_*<BITS>`,
+//!   `yuv_444p_n_to_rgb_*<BITS>`, `p_n_to_rgb_*<BITS>`). Native SIMD
+//!   on every backend (NEON / SSE4.1 / AVX2 / AVX-512 / wasm
+//!   simd128). [`Yuv422p`] (and the [`Yuv422p10`] / [`Yuv422p12`] /
+//!   [`Yuv422p14`] family) reuses [`Yuv420p`]'s per-row kernels
+//!   (4:2:2 differs only in the vertical walker); same for
+//!   [`Nv16`] ↔ [`Nv12`]. [`Yuv444p`] and [`Yuv444p10`] /
+//!   [`Yuv444p12`] / [`Yuv444p14`] use a dedicated 4:4:4 kernel
+//!   family (no horizontal chroma duplication step); [`Nv24`] and
+//!   [`Nv42`] share a 4:4:4 kernel family via a `SWAP_UV` const
+//!   generic.
+//! - **16-bit family** — dedicated `yuv_420p16_to_rgb_*`,
+//!   `yuv444p16_to_rgb_*`, `p16_to_rgb_*`. [`Yuv422p16`] reuses the
+//!   4:2:0 16-bit kernels by shape equivalence. The **u8-output**
+//!   kernels stay on i32 (output-range scaling keeps `coeff × u_d`
+//!   within i32). The **u16-output** kernels widen the chroma matrix
+//!   multiply-add to i64 to avoid the ~2.31·10⁹ chroma-channel sum
+//!   overflowing i32 at `BITS == 16`; the Y path also widens to i64
+//!   to handle limited-range unclamped samples.
 //!
 //! # SIMD coverage
 //!
 //! Every format above has a native SIMD backend for each supported
 //! target (NEON on aarch64; SSE4.1 / AVX2 / AVX-512 on x86_64; wasm
-//! simd128). Exceptions:
-//! - **16-bit u16 output on AVX2**: delegates to the SSE4.1 kernel
-//!   — AVX2 lacks `_mm256_srai_epi64`, so the `srai64_15` bias trick
-//!   would have to be duplicated at 256 bits for marginal gain.
-//! - **16-bit u16 output on wasm simd128**: falls through to scalar
-//!   — the single-lane i64 arithmetic is cheaper scalar.
+//! simd128). Every u8-output and u16-output path has a native
+//! implementation on every backend — including the 16-bit u16-output
+//! paths for `Yuv420p16`, `P016`, and `Yuv444p16`, which use the
+//! backend-native i64 arithmetic (native `_mm512_srai_epi64` on
+//! AVX-512 and `i64x2_shr` on wasm; `srai64_15` bias trick on SSE4.1
+//! and AVX2 because those ISAs lack native i64 arithmetic right
+//! shift).
 //!
 //! # Not yet shipped (follow-up)
 //!
-//! - **Planar 4:2:2 / 4:4:4** (`Yuv422p`, `Yuv444p`) — would share
-//!   the 4:2:2 / 4:4:4 row math with their semi-planar peers but
-//!   need their own row walkers.
 //! - **Packed RGB sources** (`Rgb24`, `Bgr24`, `Rgba`, `Bgra`,
 //!   `Rgba1010102`, etc.).
 //! - **u16 semi-planar 4:2:2 / 4:4:4** (`P210`, `P216`, `P410`,
@@ -87,6 +103,8 @@
 //! and `PnFrame<BITS>`).
 //!
 //! [`Yuv420p`]: crate::yuv::Yuv420p
+//! [`Yuv422p`]: crate::yuv::Yuv422p
+//! [`Yuv444p`]: crate::yuv::Yuv444p
 //! [`Nv12`]: crate::yuv::Nv12
 //! [`Nv16`]: crate::yuv::Nv16
 //! [`Nv21`]: crate::yuv::Nv21
@@ -96,6 +114,14 @@
 //! [`Yuv420p12`]: crate::yuv::Yuv420p12
 //! [`Yuv420p14`]: crate::yuv::Yuv420p14
 //! [`Yuv420p16`]: crate::yuv::Yuv420p16
+//! [`Yuv422p10`]: crate::yuv::Yuv422p10
+//! [`Yuv422p12`]: crate::yuv::Yuv422p12
+//! [`Yuv422p14`]: crate::yuv::Yuv422p14
+//! [`Yuv422p16`]: crate::yuv::Yuv422p16
+//! [`Yuv444p10`]: crate::yuv::Yuv444p10
+//! [`Yuv444p12`]: crate::yuv::Yuv444p12
+//! [`Yuv444p14`]: crate::yuv::Yuv444p14
+//! [`Yuv444p16`]: crate::yuv::Yuv444p16
 //! [`P010`]: crate::yuv::P010
 //! [`P012`]: crate::yuv::P012
 //! [`P016`]: crate::yuv::P016
