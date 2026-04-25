@@ -3778,6 +3778,98 @@ mod tests {
     check_p10_u16_avx512_equivalence(1920, ColorMatrix::Bt2020Ncl, false);
   }
 
+  // ---- yuv420p_n<BITS> AVX-512 scalar-equivalence (BITS=9 coverage) ---
+
+  fn p_n_plane_avx512<const BITS: u32>(n: usize, seed: usize) -> std::vec::Vec<u16> {
+    let mask = ((1u32 << BITS) - 1) as u16;
+    (0..n)
+      .map(|i| ((i.wrapping_mul(seed).wrapping_add(seed * 3)) as u16) & mask)
+      .collect()
+  }
+
+  fn check_p_n_u8_avx512_equivalence<const BITS: u32>(
+    width: usize,
+    matrix: ColorMatrix,
+    full_range: bool,
+  ) {
+    if !std::arch::is_x86_feature_detected!("avx512bw") {
+      return;
+    }
+    let y = p_n_plane_avx512::<BITS>(width, 37);
+    let u = p_n_plane_avx512::<BITS>(width / 2, 53);
+    let v = p_n_plane_avx512::<BITS>(width / 2, 71);
+    let mut rgb_scalar = std::vec![0u8; width * 3];
+    let mut rgb_simd = std::vec![0u8; width * 3];
+    scalar::yuv_420p_n_to_rgb_row::<BITS>(&y, &u, &v, &mut rgb_scalar, width, matrix, full_range);
+    unsafe {
+      yuv_420p_n_to_rgb_row::<BITS>(&y, &u, &v, &mut rgb_simd, width, matrix, full_range);
+    }
+    assert_eq!(
+      rgb_scalar, rgb_simd,
+      "AVX-512 yuv_420p_n<{BITS}>→u8 diverges (width={width}, matrix={matrix:?}, full_range={full_range})"
+    );
+  }
+
+  fn check_p_n_u16_avx512_equivalence<const BITS: u32>(
+    width: usize,
+    matrix: ColorMatrix,
+    full_range: bool,
+  ) {
+    if !std::arch::is_x86_feature_detected!("avx512bw") {
+      return;
+    }
+    let y = p_n_plane_avx512::<BITS>(width, 37);
+    let u = p_n_plane_avx512::<BITS>(width / 2, 53);
+    let v = p_n_plane_avx512::<BITS>(width / 2, 71);
+    let mut rgb_scalar = std::vec![0u16; width * 3];
+    let mut rgb_simd = std::vec![0u16; width * 3];
+    scalar::yuv_420p_n_to_rgb_u16_row::<BITS>(
+      &y,
+      &u,
+      &v,
+      &mut rgb_scalar,
+      width,
+      matrix,
+      full_range,
+    );
+    unsafe {
+      yuv_420p_n_to_rgb_u16_row::<BITS>(&y, &u, &v, &mut rgb_simd, width, matrix, full_range);
+    }
+    assert_eq!(
+      rgb_scalar, rgb_simd,
+      "AVX-512 yuv_420p_n<{BITS}>→u16 diverges (width={width}, matrix={matrix:?}, full_range={full_range})"
+    );
+  }
+
+  #[test]
+  fn avx512_yuv420p9_matches_scalar_all_matrices_and_ranges() {
+    for m in [
+      ColorMatrix::Bt601,
+      ColorMatrix::Bt709,
+      ColorMatrix::Bt2020Ncl,
+      ColorMatrix::Smpte240m,
+      ColorMatrix::Fcc,
+      ColorMatrix::YCgCo,
+    ] {
+      for full in [true, false] {
+        check_p_n_u8_avx512_equivalence::<9>(64, m, full);
+        check_p_n_u16_avx512_equivalence::<9>(64, m, full);
+      }
+    }
+  }
+
+  #[test]
+  fn avx512_yuv420p9_matches_scalar_tail_and_large_widths() {
+    // AVX-512 main loop is 64 px; widths chosen to stress tail handling
+    // both below and above the SIMD lane width.
+    for w in [18usize, 30, 34, 62, 66, 126, 130, 1922] {
+      check_p_n_u8_avx512_equivalence::<9>(w, ColorMatrix::Bt601, false);
+      check_p_n_u16_avx512_equivalence::<9>(w, ColorMatrix::Bt709, true);
+    }
+    check_p_n_u8_avx512_equivalence::<9>(1920, ColorMatrix::Bt709, false);
+    check_p_n_u16_avx512_equivalence::<9>(1920, ColorMatrix::Bt2020Ncl, false);
+  }
+
   // ---- P010 AVX-512 scalar-equivalence --------------------------------
 
   fn p010_plane(n: usize, seed: usize) -> std::vec::Vec<u16> {

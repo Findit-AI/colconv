@@ -8679,4 +8679,113 @@ mod tests {
     yuv444p_to(&src444, true, ColorMatrix::Bt709, &mut s444).unwrap();
     assert_eq!(rgb440, rgb444);
   }
+
+  // ---- Walker-level SIMD-vs-scalar equivalence for 9-bit 4:2:x --------
+  //
+  // Per-arch row-kernel tests cover the BITS=9 path with non-neutral
+  // chroma directly. These walker-level tests additionally pin the
+  // public dispatcher behavior — Yuv420p9 / Yuv422p9 read through the
+  // same `yuv_420p_n_to_rgb_*<9>` half-width kernels, so a backend
+  // bug here would silently corrupt user output. Width 1922 forces
+  // both the SIMD main loop and a scalar tail; chroma is non-neutral
+  // and limited-range parameters are exercised below.
+
+  fn pseudo_random_u16_low_n_bits(buf: &mut [u16], seed: u32, bits: u32) {
+    let mask = ((1u32 << bits) - 1) as u16;
+    let mut state = seed;
+    for b in buf {
+      state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+      *b = ((state >> 8) as u16) & mask;
+    }
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn yuv420p9_walker_simd_matches_scalar_with_random_chroma() {
+    let w = 1922u32; // forces tail handling on every backend
+    let h = 4u32;
+    let mut yp = std::vec![0u16; (w * h) as usize];
+    let mut up = std::vec![0u16; ((w / 2) * (h / 2)) as usize];
+    let mut vp = std::vec![0u16; ((w / 2) * (h / 2)) as usize];
+    pseudo_random_u16_low_n_bits(&mut yp, 0x1111, 9);
+    pseudo_random_u16_low_n_bits(&mut up, 0x2222, 9);
+    pseudo_random_u16_low_n_bits(&mut vp, 0x3333, 9);
+    let src = Yuv420p9Frame::new(&yp, &up, &vp, w, h, w, w / 2, w / 2);
+
+    for &full_range in &[true, false] {
+      let mut rgb_simd = std::vec![0u8; (w * h * 3) as usize];
+      let mut rgb_scalar = std::vec![0u8; (w * h * 3) as usize];
+      let mut rgb_u16_simd = std::vec![0u16; (w * h * 3) as usize];
+      let mut rgb_u16_scalar = std::vec![0u16; (w * h * 3) as usize];
+
+      let mut s_simd = MixedSinker::<Yuv420p9>::new(w as usize, h as usize)
+        .with_rgb(&mut rgb_simd)
+        .unwrap()
+        .with_rgb_u16(&mut rgb_u16_simd)
+        .unwrap();
+      yuv420p9_to(&src, full_range, ColorMatrix::Bt709, &mut s_simd).unwrap();
+
+      let mut s_scalar = MixedSinker::<Yuv420p9>::new(w as usize, h as usize)
+        .with_rgb(&mut rgb_scalar)
+        .unwrap()
+        .with_rgb_u16(&mut rgb_u16_scalar)
+        .unwrap();
+      s_scalar.set_simd(false);
+      yuv420p9_to(&src, full_range, ColorMatrix::Bt709, &mut s_scalar).unwrap();
+
+      assert_eq!(rgb_simd, rgb_scalar, "Yuv420p9 SIMD u8 ≠ scalar u8");
+      assert_eq!(
+        rgb_u16_simd, rgb_u16_scalar,
+        "Yuv420p9 SIMD u16 ≠ scalar u16"
+      );
+    }
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn yuv422p9_walker_simd_matches_scalar_with_random_chroma() {
+    let w = 1922u32;
+    let h = 4u32;
+    let mut yp = std::vec![0u16; (w * h) as usize];
+    let mut up = std::vec![0u16; ((w / 2) * h) as usize];
+    let mut vp = std::vec![0u16; ((w / 2) * h) as usize];
+    pseudo_random_u16_low_n_bits(&mut yp, 0x4444, 9);
+    pseudo_random_u16_low_n_bits(&mut up, 0x5555, 9);
+    pseudo_random_u16_low_n_bits(&mut vp, 0x6666, 9);
+    let src = Yuv422p9Frame::new(&yp, &up, &vp, w, h, w, w / 2, w / 2);
+
+    for &full_range in &[true, false] {
+      let mut rgb_simd = std::vec![0u8; (w * h * 3) as usize];
+      let mut rgb_scalar = std::vec![0u8; (w * h * 3) as usize];
+      let mut rgb_u16_simd = std::vec![0u16; (w * h * 3) as usize];
+      let mut rgb_u16_scalar = std::vec![0u16; (w * h * 3) as usize];
+
+      let mut s_simd = MixedSinker::<Yuv422p9>::new(w as usize, h as usize)
+        .with_rgb(&mut rgb_simd)
+        .unwrap()
+        .with_rgb_u16(&mut rgb_u16_simd)
+        .unwrap();
+      yuv422p9_to(&src, full_range, ColorMatrix::Bt2020Ncl, &mut s_simd).unwrap();
+
+      let mut s_scalar = MixedSinker::<Yuv422p9>::new(w as usize, h as usize)
+        .with_rgb(&mut rgb_scalar)
+        .unwrap()
+        .with_rgb_u16(&mut rgb_u16_scalar)
+        .unwrap();
+      s_scalar.set_simd(false);
+      yuv422p9_to(&src, full_range, ColorMatrix::Bt2020Ncl, &mut s_scalar).unwrap();
+
+      assert_eq!(rgb_simd, rgb_scalar, "Yuv422p9 SIMD u8 ≠ scalar u8");
+      assert_eq!(
+        rgb_u16_simd, rgb_u16_scalar,
+        "Yuv422p9 SIMD u16 ≠ scalar u16"
+      );
+    }
+  }
 }

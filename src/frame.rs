@@ -3708,6 +3708,78 @@ impl<'a, const BITS: u32> Yuv440pFrame16<'a, BITS> {
     }
   }
 
+  /// Constructs a new [`Yuv440pFrame16`] and additionally rejects any
+  /// sample whose value exceeds `(1 << BITS) - 1`. Mirrors
+  /// [`Yuv420pFrame16::try_new_checked`] /
+  /// [`Yuv444pFrame16::try_new_checked`]; downstream row kernels mask
+  /// the high bits at load time, so out-of-range samples otherwise
+  /// produce silently wrong output. Use this constructor on untrusted
+  /// inputs (custom decoders, unchecked FFI buffers, etc.).
+  ///
+  /// Cost: one O(plane_size) linear scan per plane. The chroma planes
+  /// here are full-width × half-height (4:4:0 layout).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  #[allow(clippy::too_many_arguments)]
+  pub fn try_new_checked(
+    y: &'a [u16],
+    u: &'a [u16],
+    v: &'a [u16],
+    width: u32,
+    height: u32,
+    y_stride: u32,
+    u_stride: u32,
+    v_stride: u32,
+  ) -> Result<Self, Yuv420pFrame16Error> {
+    let frame = Self::try_new(y, u, v, width, height, y_stride, u_stride, v_stride)?;
+    if BITS == 16 {
+      return Ok(frame);
+    }
+    let max_valid: u16 = ((1u32 << BITS) - 1) as u16;
+    let w = width as usize;
+    let h = height as usize;
+    let chroma_h = (height as usize).div_ceil(2);
+    for row in 0..h {
+      let start = row * y_stride as usize;
+      for (col, &s) in y[start..start + w].iter().enumerate() {
+        if s > max_valid {
+          return Err(Yuv420pFrame16Error::SampleOutOfRange {
+            plane: Yuv420pFrame16Plane::Y,
+            index: start + col,
+            value: s,
+            max_valid,
+          });
+        }
+      }
+    }
+    for row in 0..chroma_h {
+      let start = row * u_stride as usize;
+      for (col, &s) in u[start..start + w].iter().enumerate() {
+        if s > max_valid {
+          return Err(Yuv420pFrame16Error::SampleOutOfRange {
+            plane: Yuv420pFrame16Plane::U,
+            index: start + col,
+            value: s,
+            max_valid,
+          });
+        }
+      }
+    }
+    for row in 0..chroma_h {
+      let start = row * v_stride as usize;
+      for (col, &s) in v[start..start + w].iter().enumerate() {
+        if s > max_valid {
+          return Err(Yuv420pFrame16Error::SampleOutOfRange {
+            plane: Yuv420pFrame16Plane::V,
+            index: start + col,
+            value: s,
+            max_valid,
+          });
+        }
+      }
+    }
+    Ok(frame)
+  }
+
   /// Y plane (`u16` elements).
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn y(&self) -> &'a [u16] {
@@ -5132,5 +5204,96 @@ mod tests {
     let v = std::vec![32768u16; 16 * 8];
     Yuv444p16Frame::try_new_checked(&y, &u, &v, 16, 8, 16, 16, 16)
       .expect("every u16 value is in range at 16 bits");
+  }
+
+  // ---- Yuv440p10/12 checked-constructor tests ---------------------------
+
+  fn p440_planes_10bit() -> (std::vec::Vec<u16>, std::vec::Vec<u16>, std::vec::Vec<u16>) {
+    // 4:4:0: chroma is FULL-width × HALF-height (8 / 2 = 4 chroma rows).
+    let y = std::vec![64u16; 16 * 8];
+    let u = std::vec![512u16; 16 * 4];
+    let v = std::vec![512u16; 16 * 4];
+    (y, u, v)
+  }
+
+  #[test]
+  fn yuv440p10_try_new_checked_accepts_in_range_samples() {
+    let (y, u, v) = p440_planes_10bit();
+    let f = Yuv440p10Frame::try_new_checked(&y, &u, &v, 16, 8, 16, 16, 16).expect("valid 10-bit");
+    assert_eq!(f.width(), 16);
+    assert_eq!(f.bits(), 10);
+  }
+
+  #[test]
+  fn yuv440p10_try_new_checked_rejects_y_high_bit_set() {
+    let mut y = std::vec![0u16; 16 * 8];
+    y[2 * 16 + 9] = 0x8000;
+    let u = std::vec![512u16; 16 * 4];
+    let v = std::vec![512u16; 16 * 4];
+    let e = Yuv440p10Frame::try_new_checked(&y, &u, &v, 16, 8, 16, 16, 16).unwrap_err();
+    assert!(matches!(
+      e,
+      Yuv420pFrame16Error::SampleOutOfRange {
+        plane: Yuv420pFrame16Plane::Y,
+        value: 0x8000,
+        max_valid: 1023,
+        ..
+      }
+    ));
+  }
+
+  #[test]
+  fn yuv440p10_try_new_checked_rejects_u_plane_sample_in_full_width_chroma() {
+    // 4:4:0-specific: chroma is full-width × half-height. Plant the
+    // bad sample at column 13 (would be out of range for half-width
+    // 4:2:0/4:2:2 chroma) on the last chroma row (index 3 for height
+    // 8 ⇒ 4 chroma rows).
+    let y = std::vec![0u16; 16 * 8];
+    let mut u = std::vec![512u16; 16 * 4];
+    u[3 * 16 + 13] = 1024;
+    let v = std::vec![512u16; 16 * 4];
+    let e = Yuv440p10Frame::try_new_checked(&y, &u, &v, 16, 8, 16, 16, 16).unwrap_err();
+    assert!(matches!(
+      e,
+      Yuv420pFrame16Error::SampleOutOfRange {
+        plane: Yuv420pFrame16Plane::U,
+        value: 1024,
+        max_valid: 1023,
+        ..
+      }
+    ));
+  }
+
+  #[test]
+  fn yuv440p10_try_new_checked_rejects_v_plane_sample() {
+    let y = std::vec![0u16; 16 * 8];
+    let u = std::vec![512u16; 16 * 4];
+    let mut v = std::vec![512u16; 16 * 4];
+    v[3 * 16 + 15] = 0xFFFF; // last chroma sample of the last chroma row
+    let e = Yuv440p10Frame::try_new_checked(&y, &u, &v, 16, 8, 16, 16, 16).unwrap_err();
+    assert!(matches!(
+      e,
+      Yuv420pFrame16Error::SampleOutOfRange {
+        plane: Yuv420pFrame16Plane::V,
+        ..
+      }
+    ));
+  }
+
+  #[test]
+  fn yuv440p12_try_new_checked_rejects_above_4095() {
+    let mut y = std::vec![2048u16; 16 * 8];
+    y[42] = 4096; // just above 12-bit max
+    let u = std::vec![2048u16; 16 * 4];
+    let v = std::vec![2048u16; 16 * 4];
+    let e = Yuv440p12Frame::try_new_checked(&y, &u, &v, 16, 8, 16, 16, 16).unwrap_err();
+    assert!(matches!(
+      e,
+      Yuv420pFrame16Error::SampleOutOfRange {
+        value: 4096,
+        max_valid: 4095,
+        ..
+      }
+    ));
   }
 }

@@ -3507,6 +3507,100 @@ mod tests {
     check_p10_u16_equivalence(1920, ColorMatrix::Bt2020Ncl, false);
   }
 
+  // ---- yuv420p_n<BITS> scalar-equivalence (BITS=9 coverage) -------------
+  //
+  // Const-generic siblings of the BITS=10 helpers above. Used to pin
+  // the BITS=9 4:2:0 SIMD path against scalar — Yuv420p9 / Yuv422p9
+  // both dispatch into the same `yuv_420p_n_to_rgb_*<9>` kernels.
+
+  fn p_n_plane<const BITS: u32>(n: usize, seed: usize) -> std::vec::Vec<u16> {
+    let mask = ((1u32 << BITS) - 1) as u16;
+    (0..n)
+      .map(|i| ((i.wrapping_mul(seed).wrapping_add(seed * 3)) as u16) & mask)
+      .collect()
+  }
+
+  fn check_p_n_u8_equivalence<const BITS: u32>(
+    width: usize,
+    matrix: ColorMatrix,
+    full_range: bool,
+  ) {
+    let y = p_n_plane::<BITS>(width, 37);
+    let u = p_n_plane::<BITS>(width / 2, 53);
+    let v = p_n_plane::<BITS>(width / 2, 71);
+    let mut rgb_scalar = std::vec![0u8; width * 3];
+    let mut rgb_neon = std::vec![0u8; width * 3];
+
+    scalar::yuv_420p_n_to_rgb_row::<BITS>(&y, &u, &v, &mut rgb_scalar, width, matrix, full_range);
+    unsafe {
+      yuv_420p_n_to_rgb_row::<BITS>(&y, &u, &v, &mut rgb_neon, width, matrix, full_range);
+    }
+    assert_eq!(
+      rgb_scalar, rgb_neon,
+      "NEON yuv_420p_n<{BITS}>→u8 diverges (width={width}, matrix={matrix:?}, full_range={full_range})"
+    );
+  }
+
+  fn check_p_n_u16_equivalence<const BITS: u32>(
+    width: usize,
+    matrix: ColorMatrix,
+    full_range: bool,
+  ) {
+    let y = p_n_plane::<BITS>(width, 37);
+    let u = p_n_plane::<BITS>(width / 2, 53);
+    let v = p_n_plane::<BITS>(width / 2, 71);
+    let mut rgb_scalar = std::vec![0u16; width * 3];
+    let mut rgb_neon = std::vec![0u16; width * 3];
+
+    scalar::yuv_420p_n_to_rgb_u16_row::<BITS>(
+      &y,
+      &u,
+      &v,
+      &mut rgb_scalar,
+      width,
+      matrix,
+      full_range,
+    );
+    unsafe {
+      yuv_420p_n_to_rgb_u16_row::<BITS>(&y, &u, &v, &mut rgb_neon, width, matrix, full_range);
+    }
+    assert_eq!(
+      rgb_scalar, rgb_neon,
+      "NEON yuv_420p_n<{BITS}>→u16 diverges (width={width}, matrix={matrix:?}, full_range={full_range})"
+    );
+  }
+
+  #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
+  fn neon_yuv420p9_matches_scalar_all_matrices_and_ranges() {
+    for m in [
+      ColorMatrix::Bt601,
+      ColorMatrix::Bt709,
+      ColorMatrix::Bt2020Ncl,
+      ColorMatrix::Smpte240m,
+      ColorMatrix::Fcc,
+      ColorMatrix::YCgCo,
+    ] {
+      for full in [true, false] {
+        check_p_n_u8_equivalence::<9>(16, m, full);
+        check_p_n_u16_equivalence::<9>(16, m, full);
+      }
+    }
+  }
+
+  #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
+  fn neon_yuv420p9_matches_scalar_tail_and_large_widths() {
+    // Tail widths force scalar fallback past the SIMD main loop;
+    // 1920 is one full HD luma row.
+    for w in [18usize, 30, 34, 1922] {
+      check_p_n_u8_equivalence::<9>(w, ColorMatrix::Bt601, false);
+      check_p_n_u16_equivalence::<9>(w, ColorMatrix::Bt709, true);
+    }
+    check_p_n_u8_equivalence::<9>(1920, ColorMatrix::Bt709, false);
+    check_p_n_u16_equivalence::<9>(1920, ColorMatrix::Bt2020Ncl, false);
+  }
+
   /// Out‑of‑range regression: every kernel AND‑masks each `u16` load
   /// to the low `BITS` bits, so **arbitrary** upper‑bit corruption
   /// (not just p010 packing) produces scalar/NEON bit‑identical
