@@ -2332,6 +2332,26 @@ mod overflow_tests {
   #[cfg(target_pointer_width = "32")]
   #[test]
   #[should_panic(expected = "overflows usize")]
+  fn yuv_444_dispatcher_rejects_width_times_3_overflow() {
+    let y: [u8; 0] = [];
+    let u: [u8; 0] = [];
+    let v: [u8; 0] = [];
+    let mut rgb: [u8; 0] = [];
+    yuv_444_to_rgb_row(
+      &y,
+      &u,
+      &v,
+      &mut rgb,
+      OVERFLOW_WIDTH,
+      ColorMatrix::Bt601,
+      true,
+      false,
+    );
+  }
+
+  #[cfg(target_pointer_width = "32")]
+  #[test]
+  #[should_panic(expected = "overflows usize")]
   fn nv12_dispatcher_rejects_width_times_3_overflow() {
     let y: [u8; 0] = [];
     let uv: [u8; 0] = [];
