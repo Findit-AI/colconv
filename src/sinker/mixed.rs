@@ -10550,8 +10550,8 @@ mod tests {
     .unwrap();
     // Interior should be exactly red.
     let wu = w as usize;
-    for y in 1..(h as usize) - 1 {
-      for x in 1..wu - 1 {
+    for y in 0..(h as usize) {
+      for x in 0..wu {
         let i = (y * wu + x) * 3;
         assert_eq!(rgb[i], 255, "px ({x},{y}) R");
         assert_eq!(rgb[i + 1], 0, "px ({x},{y}) G");
@@ -10615,8 +10615,8 @@ mod tests {
     .unwrap();
     // Pure red at interior → H = 0 (red), S = 255 (max), V = 255.
     let wu = w as usize;
-    for y in 1..(h as usize) - 1 {
-      for x in 1..wu - 1 {
+    for y in 0..(h as usize) {
+      for x in 0..wu {
         let i = y * wu + x;
         assert_eq!(hh[i], 0, "px ({x},{y}) H");
         assert_eq!(ss[i], 255, "px ({x},{y}) S");
@@ -10648,8 +10648,8 @@ mod tests {
     )
     .unwrap();
     let wu = w as usize;
-    for y in 1..(h as usize) - 1 {
-      for x in 1..wu - 1 {
+    for y in 0..(h as usize) {
+      for x in 0..wu {
         let i = (y * wu + x) * 3;
         assert_eq!(rgb[i], 255, "px ({x},{y}) R");
         assert_eq!(rgb[i + 1], 0, "px ({x},{y}) G");
@@ -10682,8 +10682,8 @@ mod tests {
     .unwrap();
     // Low-packed 12-bit white = 4095 at interior.
     let wu = w as usize;
-    for y in 1..(h as usize) - 1 {
-      for x in 1..wu - 1 {
+    for y in 0..(h as usize) {
+      for x in 0..wu {
         let i = (y * wu + x) * 3;
         assert_eq!(rgb[i], 4095, "px ({x},{y}) R");
         assert_eq!(rgb[i + 1], 0, "px ({x},{y}) G");
@@ -10719,8 +10719,8 @@ mod tests {
     )
     .unwrap();
     let wu = w as usize;
-    for y in 1..(h as usize) - 1 {
-      for x in 1..wu - 1 {
+    for y in 0..(h as usize) {
+      for x in 0..wu {
         let i = (y * wu + x) * 3;
         assert_eq!(rgb_u8[i], 255);
         assert_eq!(rgb_u16[i], 4095);

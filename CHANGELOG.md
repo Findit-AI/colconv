@@ -68,14 +68,18 @@ scheduled as a dedicated follow-up PR (`feat/bayer-simd`).
 
 ### Tests
 
-- 15 frame-validation tests (8-bit + high-bit-depth, including
-  `try_new_checked` low-bit-set rejection).
+- Frame-validation tests (8-bit + high-bit-depth, including
+  `try_new_checked` rejecting samples whose value exceeds
+  `(1 << BITS) - 1` under the low-packed convention).
 - 5 type-helper tests (WB / CCM defaults, fuse arithmetic).
 - 11 end-to-end walker + kernel tests (8-bit + 12-bit, solid R / G
   / B channels, uniform-byte invariant, pattern swap RGGB↔BGGR,
-  walker row-count). Solid-channel assertions cover the interior
-  `[1, h-2] × [1, w-2]`; clamp-induced edge bleed is the standard
-  bilinear-edge tradeoff.
+  walker row-count). Solid-channel assertions cover the **full
+  frame** including borders — boundary handling uses mirror-by-2
+  (`row -1 → row 1`, `row h → row h-2`, same on columns) which
+  preserves CFA parity, so a constant-channel Bayer mosaic stays
+  constant everywhere instead of bleeding wrong-color samples into
+  the missing-channel averages at edges.
 
 ## Ship 7 — u16 semi-planar 4:2:2 / 4:4:4 (P210 / P212 / P216 / P410 / P412 / P416)
 

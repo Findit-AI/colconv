@@ -4730,8 +4730,8 @@ impl<'a, const BITS: u32> BayerFrame16<'a, BITS> {
   }
 }
 
-/// Type alias for a 10-bit Bayer frame
-/// (`AV_PIX_FMT_BAYER_*16LE` content with low 6 bits zero).
+/// Type alias for a 10-bit Bayer frame — low-packed `u16` samples
+/// with values in `[0, 1023]` (the high 6 bits are zero).
 pub type Bayer10Frame<'a> = BayerFrame16<'a, 10>;
 /// Type alias for a 12-bit Bayer frame.
 pub type Bayer12Frame<'a> = BayerFrame16<'a, 12>;

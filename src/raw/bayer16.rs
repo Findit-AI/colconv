@@ -173,8 +173,18 @@ pub fn bayer16_to<const BITS: u32, S: BayerSink16<BITS>>(
   let plane = src.data();
 
   for row in 0..h {
-    let above_row = if row == 0 { 0 } else { row - 1 };
-    let below_row = if row + 1 == h { h - 1 } else { row + 1 };
+    // Mirror-by-2 row clamp; see [`super::bayer::bayer_to`] for
+    // the rationale (CFA-parity preservation at boundaries).
+    let above_row = if row == 0 {
+      if h >= 2 { 1 } else { 0 }
+    } else {
+      row - 1
+    };
+    let below_row = if row + 1 == h {
+      if h >= 2 { h - 2 } else { h - 1 }
+    } else {
+      row + 1
+    };
 
     let above = &plane[above_row * stride..above_row * stride + w];
     let mid = &plane[row * stride..row * stride + w];
@@ -295,11 +305,11 @@ mod tests {
     data
   }
 
-  fn assert_interior_u8(rgb: &[u8], w: u32, h: u32, expect: (u8, u8, u8)) {
+  fn assert_full_frame_u8(rgb: &[u8], w: u32, h: u32, expect: (u8, u8, u8)) {
     let w = w as usize;
     let h = h as usize;
-    for y in 1..h - 1 {
-      for x in 1..w - 1 {
+    for y in 0..h {
+      for x in 0..w {
         let i = (y * w + x) * 3;
         assert_eq!(rgb[i], expect.0, "u8 px ({x},{y}) R");
         assert_eq!(rgb[i + 1], expect.1, "u8 px ({x},{y}) G");
@@ -308,11 +318,11 @@ mod tests {
     }
   }
 
-  fn assert_interior_u16(rgb: &[u16], w: u32, h: u32, expect: (u16, u16, u16)) {
+  fn assert_full_frame_u16(rgb: &[u16], w: u32, h: u32, expect: (u16, u16, u16)) {
     let w = w as usize;
     let h = h as usize;
-    for y in 1..h - 1 {
-      for x in 1..w - 1 {
+    for y in 0..h {
+      for x in 0..w {
         let i = (y * w + x) * 3;
         assert_eq!(rgb[i], expect.0, "u16 px ({x},{y}) R");
         assert_eq!(rgb[i + 1], expect.1, "u16 px ({x},{y}) G");
@@ -322,8 +332,10 @@ mod tests {
   }
 
   #[test]
-  fn bayer12_solid_red_rggb_yields_u8_red_interior() {
+  fn bayer12_solid_red_rggb_yields_u8_red_full_frame() {
     // 12-bit max = 4095. R = 4095 (white at this channel), G = B = 0.
+    // Mirror-by-2 boundary handling means every output pixel
+    // matches, including borders and corners.
     let (w, h) = (8u32, 6u32);
     let raw = solid_rggb_12bit(w, h, 4095, 0, 0);
     let frame = Bayer12Frame::try_new(&raw, w, h, w).unwrap();
@@ -341,12 +353,11 @@ mod tests {
       &mut sink,
     )
     .unwrap();
-    assert_interior_u8(&rgb, w, h, (255, 0, 0));
+    assert_full_frame_u8(&rgb, w, h, (255, 0, 0));
   }
 
   #[test]
-  fn bayer12_solid_red_rggb_yields_u16_red_interior() {
-    // 12-bit u16 output: max = 4095 (low-packed), so red site → 4095.
+  fn bayer12_solid_red_rggb_yields_u16_red_full_frame() {
     let (w, h) = (8u32, 6u32);
     let raw = solid_rggb_12bit(w, h, 4095, 0, 0);
     let frame = Bayer12Frame::try_new(&raw, w, h, w).unwrap();
@@ -364,7 +375,7 @@ mod tests {
       &mut sink,
     )
     .unwrap();
-    assert_interior_u16(&rgb, w, h, (4095, 0, 0));
+    assert_full_frame_u16(&rgb, w, h, (4095, 0, 0));
   }
 
   #[test]

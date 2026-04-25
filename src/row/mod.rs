@@ -2895,14 +2895,15 @@ pub fn bayer_to_rgb_row(
   scalar::bayer_to_rgb_row(above, mid, below, row_parity, pattern, demosaic, m, rgb_out);
 }
 
-/// Converts one row of a 10/12/14/16-bit MSB-aligned Bayer plane
-/// to packed `u8` RGB.
+/// Converts one row of a 10/12/14/16-bit **low-packed** Bayer
+/// plane to packed `u8` RGB.
 ///
-/// `BITS` ∈ {10, 12, 14, 16}; samples are MSB-aligned `u16`. `m`
-/// is the unscaled `CCM · diag(wb)` — the kernel bakes the
-/// input→u8 rescale (`255 / max_msb`) at output time. `above` /
-/// `mid` / `below` must all be the same length; `rgb_out` must
-/// have at least `3 * mid.len()` bytes.
+/// `BITS` ∈ {10, 12, 14, 16}; samples are low-packed `u16` (active
+/// values in the low `BITS` bits, range `[0, (1 << BITS) - 1]`).
+/// `m` is the unscaled `CCM · diag(wb)` — the kernel bakes the
+/// input→u8 rescale (`255 / ((1 << BITS) - 1)`) at output time.
+/// `above` / `mid` / `below` must all be the same length;
+/// `rgb_out` must have at least `3 * mid.len()` bytes.
 ///
 /// **`use_simd` is currently a no-op** (see
 /// [`bayer_to_rgb_row`] for the deferred-SIMD note).
@@ -2934,12 +2935,13 @@ pub fn bayer16_to_rgb_row<const BITS: u32>(
   scalar::bayer16_to_rgb_row::<BITS>(above, mid, below, row_parity, pattern, demosaic, m, rgb_out);
 }
 
-/// Converts one row of a 10/12/14/16-bit MSB-aligned Bayer plane
-/// to packed `u16` RGB (low-packed at `BITS`).
+/// Converts one row of a 10/12/14/16-bit **low-packed** Bayer
+/// plane to packed `u16` RGB (also low-packed at `BITS`).
 ///
-/// `BITS` ∈ {10, 12, 14, 16}. Output range: `[0, (1 << BITS) - 1]`
-/// per channel. `above` / `mid` / `below` must all be the same
-/// length; `rgb_out` must have at least `3 * mid.len()` `u16`
+/// `BITS` ∈ {10, 12, 14, 16}. Input and output share the same
+/// low-packed range `[0, (1 << BITS) - 1]` per channel — no
+/// rescale, just clamp. `above` / `mid` / `below` must all be the
+/// same length; `rgb_out` must have at least `3 * mid.len()` `u16`
 /// elements.
 ///
 /// **`use_simd` is currently a no-op** (see

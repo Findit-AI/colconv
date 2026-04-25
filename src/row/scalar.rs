@@ -1666,8 +1666,24 @@ where
   let center = read(BayerRowSel::Mid, x);
   let n = read(BayerRowSel::Above, x);
   let s = read(BayerRowSel::Below, x);
-  let w_idx = if x == 0 { 0 } else { x - 1 };
-  let e_idx = if x + 1 == width { width - 1 } else { x + 1 };
+  // **Mirror-by-2** column clamp. Replicate clamp (`x = 0 → x`,
+  // `x = w-1 → x`) breaks Bayer parity: at column 0 of an RGGB
+  // R-site, the "west" tap would read the same R sample as the
+  // center, contaminating the G average with red. Mirror-by-2
+  // (`-1 → 1`, `w → w-2`) preserves parity because Bayer tiles in
+  // 2×2, so skipping two columns lands on the same CFA color the
+  // missing-tap site would have provided. Falls back to replicate
+  // when `width < 2` (no useful Bayer interpretation at that size).
+  let w_idx = if x == 0 {
+    if width >= 2 { 1 } else { 0 }
+  } else {
+    x - 1
+  };
+  let e_idx = if x + 1 == width {
+    if width >= 2 { width - 2 } else { width - 1 }
+  } else {
+    x + 1
+  };
   let west = read(BayerRowSel::Mid, w_idx);
   let east = read(BayerRowSel::Mid, e_idx);
   let nw = read(BayerRowSel::Above, w_idx);

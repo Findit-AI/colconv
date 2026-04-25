@@ -152,9 +152,21 @@ pub fn bayer_to<S: BayerSink>(
   let plane = src.data();
 
   for row in 0..h {
-    // Top-edge / bottom-edge replicate clamp.
-    let above_row = if row == 0 { 0 } else { row - 1 };
-    let below_row = if row + 1 == h { h - 1 } else { row + 1 };
+    // **Mirror-by-2** row clamp at the top / bottom edges. See the
+    // [`scalar::bayer_to_rgb_row`] kernel docs for the rationale
+    // (preserves CFA parity across the boundary; replicate clamp
+    // would mix wrong-color samples into the missing-channel
+    // averages). Falls back to replicate when `h < 2`.
+    let above_row = if row == 0 {
+      if h >= 2 { 1 } else { 0 }
+    } else {
+      row - 1
+    };
+    let below_row = if row + 1 == h {
+      if h >= 2 { h - 2 } else { h - 1 }
+    } else {
+      row + 1
+    };
 
     let above = &plane[above_row * stride..above_row * stride + w];
     let mid = &plane[row * stride..row * stride + w];
@@ -231,18 +243,16 @@ mod tests {
     data
   }
 
-  /// Walk only the interior (rows `[1, h-2]`, cols `[1, w-2]`)
-  /// where edge-clamp artifacts don't apply, and assert the
-  /// expected RGB triple at every site. Documented edge behavior:
-  /// at edges, the clamp replicates the sampled color and
-  /// contaminates the demosaic average, which is the standard
-  /// bilinear-edge tradeoff every libdc1394 / OpenCV / RawTherapee
-  /// scalar reference also exhibits.
-  fn assert_interior(rgb: &[u8], w: u32, h: u32, expect: (u8, u8, u8)) {
+  /// Assert every output pixel — **including the borders** —
+  /// matches the expected RGB triple. Mirror-by-2 boundary handling
+  /// preserves CFA parity, so a solid-channel Bayer mosaic stays
+  /// solid across the full frame (no clamp-induced channel bleed
+  /// at the edges or corners).
+  fn assert_full_frame(rgb: &[u8], w: u32, h: u32, expect: (u8, u8, u8)) {
     let w = w as usize;
     let h = h as usize;
-    for y in 1..h - 1 {
-      for x in 1..w - 1 {
+    for y in 0..h {
+      for x in 0..w {
         let i = (y * w + x) * 3;
         assert_eq!(rgb[i], expect.0, "px ({x},{y}) R");
         assert_eq!(rgb[i + 1], expect.1, "px ({x},{y}) G");
@@ -252,7 +262,7 @@ mod tests {
   }
 
   #[test]
-  fn bayer_solid_red_rggb_neutral_wb_identity_ccm_yields_red_interior() {
+  fn bayer_solid_red_rggb_neutral_wb_identity_ccm_yields_red() {
     let (w, h) = (8u32, 6u32);
     let raw = solid_rggb(w, h, 255, 0, 0);
     let frame = BayerFrame::try_new(&raw, w, h, w).unwrap();
@@ -270,11 +280,11 @@ mod tests {
       &mut sink,
     )
     .unwrap();
-    assert_interior(&rgb, w, h, (255, 0, 0));
+    assert_full_frame(&rgb, w, h, (255, 0, 0));
   }
 
   #[test]
-  fn bayer_solid_green_rggb_yields_green_interior() {
+  fn bayer_solid_green_rggb_yields_green() {
     let (w, h) = (8u32, 6u32);
     let raw = solid_rggb(w, h, 0, 255, 0);
     let frame = BayerFrame::try_new(&raw, w, h, w).unwrap();
@@ -292,11 +302,11 @@ mod tests {
       &mut sink,
     )
     .unwrap();
-    assert_interior(&rgb, w, h, (0, 255, 0));
+    assert_full_frame(&rgb, w, h, (0, 255, 0));
   }
 
   #[test]
-  fn bayer_solid_blue_rggb_yields_blue_interior() {
+  fn bayer_solid_blue_rggb_yields_blue() {
     let (w, h) = (8u32, 6u32);
     let raw = solid_rggb(w, h, 0, 0, 255);
     let frame = BayerFrame::try_new(&raw, w, h, w).unwrap();
@@ -314,7 +324,7 @@ mod tests {
       &mut sink,
     )
     .unwrap();
-    assert_interior(&rgb, w, h, (0, 0, 255));
+    assert_full_frame(&rgb, w, h, (0, 0, 255));
   }
 
   #[test]
@@ -346,7 +356,7 @@ mod tests {
   }
 
   #[test]
-  fn bayer_pattern_swap_red_to_blue_interior() {
+  fn bayer_pattern_swap_red_to_blue() {
     // RGGB plane filled to look red, decoded with BGGR pattern,
     // should come out blue at interior sites (R↔B swap).
     let (w, h) = (8u32, 6u32);
@@ -366,7 +376,7 @@ mod tests {
       &mut sink,
     )
     .unwrap();
-    assert_interior(&rgb, w, h, (0, 0, 255));
+    assert_full_frame(&rgb, w, h, (0, 0, 255));
   }
 
   #[test]
@@ -401,10 +411,10 @@ mod tests {
   }
 
   #[test]
-  fn bayer_walker_handles_odd_width_and_height() {
-    // 15×7 RGGB-tiled solid red. Demosaic must run end-to-end
-    // without panicking; interior pixels (rows 1..h-1, cols 1..w-1)
-    // still match the expected channel.
+  fn bayer_walker_handles_odd_width_and_height_full_frame() {
+    // 15×7 RGGB-tiled solid red. Mirror-by-2 boundary handling
+    // means every output pixel — interior and border — should
+    // match the expected channel.
     let (w, h) = (15u32, 7u32);
     let raw = solid_rggb(w, h, 255, 0, 0);
     let frame = BayerFrame::try_new(&raw, w, h, w).unwrap();
@@ -422,16 +432,33 @@ mod tests {
       &mut sink,
     )
     .unwrap();
-    let wu = w as usize;
-    let hu = h as usize;
-    for y in 1..hu - 1 {
-      for x in 1..wu - 1 {
-        let i = (y * wu + x) * 3;
-        assert_eq!(rgb[i], 255, "odd-dim px ({x},{y}) R");
-        assert_eq!(rgb[i + 1], 0, "odd-dim px ({x},{y}) G");
-        assert_eq!(rgb[i + 2], 0, "odd-dim px ({x},{y}) B");
-      }
-    }
+    assert_full_frame(&rgb, w, h, (255, 0, 0));
+  }
+
+  #[test]
+  fn bayer_walker_handles_2x2_minimum_tile() {
+    // 2×2 RGGB-filled red. Smallest frame that still has a
+    // complete CFA tile. Mirror-by-2 maps `row -1 → row 1` and
+    // `row 2 → row 0`, so each row of the 2-row frame uses the
+    // other row as both `above` and `below`. Same for columns.
+    // Full frame should be solid red.
+    let raw = solid_rggb(2, 2, 255, 0, 0);
+    let frame = BayerFrame::try_new(&raw, 2, 2, 2).unwrap();
+    let mut rgb = std::vec![0u8; 2 * 2 * 3];
+    let mut sink = CaptureRgb {
+      out: &mut rgb,
+      width: 0,
+    };
+    bayer_to(
+      &frame,
+      BayerPattern::Rggb,
+      BayerDemosaic::Bilinear,
+      WhiteBalance::neutral(),
+      ColorCorrectionMatrix::identity(),
+      &mut sink,
+    )
+    .unwrap();
+    assert_full_frame(&rgb, 2, 2, (255, 0, 0));
   }
 
   #[test]
