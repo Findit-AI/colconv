@@ -15,4 +15,4 @@
 pub mod mixed;
 
 #[cfg(any(feature = "std", feature = "alloc"))]
-pub use mixed::MixedSinker;
+pub use mixed::{LumaCoefficients, MixedSinker};

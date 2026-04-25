@@ -484,7 +484,118 @@ pub struct MixedSinker<'a, F: SourceFormat> {
   /// to `true`; benchmarks flip this with [`Self::with_simd`] /
   /// [`Self::set_simd`] to A/B test scalar vs SIMD on the same frame.
   simd: bool,
+  /// Q8 fixed-point luma coefficients `(cr, cg, cb)` such that
+  /// `luma = ((cr * R + cg * G + cb * B + 128) >> 8) as u8`. Only
+  /// consulted by source impls that *derive* luma from RGB
+  /// (currently the `Bayer` / `Bayer16<BITS>` family — YUV impls
+  /// memcpy from the native Y plane and ignore this field).
+  /// Default: BT.709 `(54, 183, 19)`.
+  luma_coefficients_q8: (u32, u32, u32),
   _fmt: PhantomData<F>,
+}
+
+/// Luma coefficient set for sources that derive luma from RGB.
+///
+/// Only consulted by `MixedSinker` impls whose source is *not* YUV
+/// (currently the Bayer / Bayer16 family — YUV impls memcpy from
+/// the native Y plane). For Bayer the choice should match the
+/// gamut your [`crate::raw::ColorCorrectionMatrix`] targets:
+///
+/// - CCM target = Rec.709 / sRGB → use [`Self::Bt709`] (the default)
+/// - CCM target = Rec.2020 (UHDTV / HDR10) → use [`Self::Bt2020`]
+/// - CCM target = DCI-P3 (cinema) → use [`Self::DciP3`]
+/// - CCM target = ACEScg / ACES AP1 → use [`Self::AcesAp1`]
+/// - CCM target = SDTV (rare for RAW) → use [`Self::Bt601`]
+/// - CCM target = something else, or you've measured your own
+///   weights → use [`Self::Custom`]
+///
+/// Picking the wrong set still produces a **valid** luma plane,
+/// but its numeric values won't match what a downstream
+/// luma-driven analysis (scene-cut detection, brightness
+/// thresholding, perceptual diff) expects for non-grayscale
+/// content. Uniform-gray content is unaffected — every coefficient
+/// set agrees on gray.
+///
+/// Each variant resolves to a Q8 `(cr, cg, cb)` triple summing to
+/// `256` so `(cr * R + cg * G + cb * B + 128) >> 8` produces
+/// `u8` luma without bias. The triples come from each standard's
+/// published coefficients rounded to nearest u32.
+#[derive(Debug, Clone, Copy, PartialEq, IsVariant)]
+#[non_exhaustive]
+pub enum LumaCoefficients {
+  /// **BT.709 / sRGB** (`R=0.2126, G=0.7152, B=0.0722`) → Q8
+  /// `(54, 183, 19)`. The default; most common output gamut and
+  /// the implicit weights every YUV→RGB→luma video pipeline uses.
+  Bt709,
+  /// **BT.2020 / Rec.2020** (`R=0.2627, G=0.6780, B=0.0593`) → Q8
+  /// `(67, 174, 15)`. UHDTV / HDR10 / Rec.2100 (HLG, PQ).
+  Bt2020,
+  /// **BT.601 / SMPTE 170M** (`R=0.2990, G=0.5870, B=0.1140`) →
+  /// Q8 `(77, 150, 29)`. Legacy SDTV / NTSC / PAL. Rare for RAW
+  /// pipelines but included for completeness.
+  Bt601,
+  /// **DCI-P3** (`R=0.228975, G=0.691739, B=0.079287`) → Q8
+  /// `(59, 177, 20)`. Theatrical / cinema P3 displays. Note the
+  /// **D65 white point** is the same as Rec.709, so for
+  /// luma-only purposes this is close to `Bt709` (within ~1 LSB
+  /// for most content).
+  DciP3,
+  /// **ACES AP1 / ACEScg** (`R=0.2722287, G=0.6740818,
+  /// B=0.0536895`) → Q8 `(70, 172, 14)`. Cinema grading working
+  /// space. Numerically very close to BT.2020. (Naïve nearest
+  /// rounding gives `(70, 173, 14)` which sums to 257; the `cg`
+  /// term is rounded down by 1 LSB so the triple sums to 256
+  /// without biasing the `>> 8` divisor.)
+  AcesAp1,
+  /// Caller-supplied coefficients. Each is a non-negative `f32`;
+  /// they should sum to `~1.0` (the constructor doesn't enforce
+  /// this — out-of-spec sums produce a brightness-scaled luma
+  /// plane). Resolves to Q8 by `(coef * 256 + 0.5) as u32`.
+  Custom {
+    /// Red weight.
+    r: f32,
+    /// Green weight.
+    g: f32,
+    /// Blue weight.
+    b: f32,
+  },
+}
+
+impl LumaCoefficients {
+  /// Resolves the coefficient set to its Q8 fixed-point triple
+  /// `(cr, cg, cb)` such that
+  /// `luma = ((cr * R + cg * G + cb * B + 128) >> 8) as u8`. The
+  /// preset triples come from each standard's published weights
+  /// rounded to nearest u32 and (for the published presets) sum
+  /// to exactly `256`.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn to_q8(self) -> (u32, u32, u32) {
+    match self {
+      Self::Bt709 => (54, 183, 19),
+      Self::Bt2020 => (67, 174, 15),
+      Self::Bt601 => (77, 150, 29),
+      Self::DciP3 => (59, 177, 20),
+      // Naïve nearest rounding gives `(70, 173, 14)` which sums
+      // to 257; the `>> 8` divisor implicitly assumes 256, so we
+      // shave 1 LSB off `cg` (the largest, smallest-relative-
+      // -error coefficient). Resulting (R, G, B) error vs. the
+      // published weights is `(+0.0012, -0.0022, +0.0010)`.
+      Self::AcesAp1 => (70, 172, 14),
+      Self::Custom { r, g, b } => (
+        (r * 256.0 + 0.5) as u32,
+        (g * 256.0 + 0.5) as u32,
+        (b * 256.0 + 0.5) as u32,
+      ),
+    }
+  }
+}
+
+impl Default for LumaCoefficients {
+  /// Default is [`Self::Bt709`] — matches the implicit weights
+  /// every YUV-source → RGB → luma video pipeline uses.
+  fn default() -> Self {
+    Self::Bt709
+  }
 }
 
 impl<F: SourceFormat> MixedSinker<'_, F> {
@@ -505,6 +616,12 @@ impl<F: SourceFormat> MixedSinker<'_, F> {
       height,
       rgb_scratch: Vec::new(),
       simd: true,
+      // BT.709 by default — matches the implicit weights every
+      // YUV→RGB→luma pipeline uses, and is the most common Bayer
+      // CCM target. Per-format impls (`MixedSinker<Bayer>` etc.)
+      // expose `with_luma_coefficients` for callers whose CCM
+      // targets a different gamut.
+      luma_coefficients_q8: (54, 183, 19),
       _fmt: PhantomData,
     }
   }
@@ -6396,20 +6513,24 @@ fn check_dimensions_match(
   Ok(())
 }
 
-/// BT.709 luma derivation from packed `R, G, B` u8 row.
+/// Configurable-coefficients luma derivation from packed
+/// `R, G, B` u8 row.
 ///
-/// Q8 fixed-point: `Y ≈ 0.2126·R + 0.7152·G + 0.0722·B`, scaled to
-/// the `(54, 183, 19)` integer triple with `+128 >> 8` round-to-
-/// nearest. `rgb` carries `3 * luma.len()` packed bytes; the loop
-/// writes one luma sample per pixel.
+/// Q8 fixed-point: `Y ≈ (cr·R + cg·G + cb·B + 128) >> 8`, where
+/// `(cr, cg, cb)` is the caller's [`LumaCoefficients`] resolved
+/// via [`LumaCoefficients::to_q8`]. The presets all sum to `256`
+/// so the divisor is implicit in the `>> 8`. `rgb` carries
+/// `3 * luma.len()` packed bytes; the loop writes one luma
+/// sample per pixel.
 ///
 /// Used by Bayer / Bayer16 [`MixedSinker`] paths whose source has
-/// no native luma plane to memcpy from. The other (YUV) source
-/// impls take their luma directly off the Y plane and don't go
-/// through this helper.
+/// no native luma plane to memcpy from. YUV source impls take
+/// their luma directly off the Y plane and don't go through this
+/// helper, so they don't need a configurable coefficient set —
+/// the source's `ColorMatrix` already fixed it at encode time.
 #[cfg_attr(not(tarpaulin), inline(always))]
-fn rgb_row_to_bt709_luma_row(rgb: &[u8], luma: &mut [u8]) {
-  // Caller's contract: `rgb` packs `3 * luma.len()` bytes. The two
+fn rgb_row_to_luma_row(rgb: &[u8], luma: &mut [u8], coeffs_q8: (u32, u32, u32)) {
+  // Caller's contract: `rgb` packs `3 * luma.len()` bytes. The
   // current callers (`MixedSinker<Bayer>` and
   // `MixedSinker<Bayer16<BITS>>`) both slice their `luma` and
   // `rgb_row` from the same `width`, so the relationship holds
@@ -6428,24 +6549,48 @@ fn rgb_row_to_bt709_luma_row(rgb: &[u8], luma: &mut [u8]) {
       .len()
       .checked_mul(3)
       .is_some_and(|need| rgb.len() >= need),
-    "rgb_row_to_bt709_luma_row: rgb.len()={} but need {} (= 3 × luma.len()={})",
+    "rgb_row_to_luma_row: rgb.len()={} but need {} (= 3 × luma.len()={})",
     rgb.len(),
-    // saturating_mul avoids triggering an overflow panic *inside*
-    // the format-args evaluation when `luma.len()` is itself
-    // pathological — the assertion's predicate already failed at
-    // that point, so reporting `usize::MAX` is fine.
     luma.len().saturating_mul(3),
     luma.len(),
   );
+  let (cr, cg, cb) = coeffs_q8;
   for (i, d) in luma.iter_mut().enumerate() {
     let r = rgb[3 * i] as u32;
     let g = rgb[3 * i + 1] as u32;
     let b = rgb[3 * i + 2] as u32;
-    *d = ((54 * r + 183 * g + 19 * b + 128) >> 8) as u8;
+    *d = ((cr * r + cg * g + cb * b + 128) >> 8).min(255) as u8;
   }
 }
 
 // ---- Bayer (8-bit) impl --------------------------------------------------
+
+impl MixedSinker<'_, Bayer> {
+  /// Sets the luma coefficient set used to derive the luma plane
+  /// from demosaiced RGB. Only matters when `with_luma` is also
+  /// attached. Default: [`LumaCoefficients::Bt709`].
+  ///
+  /// Pick the set that matches the gamut your
+  /// [`crate::raw::ColorCorrectionMatrix`] targets — see
+  /// [`LumaCoefficients`] for guidance. Choosing the wrong set
+  /// still produces a valid `u8` luma plane, but its numeric
+  /// values won't match what a downstream luma-driven analysis
+  /// (scene-cut detection, brightness thresholding, perceptual
+  /// diff) expects for non-grayscale content.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn with_luma_coefficients(mut self, coeffs: LumaCoefficients) -> Self {
+    self.set_luma_coefficients(coeffs);
+    self
+  }
+
+  /// In-place variant of
+  /// [`with_luma_coefficients`](Self::with_luma_coefficients).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn set_luma_coefficients(&mut self, coeffs: LumaCoefficients) -> &mut Self {
+    self.luma_coefficients_q8 = coeffs.to_q8();
+    self
+  }
+}
 
 impl BayerSink for MixedSinker<'_, Bayer> {}
 
@@ -6500,6 +6645,10 @@ impl PixelSink for MixedSinker<'_, Bayer> {
         configured_height: self.height,
       });
     }
+
+    // `Copy`, captured before the `Self { .. }` destructure so the
+    // luma path doesn't have to re-borrow `self`.
+    let luma_coeffs_q8 = self.luma_coefficients_q8;
 
     let Self {
       rgb,
@@ -6561,7 +6710,11 @@ impl PixelSink for MixedSinker<'_, Bayer> {
     );
 
     if let Some(luma) = luma.as_deref_mut() {
-      rgb_row_to_bt709_luma_row(rgb_row, &mut luma[one_plane_start..one_plane_end]);
+      rgb_row_to_luma_row(
+        rgb_row,
+        &mut luma[one_plane_start..one_plane_end],
+        luma_coeffs_q8,
+      );
     }
 
     if let Some(hsv) = hsv.as_mut() {
@@ -6610,6 +6763,31 @@ impl<'a, const BITS: u32> MixedSinker<'a, Bayer16<BITS>> {
     }
     self.rgb_u16 = Some(buf);
     Ok(self)
+  }
+
+  /// Sets the luma coefficient set used to derive the (8-bit)
+  /// luma plane from demosaiced RGB. Only matters when `with_luma`
+  /// is also attached. Default: [`LumaCoefficients::Bt709`].
+  ///
+  /// Pick the set that matches the gamut your
+  /// [`crate::raw::ColorCorrectionMatrix`] targets — see
+  /// [`LumaCoefficients`] for guidance. Choosing the wrong set
+  /// still produces a valid `u8` luma plane, but its numeric
+  /// values won't match what a downstream luma-driven analysis
+  /// (scene-cut detection, brightness thresholding, perceptual
+  /// diff) expects for non-grayscale content.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn with_luma_coefficients(mut self, coeffs: LumaCoefficients) -> Self {
+    self.set_luma_coefficients(coeffs);
+    self
+  }
+
+  /// In-place variant of
+  /// [`with_luma_coefficients`](Self::with_luma_coefficients).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn set_luma_coefficients(&mut self, coeffs: LumaCoefficients) -> &mut Self {
+    self.luma_coefficients_q8 = coeffs.to_q8();
+    self
   }
 }
 
@@ -6662,6 +6840,10 @@ impl<const BITS: u32> PixelSink for MixedSinker<'_, Bayer16<BITS>> {
         configured_height: self.height,
       });
     }
+
+    // `Copy`, captured before the `Self { .. }` destructure so the
+    // luma path doesn't have to re-borrow `self`.
+    let luma_coeffs_q8 = self.luma_coefficients_q8;
 
     let Self {
       rgb,
@@ -6748,7 +6930,11 @@ impl<const BITS: u32> PixelSink for MixedSinker<'_, Bayer16<BITS>> {
     );
 
     if let Some(luma) = luma.as_deref_mut() {
-      rgb_row_to_bt709_luma_row(rgb_row, &mut luma[one_plane_start..one_plane_end]);
+      rgb_row_to_luma_row(
+        rgb_row,
+        &mut luma[one_plane_start..one_plane_end],
+        luma_coeffs_q8,
+      );
     }
 
     if let Some(hsv) = hsv.as_mut() {
@@ -10828,5 +11014,233 @@ mod tests {
         ..
       }
     ));
+  }
+
+  // ---- Bayer luma-coefficients tests --------------------------------------
+  //
+  // Cover the gap that earlier `bayer_mixed_sinker_with_luma_uniform_byte`
+  // missed: every coefficient set agrees on gray, so a hard-coded BT.709
+  // path could go undetected. The non-gray cases below force the rows
+  // apart — solid red goes through `cr` only, so each variant produces a
+  // distinct luma value.
+
+  /// Resolve a [`LumaCoefficients`] preset and run a solid-red 8-bit
+  /// Bayer frame through it; return the `cr` actually applied.
+  fn bayer8_solid_red_luma(coeffs: LumaCoefficients) -> u8 {
+    use crate::{
+      frame::BayerFrame,
+      raw::{BayerDemosaic, BayerPattern, ColorCorrectionMatrix, WhiteBalance, bayer_to},
+    };
+    let (w, h) = (8u32, 6u32);
+    let raw = solid_rggb8(w, h, 255, 0, 0);
+    let frame = BayerFrame::try_new(&raw, w, h, w).unwrap();
+    let mut luma = std::vec![0u8; (w * h) as usize];
+    let mut sinker = MixedSinker::<Bayer>::new(w as usize, h as usize)
+      .with_luma(&mut luma)
+      .unwrap()
+      .with_luma_coefficients(coeffs);
+    bayer_to(
+      &frame,
+      BayerPattern::Rggb,
+      BayerDemosaic::Bilinear,
+      WhiteBalance::neutral(),
+      ColorCorrectionMatrix::identity(),
+      &mut sinker,
+    )
+    .unwrap();
+    let center = luma[(h as usize / 2) * (w as usize) + (w as usize / 2)];
+    for (i, &y) in luma.iter().enumerate() {
+      assert_eq!(
+        y, center,
+        "luma not uniform at idx {i}: {y} vs center {center}"
+      );
+    }
+    center
+  }
+
+  #[test]
+  fn bayer_with_luma_coefficients_solid_red_differs_by_preset() {
+    // Solid red after demosaic is `(255, 0, 0)` everywhere
+    // (`bayer_mixed_sinker_with_rgb_red_interior` proves this).
+    // Luma reduces to `(cr * 255 + 128) >> 8` for each preset, so
+    // each coefficient set must produce a different value. The
+    // hard-coded BT.709 bug Codex flagged would make these all 54.
+    let bt709 = bayer8_solid_red_luma(LumaCoefficients::Bt709);
+    let bt2020 = bayer8_solid_red_luma(LumaCoefficients::Bt2020);
+    let bt601 = bayer8_solid_red_luma(LumaCoefficients::Bt601);
+    let dcip3 = bayer8_solid_red_luma(LumaCoefficients::DciP3);
+    let aces = bayer8_solid_red_luma(LumaCoefficients::AcesAp1);
+
+    assert_eq!(bt709, 54, "BT.709 red luma");
+    assert_eq!(bt2020, 67, "BT.2020 red luma");
+    assert_eq!(bt601, 77, "BT.601 red luma");
+    assert_eq!(dcip3, 59, "DCI-P3 red luma");
+    assert_eq!(aces, 70, "ACES AP1 red luma");
+
+    // Distinct values guard against silent collapse to the default.
+    let mut all = std::vec![bt709, bt2020, bt601, dcip3, aces];
+    all.sort_unstable();
+    all.dedup();
+    assert_eq!(all.len(), 5, "presets collapsed to fewer values: {all:?}");
+  }
+
+  #[test]
+  fn bayer_with_luma_coefficients_custom_round_trips_to_q8() {
+    // Custom weights `(1.0, 0.0, 0.0)` → Q8 `(256, 0, 0)`. Solid red
+    // 255 then reduces to `(256 * 255 + 128) >> 8 = 255` (clamped).
+    let red = bayer8_solid_red_luma(LumaCoefficients::Custom {
+      r: 1.0,
+      g: 0.0,
+      b: 0.0,
+    });
+    assert_eq!(red, 255, "Custom (1.0, 0.0, 0.0) on red 255 → 255");
+  }
+
+  #[test]
+  fn bayer_with_luma_coefficients_default_is_bt709() {
+    // No `with_luma_coefficients` call → default (BT.709). Same red
+    // input must produce the BT.709 value (54). This pins the
+    // public default so a future refactor can't silently change it.
+    use crate::{
+      frame::BayerFrame,
+      raw::{BayerDemosaic, BayerPattern, ColorCorrectionMatrix, WhiteBalance, bayer_to},
+    };
+    let (w, h) = (8u32, 6u32);
+    let raw = solid_rggb8(w, h, 255, 0, 0);
+    let frame = BayerFrame::try_new(&raw, w, h, w).unwrap();
+    let mut luma = std::vec![0u8; (w * h) as usize];
+    let mut sinker = MixedSinker::<Bayer>::new(w as usize, h as usize)
+      .with_luma(&mut luma)
+      .unwrap();
+    bayer_to(
+      &frame,
+      BayerPattern::Rggb,
+      BayerDemosaic::Bilinear,
+      WhiteBalance::neutral(),
+      ColorCorrectionMatrix::identity(),
+      &mut sinker,
+    )
+    .unwrap();
+    for (i, &y) in luma.iter().enumerate() {
+      assert_eq!(y, 54, "default red luma at idx {i}");
+    }
+    assert_eq!(LumaCoefficients::default(), LumaCoefficients::Bt709);
+  }
+
+  #[test]
+  fn bayer_with_luma_coefficients_uniform_gray_invariant() {
+    // The reverse of the above: gray content *must* be invariant
+    // under any preset (this is the property the original
+    // `*_with_luma_uniform_byte` test relied on, and the reason
+    // the hard-coded BT.709 bug was invisible there).
+    use crate::{
+      frame::BayerFrame,
+      raw::{BayerDemosaic, BayerPattern, ColorCorrectionMatrix, WhiteBalance, bayer_to},
+    };
+    let (w, h) = (8u32, 6u32);
+    let raw = std::vec![200u8; (w * h) as usize];
+    let frame = BayerFrame::try_new(&raw, w, h, w).unwrap();
+    let presets = [
+      LumaCoefficients::Bt709,
+      LumaCoefficients::Bt2020,
+      LumaCoefficients::Bt601,
+      LumaCoefficients::DciP3,
+      LumaCoefficients::AcesAp1,
+    ];
+    for preset in presets {
+      let mut luma = std::vec![0u8; (w * h) as usize];
+      let mut sinker = MixedSinker::<Bayer>::new(w as usize, h as usize)
+        .with_luma(&mut luma)
+        .unwrap()
+        .with_luma_coefficients(preset);
+      bayer_to(
+        &frame,
+        BayerPattern::Rggb,
+        BayerDemosaic::Bilinear,
+        WhiteBalance::neutral(),
+        ColorCorrectionMatrix::identity(),
+        &mut sinker,
+      )
+      .unwrap();
+      for &y in &luma {
+        assert!(
+          (y as i32 - 200).abs() <= 1,
+          "{preset:?} on gray 200 → {y} (expected ~200)"
+        );
+      }
+    }
+  }
+
+  #[test]
+  fn bayer16_with_luma_coefficients_solid_red_differs_by_preset() {
+    // Mirror of the 8-bit test for the high-bit-depth path
+    // (`MixedSinker<Bayer16<BITS>>`). 12-bit white = 4095 →
+    // demosaic produces `(255, 0, 0)` u8 RGB after CCM identity
+    // and right-shift to u8 (the bayer16→u8 path reduces samples
+    // before the luma kernel).
+    use crate::{
+      frame::Bayer12Frame,
+      raw::{BayerDemosaic, BayerPattern, ColorCorrectionMatrix, WhiteBalance, bayer16_to},
+    };
+    let (w, h) = (8u32, 6u32);
+    let raw = solid_rggb12(w, h, 4095, 0, 0);
+    let frame = Bayer12Frame::try_new(&raw, w, h, w).unwrap();
+
+    let run = |coeffs: LumaCoefficients| -> u8 {
+      let mut luma = std::vec![0u8; (w * h) as usize];
+      let mut sinker = MixedSinker::<Bayer16<12>>::new(w as usize, h as usize)
+        .with_luma(&mut luma)
+        .unwrap()
+        .with_luma_coefficients(coeffs);
+      bayer16_to(
+        &frame,
+        BayerPattern::Rggb,
+        BayerDemosaic::Bilinear,
+        WhiteBalance::neutral(),
+        ColorCorrectionMatrix::identity(),
+        &mut sinker,
+      )
+      .unwrap();
+      let center = luma[(h as usize / 2) * (w as usize) + (w as usize / 2)];
+      for (i, &y) in luma.iter().enumerate() {
+        assert_eq!(y, center, "luma not uniform at idx {i}");
+      }
+      center
+    };
+
+    let bt709 = run(LumaCoefficients::Bt709);
+    let bt2020 = run(LumaCoefficients::Bt2020);
+    let bt601 = run(LumaCoefficients::Bt601);
+    let dcip3 = run(LumaCoefficients::DciP3);
+    let aces = run(LumaCoefficients::AcesAp1);
+
+    assert_eq!(bt709, 54, "BT.709 red luma (Bayer16<12>)");
+    assert_eq!(bt2020, 67, "BT.2020 red luma (Bayer16<12>)");
+    assert_eq!(bt601, 77, "BT.601 red luma (Bayer16<12>)");
+    assert_eq!(dcip3, 59, "DCI-P3 red luma (Bayer16<12>)");
+    assert_eq!(aces, 70, "ACES AP1 red luma (Bayer16<12>)");
+
+    let mut all = std::vec![bt709, bt2020, bt601, dcip3, aces];
+    all.sort_unstable();
+    all.dedup();
+    assert_eq!(all.len(), 5, "Bayer16 presets collapsed: {all:?}");
+  }
+
+  #[test]
+  fn luma_coefficients_to_q8_presets_sum_to_256() {
+    // Round-to-nearest of the published weights for each preset
+    // must still sum to exactly 256 — the rgb_row_to_luma_row
+    // kernel divides by 256 implicitly via `>> 8`, so any preset
+    // that drifts from 256 produces a brightness-scaled luma plane.
+    for preset in [
+      LumaCoefficients::Bt709,
+      LumaCoefficients::Bt2020,
+      LumaCoefficients::Bt601,
+      LumaCoefficients::DciP3,
+      LumaCoefficients::AcesAp1,
+    ] {
+      let (cr, cg, cb) = preset.to_q8();
+      assert_eq!(cr + cg + cb, 256, "{preset:?} Q8 weights don't sum to 256");
+    }
   }
 }

@@ -82,6 +82,37 @@ color-correction in a single per-row kernel.
 Scalar reference path lands first; per-arch SIMD backends are
 scheduled as a dedicated follow-up PR (`feat/bayer-simd`).
 
+### MixedSinker integration
+
+- `MixedSinker<Bayer>` and `MixedSinker<Bayer16<BITS>>` impls — both
+  expose `with_rgb` / `with_luma` / `with_hsv`; the `Bayer16<BITS>`
+  variant additionally exposes `with_rgb_u16` for native-depth RGB
+  output. RGB scratch buffer is grown lazily for the HSV-without-RGB
+  path (mirrors the YUV impls).
+- **Luma colorimetry is caller-configurable** via the new
+  `LumaCoefficients` enum (`Bt709` / `Bt2020` / `Bt601` / `DciP3` /
+  `AcesAp1` / `Custom { r, g, b: f32 }`, `#[non_exhaustive]`). YUV
+  source impls memcpy luma directly off the Y plane and are
+  unaffected; Bayer impls *derive* luma from the demosaiced RGB and
+  therefore need to know which gamut weights to apply. Choose the
+  preset matching the gamut your `ColorCorrectionMatrix` targets:
+  passing a Rec.2020 CCM and using BT.709 luma weights produces a
+  valid-shaped but numerically wrong luma plane for non-grayscale
+  content (downstream scene-cut detectors, brightness thresholders
+  and perceptual-diff tools see the wrong values; uniform gray is
+  invariant — every preset agrees on gray, which is what made the
+  hard-coded BT.709 path go undetected by uniform-gray tests).
+  Default is `Bt709` to match the implicit weights every YUV → RGB →
+  luma pipeline uses. API:
+  `MixedSinker::<Bayer>::new(w, h).with_luma_coefficients(LumaCoefficients::Bt2020)`.
+  `Custom` weights are not normalized — caller is responsible for
+  picking values that sum to ~1.0 (otherwise the luma plane is
+  brightness-scaled). All five published presets resolve to Q8
+  triples summing to exactly 256, so the kernel's `>> 8` divisor is
+  exact (the published ACES AP1 weights round naïvely to `(70, 173,
+  14) = 257`; `cg` is shaved by 1 LSB to make the triple sum to 256
+  with the smallest perceptual error).
+
 ### Tests
 
 - Frame-validation tests (8-bit + high-bit-depth, including
@@ -97,6 +128,15 @@ scheduled as a dedicated follow-up PR (`feat/bayer-simd`).
   preserves CFA parity, so a constant-channel Bayer mosaic stays
   constant everywhere instead of bleeding wrong-color samples into
   the missing-channel averages at edges.
+- 6 luma-coefficient tests covering both Bayer and Bayer16 paths:
+  solid-red rows produce distinct luma values for each preset (54
+  / 67 / 77 / 59 / 70 for BT.709 / BT.2020 / BT.601 / DCI-P3 /
+  ACES AP1 — guards against silent collapse to one preset);
+  `Custom { r: 1.0, g: 0.0, b: 0.0 }` round-trips the red channel
+  back to 255; default is `Bt709`; uniform gray is invariant
+  across all presets (regression-pin for the original
+  `*_with_luma_uniform_byte` semantics); preset Q8 triples each
+  sum to exactly 256.
 
 ## Ship 7 — u16 semi-planar 4:2:2 / 4:4:4 (P210 / P212 / P216 / P410 / P412 / P416)
 
