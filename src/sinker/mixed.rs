@@ -5327,8 +5327,7 @@ impl PixelSink for MixedSinker<'_, Yuv440p12> {
 
 /// Returns `Ok(())` iff the walker's frame dimensions exactly match
 /// the sinker's configured dimensions. Called from
-/// [`PixelSink::begin_frame`] on both `MixedSinker<Yuv420p>` and
-/// `MixedSinker<Nv12>`.
+/// [`PixelSink::begin_frame`] in every `MixedSinker<F>` impl.
 ///
 /// The sinker's RGB / luma / HSV buffers were sized for
 /// `configured_w × configured_h`. A shorter frame would silently

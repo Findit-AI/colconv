@@ -2,9 +2,10 @@
 //!
 //! Same `u16`-backed layout as [`super::Yuv422p10`] with 9 active
 //! bits in the low 9 of each element. Niche format — AVC High 9
-//! profile only. Per-row kernel reuses the 4:2:0 family
-//! ([`crate::row::yuv_420p_n_to_rgb_row`]`::<9>`) verbatim — same
-//! shape (half-width chroma per row), only the vertical walk differs.
+//! profile only. Per-row kernel reuses the 4:2:0 family at
+//! `BITS = 9` (`yuv_420p_n_to_rgb_row::<9>` and friends, internal
+//! to `crate::row`) verbatim — same shape (half-width chroma per
+//! row), only the vertical walk differs.
 
 use crate::{ColorMatrix, PixelSink, SourceFormat, frame::Yuv422p9Frame, sealed::Sealed};
 

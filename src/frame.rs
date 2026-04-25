@@ -4568,7 +4568,7 @@ mod tests {
   }
 
   #[test]
-  fn yuv420p16_try_new_rejects_unsupported_bits() {
+  fn yuv420p_frame16_try_new_rejects_unsupported_bits() {
     // BITS must be in {9, 10, 12, 14, 16}. 11, 15, etc. are rejected
     // before any plane math runs.
     let y = std::vec![0u16; 16 * 8];
