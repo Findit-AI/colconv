@@ -2734,6 +2734,37 @@ fn rgb_row_elems(width: usize) -> usize {
   }
 }
 
+/// Asserts every `u16` sample in a Bayer16 plane is **low-packed**
+/// at `BITS`. Used by [`crate::raw::bayer16_to`] as an upfront
+/// safety net **before** the first sink mutation, so a contract
+/// violation (caller used [`crate::frame::BayerFrame16::try_new`]
+/// — geometry-only — with mispacked or stale-high-bits data)
+/// fails loudly with the user's output buffer untouched, rather
+/// than panicking mid-stream after earlier rows are already
+/// written.
+///
+/// Implementation: single OR-fold across the entire plane,
+/// followed by one AND with the bad-bit mask. The total work is
+/// O(width × height) but the inner loop is one OR per `u16` —
+/// well below the cost of the demosaic + matmul that follows.
+/// For `BITS == 16` this is a no-op (the bad-bit mask is zero;
+/// const-folded out by the compiler).
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn assert_bayer16_plane_in_range<const BITS: u32>(plane: &[u16]) {
+  if BITS == 16 {
+    return;
+  }
+  let max_valid: u16 = ((1u32 << BITS) - 1) as u16;
+  let bad_mask: u16 = !max_valid;
+  let or_all: u16 = plane.iter().fold(0u16, |acc, &x| acc | x);
+  assert!(
+    or_all & bad_mask == 0,
+    "Bayer16 plane contains samples with bits above (1 << BITS) - 1 = {max_valid}; \
+     use BayerFrame16::try_new_checked to validate untrusted input \
+     (BITS = {BITS})"
+  );
+}
+
 /// Asserts every `u16` sample in `above` / `mid` / `below` is
 /// **low-packed** at `BITS`, i.e. fits in `[0, (1 << BITS) - 1]`.
 /// Implemented as an OR-fold per row — single tight loop, single

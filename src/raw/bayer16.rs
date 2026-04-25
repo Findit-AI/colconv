@@ -161,6 +161,22 @@ pub trait BayerSink16<const BITS: u32>:
 /// Walks a [`BayerFrame16<BITS>`] row by row, handing each row to
 /// the sink along with the precomputed `M = CCM · diag(wb)` 3×3.
 ///
+/// **Sample-range pre-pass.** Before any sink interaction, the
+/// walker scans the source plane and panics if any sample
+/// violates the low-packed contract (`value < (1 << BITS)`). The
+/// panic fires **before** [`crate::PixelSink::begin_frame`], so
+/// the sink's output buffers are guaranteed untouched on contract
+/// violation — no half-converted frames. The fallible alternative
+/// is to construct the frame via
+/// [`crate::frame::BayerFrame16::try_new_checked`], which surfaces
+/// the same condition as [`crate::frame::BayerFrame16Error::SampleOutOfRange`]
+/// at frame-construction time.
+///
+/// The pre-pass is one OR-fold across the entire plane (single
+/// instruction per `u16`); cost is well below the demosaic +
+/// matmul that follows. For `BITS == 16` the check is a no-op
+/// (every `u16` is valid; const-folded by the compiler).
+///
 /// **Allocation profile.** Zero per-row and zero per-frame heap
 /// allocation, identical to the 8-bit [`super::bayer_to`].
 pub fn bayer16_to<const BITS: u32, S: BayerSink16<BITS>>(
@@ -171,6 +187,13 @@ pub fn bayer16_to<const BITS: u32, S: BayerSink16<BITS>>(
   ccm: ColorCorrectionMatrix,
   sink: &mut S,
 ) -> Result<(), S::Error> {
+  // Upfront sample-range validation — runs *before* `begin_frame`
+  // so that a contract violation (caller used `try_new` with
+  // mispacked / stale-high-bits data) panics with the user's
+  // output buffers untouched, instead of mid-stream after earlier
+  // rows have already been written.
+  crate::row::assert_bayer16_plane_in_range::<BITS>(src.data());
+
   sink.begin_frame(src.width(), src.height())?;
 
   let m = fuse_wb_ccm(&wb, &ccm);
@@ -494,7 +517,7 @@ mod tests {
   /// violation — the only out-of-range case `try_new` doesn't
   /// catch). Test runs in both debug and release.
   #[test]
-  #[should_panic(expected = "Bayer16 sample exceeds")]
+  #[should_panic(expected = "Bayer16 plane contains samples")]
   fn bayer12_dispatcher_panics_on_sample_above_max() {
     let (w, h) = (4u32, 2u32);
     let mut raw = std::vec![100u16; (w * h) as usize];
@@ -522,7 +545,7 @@ mod tests {
   /// before constructing the `Bayer12Frame`. Should be rejected
   /// loudly, not silently produce saturated output.
   #[test]
-  #[should_panic(expected = "Bayer16 sample exceeds")]
+  #[should_panic(expected = "Bayer16 plane contains samples")]
   fn bayer12_dispatcher_rejects_msb_aligned_input() {
     let (w, h) = (4u32, 2u32);
     let raw = std::vec![0x8000u16; (w * h) as usize]; // MSB-aligned 12-bit midgray
@@ -541,6 +564,53 @@ mod tests {
       &mut sink,
     )
     .unwrap();
+  }
+
+  /// Codex-recommended regression: Bayer12Frame built via plain
+  /// `try_new` (geometry-only) with one bad sample in a *later*
+  /// row. The walker must panic **before** any output is written,
+  /// not mid-stream after earlier rows have been mutated.
+  #[test]
+  fn bayer12_walker_panics_before_first_sink_mutation_on_bad_sample() {
+    let (w, h) = (4u32, 8u32);
+    let mut raw = std::vec![100u16; (w * h) as usize];
+    // Bad sample in row 6 — far enough that several rows would
+    // process cleanly under a per-row check (rows 0..5), exposing
+    // the partial-mutation bug Codex's adversarial review caught.
+    let off = (6 * w) as usize + 2;
+    raw[off] = 4096; // exceeds 12-bit max
+    let frame = Bayer12Frame::try_new(&raw, w, h, w).unwrap();
+
+    // The output buffer is filled with a sentinel; if the walker
+    // partially mutates it before panicking, the test will detect
+    // it (the sentinel won't all survive). We capture both the
+    // pre-state and the panic.
+    let mut rgb = std::vec![0xAAu8; (w * h * 3) as usize];
+    let pre_rgb = rgb.clone();
+    // Invoke the walker through `MixedSinker`, the same path a
+    // safe API user would take. Catch the panic so we can inspect
+    // the output buffer state afterward.
+    let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+      let mut sinker = crate::sinker::MixedSinker::<Bayer16<12>>::new(w as usize, h as usize)
+        .with_rgb(&mut rgb)
+        .unwrap();
+      bayer16_to(
+        &frame,
+        BayerPattern::Rggb,
+        BayerDemosaic::Bilinear,
+        WhiteBalance::neutral(),
+        ColorCorrectionMatrix::identity(),
+        &mut sinker,
+      )
+    }))
+    .is_err();
+    assert!(panicked, "walker must panic on out-of-range Bayer12 sample");
+    // Critical assertion: the output buffer is byte-identical to
+    // its pre-walker state. No partial mutation.
+    assert_eq!(
+      rgb, pre_rgb,
+      "walker panicked AFTER mutating the output buffer; partial output contract violated"
+    );
   }
 
   /// At BITS=16 every `u16` is valid; the dispatcher's bad-bit
