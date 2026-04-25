@@ -187,21 +187,24 @@ pub fn bayer16_to<const BITS: u32, S: BayerSink16<BITS>>(
   ccm: ColorCorrectionMatrix,
   sink: &mut S,
 ) -> Result<(), S::Error> {
-  // Upfront sample-range validation — runs *before* `begin_frame`
-  // so that a contract violation (caller used `try_new` with
-  // mispacked / stale-high-bits data) panics with the user's
-  // output buffers untouched, instead of mid-stream after earlier
-  // rows have already been written.
-  crate::row::assert_bayer16_plane_in_range::<BITS>(src.data());
-
-  sink.begin_frame(src.width(), src.height())?;
-
-  let m = fuse_wb_ccm(&wb, &ccm);
-
   let w = src.width() as usize;
   let h = src.height() as usize;
   let stride = src.stride() as usize;
   let plane = src.data();
+
+  // Upfront sample-range validation — runs *before* `begin_frame`
+  // so that a contract violation (caller used `try_new` with
+  // mispacked / stale-high-bits data) panics with the user's
+  // output buffers untouched, instead of mid-stream after earlier
+  // rows have already been written. Only the per-row **active**
+  // region is scanned (matching the walker's actual reads); row
+  // padding and trailing backing storage are skipped so ordinary
+  // padded decoder output stays convertible.
+  crate::row::assert_bayer16_plane_in_range::<BITS>(plane, w, h, stride);
+
+  sink.begin_frame(src.width(), src.height())?;
+
+  let m = fuse_wb_ccm(&wb, &ccm);
 
   for row in 0..h {
     // Mirror-by-2 row clamp; see [`super::bayer::bayer_to`] for
@@ -517,7 +520,7 @@ mod tests {
   /// violation — the only out-of-range case `try_new` doesn't
   /// catch). Test runs in both debug and release.
   #[test]
-  #[should_panic(expected = "Bayer16 plane contains samples")]
+  #[should_panic(expected = "Bayer16 active samples contain bits")]
   fn bayer12_dispatcher_panics_on_sample_above_max() {
     let (w, h) = (4u32, 2u32);
     let mut raw = std::vec![100u16; (w * h) as usize];
@@ -545,7 +548,7 @@ mod tests {
   /// before constructing the `Bayer12Frame`. Should be rejected
   /// loudly, not silently produce saturated output.
   #[test]
-  #[should_panic(expected = "Bayer16 plane contains samples")]
+  #[should_panic(expected = "Bayer16 active samples contain bits")]
   fn bayer12_dispatcher_rejects_msb_aligned_input() {
     let (w, h) = (4u32, 2u32);
     let raw = std::vec![0x8000u16; (w * h) as usize]; // MSB-aligned 12-bit midgray
@@ -611,6 +614,77 @@ mod tests {
       rgb, pre_rgb,
       "walker panicked AFTER mutating the output buffer; partial output contract violated"
     );
+  }
+
+  /// Codex-recommended regression: a valid padded RAW buffer
+  /// (`stride > width`) with **stale high bits in the row
+  /// padding** must NOT trip the upfront pre-pass. The walker
+  /// only reads the active per-row region (`r * stride .. r *
+  /// stride + width`) so padding bytes are out of scope.
+  #[test]
+  fn bayer12_walker_accepts_padded_stride_with_dirty_padding() {
+    let w: u32 = 4;
+    let h: u32 = 4;
+    let stride: u32 = 8; // padding = 4 samples per row
+    let mut raw = std::vec![100u16; (stride * h) as usize];
+    // Fill the padding with stale high bits (would trigger the
+    // upfront panic if validated). Active region (cols 0..4) is
+    // valid 12-bit data.
+    for r in 0..(h as usize) {
+      for c in 4..(stride as usize) {
+        raw[r * stride as usize + c] = 0xFFFF;
+      }
+    }
+    let frame = Bayer12Frame::try_new(&raw, w, h, stride).unwrap();
+    let mut rgb = std::vec![0u8; (w * h * 3) as usize];
+    let mut sink = CaptureRgbU8::<12> {
+      out: &mut rgb,
+      width: 0,
+    };
+    bayer16_to(
+      &frame,
+      BayerPattern::Rggb,
+      BayerDemosaic::Bilinear,
+      WhiteBalance::neutral(),
+      ColorCorrectionMatrix::identity(),
+      &mut sink,
+    )
+    .unwrap();
+    // Sanity: kernel ran without panicking. Output content is
+    // not the focus; the test is the absence of panic.
+  }
+
+  /// Companion regression: trailing backing storage past
+  /// `(h - 1) * stride + width` with junk must NOT trip the
+  /// pre-pass either — the walker doesn't read past the last
+  /// active row.
+  #[test]
+  fn bayer12_walker_accepts_overlong_slice_with_trailing_junk() {
+    let w: u32 = 4;
+    let h: u32 = 2;
+    let stride: u32 = 4;
+    // Backing storage is twice the declared geometry; trailing
+    // half is filled with values that would trip a wholesale
+    // scan.
+    let mut raw = std::vec![100u16; (stride * h * 2) as usize];
+    for v in raw.iter_mut().skip((stride * h) as usize) {
+      *v = 0xFFFF;
+    }
+    let frame = Bayer12Frame::try_new(&raw, w, h, stride).unwrap();
+    let mut rgb = std::vec![0u8; (w * h * 3) as usize];
+    let mut sink = CaptureRgbU8::<12> {
+      out: &mut rgb,
+      width: 0,
+    };
+    bayer16_to(
+      &frame,
+      BayerPattern::Rggb,
+      BayerDemosaic::Bilinear,
+      WhiteBalance::neutral(),
+      ColorCorrectionMatrix::identity(),
+      &mut sink,
+    )
+    .unwrap();
   }
 
   /// At BITS=16 every `u16` is valid; the dispatcher's bad-bit
