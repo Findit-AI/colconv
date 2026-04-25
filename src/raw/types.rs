@@ -52,8 +52,15 @@ pub enum BayerPattern {
 /// fill in the two missing color channels at each Bayer site.
 ///
 /// Currently only [`BayerDemosaic::Bilinear`] is wired up. The enum
-/// is `#[non_exhaustive]` so future variants (e.g. Malvar-He-Cutler
-/// for sharper output) can land without a breaking change.
+/// is `#[non_exhaustive]` so future variants (Malvar-He-Cutler /
+/// MHC for sharper output, DCB / VNG / AHD for edge-aware
+/// high-quality reconstruction) can land without a breaking
+/// change. The MHC variant is the smallest next step (5-row
+/// window, ~3× bilinear cost); DCB / VNG / AHD are larger
+/// follow-ups that need a different walker shape than the per-row
+/// model. See `docs/color-conversion-functions.md` §
+/// "Cleanup follow-ups → Higher-quality Bayer demosaic algorithms"
+/// for the full design notes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, IsVariant)]
 #[non_exhaustive]
 pub enum BayerDemosaic {
