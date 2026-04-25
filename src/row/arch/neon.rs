@@ -3988,6 +3988,23 @@ mod tests {
 
   #[test]
   #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
+  fn neon_yuv444p9_matches_scalar_all_matrices() {
+    // BITS=9 reuses the same const-generic kernel as 10/12/14; this
+    // test pins the AND-mask + Q15 scale path at the lowest legal depth.
+    for m in [
+      ColorMatrix::Bt601,
+      ColorMatrix::Bt709,
+      ColorMatrix::Bt2020Ncl,
+    ] {
+      for full in [true, false] {
+        check_yuv444p_n_u8_neon_equivalence::<9>(16, m, full);
+        check_yuv444p_n_u16_neon_equivalence::<9>(16, m, full);
+      }
+    }
+  }
+
+  #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
   fn neon_yuv444p10_matches_scalar_all_matrices() {
     for m in [
       ColorMatrix::Bt601,

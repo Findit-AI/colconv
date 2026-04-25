@@ -3397,6 +3397,18 @@ mod tests {
   }
 
   #[test]
+  fn avx512_yuv_444p9_matches_scalar_all_matrices() {
+    if !std::arch::is_x86_feature_detected!("avx512bw") {
+      return;
+    }
+    for m in [ColorMatrix::Bt709, ColorMatrix::Bt2020Ncl] {
+      for full in [true, false] {
+        check_yuv_444p_n_equivalence::<9>(64, m, full);
+      }
+    }
+  }
+
+  #[test]
   fn avx512_yuv_444p10_matches_scalar_all_matrices() {
     if !std::arch::is_x86_feature_detected!("avx512bw") {
       return;

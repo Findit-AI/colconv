@@ -2851,6 +2851,18 @@ mod tests {
   }
 
   #[test]
+  fn sse41_yuv_444p9_matches_scalar_all_matrices() {
+    if !std::arch::is_x86_feature_detected!("sse4.1") {
+      return;
+    }
+    for m in [ColorMatrix::Bt709, ColorMatrix::Bt2020Ncl] {
+      for full in [true, false] {
+        check_yuv_444p_n_equivalence::<9>(16, m, full);
+      }
+    }
+  }
+
+  #[test]
   fn sse41_yuv_444p10_matches_scalar_all_matrices() {
     if !std::arch::is_x86_feature_detected!("sse4.1") {
       return;
