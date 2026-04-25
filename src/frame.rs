@@ -764,6 +764,10 @@ pub enum Yuv444pFrameError {
 /// per-row math is identical (full-width chroma, no horizontal
 /// duplication); only the walker reads chroma row `r / 2` instead
 /// of `r`.
+///
+/// Validation errors surface as [`Yuv440pFrameError`] (a transparent
+/// alias of [`Yuv444pFrameError`] — same variants apply since 4:4:0
+/// uses the same chroma-width and overflow contracts as 4:4:4).
 #[derive(Debug, Clone, Copy)]
 pub struct Yuv440pFrame<'a> {
   y: &'a [u8],
@@ -778,9 +782,10 @@ pub struct Yuv440pFrame<'a> {
 
 impl<'a> Yuv440pFrame<'a> {
   /// Constructs a new [`Yuv440pFrame`], validating dimensions and
-  /// plane lengths. Reuses [`Yuv444pFrameError`] — same error
-  /// variants apply (no width-parity check; 4:4:0 has full-width
-  /// chroma like 4:4:4).
+  /// plane lengths. Errors surface as [`Yuv440pFrameError`] (a
+  /// transparent alias of [`Yuv444pFrameError`] — same variants apply
+  /// since 4:4:0 has full-width chroma like 4:4:4 and no width-parity
+  /// constraint).
   #[cfg_attr(not(tarpaulin), inline(always))]
   #[allow(clippy::too_many_arguments)]
   pub const fn try_new(
@@ -792,7 +797,7 @@ impl<'a> Yuv440pFrame<'a> {
     y_stride: u32,
     u_stride: u32,
     v_stride: u32,
-  ) -> Result<Self, Yuv444pFrameError> {
+  ) -> Result<Self, Yuv440pFrameError> {
     if width == 0 || height == 0 {
       return Err(Yuv444pFrameError::ZeroDimension { width, height });
     }
@@ -927,6 +932,12 @@ impl<'a> Yuv440pFrame<'a> {
     self.v_stride
   }
 }
+
+/// Errors returned by [`Yuv440pFrame::try_new`]. Transparent alias of
+/// [`Yuv444pFrameError`] — 4:4:0 has the same full-width chroma and
+/// no width-parity constraint, so the variants apply unchanged. The
+/// alias keeps the public API self-descriptive.
+pub type Yuv440pFrameError = Yuv444pFrameError;
 
 /// A validated NV12 (semi‑planar 4:2:0) frame.
 ///
@@ -3568,6 +3579,14 @@ pub type Yuv444p14Frame<'a> = Yuv444pFrame16<'a, 14>;
 /// the parallel i64 kernel family (see `yuv_444p16_to_rgb_*`).
 pub type Yuv444p16Frame<'a> = Yuv444pFrame16<'a, 16>;
 
+/// Errors returned by [`Yuv440pFrame16::try_new`] and
+/// [`Yuv440pFrame16::try_new_checked`]. Transparent alias of
+/// [`Yuv420pFrame16Error`] — same `UnsupportedBits` /
+/// `SampleOutOfRange` / geometry variants apply. The alias keeps the
+/// public 4:4:0 surface self-descriptive without duplicating an
+/// otherwise-identical enum.
+pub type Yuv440pFrame16Error = Yuv420pFrame16Error;
+
 /// A validated planar 4:4:0 `u16`-backed frame, generic over
 /// `const BITS: u32 ∈ {10, 12}`. Samples are low-bit-packed (the
 /// `BITS` active bits sit in the **low** bits of each `u16`).
@@ -3605,7 +3624,7 @@ impl<'a, const BITS: u32> Yuv440pFrame16<'a, BITS> {
     y_stride: u32,
     u_stride: u32,
     v_stride: u32,
-  ) -> Result<Self, Yuv420pFrame16Error> {
+  ) -> Result<Self, Yuv440pFrame16Error> {
     if BITS != 10 && BITS != 12 {
       return Err(Yuv420pFrame16Error::UnsupportedBits { bits: BITS });
     }
@@ -3729,11 +3748,11 @@ impl<'a, const BITS: u32> Yuv440pFrame16<'a, BITS> {
     y_stride: u32,
     u_stride: u32,
     v_stride: u32,
-  ) -> Result<Self, Yuv420pFrame16Error> {
+  ) -> Result<Self, Yuv440pFrame16Error> {
     let frame = Self::try_new(y, u, v, width, height, y_stride, u_stride, v_stride)?;
-    if BITS == 16 {
-      return Ok(frame);
-    }
+    // No BITS == 16 early-return: `try_new` rejects everything outside
+    // {10, 12}, so unlike Yuv420p/444p (which both accept 16) the
+    // u16-saturating-noop case can't occur here.
     let max_valid: u16 = ((1u32 << BITS) - 1) as u16;
     let w = width as usize;
     let h = height as usize;
