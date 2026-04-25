@@ -2788,6 +2788,8 @@ pub(crate) unsafe fn p_n_444_16_to_rgb_u16_row(
     let cbu = _mm_set1_epi32(coeffs.b_u());
     let cbv = _mm_set1_epi32(coeffs.b_v());
 
+    let rnd32_v = _mm_set1_epi32(1 << 14);
+
     let mut x = 0usize;
     while x + 8 <= width {
       // 8 pixels per iter (i64 narrows). 16 UV u16 elements (= 8 pairs).
@@ -2797,7 +2799,6 @@ pub(crate) unsafe fn p_n_444_16_to_rgb_u16_row(
       let u_i16 = _mm_sub_epi16(u_vec, bias16_v);
       let v_i16 = _mm_sub_epi16(v_vec, bias16_v);
 
-      let rnd32_v = _mm_set1_epi32(1 << 14);
       let u_lo_i32 = _mm_cvtepi16_epi32(u_i16);
       let u_hi_i32 = _mm_cvtepi16_epi32(_mm_srli_si128::<8>(u_i16));
       let v_lo_i32 = _mm_cvtepi16_epi32(v_i16);

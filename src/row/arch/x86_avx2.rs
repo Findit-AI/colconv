@@ -3284,6 +3284,7 @@ pub(crate) unsafe fn p_n_444_16_to_rgb_u16_row(
     let cgv = _mm256_set1_epi32(coeffs.g_v());
     let cbu = _mm256_set1_epi32(coeffs.b_u());
     let cbv = _mm256_set1_epi32(coeffs.b_v());
+    let rnd32_v = _mm256_set1_epi32(1 << 14);
 
     let mut x = 0usize;
     while x + 16 <= width {
@@ -3299,7 +3300,6 @@ pub(crate) unsafe fn p_n_444_16_to_rgb_u16_row(
       let v_lo_i32 = _mm256_cvtepi16_epi32(_mm256_castsi256_si128(v_i16));
       let v_hi_i32 = _mm256_cvtepi16_epi32(_mm256_extracti128_si256::<1>(v_i16));
 
-      let rnd32_v = _mm256_set1_epi32(1 << 14);
       let u_d_lo = q15_shift(_mm256_add_epi32(
         _mm256_mullo_epi32(u_lo_i32, c_scale_v),
         rnd32_v,
