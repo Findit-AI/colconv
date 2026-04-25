@@ -416,7 +416,9 @@ pub enum RowSlice {
   /// ([`Bayer`](crate::raw::Bayer)). `u8` samples, `width` elements;
   /// supplied by the walker via the **mirror-by-2** boundary
   /// contract — see [`crate::raw::BayerRow::above`] — so at the
-  /// top edge this is `mid_row(1)`, not `mid` itself.
+  /// top edge this is `mid_row(1)`, not `mid` itself. Replicate
+  /// fallback (`above == mid`) only when `height < 2` (no mirror
+  /// partner exists).
   #[display("Bayer Above")]
   BayerAbove,
   /// `mid` row of an **8-bit Bayer** source. `u8` samples, `width`
@@ -425,13 +427,15 @@ pub enum RowSlice {
   BayerMid,
   /// `below` row of an **8-bit Bayer** source. `u8` samples, `width`
   /// elements; mirror-by-2 supplies `mid_row(h - 2)` at the bottom
-  /// edge — see [`crate::raw::BayerRow::below`].
+  /// edge — see [`crate::raw::BayerRow::below`]. Replicate fallback
+  /// (`below == mid`) only when `height < 2`.
   #[display("Bayer Below")]
   BayerBelow,
   /// `above` row of a **high-bit-depth Bayer** source
   /// ([`Bayer16<BITS>`](crate::raw::Bayer16)). `u16` samples,
   /// `width` elements; mirror-by-2 supplies `mid_row(1)` at the
-  /// top edge.
+  /// top edge. Replicate fallback (`above == mid`) only when
+  /// `height < 2`.
   #[display("Bayer16 Above")]
   Bayer16Above,
   /// `mid` row of a **high-bit-depth Bayer** source. `u16` samples,
@@ -440,7 +444,8 @@ pub enum RowSlice {
   Bayer16Mid,
   /// `below` row of a **high-bit-depth Bayer** source. `u16`
   /// samples, `width` elements; mirror-by-2 supplies
-  /// `mid_row(h - 2)` at the bottom edge.
+  /// `mid_row(h - 2)` at the bottom edge. Replicate fallback
+  /// (`below == mid`) only when `height < 2`.
   #[display("Bayer16 Below")]
   Bayer16Below,
 }
@@ -6411,11 +6416,21 @@ fn rgb_row_to_bt709_luma_row(rgb: &[u8], luma: &mut [u8]) {
   // structurally — but the `debug_assert` makes that obvious to
   // any future caller and turns silent OOB indexing into a clear
   // failure under tests.
+  //
+  // `checked_mul` instead of `3 * luma.len()` because, while the
+  // existing `frame_bytes` validation in caller paths makes the
+  // product fit, a future caller passing a raw slice with no such
+  // upstream check could trigger a `usize` overflow inside the
+  // assert message itself (panic before the assertion runs).
+  // Failing the assert on overflow yields a clean diagnostic.
   debug_assert!(
-    rgb.len() >= 3 * luma.len(),
+    luma
+      .len()
+      .checked_mul(3)
+      .is_some_and(|need| rgb.len() >= need),
     "rgb_row_to_bt709_luma_row: rgb has {} bytes, need >= 3 * luma.len() ({})",
     rgb.len(),
-    3 * luma.len()
+    luma.len(),
   );
   for (i, d) in luma.iter_mut().enumerate() {
     let r = rgb[3 * i] as u32;

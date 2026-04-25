@@ -489,14 +489,13 @@ mod tests {
     }
   }
 
-  /// In debug builds the kernel asserts samples ≤ `(1 << BITS) - 1`.
-  /// Out-of-range input on the public path is a contract violation;
-  /// `try_new_checked` is the documented validator. This test
-  /// exercises the assertion's failure mode under `cfg(debug_assertions)`.
-  #[cfg(debug_assertions)]
+  /// The public Bayer16 dispatcher panics in **release mode** if
+  /// any sample's high bits are non-zero (low-packed contract
+  /// violation — the only out-of-range case `try_new` doesn't
+  /// catch). Test runs in both debug and release.
   #[test]
   #[should_panic(expected = "Bayer16 sample exceeds")]
-  fn bayer12_kernel_panics_on_sample_above_max_in_debug() {
+  fn bayer12_dispatcher_panics_on_sample_above_max() {
     let (w, h) = (4u32, 2u32);
     let mut raw = std::vec![100u16; (w * h) as usize];
     raw[3] = 4096; // just above 12-bit max
@@ -515,6 +514,60 @@ mod tests {
       &mut sink,
     )
     .unwrap();
+  }
+
+  /// Codex-recommended regression: MSB-aligned 12-bit midgray
+  /// (e.g., `2048 << 4 = 0x8000`) is exactly the common
+  /// packing-mismatch bug, where a caller forgot to right-shift
+  /// before constructing the `Bayer12Frame`. Should be rejected
+  /// loudly, not silently produce saturated output.
+  #[test]
+  #[should_panic(expected = "Bayer16 sample exceeds")]
+  fn bayer12_dispatcher_rejects_msb_aligned_input() {
+    let (w, h) = (4u32, 2u32);
+    let raw = std::vec![0x8000u16; (w * h) as usize]; // MSB-aligned 12-bit midgray
+    let frame = Bayer12Frame::try_new(&raw, w, h, w).unwrap();
+    let mut rgb = std::vec![0u8; (w * h * 3) as usize];
+    let mut sink = CaptureRgbU8::<12> {
+      out: &mut rgb,
+      width: 0,
+    };
+    bayer16_to(
+      &frame,
+      BayerPattern::Rggb,
+      BayerDemosaic::Bilinear,
+      WhiteBalance::neutral(),
+      ColorCorrectionMatrix::identity(),
+      &mut sink,
+    )
+    .unwrap();
+  }
+
+  /// At BITS=16 every `u16` is valid; the dispatcher's bad-bit
+  /// mask is zero so the check is a no-op and 0xFFFF passes.
+  #[test]
+  fn bayer16bit_dispatcher_accepts_full_u16_range() {
+    let (w, h) = (4u32, 2u32);
+    let raw = std::vec![0xFFFFu16; (w * h) as usize];
+    let frame = crate::frame::Bayer16Frame::try_new(&raw, w, h, w).unwrap();
+    let mut rgb = std::vec![0u8; (w * h * 3) as usize];
+    let mut sink = CaptureRgbU8::<16> {
+      out: &mut rgb,
+      width: 0,
+    };
+    bayer16_to(
+      &frame,
+      BayerPattern::Rggb,
+      BayerDemosaic::Bilinear,
+      WhiteBalance::neutral(),
+      ColorCorrectionMatrix::identity(),
+      &mut sink,
+    )
+    .unwrap();
+    // Solid 0xFFFF saturates to 255 on every channel.
+    for &c in &rgb {
+      assert_eq!(c, 255);
+    }
   }
 
   #[test]

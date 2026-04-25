@@ -1754,24 +1754,14 @@ pub(crate) fn bayer16_to_rgb_row<const BITS: u32>(
   debug_assert_eq!(below.len(), w);
   debug_assert!(rgb_out.len() >= 3 * w);
   // Sample-range contract: caller guarantees every sample is
-  // `< (1 << BITS)` (low-packed convention; high `16 - BITS` bits
-  // are zero on conforming input). Out-of-range samples produce
-  // saturated output and contaminate demosaic neighbor averages —
-  // not memory-unsafe, but numerically meaningless. Validate via
-  // [`crate::frame::BayerFrame16::try_new_checked`] for untrusted
-  // input; the debug_assert below catches contract violations in
-  // test builds at zero release-mode cost.
-  let max_valid: u16 = ((1u32 << BITS) - 1) as u16;
-  debug_assert!(
-    above.iter().all(|&s| s <= max_valid)
-      && mid.iter().all(|&s| s <= max_valid)
-      && below.iter().all(|&s| s <= max_valid),
-    "Bayer16 sample exceeds (1 << BITS) - 1 = {max_valid}; \
-     use BayerFrame16::try_new_checked to validate untrusted input"
-  );
+  // `< (1 << BITS)` (low-packed convention). The public dispatcher
+  // [`crate::row::bayer16_to_rgb_row`] enforces this at the
+  // boundary in release mode via an OR-fold; this kernel trusts
+  // the precondition.
 
   let (r_par, b_par) = pattern_phases(pattern);
   let rp = (row_parity & 1) as usize;
+  let max_valid: u16 = ((1u32 << BITS) - 1) as u16;
   let max_in = max_valid as f32;
   let out_scale = 255.0 / max_in;
 
@@ -1817,19 +1807,12 @@ pub(crate) fn bayer16_to_rgb_u16_row<const BITS: u32>(
   debug_assert_eq!(above.len(), w);
   debug_assert_eq!(below.len(), w);
   debug_assert!(rgb_out.len() >= 3 * w);
-  // Same sample-range contract as `bayer16_to_rgb_row<BITS>`; see
-  // that function for the rationale.
-  let max_valid: u16 = ((1u32 << BITS) - 1) as u16;
-  debug_assert!(
-    above.iter().all(|&s| s <= max_valid)
-      && mid.iter().all(|&s| s <= max_valid)
-      && below.iter().all(|&s| s <= max_valid),
-    "Bayer16 sample exceeds (1 << BITS) - 1 = {max_valid}; \
-     use BayerFrame16::try_new_checked to validate untrusted input"
-  );
+  // Same sample-range contract as `bayer16_to_rgb_row<BITS>`; the
+  // public dispatcher enforces it at the boundary.
 
   let (r_par, b_par) = pattern_phases(pattern);
   let rp = (row_parity & 1) as usize;
+  let max_valid: u16 = ((1u32 << BITS) - 1) as u16;
   let max_out = max_valid as f32;
 
   for x in 0..w {
