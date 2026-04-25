@@ -6428,8 +6428,13 @@ fn rgb_row_to_bt709_luma_row(rgb: &[u8], luma: &mut [u8]) {
       .len()
       .checked_mul(3)
       .is_some_and(|need| rgb.len() >= need),
-    "rgb_row_to_bt709_luma_row: rgb has {} bytes, need >= 3 * luma.len() ({})",
+    "rgb_row_to_bt709_luma_row: rgb.len()={} but need {} (= 3 × luma.len()={})",
     rgb.len(),
+    // saturating_mul avoids triggering an overflow panic *inside*
+    // the format-args evaluation when `luma.len()` is itself
+    // pathological — the assertion's predicate already failed at
+    // that point, so reporting `usize::MAX` is fine.
+    luma.len().saturating_mul(3),
     luma.len(),
   );
   for (i, d) in luma.iter_mut().enumerate() {
