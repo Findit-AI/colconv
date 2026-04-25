@@ -327,13 +327,12 @@ pub(crate) fn yuv_420p_n_to_rgb_row<const BITS: u32>(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  // Low-bit-packed planar kernels are defined for BITS in {10, 12, 14}.
-  // 16 would overflow the Q15 chroma sum; 8 belongs to the non-
-  // const-generic `yuv_420_to_rgb_row` family.
-  debug_assert!(
-    BITS == 9 || BITS == 10 || BITS == 12 || BITS == 14,
-    "yuv_420p_n_to_rgb_row only supports BITS in {{9, 10, 12, 14}}"
-  );
+  // Compile-time guard — fails monomorphization for any BITS outside
+  // {9, 10, 12, 14}. 16 would overflow the Q15 chroma sum (16-bit lives
+  // in `yuv_420p16_to_rgb_row`'s i64 chroma family); 8 belongs to the
+  // non-const-generic `yuv_420_to_rgb_row`. Without this guard a release
+  // build instantiating ::<16> would silently produce wrong output.
+  const { assert!(BITS == 9 || BITS == 10 || BITS == 12 || BITS == 14) };
   debug_assert_eq!(width & 1, 0, "YUV 4:2:0 requires even width");
   debug_assert!(y.len() >= width, "y row too short");
   debug_assert!(u_half.len() >= width / 2, "u_half row too short");
@@ -427,12 +426,10 @@ pub(crate) fn yuv_420p_n_to_rgb_u16_row<const BITS: u32>(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  // Same BITS range as the u8-output counterpart. See
-  // `yuv_420p_n_to_rgb_row` for the rationale.
-  debug_assert!(
-    BITS == 9 || BITS == 10 || BITS == 12 || BITS == 14,
-    "yuv_420p_n_to_rgb_u16_row only supports BITS in {{9, 10, 12, 14}}"
-  );
+  // Compile-time guard — see note on `yuv_420p_n_to_rgb_row`. The
+  // 16-bit u16-output path is `yuv_420p16_to_rgb_u16_row` (i64 chroma
+  // family).
+  const { assert!(BITS == 9 || BITS == 10 || BITS == 12 || BITS == 14) };
   debug_assert_eq!(width & 1, 0, "YUV 4:2:0 requires even width");
   debug_assert!(y.len() >= width, "y row too short");
   debug_assert!(u_half.len() >= width / 2, "u_half row too short");
