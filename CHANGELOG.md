@@ -1,5 +1,54 @@
 # UNRELEASED
 
+## Ship 6b — 9-bit family + 4:4:0 family (Tier 1 completion)
+
+Closes the remaining FFmpeg `AVPixelFormat` Tier 1 gap. Six new
+formats, all reusing existing kernel families:
+
+### New formats
+
+- **`Yuv420p9` / `Yuv422p9` / `Yuv444p9`** — 9-bit planar at 4:2:0 /
+  4:2:2 / 4:4:4. Aliases over `Yuv420pFrame16<9>` /
+  `Yuv422pFrame16<9>` / `Yuv444pFrame16<9>`. Reuses the const-generic
+  `yuv_420p_n_to_rgb_*<BITS>` and `yuv_444p_n_to_rgb_*<BITS>` kernel
+  families — only the AND mask (`0x1FF`) and the Q15 scale change at
+  `BITS = 9`. Niche format (AVC High 9 profile only); no HEVC / VP9 /
+  AV1 producers.
+- **`Yuv440p`** — 4:4:0 planar at 8 bits (`AV_PIX_FMT_YUV440P` /
+  `AV_PIX_FMT_YUVJ440P`). Full-width chroma, half-height — the
+  axis-flipped twin of `Yuv422p`. Reuses `yuv_444_to_rgb_row`
+  verbatim; only the walker reads chroma row `r / 2`. Mostly seen
+  from JPEG decoders that subsample vertically only.
+- **`Yuv440p10` / `Yuv440p12`** — 4:4:0 planar at 10 / 12 bits.
+  `Yuv440pFrame16<BITS>` with aliases. Reuses the const-generic
+  `yuv_444p_n_to_rgb_*<BITS>` family. No 9 / 14 / 16-bit variants
+  exist in FFmpeg, so `try_new` rejects them.
+- New `RowSlice` variants for the 9-bit shape rows: `Y9`, `UHalf9`,
+  `VHalf9`, `UFull9`, `VFull9`.
+
+### SIMD
+
+All 6 new formats inherit native SIMD coverage from the underlying
+const-generic kernel families. No new SIMD code paths — only the
+compile-time `BITS` validators were widened from `{10, 12, 14}` to
+`{9, 10, 12, 14}` across scalar + 5 backends.
+
+| Kernel dispatch                                       | NEON | SSE4.1 | AVX2 | AVX-512 | wasm simd128 |
+| ----------------------------------------------------- | :--: | :----: | :--: | :-----: | :----------: |
+| `yuv_420p_n_to_rgb_*<9>` (4:2:0 / 4:2:2)              |  ✅  |   ✅   |  ✅  |   ✅    |      ✅      |
+| `yuv_444p_n_to_rgb_*<9>` (4:4:4)                      |  ✅  |   ✅   |  ✅  |   ✅    |      ✅      |
+| `yuv_444_to_rgb_row` (via `Yuv440p`)                  |  ✅  |   ✅   |  ✅  |   ✅    |      ✅      |
+| `yuv_444p_n_to_rgb_*<10/12>` (via `Yuv440p10/12`)     |  ✅  |   ✅   |  ✅  |   ✅    |      ✅      |
+
+### Notes
+
+- 4:4:0 is rare in modern codecs (mostly JPEG vertical-only
+  subsampling) but ships as a first-class citizen for completeness.
+- 9-bit is niche but trivially cheap to add (zero new kernels);
+  shipping it closes the Tier 1 row in the format matrix.
+- Skipped: `Yuv411p` / `Yuv410p` (legacy DV / Cinepak — uncommon
+  enough that adding them now would be speculative work).
+
 ## Ship 6 — Yuv422p / Yuv444p at 8/10/12/14/16 bit
 
 All three priorities landed in a single PR:

@@ -32,20 +32,26 @@
 //! | ---------------- | --------- | ----------- | ------------------------ | --------------------- |
 //! | [`Yuv420p`]      |  8        | 4:2:0       | planar                   | `yuv420p`             |
 //! | [`Yuv422p`]      |  8        | 4:2:2       | planar                   | `yuv422p`             |
+//! | [`Yuv440p`]      |  8        | 4:4:0       | planar                   | `yuv440p`             |
 //! | [`Yuv444p`]      |  8        | 4:4:4       | planar                   | `yuv444p`             |
 //! | [`Nv12`]         |  8        | 4:2:0       | semi-planar UV           | `nv12`                |
 //! | [`Nv21`]         |  8        | 4:2:0       | semi-planar VU           | `nv21`                |
 //! | [`Nv16`]         |  8        | 4:2:2       | semi-planar UV           | `nv16`                |
 //! | [`Nv24`]         |  8        | 4:4:4       | semi-planar UV           | `nv24`                |
 //! | [`Nv42`]         |  8        | 4:4:4       | semi-planar VU           | `nv42`                |
+//! | [`Yuv420p9`]     |  9        | 4:2:0       | planar, low-packed       | `yuv420p9le`          |
 //! | [`Yuv420p10`]    | 10        | 4:2:0       | planar, low-packed       | `yuv420p10le`         |
 //! | [`Yuv420p12`]    | 12        | 4:2:0       | planar, low-packed       | `yuv420p12le`         |
 //! | [`Yuv420p14`]    | 14        | 4:2:0       | planar, low-packed       | `yuv420p14le`         |
 //! | [`Yuv420p16`]    | 16        | 4:2:0       | planar                   | `yuv420p16le`         |
+//! | [`Yuv422p9`]     |  9        | 4:2:2       | planar, low-packed       | `yuv422p9le`          |
 //! | [`Yuv422p10`]    | 10        | 4:2:2       | planar, low-packed       | `yuv422p10le`         |
 //! | [`Yuv422p12`]    | 12        | 4:2:2       | planar, low-packed       | `yuv422p12le`         |
 //! | [`Yuv422p14`]    | 14        | 4:2:2       | planar, low-packed       | `yuv422p14le`         |
 //! | [`Yuv422p16`]    | 16        | 4:2:2       | planar                   | `yuv422p16le`         |
+//! | [`Yuv440p10`]    | 10        | 4:4:0       | planar, low-packed       | `yuv440p10le`         |
+//! | [`Yuv440p12`]    | 12        | 4:4:0       | planar, low-packed       | `yuv440p12le`         |
+//! | [`Yuv444p9`]     |  9        | 4:4:4       | planar, low-packed       | `yuv444p9le`          |
 //! | [`Yuv444p10`]    | 10        | 4:4:4       | planar, low-packed       | `yuv444p10le`         |
 //! | [`Yuv444p12`]    | 12        | 4:4:4       | planar, low-packed       | `yuv444p12le`         |
 //! | [`Yuv444p14`]    | 14        | 4:4:4       | planar, low-packed       | `yuv444p14le`         |
@@ -53,6 +59,21 @@
 //! | [`P010`]         | 10        | 4:2:0       | semi-planar, high-packed | `p010le`              |
 //! | [`P012`]         | 12        | 4:2:0       | semi-planar, high-packed | `p012le`              |
 //! | [`P016`]         | 16        | 4:2:0       | semi-planar              | `p016le`              |
+//!
+//! ## YUVA sources (alpha-drop)
+//!
+//! Every shipped 4:2:0 / 4:2:2 / 4:4:4 planar family also covers its
+//! `yuva*` alpha variant by **alpha-drop**: the caller hands the
+//! Y / U / V slices from a 4-plane YUVA buffer to the matching
+//! `Yuv*p*Frame` constructor and ignores the alpha plane. This works
+//! today for `yuva420p`, `yuva420p9le`, `yuva420p10le`,
+//! `yuva420p16le`, `yuva422p`, `yuva422p9le`, `yuva422p10le`,
+//! `yuva422p16le`, `yuva444p`, `yuva444p9le`, `yuva444p10le`, and
+//! `yuva444p16le` (the full set of YUVA pixel formats FFmpeg
+//! produces). RGBA pass-through (preserving the alpha channel into
+//! the output) is the dedicated **Ship 8** work item — it adds
+//! `with_rgba` / `with_rgba_u16` accessors on `MixedSinker` plus
+//! native YUVA frame types.
 //!
 //! # Kernel families
 //!
@@ -104,20 +125,26 @@
 //!
 //! [`Yuv420p`]: crate::yuv::Yuv420p
 //! [`Yuv422p`]: crate::yuv::Yuv422p
+//! [`Yuv440p`]: crate::yuv::Yuv440p
 //! [`Yuv444p`]: crate::yuv::Yuv444p
 //! [`Nv12`]: crate::yuv::Nv12
 //! [`Nv16`]: crate::yuv::Nv16
 //! [`Nv21`]: crate::yuv::Nv21
 //! [`Nv24`]: crate::yuv::Nv24
 //! [`Nv42`]: crate::yuv::Nv42
+//! [`Yuv420p9`]: crate::yuv::Yuv420p9
 //! [`Yuv420p10`]: crate::yuv::Yuv420p10
 //! [`Yuv420p12`]: crate::yuv::Yuv420p12
 //! [`Yuv420p14`]: crate::yuv::Yuv420p14
 //! [`Yuv420p16`]: crate::yuv::Yuv420p16
+//! [`Yuv422p9`]: crate::yuv::Yuv422p9
 //! [`Yuv422p10`]: crate::yuv::Yuv422p10
 //! [`Yuv422p12`]: crate::yuv::Yuv422p12
 //! [`Yuv422p14`]: crate::yuv::Yuv422p14
 //! [`Yuv422p16`]: crate::yuv::Yuv422p16
+//! [`Yuv440p10`]: crate::yuv::Yuv440p10
+//! [`Yuv440p12`]: crate::yuv::Yuv440p12
+//! [`Yuv444p9`]: crate::yuv::Yuv444p9
 //! [`Yuv444p10`]: crate::yuv::Yuv444p10
 //! [`Yuv444p12`]: crate::yuv::Yuv444p12
 //! [`Yuv444p14`]: crate::yuv::Yuv444p14

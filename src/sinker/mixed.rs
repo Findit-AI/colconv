@@ -5,13 +5,41 @@
 //! parameter. One `PixelSink` impl per supported format. Currently
 //! ships impls for:
 //!
-//! - 8‑bit 4:2:0: [`Yuv420p`](crate::yuv::Yuv420p),
-//!   [`Nv12`](crate::yuv::Nv12), [`Nv21`](crate::yuv::Nv21).
-//! - 10/12/14‑bit planar 4:2:0: [`Yuv420p10`](crate::yuv::Yuv420p10),
+//! - **8‑bit planar**: [`Yuv420p`](crate::yuv::Yuv420p),
+//!   [`Yuv422p`](crate::yuv::Yuv422p),
+//!   [`Yuv440p`](crate::yuv::Yuv440p),
+//!   [`Yuv444p`](crate::yuv::Yuv444p).
+//! - **8‑bit semi‑planar**: [`Nv12`](crate::yuv::Nv12),
+//!   [`Nv21`](crate::yuv::Nv21), [`Nv16`](crate::yuv::Nv16),
+//!   [`Nv24`](crate::yuv::Nv24), [`Nv42`](crate::yuv::Nv42).
+//! - **9/10/12/14/16‑bit planar 4:2:0**:
+//!   [`Yuv420p9`](crate::yuv::Yuv420p9),
+//!   [`Yuv420p10`](crate::yuv::Yuv420p10),
 //!   [`Yuv420p12`](crate::yuv::Yuv420p12),
-//!   [`Yuv420p14`](crate::yuv::Yuv420p14).
-//! - 10/12‑bit semi‑planar high‑bit‑packed 4:2:0:
-//!   [`P010`](crate::yuv::P010), [`P012`](crate::yuv::P012).
+//!   [`Yuv420p14`](crate::yuv::Yuv420p14),
+//!   [`Yuv420p16`](crate::yuv::Yuv420p16).
+//! - **9/10/12/14/16‑bit planar 4:2:2**:
+//!   [`Yuv422p9`](crate::yuv::Yuv422p9),
+//!   [`Yuv422p10`](crate::yuv::Yuv422p10),
+//!   [`Yuv422p12`](crate::yuv::Yuv422p12),
+//!   [`Yuv422p14`](crate::yuv::Yuv422p14),
+//!   [`Yuv422p16`](crate::yuv::Yuv422p16).
+//! - **10/12‑bit planar 4:4:0**:
+//!   [`Yuv440p10`](crate::yuv::Yuv440p10),
+//!   [`Yuv440p12`](crate::yuv::Yuv440p12).
+//! - **9/10/12/14/16‑bit planar 4:4:4**:
+//!   [`Yuv444p9`](crate::yuv::Yuv444p9),
+//!   [`Yuv444p10`](crate::yuv::Yuv444p10),
+//!   [`Yuv444p12`](crate::yuv::Yuv444p12),
+//!   [`Yuv444p14`](crate::yuv::Yuv444p14),
+//!   [`Yuv444p16`](crate::yuv::Yuv444p16).
+//! - **10/12/16‑bit semi‑planar high‑bit‑packed 4:2:0**:
+//!   [`P010`](crate::yuv::P010), [`P012`](crate::yuv::P012),
+//!   [`P016`](crate::yuv::P016).
+//!
+//! High‑bit‑depth source impls expose both `with_rgb` (u8 output) and
+//! `with_rgb_u16` (native‑depth u16 output). Calling `with_rgb_u16` on
+//! an 8‑bit source format is a compile error.
 //!
 //! All configuration and processing methods are fallible — no panics
 //! under normal contract violations — so the sink is usable on
@@ -30,21 +58,25 @@ use crate::{
     nv12_to_rgb_row, nv21_to_rgb_row, nv24_to_rgb_row, nv42_to_rgb_row, p010_to_rgb_row,
     p010_to_rgb_u16_row, p012_to_rgb_row, p012_to_rgb_u16_row, p016_to_rgb_row,
     p016_to_rgb_u16_row, rgb_to_hsv_row, yuv_420_to_rgb_row, yuv_444_to_rgb_row,
-    yuv420p10_to_rgb_row, yuv420p10_to_rgb_u16_row, yuv420p12_to_rgb_row, yuv420p12_to_rgb_u16_row,
-    yuv420p14_to_rgb_row, yuv420p14_to_rgb_u16_row, yuv420p16_to_rgb_row, yuv420p16_to_rgb_u16_row,
+    yuv420p9_to_rgb_row, yuv420p9_to_rgb_u16_row, yuv420p10_to_rgb_row, yuv420p10_to_rgb_u16_row,
+    yuv420p12_to_rgb_row, yuv420p12_to_rgb_u16_row, yuv420p14_to_rgb_row, yuv420p14_to_rgb_u16_row,
+    yuv420p16_to_rgb_row, yuv420p16_to_rgb_u16_row, yuv444p9_to_rgb_row, yuv444p9_to_rgb_u16_row,
     yuv444p10_to_rgb_row, yuv444p10_to_rgb_u16_row, yuv444p12_to_rgb_row, yuv444p12_to_rgb_u16_row,
     yuv444p14_to_rgb_row, yuv444p14_to_rgb_u16_row, yuv444p16_to_rgb_row, yuv444p16_to_rgb_u16_row,
   },
   yuv::{
     Nv12, Nv12Row, Nv12Sink, Nv16, Nv16Row, Nv16Sink, Nv21, Nv21Row, Nv21Sink, Nv24, Nv24Row,
     Nv24Sink, Nv42, Nv42Row, Nv42Sink, P010, P010Row, P010Sink, P012, P012Row, P012Sink, P016,
-    P016Row, P016Sink, Yuv420p, Yuv420p10, Yuv420p10Row, Yuv420p10Sink, Yuv420p12, Yuv420p12Row,
-    Yuv420p12Sink, Yuv420p14, Yuv420p14Row, Yuv420p14Sink, Yuv420p16, Yuv420p16Row, Yuv420p16Sink,
-    Yuv420pRow, Yuv420pSink, Yuv422p, Yuv422p10, Yuv422p10Row, Yuv422p10Sink, Yuv422p12,
-    Yuv422p12Row, Yuv422p12Sink, Yuv422p14, Yuv422p14Row, Yuv422p14Sink, Yuv422p16, Yuv422p16Row,
-    Yuv422p16Sink, Yuv422pRow, Yuv422pSink, Yuv444p, Yuv444p10, Yuv444p10Row, Yuv444p10Sink,
-    Yuv444p12, Yuv444p12Row, Yuv444p12Sink, Yuv444p14, Yuv444p14Row, Yuv444p14Sink, Yuv444p16,
-    Yuv444p16Row, Yuv444p16Sink, Yuv444pRow, Yuv444pSink,
+    P016Row, P016Sink, Yuv420p, Yuv420p9, Yuv420p9Row, Yuv420p9Sink, Yuv420p10, Yuv420p10Row,
+    Yuv420p10Sink, Yuv420p12, Yuv420p12Row, Yuv420p12Sink, Yuv420p14, Yuv420p14Row, Yuv420p14Sink,
+    Yuv420p16, Yuv420p16Row, Yuv420p16Sink, Yuv420pRow, Yuv420pSink, Yuv422p, Yuv422p9,
+    Yuv422p9Row, Yuv422p9Sink, Yuv422p10, Yuv422p10Row, Yuv422p10Sink, Yuv422p12, Yuv422p12Row,
+    Yuv422p12Sink, Yuv422p14, Yuv422p14Row, Yuv422p14Sink, Yuv422p16, Yuv422p16Row, Yuv422p16Sink,
+    Yuv422pRow, Yuv422pSink, Yuv440p, Yuv440p10, Yuv440p10Row, Yuv440p10Sink, Yuv440p12,
+    Yuv440p12Row, Yuv440p12Sink, Yuv440pRow, Yuv440pSink, Yuv444p, Yuv444p9, Yuv444p9Row,
+    Yuv444p9Sink, Yuv444p10, Yuv444p10Row, Yuv444p10Sink, Yuv444p12, Yuv444p12Row, Yuv444p12Sink,
+    Yuv444p14, Yuv444p14Row, Yuv444p14Sink, Yuv444p16, Yuv444p16Row, Yuv444p16Sink, Yuv444pRow,
+    Yuv444pSink,
   },
 };
 
@@ -265,6 +297,27 @@ pub enum RowSlice {
   /// `width` pairs — byte order swapped relative to [`Self::UvFull`].
   #[display("VU Full")]
   VuFull,
+  /// Full‑width Y row of a **9‑bit** planar source
+  /// ([`Yuv420p9`](crate::yuv::Yuv420p9) /
+  /// [`Yuv422p9`](crate::yuv::Yuv422p9) /
+  /// [`Yuv444p9`](crate::yuv::Yuv444p9)). `u16` samples, `width`
+  /// elements (low 9 bits active).
+  #[display("Y9")]
+  Y9,
+  /// Half‑width U row of a **9‑bit** planar source. `u16` samples,
+  /// `width / 2` elements.
+  #[display("U Half 9")]
+  UHalf9,
+  /// Half‑width V row of a **9‑bit** planar source. `u16` samples,
+  /// `width / 2` elements.
+  #[display("V Half 9")]
+  VHalf9,
+  /// Full‑width U row of a **9‑bit** 4:4:4 planar source.
+  #[display("U Full 9")]
+  UFull9,
+  /// Full‑width V row of a **9‑bit** 4:4:4 planar source.
+  #[display("V Full 9")]
+  VFull9,
   /// Full‑width Y row of a **10‑bit** planar source ([`Yuv420p10`]).
   /// `u16` samples, `width` elements.
   #[display("Y10")]
@@ -4287,10 +4340,994 @@ impl PixelSink for MixedSinker<'_, P016> {
   }
 }
 
+// ---- Yuv420p9 impl -----------------------------------------------------
+//
+// 9-bit 4:2:0 planar. AV_PIX_FMT_YUV420P9LE — niche AVC High 9 only.
+// Reuses the Q15 i32 kernel family at `BITS = 9` via the
+// `yuv420p9_to_rgb_*` row primitives (which dispatch to
+// `yuv_420p_n_to_rgb_*<9>` internally).
+
+impl<'a> MixedSinker<'a, Yuv420p9> {
+  /// Attaches a packed **`u16`** RGB output buffer. 9‑bit low‑packed
+  /// (`(1 << 9) - 1 = 511` max).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn with_rgb_u16(mut self, buf: &'a mut [u16]) -> Result<Self, MixedSinkerError> {
+    self.set_rgb_u16(buf)?;
+    Ok(self)
+  }
+  /// In-place variant of [`with_rgb_u16`](Self::with_rgb_u16).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn set_rgb_u16(&mut self, buf: &'a mut [u16]) -> Result<&mut Self, MixedSinkerError> {
+    let expected = self.frame_bytes(3)?;
+    if buf.len() < expected {
+      return Err(MixedSinkerError::RgbU16BufferTooShort {
+        expected,
+        actual: buf.len(),
+      });
+    }
+    self.rgb_u16 = Some(buf);
+    Ok(self)
+  }
+}
+
+impl Yuv420p9Sink for MixedSinker<'_, Yuv420p9> {}
+
+impl PixelSink for MixedSinker<'_, Yuv420p9> {
+  type Input<'r> = Yuv420p9Row<'r>;
+  type Error = MixedSinkerError;
+
+  fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
+    if self.width & 1 != 0 {
+      return Err(MixedSinkerError::OddWidth { width: self.width });
+    }
+    check_dimensions_match(self.width, self.height, width, height)
+  }
+
+  fn process(&mut self, row: Yuv420p9Row<'_>) -> Result<(), Self::Error> {
+    const BITS: u32 = 9;
+    let w = self.width;
+    let h = self.height;
+    let idx = row.row();
+    let use_simd = self.simd;
+
+    if w & 1 != 0 {
+      return Err(MixedSinkerError::OddWidth { width: w });
+    }
+    if row.y().len() != w {
+      return Err(MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::Y9,
+        row: idx,
+        expected: w,
+        actual: row.y().len(),
+      });
+    }
+    if row.u_half().len() != w / 2 {
+      return Err(MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::UHalf9,
+        row: idx,
+        expected: w / 2,
+        actual: row.u_half().len(),
+      });
+    }
+    if row.v_half().len() != w / 2 {
+      return Err(MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::VHalf9,
+        row: idx,
+        expected: w / 2,
+        actual: row.v_half().len(),
+      });
+    }
+    if idx >= self.height {
+      return Err(MixedSinkerError::RowIndexOutOfRange {
+        row: idx,
+        configured_height: self.height,
+      });
+    }
+
+    let Self {
+      rgb,
+      rgb_u16,
+      luma,
+      hsv,
+      rgb_scratch,
+      ..
+    } = self;
+    let one_plane_start = idx * w;
+    let one_plane_end = one_plane_start + w;
+
+    if let Some(luma) = luma.as_deref_mut() {
+      let dst = &mut luma[one_plane_start..one_plane_end];
+      for (d, &s) in dst.iter_mut().zip(row.y().iter()) {
+        *d = (s >> (BITS - 8)) as u8;
+      }
+    }
+
+    if let Some(buf) = rgb_u16.as_deref_mut() {
+      let rgb_plane_end =
+        one_plane_end
+          .checked_mul(3)
+          .ok_or(MixedSinkerError::GeometryOverflow {
+            width: w,
+            height: h,
+            channels: 3,
+          })?;
+      let rgb_plane_start = one_plane_start * 3;
+      yuv420p9_to_rgb_u16_row(
+        row.y(),
+        row.u_half(),
+        row.v_half(),
+        &mut buf[rgb_plane_start..rgb_plane_end],
+        w,
+        row.matrix(),
+        row.full_range(),
+        use_simd,
+      );
+    }
+
+    if rgb.is_none() && hsv.is_none() {
+      return Ok(());
+    }
+
+    let rgb_row: &mut [u8] = match rgb.as_deref_mut() {
+      Some(buf) => {
+        let rgb_plane_end =
+          one_plane_end
+            .checked_mul(3)
+            .ok_or(MixedSinkerError::GeometryOverflow {
+              width: w,
+              height: h,
+              channels: 3,
+            })?;
+        let rgb_plane_start = one_plane_start * 3;
+        &mut buf[rgb_plane_start..rgb_plane_end]
+      }
+      None => {
+        let rgb_row_bytes = w.checked_mul(3).ok_or(MixedSinkerError::GeometryOverflow {
+          width: w,
+          height: h,
+          channels: 3,
+        })?;
+        if rgb_scratch.len() < rgb_row_bytes {
+          rgb_scratch.resize(rgb_row_bytes, 0);
+        }
+        &mut rgb_scratch[..rgb_row_bytes]
+      }
+    };
+
+    yuv420p9_to_rgb_row(
+      row.y(),
+      row.u_half(),
+      row.v_half(),
+      rgb_row,
+      w,
+      row.matrix(),
+      row.full_range(),
+      use_simd,
+    );
+
+    if let Some(hsv) = hsv.as_mut() {
+      rgb_to_hsv_row(
+        rgb_row,
+        &mut hsv.h[one_plane_start..one_plane_end],
+        &mut hsv.s[one_plane_start..one_plane_end],
+        &mut hsv.v[one_plane_start..one_plane_end],
+        w,
+        use_simd,
+      );
+    }
+    Ok(())
+  }
+}
+
+// ---- Yuv422p9 impl -----------------------------------------------------
+//
+// 4:2:2 planar 9‑bit — same per-row chroma shape as 4:2:0 (half-width
+// U / V), one chroma row per Y row instead of one per two. Reuses
+// `yuv420p9_to_rgb_*` row primitives verbatim.
+
+impl<'a> MixedSinker<'a, Yuv422p9> {
+  /// Attaches a packed **`u16`** RGB output buffer. 9-bit low-packed.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn with_rgb_u16(mut self, buf: &'a mut [u16]) -> Result<Self, MixedSinkerError> {
+    self.set_rgb_u16(buf)?;
+    Ok(self)
+  }
+  /// In-place variant.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn set_rgb_u16(&mut self, buf: &'a mut [u16]) -> Result<&mut Self, MixedSinkerError> {
+    let expected = self.frame_bytes(3)?;
+    if buf.len() < expected {
+      return Err(MixedSinkerError::RgbU16BufferTooShort {
+        expected,
+        actual: buf.len(),
+      });
+    }
+    self.rgb_u16 = Some(buf);
+    Ok(self)
+  }
+}
+
+impl Yuv422p9Sink for MixedSinker<'_, Yuv422p9> {}
+
+impl PixelSink for MixedSinker<'_, Yuv422p9> {
+  type Input<'r> = Yuv422p9Row<'r>;
+  type Error = MixedSinkerError;
+
+  fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
+    if self.width & 1 != 0 {
+      return Err(MixedSinkerError::OddWidth { width: self.width });
+    }
+    check_dimensions_match(self.width, self.height, width, height)
+  }
+
+  fn process(&mut self, row: Yuv422p9Row<'_>) -> Result<(), Self::Error> {
+    const BITS: u32 = 9;
+    let w = self.width;
+    let h = self.height;
+    let idx = row.row();
+    let use_simd = self.simd;
+
+    if w & 1 != 0 {
+      return Err(MixedSinkerError::OddWidth { width: w });
+    }
+    if row.y().len() != w {
+      return Err(MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::Y9,
+        row: idx,
+        expected: w,
+        actual: row.y().len(),
+      });
+    }
+    if row.u_half().len() != w / 2 {
+      return Err(MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::UHalf9,
+        row: idx,
+        expected: w / 2,
+        actual: row.u_half().len(),
+      });
+    }
+    if row.v_half().len() != w / 2 {
+      return Err(MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::VHalf9,
+        row: idx,
+        expected: w / 2,
+        actual: row.v_half().len(),
+      });
+    }
+    if idx >= self.height {
+      return Err(MixedSinkerError::RowIndexOutOfRange {
+        row: idx,
+        configured_height: self.height,
+      });
+    }
+
+    let Self {
+      rgb,
+      rgb_u16,
+      luma,
+      hsv,
+      rgb_scratch,
+      ..
+    } = self;
+    let one_plane_start = idx * w;
+    let one_plane_end = one_plane_start + w;
+
+    if let Some(luma) = luma.as_deref_mut() {
+      let dst = &mut luma[one_plane_start..one_plane_end];
+      for (d, &s) in dst.iter_mut().zip(row.y().iter()) {
+        *d = (s >> (BITS - 8)) as u8;
+      }
+    }
+
+    if let Some(buf) = rgb_u16.as_deref_mut() {
+      let rgb_plane_end =
+        one_plane_end
+          .checked_mul(3)
+          .ok_or(MixedSinkerError::GeometryOverflow {
+            width: w,
+            height: h,
+            channels: 3,
+          })?;
+      let rgb_plane_start = one_plane_start * 3;
+      yuv420p9_to_rgb_u16_row(
+        row.y(),
+        row.u_half(),
+        row.v_half(),
+        &mut buf[rgb_plane_start..rgb_plane_end],
+        w,
+        row.matrix(),
+        row.full_range(),
+        use_simd,
+      );
+    }
+
+    if rgb.is_none() && hsv.is_none() {
+      return Ok(());
+    }
+
+    let rgb_row: &mut [u8] = match rgb.as_deref_mut() {
+      Some(buf) => {
+        let rgb_plane_end =
+          one_plane_end
+            .checked_mul(3)
+            .ok_or(MixedSinkerError::GeometryOverflow {
+              width: w,
+              height: h,
+              channels: 3,
+            })?;
+        let rgb_plane_start = one_plane_start * 3;
+        &mut buf[rgb_plane_start..rgb_plane_end]
+      }
+      None => {
+        let rgb_row_bytes = w.checked_mul(3).ok_or(MixedSinkerError::GeometryOverflow {
+          width: w,
+          height: h,
+          channels: 3,
+        })?;
+        if rgb_scratch.len() < rgb_row_bytes {
+          rgb_scratch.resize(rgb_row_bytes, 0);
+        }
+        &mut rgb_scratch[..rgb_row_bytes]
+      }
+    };
+
+    yuv420p9_to_rgb_row(
+      row.y(),
+      row.u_half(),
+      row.v_half(),
+      rgb_row,
+      w,
+      row.matrix(),
+      row.full_range(),
+      use_simd,
+    );
+
+    if let Some(hsv) = hsv.as_mut() {
+      rgb_to_hsv_row(
+        rgb_row,
+        &mut hsv.h[one_plane_start..one_plane_end],
+        &mut hsv.s[one_plane_start..one_plane_end],
+        &mut hsv.v[one_plane_start..one_plane_end],
+        w,
+        use_simd,
+      );
+    }
+    Ok(())
+  }
+}
+
+// ---- Yuv444p9 impl -----------------------------------------------------
+
+impl<'a> MixedSinker<'a, Yuv444p9> {
+  /// Attaches a packed **`u16`** RGB output buffer. 9-bit low-packed.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn with_rgb_u16(mut self, buf: &'a mut [u16]) -> Result<Self, MixedSinkerError> {
+    self.set_rgb_u16(buf)?;
+    Ok(self)
+  }
+  /// In-place variant.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn set_rgb_u16(&mut self, buf: &'a mut [u16]) -> Result<&mut Self, MixedSinkerError> {
+    let expected = self.frame_bytes(3)?;
+    if buf.len() < expected {
+      return Err(MixedSinkerError::RgbU16BufferTooShort {
+        expected,
+        actual: buf.len(),
+      });
+    }
+    self.rgb_u16 = Some(buf);
+    Ok(self)
+  }
+}
+
+impl Yuv444p9Sink for MixedSinker<'_, Yuv444p9> {}
+
+impl PixelSink for MixedSinker<'_, Yuv444p9> {
+  type Input<'r> = Yuv444p9Row<'r>;
+  type Error = MixedSinkerError;
+
+  fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
+    check_dimensions_match(self.width, self.height, width, height)
+  }
+
+  fn process(&mut self, row: Yuv444p9Row<'_>) -> Result<(), Self::Error> {
+    const BITS: u32 = 9;
+    let w = self.width;
+    let h = self.height;
+    let idx = row.row();
+    let use_simd = self.simd;
+
+    if row.y().len() != w {
+      return Err(MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::Y9,
+        row: idx,
+        expected: w,
+        actual: row.y().len(),
+      });
+    }
+    if row.u().len() != w {
+      return Err(MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::UFull9,
+        row: idx,
+        expected: w,
+        actual: row.u().len(),
+      });
+    }
+    if row.v().len() != w {
+      return Err(MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::VFull9,
+        row: idx,
+        expected: w,
+        actual: row.v().len(),
+      });
+    }
+    if idx >= self.height {
+      return Err(MixedSinkerError::RowIndexOutOfRange {
+        row: idx,
+        configured_height: self.height,
+      });
+    }
+
+    let Self {
+      rgb,
+      rgb_u16,
+      luma,
+      hsv,
+      rgb_scratch,
+      ..
+    } = self;
+    let one_plane_start = idx * w;
+    let one_plane_end = one_plane_start + w;
+
+    if let Some(luma) = luma.as_deref_mut() {
+      let dst = &mut luma[one_plane_start..one_plane_end];
+      for (d, &s) in dst.iter_mut().zip(row.y().iter()) {
+        *d = (s >> (BITS - 8)) as u8;
+      }
+    }
+
+    if let Some(buf) = rgb_u16.as_deref_mut() {
+      let rgb_plane_end =
+        one_plane_end
+          .checked_mul(3)
+          .ok_or(MixedSinkerError::GeometryOverflow {
+            width: w,
+            height: h,
+            channels: 3,
+          })?;
+      let rgb_plane_start = one_plane_start * 3;
+      yuv444p9_to_rgb_u16_row(
+        row.y(),
+        row.u(),
+        row.v(),
+        &mut buf[rgb_plane_start..rgb_plane_end],
+        w,
+        row.matrix(),
+        row.full_range(),
+        use_simd,
+      );
+    }
+
+    if rgb.is_none() && hsv.is_none() {
+      return Ok(());
+    }
+
+    let rgb_row: &mut [u8] = match rgb.as_deref_mut() {
+      Some(buf) => {
+        let rgb_plane_end =
+          one_plane_end
+            .checked_mul(3)
+            .ok_or(MixedSinkerError::GeometryOverflow {
+              width: w,
+              height: h,
+              channels: 3,
+            })?;
+        let rgb_plane_start = one_plane_start * 3;
+        &mut buf[rgb_plane_start..rgb_plane_end]
+      }
+      None => {
+        let rgb_row_bytes = w.checked_mul(3).ok_or(MixedSinkerError::GeometryOverflow {
+          width: w,
+          height: h,
+          channels: 3,
+        })?;
+        if rgb_scratch.len() < rgb_row_bytes {
+          rgb_scratch.resize(rgb_row_bytes, 0);
+        }
+        &mut rgb_scratch[..rgb_row_bytes]
+      }
+    };
+
+    yuv444p9_to_rgb_row(
+      row.y(),
+      row.u(),
+      row.v(),
+      rgb_row,
+      w,
+      row.matrix(),
+      row.full_range(),
+      use_simd,
+    );
+
+    if let Some(hsv) = hsv.as_mut() {
+      rgb_to_hsv_row(
+        rgb_row,
+        &mut hsv.h[one_plane_start..one_plane_end],
+        &mut hsv.s[one_plane_start..one_plane_end],
+        &mut hsv.v[one_plane_start..one_plane_end],
+        w,
+        use_simd,
+      );
+    }
+    Ok(())
+  }
+}
+
+// ---- Yuv440p impl -------------------------------------------------------
+//
+// 4:4:0 planar 8‑bit — full-width chroma, half-height. Per-row math
+// matches 4:4:4 (full-width U / V); only the walker reads chroma row
+// `r / 2`. Reuses `yuv_444_to_rgb_row` verbatim.
+
+impl Yuv440pSink for MixedSinker<'_, Yuv440p> {}
+
+impl PixelSink for MixedSinker<'_, Yuv440p> {
+  type Input<'r> = Yuv440pRow<'r>;
+  type Error = MixedSinkerError;
+
+  fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
+    check_dimensions_match(self.width, self.height, width, height)
+  }
+
+  fn process(&mut self, row: Yuv440pRow<'_>) -> Result<(), Self::Error> {
+    let w = self.width;
+    let h = self.height;
+    let idx = row.row();
+    let use_simd = self.simd;
+
+    if row.y().len() != w {
+      return Err(MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::Y,
+        row: idx,
+        expected: w,
+        actual: row.y().len(),
+      });
+    }
+    if row.u().len() != w {
+      return Err(MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::UFull,
+        row: idx,
+        expected: w,
+        actual: row.u().len(),
+      });
+    }
+    if row.v().len() != w {
+      return Err(MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::VFull,
+        row: idx,
+        expected: w,
+        actual: row.v().len(),
+      });
+    }
+    if idx >= self.height {
+      return Err(MixedSinkerError::RowIndexOutOfRange {
+        row: idx,
+        configured_height: self.height,
+      });
+    }
+
+    let Self {
+      rgb,
+      luma,
+      hsv,
+      rgb_scratch,
+      ..
+    } = self;
+
+    let one_plane_start = idx * w;
+    let one_plane_end = one_plane_start + w;
+
+    if let Some(luma) = luma.as_deref_mut() {
+      luma[one_plane_start..one_plane_end].copy_from_slice(&row.y()[..w]);
+    }
+
+    let want_rgb = rgb.is_some();
+    let want_hsv = hsv.is_some();
+    if !want_rgb && !want_hsv {
+      return Ok(());
+    }
+
+    let rgb_row: &mut [u8] = match rgb.as_deref_mut() {
+      Some(buf) => {
+        let rgb_plane_end =
+          one_plane_end
+            .checked_mul(3)
+            .ok_or(MixedSinkerError::GeometryOverflow {
+              width: w,
+              height: h,
+              channels: 3,
+            })?;
+        let rgb_plane_start = one_plane_start * 3;
+        &mut buf[rgb_plane_start..rgb_plane_end]
+      }
+      None => {
+        let rgb_row_bytes = w.checked_mul(3).ok_or(MixedSinkerError::GeometryOverflow {
+          width: w,
+          height: h,
+          channels: 3,
+        })?;
+        if rgb_scratch.len() < rgb_row_bytes {
+          rgb_scratch.resize(rgb_row_bytes, 0);
+        }
+        &mut rgb_scratch[..rgb_row_bytes]
+      }
+    };
+
+    yuv_444_to_rgb_row(
+      row.y(),
+      row.u(),
+      row.v(),
+      rgb_row,
+      w,
+      row.matrix(),
+      row.full_range(),
+      use_simd,
+    );
+
+    if let Some(hsv) = hsv.as_mut() {
+      rgb_to_hsv_row(
+        rgb_row,
+        &mut hsv.h[one_plane_start..one_plane_end],
+        &mut hsv.s[one_plane_start..one_plane_end],
+        &mut hsv.v[one_plane_start..one_plane_end],
+        w,
+        use_simd,
+      );
+    }
+    Ok(())
+  }
+}
+
+// ---- Yuv440p10 impl -----------------------------------------------------
+//
+// 4:4:0 planar 10‑bit. Same row math as 4:4:4 10-bit; reuses
+// `yuv444p10_to_rgb_*`. Walker handles the half-height chroma.
+
+impl<'a> MixedSinker<'a, Yuv440p10> {
+  /// Attaches a packed **`u16`** RGB output buffer. 10-bit low-packed.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn with_rgb_u16(mut self, buf: &'a mut [u16]) -> Result<Self, MixedSinkerError> {
+    self.set_rgb_u16(buf)?;
+    Ok(self)
+  }
+  /// In-place variant.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn set_rgb_u16(&mut self, buf: &'a mut [u16]) -> Result<&mut Self, MixedSinkerError> {
+    let expected = self.frame_bytes(3)?;
+    if buf.len() < expected {
+      return Err(MixedSinkerError::RgbU16BufferTooShort {
+        expected,
+        actual: buf.len(),
+      });
+    }
+    self.rgb_u16 = Some(buf);
+    Ok(self)
+  }
+}
+
+impl Yuv440p10Sink for MixedSinker<'_, Yuv440p10> {}
+
+impl PixelSink for MixedSinker<'_, Yuv440p10> {
+  type Input<'r> = Yuv440p10Row<'r>;
+  type Error = MixedSinkerError;
+
+  fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
+    check_dimensions_match(self.width, self.height, width, height)
+  }
+
+  fn process(&mut self, row: Yuv440p10Row<'_>) -> Result<(), Self::Error> {
+    const BITS: u32 = 10;
+    let w = self.width;
+    let h = self.height;
+    let idx = row.row();
+    let use_simd = self.simd;
+
+    if row.y().len() != w {
+      return Err(MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::Y10,
+        row: idx,
+        expected: w,
+        actual: row.y().len(),
+      });
+    }
+    if row.u().len() != w {
+      return Err(MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::UFull10,
+        row: idx,
+        expected: w,
+        actual: row.u().len(),
+      });
+    }
+    if row.v().len() != w {
+      return Err(MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::VFull10,
+        row: idx,
+        expected: w,
+        actual: row.v().len(),
+      });
+    }
+    if idx >= self.height {
+      return Err(MixedSinkerError::RowIndexOutOfRange {
+        row: idx,
+        configured_height: self.height,
+      });
+    }
+
+    let Self {
+      rgb,
+      rgb_u16,
+      luma,
+      hsv,
+      rgb_scratch,
+      ..
+    } = self;
+    let one_plane_start = idx * w;
+    let one_plane_end = one_plane_start + w;
+
+    if let Some(luma) = luma.as_deref_mut() {
+      let dst = &mut luma[one_plane_start..one_plane_end];
+      for (d, &s) in dst.iter_mut().zip(row.y().iter()) {
+        *d = (s >> (BITS - 8)) as u8;
+      }
+    }
+
+    if let Some(buf) = rgb_u16.as_deref_mut() {
+      let rgb_plane_end =
+        one_plane_end
+          .checked_mul(3)
+          .ok_or(MixedSinkerError::GeometryOverflow {
+            width: w,
+            height: h,
+            channels: 3,
+          })?;
+      let rgb_plane_start = one_plane_start * 3;
+      yuv444p10_to_rgb_u16_row(
+        row.y(),
+        row.u(),
+        row.v(),
+        &mut buf[rgb_plane_start..rgb_plane_end],
+        w,
+        row.matrix(),
+        row.full_range(),
+        use_simd,
+      );
+    }
+
+    if rgb.is_none() && hsv.is_none() {
+      return Ok(());
+    }
+
+    let rgb_row: &mut [u8] = match rgb.as_deref_mut() {
+      Some(buf) => {
+        let rgb_plane_end =
+          one_plane_end
+            .checked_mul(3)
+            .ok_or(MixedSinkerError::GeometryOverflow {
+              width: w,
+              height: h,
+              channels: 3,
+            })?;
+        let rgb_plane_start = one_plane_start * 3;
+        &mut buf[rgb_plane_start..rgb_plane_end]
+      }
+      None => {
+        let rgb_row_bytes = w.checked_mul(3).ok_or(MixedSinkerError::GeometryOverflow {
+          width: w,
+          height: h,
+          channels: 3,
+        })?;
+        if rgb_scratch.len() < rgb_row_bytes {
+          rgb_scratch.resize(rgb_row_bytes, 0);
+        }
+        &mut rgb_scratch[..rgb_row_bytes]
+      }
+    };
+
+    yuv444p10_to_rgb_row(
+      row.y(),
+      row.u(),
+      row.v(),
+      rgb_row,
+      w,
+      row.matrix(),
+      row.full_range(),
+      use_simd,
+    );
+
+    if let Some(hsv) = hsv.as_mut() {
+      rgb_to_hsv_row(
+        rgb_row,
+        &mut hsv.h[one_plane_start..one_plane_end],
+        &mut hsv.s[one_plane_start..one_plane_end],
+        &mut hsv.v[one_plane_start..one_plane_end],
+        w,
+        use_simd,
+      );
+    }
+    Ok(())
+  }
+}
+
+// ---- Yuv440p12 impl -----------------------------------------------------
+
+impl<'a> MixedSinker<'a, Yuv440p12> {
+  /// Attaches a packed **`u16`** RGB output buffer. 12-bit low-packed.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn with_rgb_u16(mut self, buf: &'a mut [u16]) -> Result<Self, MixedSinkerError> {
+    self.set_rgb_u16(buf)?;
+    Ok(self)
+  }
+  /// In-place variant.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn set_rgb_u16(&mut self, buf: &'a mut [u16]) -> Result<&mut Self, MixedSinkerError> {
+    let expected = self.frame_bytes(3)?;
+    if buf.len() < expected {
+      return Err(MixedSinkerError::RgbU16BufferTooShort {
+        expected,
+        actual: buf.len(),
+      });
+    }
+    self.rgb_u16 = Some(buf);
+    Ok(self)
+  }
+}
+
+impl Yuv440p12Sink for MixedSinker<'_, Yuv440p12> {}
+
+impl PixelSink for MixedSinker<'_, Yuv440p12> {
+  type Input<'r> = Yuv440p12Row<'r>;
+  type Error = MixedSinkerError;
+
+  fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
+    check_dimensions_match(self.width, self.height, width, height)
+  }
+
+  fn process(&mut self, row: Yuv440p12Row<'_>) -> Result<(), Self::Error> {
+    const BITS: u32 = 12;
+    let w = self.width;
+    let h = self.height;
+    let idx = row.row();
+    let use_simd = self.simd;
+
+    if row.y().len() != w {
+      return Err(MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::Y12,
+        row: idx,
+        expected: w,
+        actual: row.y().len(),
+      });
+    }
+    if row.u().len() != w {
+      return Err(MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::UFull12,
+        row: idx,
+        expected: w,
+        actual: row.u().len(),
+      });
+    }
+    if row.v().len() != w {
+      return Err(MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::VFull12,
+        row: idx,
+        expected: w,
+        actual: row.v().len(),
+      });
+    }
+    if idx >= self.height {
+      return Err(MixedSinkerError::RowIndexOutOfRange {
+        row: idx,
+        configured_height: self.height,
+      });
+    }
+
+    let Self {
+      rgb,
+      rgb_u16,
+      luma,
+      hsv,
+      rgb_scratch,
+      ..
+    } = self;
+    let one_plane_start = idx * w;
+    let one_plane_end = one_plane_start + w;
+
+    if let Some(luma) = luma.as_deref_mut() {
+      let dst = &mut luma[one_plane_start..one_plane_end];
+      for (d, &s) in dst.iter_mut().zip(row.y().iter()) {
+        *d = (s >> (BITS - 8)) as u8;
+      }
+    }
+
+    if let Some(buf) = rgb_u16.as_deref_mut() {
+      let rgb_plane_end =
+        one_plane_end
+          .checked_mul(3)
+          .ok_or(MixedSinkerError::GeometryOverflow {
+            width: w,
+            height: h,
+            channels: 3,
+          })?;
+      let rgb_plane_start = one_plane_start * 3;
+      yuv444p12_to_rgb_u16_row(
+        row.y(),
+        row.u(),
+        row.v(),
+        &mut buf[rgb_plane_start..rgb_plane_end],
+        w,
+        row.matrix(),
+        row.full_range(),
+        use_simd,
+      );
+    }
+
+    if rgb.is_none() && hsv.is_none() {
+      return Ok(());
+    }
+
+    let rgb_row: &mut [u8] = match rgb.as_deref_mut() {
+      Some(buf) => {
+        let rgb_plane_end =
+          one_plane_end
+            .checked_mul(3)
+            .ok_or(MixedSinkerError::GeometryOverflow {
+              width: w,
+              height: h,
+              channels: 3,
+            })?;
+        let rgb_plane_start = one_plane_start * 3;
+        &mut buf[rgb_plane_start..rgb_plane_end]
+      }
+      None => {
+        let rgb_row_bytes = w.checked_mul(3).ok_or(MixedSinkerError::GeometryOverflow {
+          width: w,
+          height: h,
+          channels: 3,
+        })?;
+        if rgb_scratch.len() < rgb_row_bytes {
+          rgb_scratch.resize(rgb_row_bytes, 0);
+        }
+        &mut rgb_scratch[..rgb_row_bytes]
+      }
+    };
+
+    yuv444p12_to_rgb_row(
+      row.y(),
+      row.u(),
+      row.v(),
+      rgb_row,
+      w,
+      row.matrix(),
+      row.full_range(),
+      use_simd,
+    );
+
+    if let Some(hsv) = hsv.as_mut() {
+      rgb_to_hsv_row(
+        rgb_row,
+        &mut hsv.h[one_plane_start..one_plane_end],
+        &mut hsv.s[one_plane_start..one_plane_end],
+        &mut hsv.v[one_plane_start..one_plane_end],
+        w,
+        use_simd,
+      );
+    }
+    Ok(())
+  }
+}
+
 /// Returns `Ok(())` iff the walker's frame dimensions exactly match
 /// the sinker's configured dimensions. Called from
-/// [`PixelSink::begin_frame`] on both `MixedSinker<Yuv420p>` and
-/// `MixedSinker<Nv12>`.
+/// [`PixelSink::begin_frame`] in every `MixedSinker<F>` impl.
 ///
 /// The sinker's RGB / luma / HSV buffers were sized for
 /// `configured_w × configured_h`. A shorter frame would silently
@@ -4326,15 +5363,17 @@ mod tests {
     ColorMatrix,
     frame::{
       Nv12Frame, Nv16Frame, Nv21Frame, Nv24Frame, Nv42Frame, P010Frame, P012Frame, P016Frame,
-      Yuv420p10Frame, Yuv420p12Frame, Yuv420p14Frame, Yuv420p16Frame, Yuv420pFrame, Yuv422p10Frame,
-      Yuv422p12Frame, Yuv422p14Frame, Yuv422p16Frame, Yuv422pFrame, Yuv444p10Frame, Yuv444p12Frame,
+      Yuv420p9Frame, Yuv420p10Frame, Yuv420p12Frame, Yuv420p14Frame, Yuv420p16Frame, Yuv420pFrame,
+      Yuv422p9Frame, Yuv422p10Frame, Yuv422p12Frame, Yuv422p14Frame, Yuv422p16Frame, Yuv422pFrame,
+      Yuv440p10Frame, Yuv440p12Frame, Yuv440pFrame, Yuv444p9Frame, Yuv444p10Frame, Yuv444p12Frame,
       Yuv444p14Frame, Yuv444p16Frame, Yuv444pFrame,
     },
     yuv::{
       nv12_to, nv16_to, nv21_to, nv24_to, nv42_to, p010_to, p012_to, p016_to, yuv420p_to,
-      yuv420p10_to, yuv420p12_to, yuv420p14_to, yuv420p16_to, yuv422p_to, yuv422p10_to,
-      yuv422p12_to, yuv422p14_to, yuv422p16_to, yuv444p_to, yuv444p10_to, yuv444p12_to,
-      yuv444p14_to, yuv444p16_to,
+      yuv420p9_to, yuv420p10_to, yuv420p12_to, yuv420p14_to, yuv420p16_to, yuv422p_to, yuv422p9_to,
+      yuv422p10_to, yuv422p12_to, yuv422p14_to, yuv422p16_to, yuv440p_to, yuv440p10_to,
+      yuv440p12_to, yuv444p_to, yuv444p9_to, yuv444p10_to, yuv444p12_to, yuv444p14_to,
+      yuv444p16_to,
     },
   };
 
@@ -7425,5 +8464,327 @@ mod tests {
     yuv422p_to(&src422, true, ColorMatrix::Bt709, &mut s422).unwrap();
     yuv420p_to(&src420, true, ColorMatrix::Bt709, &mut s420).unwrap();
     assert_eq!(rgb422, rgb420);
+  }
+
+  // ---- 9-bit family + 4:4:0 family sanity tests ------------------------
+
+  fn solid_yuv440p_frame(
+    width: u32,
+    height: u32,
+    y: u8,
+    u: u8,
+    v: u8,
+  ) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
+    let w = width as usize;
+    let h = height as usize;
+    let ch = (height as usize).div_ceil(2);
+    (
+      std::vec![y; w * h],
+      std::vec![u; w * ch],
+      std::vec![v; w * ch],
+    )
+  }
+
+  fn solid_yuv440p_n_frame(
+    width: u32,
+    height: u32,
+    y: u16,
+    u: u16,
+    v: u16,
+  ) -> (Vec<u16>, Vec<u16>, Vec<u16>) {
+    let w = width as usize;
+    let h = height as usize;
+    let ch = (height as usize).div_ceil(2);
+    (
+      std::vec![y; w * h],
+      std::vec![u; w * ch],
+      std::vec![v; w * ch],
+    )
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn yuv420p9_gray_to_gray() {
+    let (yp, up, vp) = solid_yuv422p_n_frame(16, 8, 256, 256, 256);
+    // 4:2:0 chroma is w/2 × h/2; reuse the 4:2:2 helper's `cw * h` and
+    // truncate to the 4:2:0 layout (cw = 8, ch = 4).
+    let up = up[..8 * 4].to_vec();
+    let vp = vp[..8 * 4].to_vec();
+    let src = Yuv420p9Frame::new(&yp, &up, &vp, 16, 8, 16, 8, 8);
+
+    let mut rgb = std::vec![0u8; 16 * 8 * 3];
+    let mut sink = MixedSinker::<Yuv420p9>::new(16, 8)
+      .with_rgb(&mut rgb)
+      .unwrap();
+    yuv420p9_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+    for px in rgb.chunks(3) {
+      assert!(px[0].abs_diff(128) <= 1);
+      assert_eq!(px[0], px[1]);
+      assert_eq!(px[1], px[2]);
+    }
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn yuv422p9_gray_to_gray() {
+    let (yp, up, vp) = solid_yuv422p_n_frame(16, 8, 256, 256, 256);
+    let src = Yuv422p9Frame::new(&yp, &up, &vp, 16, 8, 16, 8, 8);
+
+    let mut rgb = std::vec![0u8; 16 * 8 * 3];
+    let mut sink = MixedSinker::<Yuv422p9>::new(16, 8)
+      .with_rgb(&mut rgb)
+      .unwrap();
+    yuv422p9_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+    for px in rgb.chunks(3) {
+      assert!(px[0].abs_diff(128) <= 1);
+      assert_eq!(px[0], px[1]);
+      assert_eq!(px[1], px[2]);
+    }
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn yuv444p9_gray_to_gray() {
+    let (yp, up, vp) = solid_yuv444p_n_frame(16, 8, 256, 256, 256);
+    let src = Yuv444p9Frame::new(&yp, &up, &vp, 16, 8, 16, 16, 16);
+
+    let mut rgb = std::vec![0u8; 16 * 8 * 3];
+    let mut sink = MixedSinker::<Yuv444p9>::new(16, 8)
+      .with_rgb(&mut rgb)
+      .unwrap();
+    yuv444p9_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+    for px in rgb.chunks(3) {
+      assert!(px[0].abs_diff(128) <= 1);
+      assert_eq!(px[0], px[1]);
+      assert_eq!(px[1], px[2]);
+    }
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn yuv440p_gray_to_gray() {
+    let (yp, up, vp) = solid_yuv440p_frame(16, 8, 128, 128, 128);
+    let src = Yuv440pFrame::new(&yp, &up, &vp, 16, 8, 16, 16, 16);
+
+    let mut rgb = std::vec![0u8; 16 * 8 * 3];
+    let mut sink = MixedSinker::<Yuv440p>::new(16, 8)
+      .with_rgb(&mut rgb)
+      .unwrap();
+    yuv440p_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+    for px in rgb.chunks(3) {
+      assert!(px[0].abs_diff(128) <= 1);
+      assert_eq!(px[0], px[1]);
+      assert_eq!(px[1], px[2]);
+    }
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn yuv440p10_gray_to_gray() {
+    let (yp, up, vp) = solid_yuv440p_n_frame(16, 8, 512, 512, 512);
+    let src = Yuv440p10Frame::new(&yp, &up, &vp, 16, 8, 16, 16, 16);
+
+    let mut rgb = std::vec![0u8; 16 * 8 * 3];
+    let mut sink = MixedSinker::<Yuv440p10>::new(16, 8)
+      .with_rgb(&mut rgb)
+      .unwrap();
+    yuv440p10_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+    for px in rgb.chunks(3) {
+      assert!(px[0].abs_diff(128) <= 1);
+      assert_eq!(px[0], px[1]);
+      assert_eq!(px[1], px[2]);
+    }
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn yuv440p12_gray_to_gray() {
+    let (yp, up, vp) = solid_yuv440p_n_frame(16, 8, 2048, 2048, 2048);
+    let src = Yuv440p12Frame::new(&yp, &up, &vp, 16, 8, 16, 16, 16);
+
+    let mut rgb = std::vec![0u8; 16 * 8 * 3];
+    let mut sink = MixedSinker::<Yuv440p12>::new(16, 8)
+      .with_rgb(&mut rgb)
+      .unwrap();
+    yuv440p12_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+    for px in rgb.chunks(3) {
+      assert!(px[0].abs_diff(128) <= 1);
+      assert_eq!(px[0], px[1]);
+      assert_eq!(px[1], px[2]);
+    }
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn yuv440p_matches_yuv444p_when_chroma_constant_per_pair() {
+    // 4:4:0 reuses the 4:4:4 row math; the only difference is the
+    // walker reads chroma row r/2. With the same chroma value at every
+    // (r, c), Yuv440p must produce identical RGB to Yuv444p with
+    // duplicated chroma rows.
+    let w = 32u32;
+    let h = 8u32;
+    let (yp, up440, vp440) = solid_yuv440p_frame(w, h, 140, 100, 160);
+    let src440 = Yuv440pFrame::new(&yp, &up440, &vp440, w, h, w, w, w);
+
+    // Yuv444p needs full-height chroma, so duplicate each of the 4 4:4:0
+    // chroma rows into 2 rows.
+    let mut up444 = std::vec::Vec::with_capacity((w * h) as usize);
+    let mut vp444 = std::vec::Vec::with_capacity((w * h) as usize);
+    for r in 0..h {
+      let cr = (r / 2) as usize;
+      let row_start = cr * w as usize;
+      let row_end = row_start + w as usize;
+      up444.extend_from_slice(&up440[row_start..row_end]);
+      vp444.extend_from_slice(&vp440[row_start..row_end]);
+    }
+    let src444 = Yuv444pFrame::new(&yp, &up444, &vp444, w, h, w, w, w);
+
+    let mut rgb440 = std::vec![0u8; (w * h * 3) as usize];
+    let mut rgb444 = std::vec![0u8; (w * h * 3) as usize];
+    let mut s440 = MixedSinker::<Yuv440p>::new(w as usize, h as usize)
+      .with_rgb(&mut rgb440)
+      .unwrap();
+    let mut s444 = MixedSinker::<Yuv444p>::new(w as usize, h as usize)
+      .with_rgb(&mut rgb444)
+      .unwrap();
+    yuv440p_to(&src440, true, ColorMatrix::Bt709, &mut s440).unwrap();
+    yuv444p_to(&src444, true, ColorMatrix::Bt709, &mut s444).unwrap();
+    assert_eq!(rgb440, rgb444);
+  }
+
+  // ---- Walker-level SIMD-vs-scalar equivalence for 9-bit 4:2:x --------
+  //
+  // Per-arch row-kernel tests cover the BITS=9 path with non-neutral
+  // chroma directly. These walker-level tests additionally pin the
+  // public dispatcher behavior — Yuv420p9 / Yuv422p9 read through the
+  // same `yuv_420p_n_to_rgb_*<9>` half-width kernels, so a backend
+  // bug here would silently corrupt user output. Width 1922 forces
+  // both the SIMD main loop and a scalar tail; chroma is non-neutral
+  // and limited-range parameters are exercised below.
+
+  fn pseudo_random_u16_low_n_bits(buf: &mut [u16], seed: u32, bits: u32) {
+    let mask = ((1u32 << bits) - 1) as u16;
+    let mut state = seed;
+    for b in buf {
+      state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+      *b = ((state >> 8) as u16) & mask;
+    }
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn yuv420p9_walker_simd_matches_scalar_with_random_chroma() {
+    let w = 1922u32; // forces tail handling on every backend
+    let h = 4u32;
+    let mut yp = std::vec![0u16; (w * h) as usize];
+    let mut up = std::vec![0u16; ((w / 2) * (h / 2)) as usize];
+    let mut vp = std::vec![0u16; ((w / 2) * (h / 2)) as usize];
+    pseudo_random_u16_low_n_bits(&mut yp, 0x1111, 9);
+    pseudo_random_u16_low_n_bits(&mut up, 0x2222, 9);
+    pseudo_random_u16_low_n_bits(&mut vp, 0x3333, 9);
+    let src = Yuv420p9Frame::new(&yp, &up, &vp, w, h, w, w / 2, w / 2);
+
+    for &full_range in &[true, false] {
+      let mut rgb_simd = std::vec![0u8; (w * h * 3) as usize];
+      let mut rgb_scalar = std::vec![0u8; (w * h * 3) as usize];
+      let mut rgb_u16_simd = std::vec![0u16; (w * h * 3) as usize];
+      let mut rgb_u16_scalar = std::vec![0u16; (w * h * 3) as usize];
+
+      let mut s_simd = MixedSinker::<Yuv420p9>::new(w as usize, h as usize)
+        .with_rgb(&mut rgb_simd)
+        .unwrap()
+        .with_rgb_u16(&mut rgb_u16_simd)
+        .unwrap();
+      yuv420p9_to(&src, full_range, ColorMatrix::Bt709, &mut s_simd).unwrap();
+
+      let mut s_scalar = MixedSinker::<Yuv420p9>::new(w as usize, h as usize)
+        .with_rgb(&mut rgb_scalar)
+        .unwrap()
+        .with_rgb_u16(&mut rgb_u16_scalar)
+        .unwrap();
+      s_scalar.set_simd(false);
+      yuv420p9_to(&src, full_range, ColorMatrix::Bt709, &mut s_scalar).unwrap();
+
+      assert_eq!(rgb_simd, rgb_scalar, "Yuv420p9 SIMD u8 ≠ scalar u8");
+      assert_eq!(
+        rgb_u16_simd, rgb_u16_scalar,
+        "Yuv420p9 SIMD u16 ≠ scalar u16"
+      );
+    }
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn yuv422p9_walker_simd_matches_scalar_with_random_chroma() {
+    let w = 1922u32;
+    let h = 4u32;
+    let mut yp = std::vec![0u16; (w * h) as usize];
+    let mut up = std::vec![0u16; ((w / 2) * h) as usize];
+    let mut vp = std::vec![0u16; ((w / 2) * h) as usize];
+    pseudo_random_u16_low_n_bits(&mut yp, 0x4444, 9);
+    pseudo_random_u16_low_n_bits(&mut up, 0x5555, 9);
+    pseudo_random_u16_low_n_bits(&mut vp, 0x6666, 9);
+    let src = Yuv422p9Frame::new(&yp, &up, &vp, w, h, w, w / 2, w / 2);
+
+    for &full_range in &[true, false] {
+      let mut rgb_simd = std::vec![0u8; (w * h * 3) as usize];
+      let mut rgb_scalar = std::vec![0u8; (w * h * 3) as usize];
+      let mut rgb_u16_simd = std::vec![0u16; (w * h * 3) as usize];
+      let mut rgb_u16_scalar = std::vec![0u16; (w * h * 3) as usize];
+
+      let mut s_simd = MixedSinker::<Yuv422p9>::new(w as usize, h as usize)
+        .with_rgb(&mut rgb_simd)
+        .unwrap()
+        .with_rgb_u16(&mut rgb_u16_simd)
+        .unwrap();
+      yuv422p9_to(&src, full_range, ColorMatrix::Bt2020Ncl, &mut s_simd).unwrap();
+
+      let mut s_scalar = MixedSinker::<Yuv422p9>::new(w as usize, h as usize)
+        .with_rgb(&mut rgb_scalar)
+        .unwrap()
+        .with_rgb_u16(&mut rgb_u16_scalar)
+        .unwrap();
+      s_scalar.set_simd(false);
+      yuv422p9_to(&src, full_range, ColorMatrix::Bt2020Ncl, &mut s_scalar).unwrap();
+
+      assert_eq!(rgb_simd, rgb_scalar, "Yuv422p9 SIMD u8 ≠ scalar u8");
+      assert_eq!(
+        rgb_u16_simd, rgb_u16_scalar,
+        "Yuv422p9 SIMD u16 ≠ scalar u16"
+      );
+    }
   }
 }
