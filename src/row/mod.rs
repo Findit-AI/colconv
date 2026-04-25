@@ -2822,27 +2822,57 @@ fn assert_bayer16_samples_in_range<const BITS: u32>(
   );
 }
 
-/// Asserts every element of a 3×3 fused color transform is finite.
+/// Maximum permitted magnitude of any element of a fused color
+/// transform handed to a Bayer row dispatcher.
+///
+/// Set to `WhiteBalance::MAX_GAIN × ColorCorrectionMatrix::MAX_COEFFICIENT_ABS
+/// = 1e6 × 1e6 = 1e12`, which is the largest absolute value any
+/// fused entry can take when the upstream WB / CCM were
+/// validated through [`crate::raw::WhiteBalance::try_new`] /
+/// [`crate::raw::ColorCorrectionMatrix::try_new`]. The overflow
+/// analysis (see those constructor docs) shows that with `|m[i][j]|
+/// ≤ 1e12` and 16-bit samples, the largest per-channel sum stays
+/// `~21` orders of magnitude under `f32::MAX`. So bounding here
+/// at 1e12 closes the door on direct-row-API callers passing
+/// extreme finite matrices that would silently overflow during
+/// the matmul.
+pub(crate) const MAX_FUSED_TRANSFORM_ABS: f32 = 1.0e12;
+
+/// Asserts every element of a 3×3 fused color transform is
+/// **finite and within the magnitude bound**
+/// ([`MAX_FUSED_TRANSFORM_ABS`]).
+///
 /// Used by the Bayer row dispatchers in release builds before
 /// invoking the kernel — once SIMD backends land they will rely on
-/// this guarantee for branchless f32 arithmetic; a single Inf or
+/// this guarantee for branchless f32 arithmetic. A single Inf or
 /// NaN would otherwise propagate through every pixel of the row
 /// (Inf clamps to saturated white, NaN casts to 0, both producing
-/// silently-wrong frames). Validating WB / CCM upstream via
+/// silently-wrong frames); finite-but-extreme entries (e.g. mixed
+/// `±f32::MAX` from a direct row-API caller) likewise produce
+/// `Inf + -Inf == NaN` during the matmul.
+///
+/// Validating WB / CCM upstream via
 /// [`crate::raw::WhiteBalance::try_new`] /
 /// [`crate::raw::ColorCorrectionMatrix::try_new`] catches the
 /// common case; this is the kernel-boundary backstop for direct
-/// row-API callers and for the (theoretical) case where fusion of
-/// finite-but-extreme inputs overflows.
+/// row-API callers and the dispatcher-level guarantee that
+/// matches what validated upstream inputs can produce.
 #[cfg_attr(not(tarpaulin), inline(always))]
-fn assert_color_transform_finite(m: &[[f32; 3]; 3]) {
+fn assert_color_transform_well_formed(m: &[[f32; 3]; 3]) {
   let mut row = 0;
   while row < 3 {
     let mut col = 0;
     while col < 3 {
+      let v = m[row][col];
       assert!(
-        m[row][col].is_finite(),
+        v.is_finite(),
         "color transform m[{row}][{col}] is non-finite (NaN or ±∞)"
+      );
+      assert!(
+        v.abs() <= MAX_FUSED_TRANSFORM_ABS,
+        "color transform m[{row}][{col}] = {v} exceeds magnitude bound \
+         (|coeff| ≤ {MAX_FUSED_TRANSFORM_ABS}); validated WB × CCM cannot \
+         produce values past this bound"
       );
       col += 1;
     }
@@ -3011,7 +3041,7 @@ pub fn bayer_to_rgb_row(
   assert_eq!(below.len(), width, "below row length must match mid");
   let rgb_min = rgb_row_bytes(width);
   assert!(rgb_out.len() >= rgb_min, "rgb_out row too short");
-  assert_color_transform_finite(m);
+  assert_color_transform_well_formed(m);
 
   scalar::bayer_to_rgb_row(above, mid, below, row_parity, pattern, demosaic, m, rgb_out);
 }
@@ -3061,7 +3091,7 @@ pub fn bayer16_to_rgb_row<const BITS: u32>(
   assert_eq!(below.len(), width, "below row length must match mid");
   let rgb_min = rgb_row_bytes(width);
   assert!(rgb_out.len() >= rgb_min, "rgb_out row too short");
-  assert_color_transform_finite(m);
+  assert_color_transform_well_formed(m);
   assert_bayer16_samples_in_range::<BITS>(above, mid, below);
 
   scalar::bayer16_to_rgb_row::<BITS>(above, mid, below, row_parity, pattern, demosaic, m, rgb_out);
@@ -3106,7 +3136,7 @@ pub fn bayer16_to_rgb_u16_row<const BITS: u32>(
   assert_eq!(below.len(), width, "below row length must match mid");
   let rgb_min = rgb_row_elems(width);
   assert!(rgb_out.len() >= rgb_min, "rgb_out row too short");
-  assert_color_transform_finite(m);
+  assert_color_transform_well_formed(m);
   assert_bayer16_samples_in_range::<BITS>(above, mid, below);
 
   scalar::bayer16_to_rgb_u16_row::<BITS>(
@@ -3264,7 +3294,7 @@ mod bayer_dispatcher_tests {
   //! Boundary-contract tests for the public Bayer row dispatchers.
   //! Walker / kernel correctness lives in `crate::raw::bayer*` and
   //! `crate::row::scalar`; these tests target the dispatcher's own
-  //! preflight (notably the new `assert_color_transform_finite`
+  //! preflight (notably the new `assert_color_transform_well_formed`
   //! check and the existing length / `BITS` / `rgb_out` checks)
   //! since that surface is what unsafe SIMD backends will rely on.
   use super::*;
@@ -3372,6 +3402,107 @@ mod bayer_dispatcher_tests {
     let below = [30u8; 4];
     let mut rgb = [0u8; 12];
     let m: [[f32; 3]; 3] = [[1.5, -0.3, -0.2], [-0.1, 1.2, -0.1], [-0.05, -0.15, 1.2]];
+    bayer_to_rgb_row(
+      &above,
+      &mid,
+      &below,
+      0,
+      BayerPattern::Rggb,
+      BayerDemosaic::Bilinear,
+      &m,
+      &mut rgb,
+      false,
+    );
+  }
+
+  /// Codex regression (round 8): a direct row-API caller that
+  /// bypasses [`crate::raw::WhiteBalance::try_new`] /
+  /// [`crate::raw::ColorCorrectionMatrix::try_new`] cannot inject
+  /// finite-but-extreme matrices that would overflow during the
+  /// per-pixel matmul. The dispatcher's
+  /// `assert_color_transform_well_formed` enforces the same
+  /// magnitude bound (1e12) that validated WB × CCM can produce.
+  #[test]
+  #[should_panic(expected = "exceeds magnitude bound")]
+  fn bayer_dispatcher_rejects_finite_extreme_m() {
+    let above = [0u8; 4];
+    let mid = [0u8; 4];
+    let below = [0u8; 4];
+    let mut rgb = [0u8; 12];
+    let mut m = [[1.0f32, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    m[1][1] = f32::MAX; // finite but past the bound
+    bayer_to_rgb_row(
+      &above,
+      &mid,
+      &below,
+      0,
+      BayerPattern::Rggb,
+      BayerDemosaic::Bilinear,
+      &m,
+      &mut rgb,
+      false,
+    );
+  }
+
+  /// Same regression for the Bayer16→u8 dispatcher.
+  #[test]
+  #[should_panic(expected = "exceeds magnitude bound")]
+  fn bayer16_u8_dispatcher_rejects_finite_extreme_m() {
+    let above = [0u16; 4];
+    let mid = [0u16; 4];
+    let below = [0u16; 4];
+    let mut rgb = [0u8; 12];
+    let mut m = [[1.0f32, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    m[2][0] = -f32::MAX;
+    bayer16_to_rgb_row::<12>(
+      &above,
+      &mid,
+      &below,
+      0,
+      BayerPattern::Rggb,
+      BayerDemosaic::Bilinear,
+      &m,
+      &mut rgb,
+      false,
+    );
+  }
+
+  /// Same regression for the Bayer16→u16 dispatcher.
+  #[test]
+  #[should_panic(expected = "exceeds magnitude bound")]
+  fn bayer16_u16_dispatcher_rejects_finite_extreme_m() {
+    let above = [0u16; 4];
+    let mid = [0u16; 4];
+    let below = [0u16; 4];
+    let mut rgb = [0u16; 12];
+    let mut m = [[1.0f32, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    m[0][0] = 1e20; // finite but past the 1e12 bound
+    bayer16_to_rgb_u16_row::<10>(
+      &above,
+      &mid,
+      &below,
+      0,
+      BayerPattern::Rggb,
+      BayerDemosaic::Bilinear,
+      &m,
+      &mut rgb,
+      false,
+    );
+  }
+
+  /// At-bound element passes (boundary inclusive, matches the
+  /// constructor bounds).
+  #[test]
+  fn bayer_dispatcher_accepts_at_bound_m() {
+    let above = [0u8; 4];
+    let mid = [0u8; 4];
+    let below = [0u8; 4];
+    let mut rgb = [0u8; 12];
+    let m = [
+      [super::MAX_FUSED_TRANSFORM_ABS, 0.0, 0.0],
+      [0.0, 1.0, 0.0],
+      [0.0, 0.0, 1.0],
+    ];
     bayer_to_rgb_row(
       &above,
       &mid,
