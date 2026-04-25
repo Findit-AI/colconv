@@ -5,13 +5,41 @@
 //! parameter. One `PixelSink` impl per supported format. Currently
 //! ships impls for:
 //!
-//! - 8‑bit 4:2:0: [`Yuv420p`](crate::yuv::Yuv420p),
-//!   [`Nv12`](crate::yuv::Nv12), [`Nv21`](crate::yuv::Nv21).
-//! - 10/12/14‑bit planar 4:2:0: [`Yuv420p10`](crate::yuv::Yuv420p10),
+//! - **8‑bit planar**: [`Yuv420p`](crate::yuv::Yuv420p),
+//!   [`Yuv422p`](crate::yuv::Yuv422p),
+//!   [`Yuv440p`](crate::yuv::Yuv440p),
+//!   [`Yuv444p`](crate::yuv::Yuv444p).
+//! - **8‑bit semi‑planar**: [`Nv12`](crate::yuv::Nv12),
+//!   [`Nv21`](crate::yuv::Nv21), [`Nv16`](crate::yuv::Nv16),
+//!   [`Nv24`](crate::yuv::Nv24), [`Nv42`](crate::yuv::Nv42).
+//! - **9/10/12/14/16‑bit planar 4:2:0**:
+//!   [`Yuv420p9`](crate::yuv::Yuv420p9),
+//!   [`Yuv420p10`](crate::yuv::Yuv420p10),
 //!   [`Yuv420p12`](crate::yuv::Yuv420p12),
-//!   [`Yuv420p14`](crate::yuv::Yuv420p14).
-//! - 10/12‑bit semi‑planar high‑bit‑packed 4:2:0:
-//!   [`P010`](crate::yuv::P010), [`P012`](crate::yuv::P012).
+//!   [`Yuv420p14`](crate::yuv::Yuv420p14),
+//!   [`Yuv420p16`](crate::yuv::Yuv420p16).
+//! - **9/10/12/14/16‑bit planar 4:2:2**:
+//!   [`Yuv422p9`](crate::yuv::Yuv422p9),
+//!   [`Yuv422p10`](crate::yuv::Yuv422p10),
+//!   [`Yuv422p12`](crate::yuv::Yuv422p12),
+//!   [`Yuv422p14`](crate::yuv::Yuv422p14),
+//!   [`Yuv422p16`](crate::yuv::Yuv422p16).
+//! - **10/12‑bit planar 4:4:0**:
+//!   [`Yuv440p10`](crate::yuv::Yuv440p10),
+//!   [`Yuv440p12`](crate::yuv::Yuv440p12).
+//! - **9/10/12/14/16‑bit planar 4:4:4**:
+//!   [`Yuv444p9`](crate::yuv::Yuv444p9),
+//!   [`Yuv444p10`](crate::yuv::Yuv444p10),
+//!   [`Yuv444p12`](crate::yuv::Yuv444p12),
+//!   [`Yuv444p14`](crate::yuv::Yuv444p14),
+//!   [`Yuv444p16`](crate::yuv::Yuv444p16).
+//! - **10/12/16‑bit semi‑planar high‑bit‑packed 4:2:0**:
+//!   [`P010`](crate::yuv::P010), [`P012`](crate::yuv::P012),
+//!   [`P016`](crate::yuv::P016).
+//!
+//! High‑bit‑depth source impls expose both `with_rgb` (u8 output) and
+//! `with_rgb_u16` (native‑depth u16 output). Calling `with_rgb_u16` on
+//! an 8‑bit source format is a compile error.
 //!
 //! All configuration and processing methods are fallible — no panics
 //! under normal contract violations — so the sink is usable on
