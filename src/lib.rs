@@ -69,7 +69,8 @@
 //! ## RAW (Bayer) sources
 //!
 //! [`raw::Bayer`] (8-bit) and [`raw::Bayer16<BITS>`] (10/12/14/16-bit
-//! MSB-aligned) feed bilinear demosaic + white balance + 3×3
+//! low-packed `u16`, range `[0, (1 << BITS) - 1]`) feed bilinear
+//! demosaic + white balance + 3×3
 //! color-correction in a single per-row kernel. Caller supplies
 //! [`raw::BayerPattern`] (BGGR / RGGB / GRBG / GBRG),
 //! [`raw::WhiteBalance`] gains, and a [`raw::ColorCorrectionMatrix`].

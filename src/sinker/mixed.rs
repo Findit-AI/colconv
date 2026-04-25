@@ -62,7 +62,7 @@ use crate::{
   HsvBuffers, PixelSink, SourceFormat,
   raw::{Bayer, Bayer16, BayerRow, BayerRow16, BayerSink, BayerSink16},
   row::{
-    bayer16_to_rgb_row, bayer16_to_rgb_u16_row, bayer_to_rgb_row, nv12_to_rgb_row, nv21_to_rgb_row,
+    bayer_to_rgb_row, bayer16_to_rgb_row, bayer16_to_rgb_u16_row, nv12_to_rgb_row, nv21_to_rgb_row,
     nv24_to_rgb_row, nv42_to_rgb_row, p010_to_rgb_row, p010_to_rgb_u16_row, p012_to_rgb_row,
     p012_to_rgb_u16_row, p016_to_rgb_row, p016_to_rgb_u16_row, p410_to_rgb_row,
     p410_to_rgb_u16_row, p412_to_rgb_row, p412_to_rgb_u16_row, p416_to_rgb_row,
@@ -412,6 +412,32 @@ pub enum RowSlice {
   /// elements (no high/low packing distinction at 16 bits).
   #[display("UV Full 16")]
   UvFull16,
+  /// `above` row of an **8-bit Bayer** source
+  /// ([`Bayer`](crate::raw::Bayer)). `u8` samples, `width` elements
+  /// (`==` `mid`); clamped to `mid` at the top edge by the walker.
+  #[display("Bayer Above")]
+  BayerAbove,
+  /// `mid` row of an **8-bit Bayer** source. `u8` samples, `width`
+  /// elements — the row currently being produced.
+  #[display("Bayer Mid")]
+  BayerMid,
+  /// `below` row of an **8-bit Bayer** source. `u8` samples, `width`
+  /// elements (`==` `mid`); clamped to `mid` at the bottom edge.
+  #[display("Bayer Below")]
+  BayerBelow,
+  /// `above` row of a **high-bit-depth Bayer** source
+  /// ([`Bayer16<BITS>`](crate::raw::Bayer16)). `u16` samples,
+  /// `width` elements; clamped to `mid` at the top edge.
+  #[display("Bayer16 Above")]
+  Bayer16Above,
+  /// `mid` row of a **high-bit-depth Bayer** source. `u16` samples,
+  /// `width` elements.
+  #[display("Bayer16 Mid")]
+  Bayer16Mid,
+  /// `below` row of a **high-bit-depth Bayer** source. `u16`
+  /// samples, `width` elements; clamped to `mid` at the bottom edge.
+  #[display("Bayer16 Below")]
+  Bayer16Below,
 }
 
 /// A sink that writes any subset of `{RGB, Luma, HSV}` into
@@ -6360,6 +6386,27 @@ fn check_dimensions_match(
   Ok(())
 }
 
+/// BT.709 luma derivation from packed `R, G, B` u8 row.
+///
+/// Q8 fixed-point: `Y ≈ 0.2126·R + 0.7152·G + 0.0722·B`, scaled to
+/// the `(54, 183, 19)` integer triple with `+128 >> 8` round-to-
+/// nearest. `rgb` carries `3 * luma.len()` packed bytes; the loop
+/// writes one luma sample per pixel.
+///
+/// Used by Bayer / Bayer16 [`MixedSinker`] paths whose source has
+/// no native luma plane to memcpy from. The other (YUV) source
+/// impls take their luma directly off the Y plane and don't go
+/// through this helper.
+#[cfg_attr(not(tarpaulin), inline(always))]
+fn rgb_row_to_bt709_luma_row(rgb: &[u8], luma: &mut [u8]) {
+  for (i, d) in luma.iter_mut().enumerate() {
+    let r = rgb[3 * i] as u32;
+    let g = rgb[3 * i + 1] as u32;
+    let b = rgb[3 * i + 2] as u32;
+    *d = ((54 * r + 183 * g + 19 * b + 128) >> 8) as u8;
+  }
+}
+
 // ---- Bayer (8-bit) impl --------------------------------------------------
 
 impl BayerSink for MixedSinker<'_, Bayer> {}
@@ -6369,9 +6416,8 @@ impl PixelSink for MixedSinker<'_, Bayer> {
   type Error = MixedSinkerError;
 
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
-    if self.width & 1 != 0 {
-      return Err(MixedSinkerError::OddWidth { width: self.width });
-    }
+    // Bayer accepts odd dimensions — see `BayerFrame::try_new` for
+    // the rationale (cropped Bayer is a real workflow).
     check_dimensions_match(self.width, self.height, width, height)
   }
 
@@ -6381,8 +6427,34 @@ impl PixelSink for MixedSinker<'_, Bayer> {
     let idx = row.row();
     let use_simd = self.simd;
 
-    if w & 1 != 0 {
-      return Err(MixedSinkerError::OddWidth { width: w });
+    // Defense-in-depth row-shape checks. The walker always hands
+    // matching slices, but a caller bypassing the walker (or one of
+    // the future unsafe SIMD backends being wired up) needs the
+    // no-panic contract: bad lengths surface as `RowShapeMismatch`,
+    // not as a kernel-level `assert!` panic.
+    if row.mid().len() != w {
+      return Err(MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::BayerMid,
+        row: idx,
+        expected: w,
+        actual: row.mid().len(),
+      });
+    }
+    if row.above().len() != w {
+      return Err(MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::BayerAbove,
+        row: idx,
+        expected: w,
+        actual: row.above().len(),
+      });
+    }
+    if row.below().len() != w {
+      return Err(MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::BayerBelow,
+        row: idx,
+        expected: w,
+        actual: row.below().len(),
+      });
     }
     if idx >= self.height {
       return Err(MixedSinkerError::RowIndexOutOfRange {
@@ -6450,16 +6522,8 @@ impl PixelSink for MixedSinker<'_, Bayer> {
       use_simd,
     );
 
-    // BT.709 luma from RGB. Q8 fixed-point: Y ≈ 0.2126R + 0.7152G +
-    // 0.0722B, scaled to (54, 183, 19) with `+128 >> 8` rounding.
     if let Some(luma) = luma.as_deref_mut() {
-      let dst = &mut luma[one_plane_start..one_plane_end];
-      for (i, d) in dst.iter_mut().enumerate() {
-        let r = rgb_row[3 * i] as u32;
-        let g = rgb_row[3 * i + 1] as u32;
-        let b = rgb_row[3 * i + 2] as u32;
-        *d = ((54 * r + 183 * g + 19 * b + 128) >> 8) as u8;
-      }
+      rgb_row_to_bt709_luma_row(rgb_row, &mut luma[one_plane_start..one_plane_end]);
     }
 
     if let Some(hsv) = hsv.as_mut() {
@@ -6518,9 +6582,8 @@ impl<const BITS: u32> PixelSink for MixedSinker<'_, Bayer16<BITS>> {
   type Error = MixedSinkerError;
 
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
-    if self.width & 1 != 0 {
-      return Err(MixedSinkerError::OddWidth { width: self.width });
-    }
+    // Bayer accepts odd dimensions — see `BayerFrame::try_new` for
+    // the rationale (cropped Bayer is a real workflow).
     check_dimensions_match(self.width, self.height, width, height)
   }
 
@@ -6530,8 +6593,30 @@ impl<const BITS: u32> PixelSink for MixedSinker<'_, Bayer16<BITS>> {
     let idx = row.row();
     let use_simd = self.simd;
 
-    if w & 1 != 0 {
-      return Err(MixedSinkerError::OddWidth { width: w });
+    // See the 8-bit Bayer impl for the row-shape rationale.
+    if row.mid().len() != w {
+      return Err(MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::Bayer16Mid,
+        row: idx,
+        expected: w,
+        actual: row.mid().len(),
+      });
+    }
+    if row.above().len() != w {
+      return Err(MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::Bayer16Above,
+        row: idx,
+        expected: w,
+        actual: row.above().len(),
+      });
+    }
+    if row.below().len() != w {
+      return Err(MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::Bayer16Below,
+        row: idx,
+        expected: w,
+        actual: row.below().len(),
+      });
     }
     if idx >= self.height {
       return Err(MixedSinkerError::RowIndexOutOfRange {
@@ -6625,13 +6710,7 @@ impl<const BITS: u32> PixelSink for MixedSinker<'_, Bayer16<BITS>> {
     );
 
     if let Some(luma) = luma.as_deref_mut() {
-      let dst = &mut luma[one_plane_start..one_plane_end];
-      for (i, d) in dst.iter_mut().enumerate() {
-        let r = rgb_row[3 * i] as u32;
-        let g = rgb_row[3 * i + 1] as u32;
-        let b = rgb_row[3 * i + 2] as u32;
-        *d = ((54 * r + 183 * g + 19 * b + 128) >> 8) as u8;
-      }
+      rgb_row_to_bt709_luma_row(rgb_row, &mut luma[one_plane_start..one_plane_end]);
     }
 
     if let Some(hsv) = hsv.as_mut() {
@@ -10427,7 +10506,7 @@ mod tests {
     data
   }
 
-  /// Build a 12-bit MSB-aligned RGGB Bayer plane.
+  /// Build a 12-bit low-packed RGGB Bayer plane.
   fn solid_rggb12(width: u32, height: u32, r: u16, g: u16, b: u16) -> std::vec::Vec<u16> {
     let w = width as usize;
     let h = height as usize;
@@ -10441,7 +10520,7 @@ mod tests {
           (1, 1) => b,
           _ => unreachable!(),
         };
-        data[y * w + x] = v << 4; // MSB-align 12 → 16
+        data[y * w + x] = v;
       }
     }
     data
@@ -10647,5 +10726,69 @@ mod tests {
         assert_eq!(rgb_u16[i], 4095);
       }
     }
+  }
+
+  #[test]
+  fn bayer_mixed_sinker_returns_row_shape_mismatch_on_bad_above() {
+    use crate::raw::{BayerDemosaic, BayerPattern, BayerRow};
+    let mut rgb = std::vec![0u8; 8 * 6 * 3];
+    let mut sinker = MixedSinker::<Bayer>::new(8, 6).with_rgb(&mut rgb).unwrap();
+    sinker.begin_frame(8, 6).unwrap();
+    let mid = std::vec![0u8; 8];
+    let below = std::vec![0u8; 8];
+    let bad_above = std::vec![0u8; 7]; // wrong length
+    let m = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    let row = BayerRow::new(
+      &bad_above,
+      &mid,
+      &below,
+      0,
+      BayerPattern::Rggb,
+      BayerDemosaic::Bilinear,
+      m,
+    );
+    let err = sinker.process(row).unwrap_err();
+    assert!(matches!(
+      err,
+      MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::BayerAbove,
+        expected: 8,
+        actual: 7,
+        ..
+      }
+    ));
+  }
+
+  #[test]
+  fn bayer16_mixed_sinker_returns_row_shape_mismatch_on_bad_mid() {
+    use crate::raw::{BayerDemosaic, BayerPattern, BayerRow16};
+    let mut rgb = std::vec![0u8; 8 * 6 * 3];
+    let mut sinker = MixedSinker::<Bayer16<12>>::new(8, 6)
+      .with_rgb(&mut rgb)
+      .unwrap();
+    sinker.begin_frame(8, 6).unwrap();
+    let above = std::vec![0u16; 8];
+    let bad_mid = std::vec![0u16; 7]; // wrong length
+    let below = std::vec![0u16; 8];
+    let m = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    let row = BayerRow16::<12>::new(
+      &above,
+      &bad_mid,
+      &below,
+      0,
+      BayerPattern::Rggb,
+      BayerDemosaic::Bilinear,
+      m,
+    );
+    let err = sinker.process(row).unwrap_err();
+    assert!(matches!(
+      err,
+      MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::Bayer16Mid,
+        expected: 8,
+        actual: 7,
+        ..
+      }
+    ));
   }
 }

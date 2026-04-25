@@ -1699,10 +1699,15 @@ where
 
 /// 10/12/14/16-bit Bayer → packed `u8` RGB.
 ///
-/// `above` / `mid` / `below` are MSB-aligned `u16` row slices. `m`
-/// is the unscaled `CCM · diag(wb)`; this kernel bakes the
-/// input→u8 rescale (`255 / max_msb`, where `max_msb =
-/// ((1 << BITS) - 1) << (16 - BITS)`) into output values.
+/// `above` / `mid` / `below` are **low-packed** `u16` row slices —
+/// active samples occupy the low `BITS` bits, with the high
+/// `16 - BITS` bits zero. This matches the planar high-bit-depth
+/// convention used by `Yuv420p10/12/14/16`, `Yuv422p10/12/14/16`,
+/// and `Yuv444p10/12/14/16`.
+///
+/// `m` is the unscaled `CCM · diag(wb)`; this kernel bakes the
+/// input→u8 rescale (`255 / ((1 << BITS) - 1)`) into output values
+/// at write time.
 ///
 /// Output: `3 * mid.len()` `u8` packed `R, G, B`.
 #[allow(clippy::too_many_arguments)]
@@ -1724,8 +1729,8 @@ pub(crate) fn bayer16_to_rgb_row<const BITS: u32>(
 
   let (r_par, b_par) = pattern_phases(pattern);
   let rp = (row_parity & 1) as usize;
-  let max_msb = (((1u32 << BITS) - 1) << (16 - BITS)) as f32;
-  let out_scale = 255.0 / max_msb;
+  let max_in = ((1u32 << BITS) - 1) as f32;
+  let out_scale = 255.0 / max_in;
 
   for x in 0..w {
     let cp = x & 1;
@@ -1743,14 +1748,13 @@ pub(crate) fn bayer16_to_rgb_row<const BITS: u32>(
   }
 }
 
-/// 10/12/14/16-bit Bayer → packed `u16` RGB (low-packed at `BITS`,
-/// matching the `*_to_rgb_u16_row` family convention).
+/// 10/12/14/16-bit Bayer → packed `u16` RGB (low-packed at `BITS`).
 ///
-/// `above` / `mid` / `below` are MSB-aligned `u16` row slices. `m`
-/// is the unscaled `CCM · diag(wb)`; this kernel bakes the
-/// MSB→low-packed rescale (`1 / (1 << (16 - BITS))`) into output
-/// values, producing a final range of `[0, (1 << BITS) - 1]` per
-/// channel.
+/// `above` / `mid` / `below` are **low-packed** `u16` row slices —
+/// active samples occupy the low `BITS` bits. Output range is
+/// `[0, (1 << BITS) - 1]` per channel; since input and output
+/// share the same scale, the matmul result feeds `clamp_u16_round`
+/// directly with no extra rescale.
 ///
 /// Output: `3 * mid.len()` `u16` packed `R, G, B`.
 #[allow(clippy::too_many_arguments)]
@@ -1772,7 +1776,6 @@ pub(crate) fn bayer16_to_rgb_u16_row<const BITS: u32>(
 
   let (r_par, b_par) = pattern_phases(pattern);
   let rp = (row_parity & 1) as usize;
-  let out_scale = 1.0f32 / ((1u32 << (16 - BITS)) as f32);
   let max_out = ((1u32 << BITS) - 1) as f32;
 
   for x in 0..w {
@@ -1782,9 +1785,9 @@ pub(crate) fn bayer16_to_rgb_u16_row<const BITS: u32>(
       BayerRowSel::Mid => mid[i] as f32,
       BayerRowSel::Below => below[i] as f32,
     });
-    let r_out = (m[0][0] * r + m[0][1] * g + m[0][2] * b) * out_scale;
-    let g_out = (m[1][0] * r + m[1][1] * g + m[1][2] * b) * out_scale;
-    let b_out = (m[2][0] * r + m[2][1] * g + m[2][2] * b) * out_scale;
+    let r_out = m[0][0] * r + m[0][1] * g + m[0][2] * b;
+    let g_out = m[1][0] * r + m[1][1] * g + m[1][2] * b;
+    let b_out = m[2][0] * r + m[2][1] * g + m[2][2] * b;
     rgb_out[3 * x] = clamp_u16_round(r_out, max_out);
     rgb_out[3 * x + 1] = clamp_u16_round(g_out, max_out);
     rgb_out[3 * x + 2] = clamp_u16_round(b_out, max_out);

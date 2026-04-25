@@ -22,11 +22,17 @@ color-correction in a single per-row kernel.
 
 ### New frame types (in `colconv::frame`)
 
-- `BayerFrame<'a>` — single `&[u8]` plane, even width / height.
-- `BayerFrame16<'a, const BITS: u32>` — `&[u16]` MSB-aligned at
-  `BITS` ∈ {10, 12, 14, 16}. Aliases: `Bayer10Frame` / `Bayer12Frame`
-  / `Bayer14Frame` / `Bayer16Frame`. `try_new_checked` rejects
-  samples with non-zero low bits.
+- `BayerFrame<'a>` — single `&[u8]` plane. Odd widths and heights
+  are accepted (cropped Bayer planes are real workflow output; the
+  walker / kernel handle partial 2×2 tiles via edge clamping).
+- `BayerFrame16<'a, const BITS: u32>` — `&[u16]` **low-packed** at
+  `BITS` ∈ {10, 12, 14, 16} (active samples in the low `BITS` bits,
+  valid range `[0, (1 << BITS) - 1]`). Matches the planar
+  `Yuv420p10/12/14/16` convention; *not* the `PnFrame` (P010 / P012)
+  high-bit-packed semi-planar convention. `try_new_checked` rejects
+  samples > `(1 << BITS) - 1` via `BayerFrame16Error::SampleOutOfRange`.
+  Aliases: `Bayer10Frame` / `Bayer12Frame` / `Bayer14Frame` /
+  `Bayer16Frame`. Odd dimensions accepted.
 - `BayerFrameError` / `BayerFrame16Error` — structured error enums,
   `#[non_exhaustive]`, `IsVariant`-derived.
 
@@ -39,8 +45,12 @@ color-correction in a single per-row kernel.
   `below` row borrows with top / bottom replicate clamp).
 - Public dispatchers: `row::bayer_to_rgb_row`,
   `row::bayer16_to_rgb_row<BITS>`,
-  `row::bayer16_to_rgb_u16_row<BITS>` (`use_simd` parameter
-  reserved while SIMD backends are pending).
+  `row::bayer16_to_rgb_u16_row<BITS>`. Each runs release-mode
+  preflight (`above` / `below` length match `mid`, `rgb_out >=
+  3 * width` via `checked_mul`, `BITS` const-asserted), matching
+  the `yuv_*_to_rgb_row` boundary contract so future unsafe SIMD
+  kernels inherit a hardened entry point. `use_simd` is currently
+  a no-op — per-arch SIMD ships in a follow-up PR.
 - Sink subtraits: `BayerSink`, `BayerSink16<BITS>`. Source markers:
   `Bayer`, `Bayer16<BITS>` plus `Bayer10` / `Bayer12` / `Bayer14` /
   `Bayer16Bit` aliases.
@@ -54,7 +64,7 @@ color-correction in a single per-row kernel.
 | `bayer16_to_rgb_u16_row<BITS>` (→u16)   |  ⏳  |   ⏳   |  ⏳  |    ⏳   |      ⏳      |
 
 Scalar reference path lands first; per-arch SIMD backends are
-scheduled as follow-up commits before the merge.
+scheduled as a dedicated follow-up PR (`feat/bayer-simd`).
 
 ### Tests
 

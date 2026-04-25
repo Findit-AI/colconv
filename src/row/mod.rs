@@ -2859,10 +2859,16 @@ const fn simd128_available() -> bool {
 ///
 /// `rgb_out` must have at least `3 * mid.len()` bytes.
 ///
-/// `use_simd` is reserved — currently the scalar reference path is
-/// the only backend and the parameter is ignored. SIMD backends
-/// will land per [`scalar::bayer_to_rgb_row`]'s contract in a
-/// follow-up commit.
+/// `above` / `mid` / `below` must all be the same length — that
+/// length is the row's pixel width. `rgb_out` must have at least
+/// `3 * mid.len()` bytes.
+///
+/// **`use_simd` is currently a no-op.** All Bayer paths run the
+/// scalar reference today; per-arch SIMD backends (NEON / SSE4.1 /
+/// AVX2 / AVX-512 / wasm simd128) ship in a follow-up. The
+/// parameter is wired through `MixedSinker` and the public
+/// dispatchers now so callers don't have to touch their call sites
+/// when SIMD lands.
 #[cfg_attr(not(tarpaulin), inline(always))]
 #[allow(clippy::too_many_arguments)]
 pub fn bayer_to_rgb_row(
@@ -2876,6 +2882,16 @@ pub fn bayer_to_rgb_row(
   rgb_out: &mut [u8],
   _use_simd: bool,
 ) {
+  // Release-mode preflight: future unsafe SIMD backends will rely on
+  // these invariants for bounds-free pointer arithmetic, so we
+  // validate here rather than only via `debug_assert!` inside the
+  // scalar kernel. Same pattern as `yuv_420_to_rgb_row`.
+  let width = mid.len();
+  assert_eq!(above.len(), width, "above row length must match mid");
+  assert_eq!(below.len(), width, "below row length must match mid");
+  let rgb_min = rgb_row_bytes(width);
+  assert!(rgb_out.len() >= rgb_min, "rgb_out row too short");
+
   scalar::bayer_to_rgb_row(above, mid, below, row_parity, pattern, demosaic, m, rgb_out);
 }
 
@@ -2884,10 +2900,12 @@ pub fn bayer_to_rgb_row(
 ///
 /// `BITS` ∈ {10, 12, 14, 16}; samples are MSB-aligned `u16`. `m`
 /// is the unscaled `CCM · diag(wb)` — the kernel bakes the
-/// input→u8 rescale (`255 / max_msb`) at output time. `rgb_out`
-/// must have at least `3 * mid.len()` bytes.
+/// input→u8 rescale (`255 / max_msb`) at output time. `above` /
+/// `mid` / `below` must all be the same length; `rgb_out` must
+/// have at least `3 * mid.len()` bytes.
 ///
-/// `_use_simd` is reserved (scalar-only today).
+/// **`use_simd` is currently a no-op** (see
+/// [`bayer_to_rgb_row`] for the deferred-SIMD note).
 #[cfg_attr(not(tarpaulin), inline(always))]
 #[allow(clippy::too_many_arguments)]
 pub fn bayer16_to_rgb_row<const BITS: u32>(
@@ -2901,6 +2919,18 @@ pub fn bayer16_to_rgb_row<const BITS: u32>(
   rgb_out: &mut [u8],
   _use_simd: bool,
 ) {
+  const {
+    assert!(
+      BITS == 10 || BITS == 12 || BITS == 14 || BITS == 16,
+      "bayer16_to_rgb_row: BITS must be 10, 12, 14, or 16"
+    )
+  };
+  let width = mid.len();
+  assert_eq!(above.len(), width, "above row length must match mid");
+  assert_eq!(below.len(), width, "below row length must match mid");
+  let rgb_min = rgb_row_bytes(width);
+  assert!(rgb_out.len() >= rgb_min, "rgb_out row too short");
+
   scalar::bayer16_to_rgb_row::<BITS>(above, mid, below, row_parity, pattern, demosaic, m, rgb_out);
 }
 
@@ -2908,10 +2938,12 @@ pub fn bayer16_to_rgb_row<const BITS: u32>(
 /// to packed `u16` RGB (low-packed at `BITS`).
 ///
 /// `BITS` ∈ {10, 12, 14, 16}. Output range: `[0, (1 << BITS) - 1]`
-/// per channel. `rgb_out` must have at least `3 * mid.len()` `u16`
+/// per channel. `above` / `mid` / `below` must all be the same
+/// length; `rgb_out` must have at least `3 * mid.len()` `u16`
 /// elements.
 ///
-/// `_use_simd` is reserved (scalar-only today).
+/// **`use_simd` is currently a no-op** (see
+/// [`bayer_to_rgb_row`] for the deferred-SIMD note).
 #[cfg_attr(not(tarpaulin), inline(always))]
 #[allow(clippy::too_many_arguments)]
 pub fn bayer16_to_rgb_u16_row<const BITS: u32>(
@@ -2925,6 +2957,18 @@ pub fn bayer16_to_rgb_u16_row<const BITS: u32>(
   rgb_out: &mut [u16],
   _use_simd: bool,
 ) {
+  const {
+    assert!(
+      BITS == 10 || BITS == 12 || BITS == 14 || BITS == 16,
+      "bayer16_to_rgb_u16_row: BITS must be 10, 12, 14, or 16"
+    )
+  };
+  let width = mid.len();
+  assert_eq!(above.len(), width, "above row length must match mid");
+  assert_eq!(below.len(), width, "below row length must match mid");
+  let rgb_min = rgb_row_elems(width);
+  assert!(rgb_out.len() >= rgb_min, "rgb_out row too short");
+
   scalar::bayer16_to_rgb_u16_row::<BITS>(
     above, mid, below, row_parity, pattern, demosaic, m, rgb_out,
   );

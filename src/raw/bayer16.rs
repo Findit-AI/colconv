@@ -1,6 +1,5 @@
-//! 10 / 12 / 14 / 16-bit Bayer (`AV_PIX_FMT_BAYER_*16LE` after MSB
-//! shift) — single-plane mosaic source carrying `u16` samples
-//! MSB-aligned at the declared bit depth.
+//! 10 / 12 / 14 / 16-bit Bayer — single-plane mosaic source
+//! carrying **low-packed** `u16` samples.
 //!
 //! Shape mirrors [`super::bayer`] for the 8-bit case but with a
 //! `u16` plane and a `BITS` const generic. Sinks consume
@@ -8,11 +7,16 @@
 //! [`super::BayerRow`] so the type system pins the input bit depth
 //! at the sink boundary).
 //!
-//! Sample convention follows the rest of the high-bit-depth crate:
-//! the active `BITS` bits live in the high `BITS` of each `u16`,
-//! with the low `16 - BITS` bits zero. Use
-//! [`crate::frame::BayerFrame16::try_new_checked`] on untrusted
-//! input to enforce this.
+//! Sample convention is **low-packed**: active samples occupy the
+//! low `BITS` bits of each `u16`, valid range
+//! `[0, (1 << BITS) - 1]`. This matches the planar
+//! [`Yuv420pFrame16`](crate::frame::Yuv420pFrame16) family.
+//! [`crate::frame::BayerFrame16::try_new_checked`] rejects samples
+//! whose value exceeds `(1 << BITS) - 1`. **Note:** this is the
+//! opposite of [`PnFrame`](crate::frame::PnFrame) (high-bit-packed
+//! semi-planar `u16`); if your upstream provides high-bit-packed
+//! Bayer, right-shift by `(16 - BITS)` before constructing
+//! [`BayerFrame16`](crate::frame::BayerFrame16).
 
 use crate::{
   PixelSink, SourceFormat,
@@ -269,14 +273,13 @@ mod tests {
 
   impl<const BITS: u32> BayerSink16<BITS> for CaptureRgbU16<'_, BITS> {}
 
-  /// Build a 12-bit MSB-aligned RGGB Bayer plane from per-channel
-  /// nominal values (each 0..=4095). MSB-aligned means each sample
-  /// is shifted left by 4 to occupy the high 12 bits of a u16.
+  /// Build a 12-bit low-packed RGGB Bayer plane from per-channel
+  /// nominal values (each 0..=4095). Bayer16 is low-packed: samples
+  /// occupy the low 12 bits of each `u16`, no shift required.
   fn solid_rggb_12bit(width: u32, height: u32, r: u16, g: u16, b: u16) -> std::vec::Vec<u16> {
     let w = width as usize;
     let h = height as usize;
     let mut data = std::vec![0u16; w * h];
-    let shift = 16 - 12;
     for y in 0..h {
       for x in 0..w {
         let v = match (y & 1, x & 1) {
@@ -286,7 +289,7 @@ mod tests {
           (1, 1) => b,
           _ => unreachable!(),
         };
-        data[y * w + x] = v << shift;
+        data[y * w + x] = v;
       }
     }
     data
@@ -366,11 +369,11 @@ mod tests {
 
   #[test]
   fn bayer12_uniform_value_yields_uniform_u8_output() {
-    // Every sample = 0x8000 (8-bit-ish midgray, MSB-aligned at 12-bit
-    // it represents 2048/4095). u8 output should be (2048/4095)*255
-    // ≈ 128 everywhere (including edges, since uniform input).
+    // Every sample = 2048 (low-packed 12-bit midgray). u8 output:
+    // 2048 / 4095 * 255 ≈ 127.53 → 128 everywhere (uniform input
+    // so edge clamping doesn't shift the value).
     let (w, h) = (8u32, 6u32);
-    let raw = std::vec![0x8000u16; (w * h) as usize];
+    let raw = std::vec![2048u16; (w * h) as usize];
     let frame = Bayer12Frame::try_new(&raw, w, h, w).unwrap();
     let mut rgb = std::vec![0u8; (w * h * 3) as usize];
     let mut sink = CaptureRgbU8::<12> {
@@ -386,7 +389,6 @@ mod tests {
       &mut sink,
     )
     .unwrap();
-    // 0x8000 in 12-bit MSB-aligned = 0x800 = 2048; 2048/4095 * 255 ≈ 127.5 → 128
     for &c in &rgb {
       assert!((c as i32 - 128).abs() <= 1, "got {c}");
     }
@@ -394,10 +396,10 @@ mod tests {
 
   #[test]
   fn bayer12_uniform_value_yields_uniform_u16_output() {
-    // Every sample = 0xFFF0 (max 12-bit MSB-aligned). u16 output
+    // Every sample = 4095 (max 12-bit low-packed). u16 output
     // should be 4095 (low-packed full white).
     let (w, h) = (8u32, 6u32);
-    let raw = std::vec![0xFFF0u16; (w * h) as usize];
+    let raw = std::vec![4095u16; (w * h) as usize];
     let frame = Bayer12Frame::try_new(&raw, w, h, w).unwrap();
     let mut rgb = std::vec![0u16; (w * h * 3) as usize];
     let mut sink = CaptureRgbU16::<12> {
@@ -415,6 +417,56 @@ mod tests {
     .unwrap();
     for &c in &rgb {
       assert_eq!(c, 4095);
+    }
+  }
+
+  #[test]
+  fn bayer10_low_packed_white_yields_full_scale_u8() {
+    // 10-bit low-packed white (1023). u8 output should be 255.
+    let (w, h) = (8u32, 6u32);
+    let raw = std::vec![1023u16; (w * h) as usize];
+    let frame = crate::frame::Bayer10Frame::try_new(&raw, w, h, w).unwrap();
+    let mut rgb = std::vec![0u8; (w * h * 3) as usize];
+    let mut sink = CaptureRgbU8::<10> {
+      out: &mut rgb,
+      width: 0,
+    };
+    bayer16_to(
+      &frame,
+      BayerPattern::Rggb,
+      BayerDemosaic::Bilinear,
+      WhiteBalance::neutral(),
+      ColorCorrectionMatrix::identity(),
+      &mut sink,
+    )
+    .unwrap();
+    for &c in &rgb {
+      assert_eq!(c, 255, "10-bit low-packed white must scale to u8 255");
+    }
+  }
+
+  #[test]
+  fn bayer14_low_packed_white_yields_full_scale_u16() {
+    // 14-bit low-packed white (16383). u16 output should be 16383.
+    let (w, h) = (8u32, 6u32);
+    let raw = std::vec![16383u16; (w * h) as usize];
+    let frame = crate::frame::Bayer14Frame::try_new(&raw, w, h, w).unwrap();
+    let mut rgb = std::vec![0u16; (w * h * 3) as usize];
+    let mut sink = CaptureRgbU16::<14> {
+      out: &mut rgb,
+      width: 0,
+    };
+    bayer16_to(
+      &frame,
+      BayerPattern::Rggb,
+      BayerDemosaic::Bilinear,
+      WhiteBalance::neutral(),
+      ColorCorrectionMatrix::identity(),
+      &mut sink,
+    )
+    .unwrap();
+    for &c in &rgb {
+      assert_eq!(c, 16383, "14-bit low-packed white must stay 16383");
     }
   }
 

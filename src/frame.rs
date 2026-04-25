@@ -4449,9 +4449,14 @@ pub enum Yuv420pFrameError {
 /// Single plane: each `u8` element is one sensor sample, with the
 /// color (R / G / B) determined by the [`crate::raw::BayerPattern`]
 /// passed at the walker boundary and the sample's `(row, column)`
-/// position within the repeating 2×2 tile. `width` and `height`
-/// must both be even (the four standard Bayer patterns tile in 2×2
-/// cells).
+/// position within the repeating 2×2 tile.
+///
+/// Odd `width` and `height` are accepted: a cropped Bayer plane
+/// (post-production crop, sensor-specific active area) legitimately
+/// exhibits a partial 2×2 tile at the right column or bottom row.
+/// The walker clamps top / bottom rows and the demosaic kernel
+/// clamps left / right columns, so the math is defined for every
+/// site regardless of dimension parity.
 ///
 /// `stride` is the sample stride of the plane — `>= width`,
 /// permitting the upstream decoder to pad rows.
@@ -4474,10 +4479,12 @@ impl<'a> BayerFrame<'a> {
   ///
   /// Returns [`BayerFrameError`] if any of:
   /// - `width` or `height` is zero,
-  /// - `width` or `height` is odd,
   /// - `stride < width`,
   /// - `data.len() < stride * height`, or
   /// - `stride * height` overflows `usize` (32‑bit targets only).
+  ///
+  /// Odd widths and heights are accepted; see the type-level docs
+  /// for the rationale.
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn try_new(
     data: &'a [u8],
@@ -4488,16 +4495,12 @@ impl<'a> BayerFrame<'a> {
     if width == 0 || height == 0 {
       return Err(BayerFrameError::ZeroDimension { width, height });
     }
-    // Bayer patterns tile in 2×2 cells (BGGR / RGGB / GRBG / GBRG).
-    // An odd width or height leaves the bottom row or right column
-    // with a partial tile — the demosaic kernel has no defined
-    // handling for that case.
-    if width & 1 != 0 {
-      return Err(BayerFrameError::OddWidth { width });
-    }
-    if height & 1 != 0 {
-      return Err(BayerFrameError::OddHeight { height });
-    }
+    // Odd Bayer widths and heights are accepted: a cropped Bayer
+    // plane (post-production crop, sensor-specific active area)
+    // legitimately exhibits a partial 2×2 tile at the right column
+    // or bottom row. The walker clamps top / bottom rows and the
+    // demosaic kernel clamps left / right columns, so the math is
+    // defined for every site regardless of dimension parity.
     if stride < width {
       return Err(BayerFrameError::StrideTooSmall { width, stride });
     }
@@ -4541,13 +4544,13 @@ impl<'a> BayerFrame<'a> {
     self.data
   }
 
-  /// Frame width in pixels. Always even.
+  /// Frame width in pixels.
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn width(&self) -> u32 {
     self.width
   }
 
-  /// Frame height in pixels. Always even.
+  /// Frame height in pixels.
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn height(&self) -> u32 {
     self.height
@@ -4561,18 +4564,29 @@ impl<'a> BayerFrame<'a> {
 }
 
 /// A validated Bayer-mosaic frame at 10 / 12 / 14 / 16 bits per
-/// sample, MSB-aligned in `u16` containers.
+/// sample, **low-packed** in `u16` containers.
 ///
-/// `BITS` ∈ {10, 12, 14, 16}; samples are stored in the high `BITS`
-/// of each `u16`, with the low `16 - BITS` bits zero. This matches
-/// the convention used by the rest of the high-bit-depth crate
-/// ([`Yuv420pFrame16`], [`PnFrame`]). Use [`Self::try_new_checked`]
-/// to additionally reject samples whose low bits are non-zero.
+/// `BITS` ∈ {10, 12, 14, 16}; samples occupy the **low** `BITS`
+/// bits of each `u16` (range `[0, (1 << BITS) - 1]`), with the high
+/// `16 - BITS` bits zero. This matches the planar high-bit-depth
+/// convention used by [`Yuv420pFrame16`], `Yuv422p*`, and
+/// `Yuv444p*`. Note that this is **not** the [`PnFrame`]
+/// (`P010` / `P012`) convention, which is high-bit-packed
+/// (semi-planar `u16` containers carry samples in the *high* bits);
+/// Bayer is single-plane and tracks the planar family instead.
 ///
-/// `width` and `height` must both be even.
+/// Use [`Self::try_new_checked`] to additionally reject samples
+/// whose value exceeds `(1 << BITS) - 1`.
 ///
-/// Source: FFmpeg's `bayer_*16le` decoders (after MSB shift),
-/// vendor-SDK 12-bit / 16-bit RAW ingest paths.
+/// Odd widths and heights are accepted (cropped Bayer is a real
+/// workflow; the kernel handles partial 2×2 tiles via edge
+/// clamping).
+///
+/// Source: FFmpeg's `bayer_*16le` decoders, vendor-SDK
+/// 10/12/14/16-bit RAW ingest paths. If your upstream provides
+/// high-bit-packed Bayer (active bits in the *high* `BITS`),
+/// right-shift each sample by `(16 - BITS)` before constructing
+/// [`BayerFrame16`].
 #[derive(Debug, Clone, Copy)]
 pub struct BayerFrame16<'a, const BITS: u32> {
   data: &'a [u16],
@@ -4589,10 +4603,12 @@ impl<'a, const BITS: u32> BayerFrame16<'a, BITS> {
   /// [`BayerFrame16Error`] if any of:
   /// - `BITS` is not 10, 12, 14, or 16,
   /// - `width` or `height` is zero,
-  /// - `width` or `height` is odd,
   /// - `stride < width`,
   /// - `data.len() < stride * height`, or
   /// - `stride * height` overflows `usize`.
+  ///
+  /// Odd widths and heights are accepted; see the type-level docs
+  /// for the rationale.
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn try_new(
     data: &'a [u16],
@@ -4606,12 +4622,9 @@ impl<'a, const BITS: u32> BayerFrame16<'a, BITS> {
     if width == 0 || height == 0 {
       return Err(BayerFrame16Error::ZeroDimension { width, height });
     }
-    if width & 1 != 0 {
-      return Err(BayerFrame16Error::OddWidth { width });
-    }
-    if height & 1 != 0 {
-      return Err(BayerFrame16Error::OddHeight { height });
-    }
+    // Odd Bayer widths and heights are accepted; see
+    // [`BayerFrame::try_new`] for the rationale (cropped Bayer is
+    // a real workflow, edge clamping handles partial tiles).
     if stride < width {
       return Err(BayerFrame16Error::StrideTooSmall { width, stride });
     }
@@ -4648,10 +4661,15 @@ impl<'a, const BITS: u32> BayerFrame16<'a, BITS> {
   }
 
   /// Like [`Self::try_new`] but additionally scans every sample and
-  /// rejects any whose low `16 - BITS` bits are non-zero (i.e., not
-  /// MSB-aligned at the declared `BITS`). Cost: one O(declared
-  /// payload) linear scan; the default [`Self::try_new`] skips this
-  /// so the hot path stays O(1).
+  /// rejects any value greater than `(1 << BITS) - 1` (i.e., any
+  /// sample whose high `16 - BITS` bits are non-zero — the Bayer16
+  /// convention is **low-packed**). Cost: one O(declared payload)
+  /// linear scan; the default [`Self::try_new`] skips this so the
+  /// hot path stays O(1).
+  ///
+  /// Returns [`BayerFrame16Error::SampleOutOfRange`] on the first
+  /// offending sample with the plane index, the offending value,
+  /// and the valid maximum so callers can pinpoint the bad sample.
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub fn try_new_checked(
     data: &'a [u16],
@@ -4660,22 +4678,17 @@ impl<'a, const BITS: u32> BayerFrame16<'a, BITS> {
     stride: u32,
   ) -> Result<Self, BayerFrame16Error> {
     let frame = Self::try_new(data, width, height, stride)?;
-    let low_bits = 16 - BITS;
-    let low_mask: u16 = if low_bits == 0 {
-      0
-    } else {
-      (1u16 << low_bits) - 1
-    };
+    let max_valid: u16 = ((1u32 << BITS) - 1) as u16;
     let w = width as usize;
     let h = height as usize;
     for row in 0..h {
       let start = row * stride as usize;
       for (col, &s) in data[start..start + w].iter().enumerate() {
-        if s & low_mask != 0 {
-          return Err(BayerFrame16Error::SampleLowBitsSet {
+        if s > max_valid {
+          return Err(BayerFrame16Error::SampleOutOfRange {
             index: start + col,
             value: s,
-            low_bits,
+            max_valid,
           });
         }
       }
@@ -4685,20 +4698,20 @@ impl<'a, const BITS: u32> BayerFrame16<'a, BITS> {
 
   /// The Bayer plane samples. Row `r` starts at sample offset
   /// `r * stride()`. Each `u16` carries the `BITS` active bits in
-  /// its high positions; the low `16 - BITS` bits are zero on
-  /// well-formed input.
+  /// its **low** `BITS` positions; the high `16 - BITS` bits are
+  /// zero on well-formed input.
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn data(&self) -> &'a [u16] {
     self.data
   }
 
-  /// Frame width in pixels. Always even.
+  /// Frame width in pixels.
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn width(&self) -> u32 {
     self.width
   }
 
-  /// Frame height in pixels. Always even.
+  /// Frame height in pixels.
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn height(&self) -> u32 {
     self.height
@@ -4736,22 +4749,6 @@ pub enum BayerFrameError {
   ZeroDimension {
     /// The supplied width.
     width: u32,
-    /// The supplied height.
-    height: u32,
-  },
-  /// `width` was odd. The four standard Bayer patterns tile in 2×2
-  /// cells, so odd widths leave the rightmost column without a
-  /// complete tile.
-  #[error("width ({width}) is odd; Bayer requires even width")]
-  OddWidth {
-    /// The supplied width.
-    width: u32,
-  },
-  /// `height` was odd. The four standard Bayer patterns tile in 2×2
-  /// cells, so odd heights leave the bottom row without a complete
-  /// tile.
-  #[error("height ({height}) is odd; Bayer requires even height")]
-  OddHeight {
     /// The supplied height.
     height: u32,
   },
@@ -4801,18 +4798,6 @@ pub enum BayerFrame16Error {
     /// The supplied height.
     height: u32,
   },
-  /// `width` was odd.
-  #[error("width ({width}) is odd; Bayer requires even width")]
-  OddWidth {
-    /// The supplied width.
-    width: u32,
-  },
-  /// `height` was odd.
-  #[error("height ({height}) is odd; Bayer requires even height")]
-  OddHeight {
-    /// The supplied height.
-    height: u32,
-  },
   /// `stride < width` (in `u16` samples).
   #[error("stride ({stride}) is smaller than width ({width})")]
   StrideTooSmall {
@@ -4837,19 +4822,18 @@ pub enum BayerFrame16Error {
     /// Row count that overflowed against the stride.
     rows: u32,
   },
-  /// A sample's low `16 - BITS` bits were non-zero — the sample is
-  /// not MSB-aligned at the declared bit depth. Only
+  /// A sample's value exceeds `(1 << BITS) - 1` — the sample's
+  /// high `16 - BITS` bits are non-zero, which is invalid under
+  /// the low-packed Bayer16 convention. Only
   /// [`BayerFrame16::try_new_checked`] can produce this error.
-  #[error(
-    "sample {value:#06x} at element {index} has non-zero low {low_bits} bits (not MSB-aligned at the declared BITS)"
-  )]
-  SampleLowBitsSet {
+  #[error("sample {value} at element {index} exceeds {max_valid} ((1 << BITS) - 1)")]
+  SampleOutOfRange {
     /// Element index within the plane's slice.
     index: usize,
     /// The offending sample value.
     value: u16,
-    /// Number of low bits expected to be zero (`16 - BITS`).
-    low_bits: u32,
+    /// The valid maximum at the declared `BITS` (`(1 << BITS) - 1`).
+    max_valid: u16,
   },
 }
 
@@ -6294,17 +6278,35 @@ mod tests {
   }
 
   #[test]
-  fn bayer_try_new_rejects_odd_width() {
-    let data = std::vec![0u8; 16 * 8];
-    let e = BayerFrame::try_new(&data, 15, 8, 16).unwrap_err();
-    assert!(matches!(e, BayerFrameError::OddWidth { width: 15 }));
+  fn bayer_try_new_accepts_odd_width() {
+    // Cropped Bayer planes can have odd dimensions; the kernel
+    // handles partial 2×2 tiles via edge clamping.
+    let data = std::vec![0u8; 15 * 8];
+    let f = BayerFrame::try_new(&data, 15, 8, 15).expect("odd width valid");
+    assert_eq!(f.width(), 15);
   }
 
   #[test]
-  fn bayer_try_new_rejects_odd_height() {
-    let data = std::vec![0u8; 16 * 8];
-    let e = BayerFrame::try_new(&data, 16, 7, 16).unwrap_err();
-    assert!(matches!(e, BayerFrameError::OddHeight { height: 7 }));
+  fn bayer_try_new_accepts_odd_height() {
+    let data = std::vec![0u8; 16 * 7];
+    let f = BayerFrame::try_new(&data, 16, 7, 16).expect("odd height valid");
+    assert_eq!(f.height(), 7);
+  }
+
+  #[test]
+  fn bayer_try_new_accepts_odd_width_and_height() {
+    let data = std::vec![0u8; 15 * 7];
+    let f = BayerFrame::try_new(&data, 15, 7, 15).expect("odd both valid");
+    assert_eq!(f.width(), 15);
+    assert_eq!(f.height(), 7);
+  }
+
+  #[test]
+  fn bayer_try_new_accepts_1x1() {
+    let data = std::vec![42u8];
+    let f = BayerFrame::try_new(&data, 1, 1, 1).expect("1x1 valid");
+    assert_eq!(f.width(), 1);
+    assert_eq!(f.height(), 1);
   }
 
   #[test]
@@ -6349,41 +6351,55 @@ mod tests {
   }
 
   #[test]
-  fn bayer16_try_new_rejects_odd_dims() {
-    let data = std::vec![0u16; 16 * 8];
-    let e = Bayer12Frame::try_new(&data, 15, 8, 16).unwrap_err();
-    assert!(matches!(e, BayerFrame16Error::OddWidth { width: 15 }));
-    let e = Bayer12Frame::try_new(&data, 16, 7, 16).unwrap_err();
-    assert!(matches!(e, BayerFrame16Error::OddHeight { height: 7 }));
+  fn bayer16_try_new_accepts_odd_dims() {
+    let data = std::vec![0u16; 15 * 7];
+    let f = Bayer12Frame::try_new(&data, 15, 7, 15).expect("odd both valid");
+    assert_eq!(f.width(), 15);
+    assert_eq!(f.height(), 7);
   }
 
   #[test]
-  fn bayer16_try_new_checked_accepts_msb_aligned_12bit() {
-    // 12-bit MSB-aligned: low 4 bits are zero. Use 0xABC0 (valid)
-    // and 0x0010 (also valid: low 4 bits zero).
-    let data = std::vec![0xABC0u16; 16 * 8];
-    Bayer12Frame::try_new_checked(&data, 16, 8, 16).expect("12-bit MSB-aligned");
+  fn bayer16_try_new_checked_accepts_low_packed_12bit() {
+    // 12-bit low-packed: every value ≤ 4095 is valid.
+    let mut data = std::vec![2048u16; 16 * 8];
+    data[7] = 4095; // max valid 12-bit
+    data[42] = 0; // black
+    Bayer12Frame::try_new_checked(&data, 16, 8, 16).expect("12-bit low-packed");
   }
 
   #[test]
-  fn bayer16_try_new_checked_rejects_low_bits_set() {
-    let mut data = std::vec![0xABC0u16; 16 * 8];
-    data[42] = 0xABC1; // low bit set — not MSB-aligned at 12 bits
+  fn bayer16_try_new_checked_rejects_above_max_at_12bit() {
+    let mut data = std::vec![2048u16; 16 * 8];
+    data[42] = 4096; // just above 12-bit max
     let e = Bayer12Frame::try_new_checked(&data, 16, 8, 16).unwrap_err();
     assert!(matches!(
       e,
-      BayerFrame16Error::SampleLowBitsSet {
+      BayerFrame16Error::SampleOutOfRange {
         index: 42,
-        value: 0xABC1,
-        low_bits: 4
+        value: 4096,
+        max_valid: 4095,
+      }
+    ));
+  }
+
+  #[test]
+  fn bayer16_try_new_checked_rejects_above_max_at_10bit() {
+    let mut data = std::vec![512u16; 16 * 8];
+    data[3] = 1024; // just above 10-bit max
+    let e = Bayer10Frame::try_new_checked(&data, 16, 8, 16).unwrap_err();
+    assert!(matches!(
+      e,
+      BayerFrame16Error::SampleOutOfRange {
+        index: 3,
+        value: 1024,
+        max_valid: 1023,
       }
     ));
   }
 
   #[test]
   fn bayer16_try_new_checked_accepts_full_u16_range_at_16bit() {
-    // At BITS=16 every bit is active; low_mask is zero, so any
-    // sample passes the check.
+    // At BITS=16 every u16 is valid.
     let mut data = std::vec![0u16; 16 * 8];
     data[7] = 0xFFFF;
     data[42] = 0x1234;

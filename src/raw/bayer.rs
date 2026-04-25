@@ -399,4 +399,63 @@ mod tests {
     .unwrap();
     assert_eq!(sink.rows, h);
   }
+
+  #[test]
+  fn bayer_walker_handles_odd_width_and_height() {
+    // 15×7 RGGB-tiled solid red. Demosaic must run end-to-end
+    // without panicking; interior pixels (rows 1..h-1, cols 1..w-1)
+    // still match the expected channel.
+    let (w, h) = (15u32, 7u32);
+    let raw = solid_rggb(w, h, 255, 0, 0);
+    let frame = BayerFrame::try_new(&raw, w, h, w).unwrap();
+    let mut rgb = std::vec![0u8; (w * h * 3) as usize];
+    let mut sink = CaptureRgb {
+      out: &mut rgb,
+      width: 0,
+    };
+    bayer_to(
+      &frame,
+      BayerPattern::Rggb,
+      BayerDemosaic::Bilinear,
+      WhiteBalance::neutral(),
+      ColorCorrectionMatrix::identity(),
+      &mut sink,
+    )
+    .unwrap();
+    let wu = w as usize;
+    let hu = h as usize;
+    for y in 1..hu - 1 {
+      for x in 1..wu - 1 {
+        let i = (y * wu + x) * 3;
+        assert_eq!(rgb[i], 255, "odd-dim px ({x},{y}) R");
+        assert_eq!(rgb[i + 1], 0, "odd-dim px ({x},{y}) G");
+        assert_eq!(rgb[i + 2], 0, "odd-dim px ({x},{y}) B");
+      }
+    }
+  }
+
+  #[test]
+  fn bayer_walker_handles_1x1() {
+    // 1×1 corner case — every "neighbor" clamps to the single
+    // sample. Demosaic must run without panicking.
+    let raw = std::vec![123u8];
+    let frame = BayerFrame::try_new(&raw, 1, 1, 1).unwrap();
+    let mut rgb = std::vec![0u8; 3];
+    let mut sink = CaptureRgb {
+      out: &mut rgb,
+      width: 0,
+    };
+    bayer_to(
+      &frame,
+      BayerPattern::Rggb,
+      BayerDemosaic::Bilinear,
+      WhiteBalance::neutral(),
+      ColorCorrectionMatrix::identity(),
+      &mut sink,
+    )
+    .unwrap();
+    // Single R-site (RGGB at (0,0) = R): output R = 123, G/B
+    // averaged from the same sample = 123.
+    assert_eq!(rgb, std::vec![123, 123, 123]);
+  }
 }
