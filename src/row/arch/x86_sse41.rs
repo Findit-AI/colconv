@@ -764,7 +764,7 @@ pub(crate) unsafe fn yuv_444p_n_to_rgb_row<const BITS: u32>(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  const { assert!(BITS == 10 || BITS == 12 || BITS == 14) };
+  const { assert!(BITS == 9 || BITS == 10 || BITS == 12 || BITS == 14) };
   debug_assert!(y.len() >= width);
   debug_assert!(u.len() >= width);
   debug_assert!(v.len() >= width);
@@ -885,7 +885,7 @@ pub(crate) unsafe fn yuv_444p_n_to_rgb_u16_row<const BITS: u32>(
   // Compile-time guard — `out_max = ((1 << BITS) - 1) as i16` below
   // silently wraps to -1 at BITS=16, corrupting the u16 clamp. The
   // dedicated 16-bit u16-output path is `yuv_444p16_to_rgb_u16_row`.
-  const { assert!(BITS == 10 || BITS == 12 || BITS == 14) };
+  const { assert!(BITS == 9 || BITS == 10 || BITS == 12 || BITS == 14) };
   debug_assert!(y.len() >= width);
   debug_assert!(u.len() >= width);
   debug_assert!(v.len() >= width);

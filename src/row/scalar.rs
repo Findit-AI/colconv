@@ -331,8 +331,8 @@ pub(crate) fn yuv_420p_n_to_rgb_row<const BITS: u32>(
   // 16 would overflow the Q15 chroma sum; 8 belongs to the non-
   // const-generic `yuv_420_to_rgb_row` family.
   debug_assert!(
-    BITS == 10 || BITS == 12 || BITS == 14,
-    "yuv_420p_n_to_rgb_row only supports BITS in {{10, 12, 14}}"
+    BITS == 9 || BITS == 10 || BITS == 12 || BITS == 14,
+    "yuv_420p_n_to_rgb_row only supports BITS in {{9, 10, 12, 14}}"
   );
   debug_assert_eq!(width & 1, 0, "YUV 4:2:0 requires even width");
   debug_assert!(y.len() >= width, "y row too short");
@@ -430,8 +430,8 @@ pub(crate) fn yuv_420p_n_to_rgb_u16_row<const BITS: u32>(
   // Same BITS range as the u8-output counterpart. See
   // `yuv_420p_n_to_rgb_row` for the rationale.
   debug_assert!(
-    BITS == 10 || BITS == 12 || BITS == 14,
-    "yuv_420p_n_to_rgb_u16_row only supports BITS in {{10, 12, 14}}"
+    BITS == 9 || BITS == 10 || BITS == 12 || BITS == 14,
+    "yuv_420p_n_to_rgb_u16_row only supports BITS in {{9, 10, 12, 14}}"
   );
   debug_assert_eq!(width & 1, 0, "YUV 4:2:0 requires even width");
   debug_assert!(y.len() >= width, "y row too short");
@@ -501,7 +501,7 @@ pub(crate) fn yuv_444p_n_to_rgb_row<const BITS: u32>(
   // (i32 u8-output kernel family). Without this guard a caller
   // invoking ::<16> would reach the NEON clamp where
   // `(1 << BITS) - 1 as i16` silently wraps to -1.
-  const { assert!(BITS == 10 || BITS == 12 || BITS == 14) };
+  const { assert!(BITS == 9 || BITS == 10 || BITS == 12 || BITS == 14) };
   debug_assert!(y.len() >= width, "y row too short");
   debug_assert!(u.len() >= width, "u row too short");
   debug_assert!(v.len() >= width, "v row too short");
@@ -548,7 +548,7 @@ pub(crate) fn yuv_444p_n_to_rgb_u16_row<const BITS: u32>(
   // Compile-time guard — see note on `yuv_444p_n_to_rgb_row`. The
   // 16-bit u16-output path is `yuv_444p16_to_rgb_u16_row` (i64
   // chroma family).
-  const { assert!(BITS == 10 || BITS == 12 || BITS == 14) };
+  const { assert!(BITS == 9 || BITS == 10 || BITS == 12 || BITS == 14) };
   debug_assert!(y.len() >= width, "y row too short");
   debug_assert!(u.len() >= width, "u row too short");
   debug_assert!(v.len() >= width, "v row too short");

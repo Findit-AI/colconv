@@ -712,6 +712,39 @@ pub(crate) fn yuv_444p_n_to_rgb_u16_row<const BITS: u32>(
   scalar::yuv_444p_n_to_rgb_u16_row::<BITS>(y, u, v, rgb_out, width, matrix, full_range);
 }
 
+/// YUV 4:4:4 planar 9-bit → u8 RGB. Thin wrapper over the
+/// crate-internal `yuv_444p_n_to_rgb_row::<9>`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn yuv444p9_to_rgb_row(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  use_simd: bool,
+) {
+  yuv_444p_n_to_rgb_row::<9>(y, u, v, rgb_out, width, matrix, full_range, use_simd);
+}
+
+/// YUV 4:4:4 planar 9-bit → native-depth u16 RGB.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn yuv444p9_to_rgb_u16_row(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  rgb_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  use_simd: bool,
+) {
+  yuv_444p_n_to_rgb_u16_row::<9>(y, u, v, rgb_out, width, matrix, full_range, use_simd);
+}
+
 /// YUV 4:4:4 planar 10-bit → u8 RGB. Thin wrapper over the
 /// crate-internal `yuv_444p_n_to_rgb_row::<10>`.
 #[cfg_attr(not(tarpaulin), inline(always))]

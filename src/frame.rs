@@ -2426,7 +2426,7 @@ impl<'a, const BITS: u32> Yuv420pFrame16<'a, BITS> {
     // i32 kernel family; 16 uses a parallel i64 kernel family (see
     // [`Yuv420p16Frame`] and `yuv_420p16_to_rgb_*`). 8 has its own
     // (non-generic) 8-bit kernels in [`Yuv420pFrame`].
-    if BITS != 10 && BITS != 12 && BITS != 14 && BITS != 16 {
+    if BITS != 9 && BITS != 10 && BITS != 12 && BITS != 14 && BITS != 16 {
       return Err(Yuv420pFrame16Error::UnsupportedBits { bits: BITS });
     }
     if width == 0 || height == 0 {
@@ -2681,6 +2681,15 @@ impl<'a, const BITS: u32> Yuv420pFrame16<'a, BITS> {
 /// for readability.
 pub type Yuv420p10Frame<'a> = Yuv420pFrame16<'a, 10>;
 
+/// Type alias for a validated YUV 4:2:0 planar frame at 9 bits per
+/// sample (`AV_PIX_FMT_YUV420P9LE`). Tight wrapper over
+/// [`Yuv420pFrame16`] with `BITS == 9` — same low‑bit‑packed `u16`
+/// layout as [`Yuv420p10Frame`] / [`Yuv420p12Frame`], just with 9
+/// active bits in the low 9 of each element (upper 7 bits zero).
+/// Niche format — AVC High 9 profile only; HEVC/VP9/AV1 don't
+/// produce 9-bit. Reuses the same Q15 i32 kernel family as 10/12/14.
+pub type Yuv420p9Frame<'a> = Yuv420pFrame16<'a, 9>;
+
 /// Type alias for a validated YUV 4:2:0 planar frame at 12 bits per
 /// sample (`AV_PIX_FMT_YUV420P12LE`). Tight wrapper over
 /// [`Yuv420pFrame16`] with `BITS == 12` — same low‑bit‑packed `u16`
@@ -2866,7 +2875,7 @@ impl<'a, const BITS: u32> Yuv422pFrame16<'a, BITS> {
     u_stride: u32,
     v_stride: u32,
   ) -> Result<Self, Yuv420pFrame16Error> {
-    if BITS != 10 && BITS != 12 && BITS != 14 && BITS != 16 {
+    if BITS != 9 && BITS != 10 && BITS != 12 && BITS != 14 && BITS != 16 {
       return Err(Yuv420pFrame16Error::UnsupportedBits { bits: BITS });
     }
     if width == 0 || height == 0 {
@@ -3095,6 +3104,10 @@ impl<'a, const BITS: u32> Yuv422pFrame16<'a, BITS> {
   }
 }
 
+/// 4:2:2 planar, 9-bit (`AV_PIX_FMT_YUV422P9LE`). Alias over
+/// [`Yuv422pFrame16`]`<9>`. Niche format; reuses the same Q15 i32
+/// kernel family as the 10/12/14 siblings.
+pub type Yuv422p9Frame<'a> = Yuv422pFrame16<'a, 9>;
 /// 4:2:2 planar, 10-bit. Alias over [`Yuv422pFrame16`]`<10>`.
 pub type Yuv422p10Frame<'a> = Yuv422pFrame16<'a, 10>;
 /// 4:2:2 planar, 12-bit. Alias over [`Yuv422pFrame16`]`<12>`.
@@ -3134,7 +3147,7 @@ impl<'a, const BITS: u32> Yuv444pFrame16<'a, BITS> {
     u_stride: u32,
     v_stride: u32,
   ) -> Result<Self, Yuv420pFrame16Error> {
-    if BITS != 10 && BITS != 12 && BITS != 14 && BITS != 16 {
+    if BITS != 9 && BITS != 10 && BITS != 12 && BITS != 14 && BITS != 16 {
       return Err(Yuv420pFrame16Error::UnsupportedBits { bits: BITS });
     }
     if width == 0 || height == 0 {
@@ -3355,6 +3368,10 @@ impl<'a, const BITS: u32> Yuv444pFrame16<'a, BITS> {
   }
 }
 
+/// 4:4:4 planar, 9-bit (`AV_PIX_FMT_YUV444P9LE`). Alias over
+/// [`Yuv444pFrame16`]`<9>`. Niche; reuses the same Q15 i32 kernel
+/// family as the 10/12/14 siblings.
+pub type Yuv444p9Frame<'a> = Yuv444pFrame16<'a, 9>;
 /// 4:4:4 planar, 10-bit. Alias over [`Yuv444pFrame16`]`<10>`.
 pub type Yuv444p10Frame<'a> = Yuv444pFrame16<'a, 10>;
 /// 4:4:4 planar, 12-bit. Alias over [`Yuv444pFrame16`]`<12>`.
@@ -4081,15 +4098,15 @@ mod tests {
 
   #[test]
   fn yuv420p16_try_new_rejects_unsupported_bits() {
-    // BITS must be in {10, 12, 14, 16}. 9 (and any other value) is
-    // rejected before any plane math runs.
+    // BITS must be in {9, 10, 12, 14, 16}. 11, 15, etc. are rejected
+    // before any plane math runs.
     let y = std::vec![0u16; 16 * 8];
     let u = std::vec![128u16; 8 * 4];
     let v = std::vec![128u16; 8 * 4];
-    let e = Yuv420pFrame16::<9>::try_new(&y, &u, &v, 16, 8, 16, 8, 8).unwrap_err();
+    let e = Yuv420pFrame16::<11>::try_new(&y, &u, &v, 16, 8, 16, 8, 8).unwrap_err();
     assert!(matches!(
       e,
-      Yuv420pFrame16Error::UnsupportedBits { bits: 9 }
+      Yuv420pFrame16Error::UnsupportedBits { bits: 11 }
     ));
     let e15 = Yuv420pFrame16::<15>::try_new(&y, &u, &v, 16, 8, 16, 8, 8).unwrap_err();
     assert!(matches!(
