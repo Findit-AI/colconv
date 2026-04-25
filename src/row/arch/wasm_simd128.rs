@@ -2717,12 +2717,17 @@ pub(crate) unsafe fn p_n_444_to_rgb_u16_row<const BITS: u32>(
       let y_scaled_lo = scale_y(y_low_i16, y_off_v, y_scale_v, rnd_v);
       let y_scaled_hi = scale_y(y_high_i16, y_off_v, y_scale_v, rnd_v);
 
-      let r_lo = clamp_u16_max_wasm(i16x8_add(y_scaled_lo, r_chroma_lo), zero_v, max_v);
-      let r_hi = clamp_u16_max_wasm(i16x8_add(y_scaled_hi, r_chroma_hi), zero_v, max_v);
-      let g_lo = clamp_u16_max_wasm(i16x8_add(y_scaled_lo, g_chroma_lo), zero_v, max_v);
-      let g_hi = clamp_u16_max_wasm(i16x8_add(y_scaled_hi, g_chroma_hi), zero_v, max_v);
-      let b_lo = clamp_u16_max_wasm(i16x8_add(y_scaled_lo, b_chroma_lo), zero_v, max_v);
-      let b_hi = clamp_u16_max_wasm(i16x8_add(y_scaled_hi, b_chroma_hi), zero_v, max_v);
+      // Saturating i16 add: y_scaled + chroma can exceed i16 range
+      // for near-max samples; wrapping `i16x8_add` would silently flip
+      // sign and clamp to 0. `i16x8_add_sat` saturates to i16::MAX,
+      // then `clamp_u16_max_wasm` produces the correct out_max.
+      // Matches the existing wasm u8 / u16 kernels' convention.
+      let r_lo = clamp_u16_max_wasm(i16x8_add_sat(y_scaled_lo, r_chroma_lo), zero_v, max_v);
+      let r_hi = clamp_u16_max_wasm(i16x8_add_sat(y_scaled_hi, r_chroma_hi), zero_v, max_v);
+      let g_lo = clamp_u16_max_wasm(i16x8_add_sat(y_scaled_lo, g_chroma_lo), zero_v, max_v);
+      let g_hi = clamp_u16_max_wasm(i16x8_add_sat(y_scaled_hi, g_chroma_hi), zero_v, max_v);
+      let b_lo = clamp_u16_max_wasm(i16x8_add_sat(y_scaled_lo, b_chroma_lo), zero_v, max_v);
+      let b_hi = clamp_u16_max_wasm(i16x8_add_sat(y_scaled_hi, b_chroma_hi), zero_v, max_v);
 
       let dst = rgb_out.as_mut_ptr().add(x * 3);
       write_rgb_u16_8(r_lo, g_lo, b_lo, dst);
