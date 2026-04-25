@@ -2734,6 +2734,34 @@ fn rgb_row_elems(width: usize) -> usize {
   }
 }
 
+/// Asserts every element of a 3×3 fused color transform is finite.
+/// Used by the Bayer row dispatchers in release builds before
+/// invoking the kernel — once SIMD backends land they will rely on
+/// this guarantee for branchless f32 arithmetic; a single Inf or
+/// NaN would otherwise propagate through every pixel of the row
+/// (Inf clamps to saturated white, NaN casts to 0, both producing
+/// silently-wrong frames). Validating WB / CCM upstream via
+/// [`crate::raw::WhiteBalance::try_new`] /
+/// [`crate::raw::ColorCorrectionMatrix::try_new`] catches the
+/// common case; this is the kernel-boundary backstop for direct
+/// row-API callers and for the (theoretical) case where fusion of
+/// finite-but-extreme inputs overflows.
+#[cfg_attr(not(tarpaulin), inline(always))]
+fn assert_color_transform_finite(m: &[[f32; 3]; 3]) {
+  let mut row = 0;
+  while row < 3 {
+    let mut col = 0;
+    while col < 3 {
+      assert!(
+        m[row][col].is_finite(),
+        "color transform m[{row}][{col}] is non-finite (NaN or ±∞)"
+      );
+      col += 1;
+    }
+    row += 1;
+  }
+}
+
 /// Element count of one full-width interleaved-UV row (`width × 2`)
 /// for semi-planar 4:4:4 sources (`P410` / `P412` / `P416`). One
 /// `(U, V)` pair per pixel = `2 * width` `u16` elements per row.
@@ -2849,19 +2877,23 @@ const fn simd128_available() -> bool {
 ///
 /// Dispatches to the best available backend for the current target.
 /// See [`scalar::bayer_to_rgb_row`] for the full semantic specification
-/// (bilinear demosaic geometry, edge-clamp behavior, output layout).
+/// (bilinear demosaic geometry, edge handling, output layout).
 ///
 /// `above` / `mid` / `below` are row-aligned slices into the source
-/// Bayer plane; the walker is responsible for clamping `above` =
-/// `mid` at the top edge and `below` = `mid` at the bottom edge.
+/// Bayer plane via the **mirror-by-2** boundary contract: at the
+/// top edge the caller supplies `above = mid_row(1)`, at the bottom
+/// edge `below = mid_row(h - 2)`; replicate fallback only when
+/// `height < 2`. See [`crate::raw::BayerRow::above`] for the full
+/// rationale (CFA-parity preservation across boundaries).
+/// `above` / `mid` / `below` must all be the same length — that
+/// length is the row's pixel width.
 ///
-/// `m` is the precomputed `CCM · diag(wb)` 3×3 transform.
+/// `m` is the precomputed `CCM · diag(wb)` 3×3 transform. Every
+/// element must be finite (not NaN, not ±∞); the dispatcher
+/// asserts this at the boundary so future unsafe SIMD kernels can
+/// trust the contract.
 ///
 /// `rgb_out` must have at least `3 * mid.len()` bytes.
-///
-/// `above` / `mid` / `below` must all be the same length — that
-/// length is the row's pixel width. `rgb_out` must have at least
-/// `3 * mid.len()` bytes.
 ///
 /// **`use_simd` is currently a no-op.** All Bayer paths run the
 /// scalar reference today; per-arch SIMD backends (NEON / SSE4.1 /
@@ -2891,6 +2923,7 @@ pub fn bayer_to_rgb_row(
   assert_eq!(below.len(), width, "below row length must match mid");
   let rgb_min = rgb_row_bytes(width);
   assert!(rgb_out.len() >= rgb_min, "rgb_out row too short");
+  assert_color_transform_finite(m);
 
   scalar::bayer_to_rgb_row(above, mid, below, row_parity, pattern, demosaic, m, rgb_out);
 }
@@ -2931,6 +2964,7 @@ pub fn bayer16_to_rgb_row<const BITS: u32>(
   assert_eq!(below.len(), width, "below row length must match mid");
   let rgb_min = rgb_row_bytes(width);
   assert!(rgb_out.len() >= rgb_min, "rgb_out row too short");
+  assert_color_transform_finite(m);
 
   scalar::bayer16_to_rgb_row::<BITS>(above, mid, below, row_parity, pattern, demosaic, m, rgb_out);
 }
@@ -2970,6 +3004,7 @@ pub fn bayer16_to_rgb_u16_row<const BITS: u32>(
   assert_eq!(below.len(), width, "below row length must match mid");
   let rgb_min = rgb_row_elems(width);
   assert!(rgb_out.len() >= rgb_min, "rgb_out row too short");
+  assert_color_transform_finite(m);
 
   scalar::bayer16_to_rgb_u16_row::<BITS>(
     above, mid, below, row_parity, pattern, demosaic, m, rgb_out,
@@ -3116,6 +3151,133 @@ mod overflow_tests {
       OVERFLOW_WIDTH,
       ColorMatrix::Bt601,
       true,
+      false,
+    );
+  }
+}
+
+#[cfg(all(test, feature = "std"))]
+mod bayer_dispatcher_tests {
+  //! Boundary-contract tests for the public Bayer row dispatchers.
+  //! Walker / kernel correctness lives in `crate::raw::bayer*` and
+  //! `crate::row::scalar`; these tests target the dispatcher's own
+  //! preflight (notably the new `assert_color_transform_finite`
+  //! check and the existing length / `BITS` / `rgb_out` checks)
+  //! since that surface is what unsafe SIMD backends will rely on.
+  use super::*;
+  use crate::raw::{BayerDemosaic, BayerPattern};
+
+  fn ident() -> [[f32; 3]; 3] {
+    [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+  }
+
+  #[test]
+  #[should_panic(expected = "non-finite")]
+  fn bayer_dispatcher_rejects_nan_in_m() {
+    let above = [0u8; 4];
+    let mid = [0u8; 4];
+    let below = [0u8; 4];
+    let mut rgb = [0u8; 12];
+    let mut m = ident();
+    m[1][1] = f32::NAN;
+    bayer_to_rgb_row(
+      &above,
+      &mid,
+      &below,
+      0,
+      BayerPattern::Rggb,
+      BayerDemosaic::Bilinear,
+      &m,
+      &mut rgb,
+      false,
+    );
+  }
+
+  #[test]
+  #[should_panic(expected = "non-finite")]
+  fn bayer_dispatcher_rejects_infinity_in_m() {
+    let above = [0u8; 4];
+    let mid = [0u8; 4];
+    let below = [0u8; 4];
+    let mut rgb = [0u8; 12];
+    let mut m = ident();
+    m[0][2] = f32::INFINITY;
+    bayer_to_rgb_row(
+      &above,
+      &mid,
+      &below,
+      0,
+      BayerPattern::Rggb,
+      BayerDemosaic::Bilinear,
+      &m,
+      &mut rgb,
+      false,
+    );
+  }
+
+  #[test]
+  #[should_panic(expected = "non-finite")]
+  fn bayer16_u8_dispatcher_rejects_neg_infinity_in_m() {
+    let above = [0u16; 4];
+    let mid = [0u16; 4];
+    let below = [0u16; 4];
+    let mut rgb = [0u8; 12];
+    let mut m = ident();
+    m[2][1] = f32::NEG_INFINITY;
+    bayer16_to_rgb_row::<12>(
+      &above,
+      &mid,
+      &below,
+      0,
+      BayerPattern::Rggb,
+      BayerDemosaic::Bilinear,
+      &m,
+      &mut rgb,
+      false,
+    );
+  }
+
+  #[test]
+  #[should_panic(expected = "non-finite")]
+  fn bayer16_u16_dispatcher_rejects_nan_in_m() {
+    let above = [0u16; 4];
+    let mid = [0u16; 4];
+    let below = [0u16; 4];
+    let mut rgb = [0u16; 12];
+    let mut m = ident();
+    m[2][2] = f32::NAN;
+    bayer16_to_rgb_u16_row::<10>(
+      &above,
+      &mid,
+      &below,
+      0,
+      BayerPattern::Rggb,
+      BayerDemosaic::Bilinear,
+      &m,
+      &mut rgb,
+      false,
+    );
+  }
+
+  #[test]
+  fn bayer_dispatcher_accepts_finite_m() {
+    // Sanity: the assertion doesn't fire for ordinary finite
+    // matrices. Realistic inputs (CCM with negative crosstalk,
+    // WB > 1) all qualify.
+    let above = [10u8; 4];
+    let mid = [20u8; 4];
+    let below = [30u8; 4];
+    let mut rgb = [0u8; 12];
+    let m: [[f32; 3]; 3] = [[1.5, -0.3, -0.2], [-0.1, 1.2, -0.1], [-0.05, -0.15, 1.2]];
+    bayer_to_rgb_row(
+      &above,
+      &mid,
+      &below,
+      0,
+      BayerPattern::Rggb,
+      BayerDemosaic::Bilinear,
+      &m,
+      &mut rgb,
       false,
     );
   }

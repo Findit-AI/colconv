@@ -6404,6 +6404,19 @@ fn check_dimensions_match(
 /// through this helper.
 #[cfg_attr(not(tarpaulin), inline(always))]
 fn rgb_row_to_bt709_luma_row(rgb: &[u8], luma: &mut [u8]) {
+  // Caller's contract: `rgb` packs `3 * luma.len()` bytes. The two
+  // current callers (`MixedSinker<Bayer>` and
+  // `MixedSinker<Bayer16<BITS>>`) both slice their `luma` and
+  // `rgb_row` from the same `width`, so the relationship holds
+  // structurally — but the `debug_assert` makes that obvious to
+  // any future caller and turns silent OOB indexing into a clear
+  // failure under tests.
+  debug_assert!(
+    rgb.len() >= 3 * luma.len(),
+    "rgb_row_to_bt709_luma_row: rgb has {} bytes, need >= 3 * luma.len() ({})",
+    rgb.len(),
+    3 * luma.len()
+  );
   for (i, d) in luma.iter_mut().enumerate() {
     let r = rgb[3 * i] as u32;
     let g = rgb[3 * i + 1] as u32;

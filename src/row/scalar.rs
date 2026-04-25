@@ -1720,10 +1720,17 @@ where
 /// 10/12/14/16-bit Bayer → packed `u8` RGB.
 ///
 /// `above` / `mid` / `below` are **low-packed** `u16` row slices —
-/// active samples occupy the low `BITS` bits, with the high
+/// every sample must satisfy `value < (1 << BITS)`, with the high
 /// `16 - BITS` bits zero. This matches the planar high-bit-depth
 /// convention used by `Yuv420p10/12/14/16`, `Yuv422p10/12/14/16`,
-/// and `Yuv444p10/12/14/16`.
+/// and `Yuv444p10/12/14/16`. Out-of-range samples violate the
+/// contract: the kernel is sound (no panic, no UB) but produces
+/// saturated output and contaminates demosaic neighbor averages,
+/// so border / interior pixels both become numerically meaningless.
+/// Use [`crate::frame::BayerFrame16::try_new_checked`] to validate
+/// untrusted input upstream — the default
+/// [`crate::frame::BayerFrame16::try_new`] only checks geometry,
+/// matching the rest of the high-bit-depth crate.
 ///
 /// `m` is the unscaled `CCM · diag(wb)`; this kernel bakes the
 /// input→u8 rescale (`255 / ((1 << BITS) - 1)`) into output values
@@ -1746,10 +1753,26 @@ pub(crate) fn bayer16_to_rgb_row<const BITS: u32>(
   debug_assert_eq!(above.len(), w);
   debug_assert_eq!(below.len(), w);
   debug_assert!(rgb_out.len() >= 3 * w);
+  // Sample-range contract: caller guarantees every sample is
+  // `< (1 << BITS)` (low-packed convention; high `16 - BITS` bits
+  // are zero on conforming input). Out-of-range samples produce
+  // saturated output and contaminate demosaic neighbor averages —
+  // not memory-unsafe, but numerically meaningless. Validate via
+  // [`crate::frame::BayerFrame16::try_new_checked`] for untrusted
+  // input; the debug_assert below catches contract violations in
+  // test builds at zero release-mode cost.
+  let max_valid: u16 = ((1u32 << BITS) - 1) as u16;
+  debug_assert!(
+    above.iter().all(|&s| s <= max_valid)
+      && mid.iter().all(|&s| s <= max_valid)
+      && below.iter().all(|&s| s <= max_valid),
+    "Bayer16 sample exceeds (1 << BITS) - 1 = {max_valid}; \
+     use BayerFrame16::try_new_checked to validate untrusted input"
+  );
 
   let (r_par, b_par) = pattern_phases(pattern);
   let rp = (row_parity & 1) as usize;
-  let max_in = ((1u32 << BITS) - 1) as f32;
+  let max_in = max_valid as f32;
   let out_scale = 255.0 / max_in;
 
   for x in 0..w {
@@ -1771,10 +1794,11 @@ pub(crate) fn bayer16_to_rgb_row<const BITS: u32>(
 /// 10/12/14/16-bit Bayer → packed `u16` RGB (low-packed at `BITS`).
 ///
 /// `above` / `mid` / `below` are **low-packed** `u16` row slices —
-/// active samples occupy the low `BITS` bits. Output range is
-/// `[0, (1 << BITS) - 1]` per channel; since input and output
+/// every sample must satisfy `value < (1 << BITS)`. Output range
+/// is `[0, (1 << BITS) - 1]` per channel; since input and output
 /// share the same scale, the matmul result feeds `clamp_u16_round`
-/// directly with no extra rescale.
+/// directly with no extra rescale. Out-of-range samples violate
+/// the contract — see [`bayer16_to_rgb_row`] for the details.
 ///
 /// Output: `3 * mid.len()` `u16` packed `R, G, B`.
 #[allow(clippy::too_many_arguments)]
@@ -1793,10 +1817,20 @@ pub(crate) fn bayer16_to_rgb_u16_row<const BITS: u32>(
   debug_assert_eq!(above.len(), w);
   debug_assert_eq!(below.len(), w);
   debug_assert!(rgb_out.len() >= 3 * w);
+  // Same sample-range contract as `bayer16_to_rgb_row<BITS>`; see
+  // that function for the rationale.
+  let max_valid: u16 = ((1u32 << BITS) - 1) as u16;
+  debug_assert!(
+    above.iter().all(|&s| s <= max_valid)
+      && mid.iter().all(|&s| s <= max_valid)
+      && below.iter().all(|&s| s <= max_valid),
+    "Bayer16 sample exceeds (1 << BITS) - 1 = {max_valid}; \
+     use BayerFrame16::try_new_checked to validate untrusted input"
+  );
 
   let (r_par, b_par) = pattern_phases(pattern);
   let rp = (row_parity & 1) as usize;
-  let max_out = ((1u32 << BITS) - 1) as f32;
+  let max_out = max_valid as f32;
 
   for x in 0..w {
     let cp = x & 1;

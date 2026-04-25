@@ -489,6 +489,34 @@ mod tests {
     }
   }
 
+  /// In debug builds the kernel asserts samples ≤ `(1 << BITS) - 1`.
+  /// Out-of-range input on the public path is a contract violation;
+  /// `try_new_checked` is the documented validator. This test
+  /// exercises the assertion's failure mode under `cfg(debug_assertions)`.
+  #[cfg(debug_assertions)]
+  #[test]
+  #[should_panic(expected = "Bayer16 sample exceeds")]
+  fn bayer12_kernel_panics_on_sample_above_max_in_debug() {
+    let (w, h) = (4u32, 2u32);
+    let mut raw = std::vec![100u16; (w * h) as usize];
+    raw[3] = 4096; // just above 12-bit max
+    let frame = Bayer12Frame::try_new(&raw, w, h, w).unwrap();
+    let mut rgb = std::vec![0u8; (w * h * 3) as usize];
+    let mut sink = CaptureRgbU8::<12> {
+      out: &mut rgb,
+      width: 0,
+    };
+    bayer16_to(
+      &frame,
+      BayerPattern::Rggb,
+      BayerDemosaic::Bilinear,
+      WhiteBalance::neutral(),
+      ColorCorrectionMatrix::identity(),
+      &mut sink,
+    )
+    .unwrap();
+  }
+
   #[test]
   fn bayer12_walker_calls_sink_once_per_row() {
     struct CountSink<const BITS: u32> {
