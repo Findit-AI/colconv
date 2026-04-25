@@ -2802,6 +2802,93 @@ pub(crate) unsafe fn p16_to_rgb_u16_row(
   }
 }
 
+// ===== Pn 4:4:4 (semi-planar high-bit-packed) → RGB =======================
+//
+// AVX2 thin wrappers delegating to the SSE4.1 4:4:4 Pn kernels. The
+// SSE4.1 implementations are correctness-equivalent (same Q15 / i64
+// chroma math, same deinterleave). A native AVX2 implementation
+// (32 Y pixels per iter via 256-bit vectors, 64 UV deinterleave via
+// `_mm256_shuffle_epi8` + permutes) is a follow-up — would yield
+// roughly 2× throughput over the SSE4.1 path on AVX2-capable CPUs.
+
+/// AVX2 Pn 4:4:4 high-bit-packed (BITS ∈ {10, 12}) → packed u8 RGB.
+/// Currently delegates to the SSE4.1 implementation; native AVX2
+/// kernel TODO.
+///
+/// # Safety
+///
+/// 1. AVX2 implies SSE4.1, so delegation is safe.
+/// 2. `y.len() >= width`, `uv_full.len() >= 2 * width`,
+///    `rgb_out.len() >= 3 * width`.
+#[inline]
+#[target_feature(enable = "avx2")]
+pub(crate) unsafe fn p_n_444_to_rgb_row<const BITS: u32>(
+  y: &[u16],
+  uv_full: &[u16],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  // SAFETY: AVX2 implies SSE4.1.
+  unsafe {
+    super::x86_sse41::p_n_444_to_rgb_row::<BITS>(y, uv_full, rgb_out, width, matrix, full_range);
+  }
+}
+
+/// AVX2 Pn 4:4:4 → native-depth u16 RGB. Delegates to SSE4.1.
+#[inline]
+#[target_feature(enable = "avx2")]
+pub(crate) unsafe fn p_n_444_to_rgb_u16_row<const BITS: u32>(
+  y: &[u16],
+  uv_full: &[u16],
+  rgb_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  // SAFETY: AVX2 implies SSE4.1.
+  unsafe {
+    super::x86_sse41::p_n_444_to_rgb_u16_row::<BITS>(
+      y, uv_full, rgb_out, width, matrix, full_range,
+    );
+  }
+}
+
+/// AVX2 P416 → packed u8 RGB. Delegates to SSE4.1.
+#[inline]
+#[target_feature(enable = "avx2")]
+pub(crate) unsafe fn p_n_444_16_to_rgb_row(
+  y: &[u16],
+  uv_full: &[u16],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  // SAFETY: AVX2 implies SSE4.1.
+  unsafe {
+    super::x86_sse41::p_n_444_16_to_rgb_row(y, uv_full, rgb_out, width, matrix, full_range);
+  }
+}
+
+/// AVX2 P416 → native-depth u16 RGB. Delegates to SSE4.1.
+#[inline]
+#[target_feature(enable = "avx2")]
+pub(crate) unsafe fn p_n_444_16_to_rgb_u16_row(
+  y: &[u16],
+  uv_full: &[u16],
+  rgb_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  // SAFETY: AVX2 implies SSE4.1.
+  unsafe {
+    super::x86_sse41::p_n_444_16_to_rgb_u16_row(y, uv_full, rgb_out, width, matrix, full_range);
+  }
+}
+
 // ===== BGR ↔ RGB byte swap ==============================================
 
 /// AVX2 BGR ↔ RGB byte swap. 32 pixels per iteration by invoking the

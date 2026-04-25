@@ -59,6 +59,12 @@
 //! | [`P010`]         | 10        | 4:2:0       | semi-planar, high-packed | `p010le`              |
 //! | [`P012`]         | 12        | 4:2:0       | semi-planar, high-packed | `p012le`              |
 //! | [`P016`]         | 16        | 4:2:0       | semi-planar              | `p016le`              |
+//! | [`P210`]         | 10        | 4:2:2       | semi-planar, high-packed | `p210le`              |
+//! | [`P212`]         | 12        | 4:2:2       | semi-planar, high-packed | `p212le`              |
+//! | [`P216`]         | 16        | 4:2:2       | semi-planar              | `p216le`              |
+//! | [`P410`]         | 10        | 4:4:4       | semi-planar, high-packed | `p410le`              |
+//! | [`P412`]         | 12        | 4:4:4       | semi-planar, high-packed | `p412le`              |
+//! | [`P416`]         | 16        | 4:4:4       | semi-planar              | `p416le`              |
 //!
 //! ## YUVA sources (alpha-drop)
 //!
@@ -152,6 +158,12 @@
 //! [`P010`]: crate::yuv::P010
 //! [`P012`]: crate::yuv::P012
 //! [`P016`]: crate::yuv::P016
+//! [`P210`]: crate::yuv::P210
+//! [`P212`]: crate::yuv::P212
+//! [`P216`]: crate::yuv::P216
+//! [`P410`]: crate::yuv::P410
+//! [`P412`]: crate::yuv::P412
+//! [`P416`]: crate::yuv::P416
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(docsrs, feature(doc_cfg))]

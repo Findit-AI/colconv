@@ -2934,6 +2934,80 @@ unsafe fn p16_to_rgb_u16_row_impl(
   }
 }
 
+// ===== Pn 4:4:4 (semi-planar high-bit-packed) → RGB =======================
+//
+// AVX-512 thin wrappers delegating to the SSE4.1 4:4:4 Pn kernels.
+// AVX-512 implies SSE4.1, so delegation is safe. Native AVX-512
+// kernel (64 Y pixels per iter, native `_mm512_srai_epi64` for the
+// 16-bit u16-output i64 chroma path) is a follow-up — would give
+// ~4× throughput over SSE4.1 on AVX-512BW-capable CPUs.
+
+#[inline]
+#[target_feature(enable = "avx512bw,avx512f")]
+pub(crate) unsafe fn p_n_444_to_rgb_row<const BITS: u32>(
+  y: &[u16],
+  uv_full: &[u16],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  // SAFETY: AVX-512 implies SSE4.1.
+  unsafe {
+    super::x86_sse41::p_n_444_to_rgb_row::<BITS>(y, uv_full, rgb_out, width, matrix, full_range);
+  }
+}
+
+#[inline]
+#[target_feature(enable = "avx512bw,avx512f")]
+pub(crate) unsafe fn p_n_444_to_rgb_u16_row<const BITS: u32>(
+  y: &[u16],
+  uv_full: &[u16],
+  rgb_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  // SAFETY: AVX-512 implies SSE4.1.
+  unsafe {
+    super::x86_sse41::p_n_444_to_rgb_u16_row::<BITS>(
+      y, uv_full, rgb_out, width, matrix, full_range,
+    );
+  }
+}
+
+#[inline]
+#[target_feature(enable = "avx512bw,avx512f")]
+pub(crate) unsafe fn p_n_444_16_to_rgb_row(
+  y: &[u16],
+  uv_full: &[u16],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  // SAFETY: AVX-512 implies SSE4.1.
+  unsafe {
+    super::x86_sse41::p_n_444_16_to_rgb_row(y, uv_full, rgb_out, width, matrix, full_range);
+  }
+}
+
+#[inline]
+#[target_feature(enable = "avx512bw,avx512f")]
+pub(crate) unsafe fn p_n_444_16_to_rgb_u16_row(
+  y: &[u16],
+  uv_full: &[u16],
+  rgb_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  // SAFETY: AVX-512 implies SSE4.1.
+  unsafe {
+    super::x86_sse41::p_n_444_16_to_rgb_u16_row(y, uv_full, rgb_out, width, matrix, full_range);
+  }
+}
+
 // ===== BGR ↔ RGB byte swap ==============================================
 
 /// AVX‑512 BGR ↔ RGB byte swap. 64 pixels per iteration via four calls

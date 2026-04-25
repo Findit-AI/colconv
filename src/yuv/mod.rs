@@ -84,6 +84,23 @@
 //!   sample (reference). At 16 bits the high‑vs‑low packing
 //!   distinction degenerates — every bit is active.
 //!
+//! # Shipped (high-bit-depth 4:2:2 / 4:4:4, high-bit-packed semi-planar)
+//!
+//! - [`P210`](crate::yuv::P210) /
+//!   [`P212`](crate::yuv::P212) /
+//!   [`P216`](crate::yuv::P216) — 4:2:2 semi‑planar at 10 / 12 / 16
+//!   bits. Reuses the 4:2:0 P‑family per‑row kernels verbatim
+//!   (half‑width interleaved UV layout is identical); only the walker
+//!   reads chroma row `r` instead of `r / 2`. NVDEC / CUDA HDR 4:2:2
+//!   download targets.
+//! - [`P410`](crate::yuv::P410) /
+//!   [`P412`](crate::yuv::P412) /
+//!   [`P416`](crate::yuv::P416) — 4:4:4 semi‑planar at 10 / 12 / 16
+//!   bits. Full‑width interleaved UV (`2 * width` u16 elements per
+//!   row, one `U, V` pair per pixel). Dedicated row‑kernel family
+//!   `p_n_444_to_rgb_*<BITS>` + `p_n_444_16_to_rgb_*`. NVDEC / CUDA
+//!   HDR 4:4:4 download target.
+//!
 //! # Kernel families
 //!
 //! - **Q15 i32 family** covers 8‑bit (non-generic `yuv_420_to_rgb_row` + siblings)
@@ -99,9 +116,6 @@
 //!
 //! # Not yet shipped
 //!
-//! - **u16 semi‑planar 4:2:2 / 4:4:4** (`P210`, `P216`, `P410`,
-//!   `P416`) — follow‑up. Would reuse the 16‑bit u16 kernel family
-//!   with 4:2:2 / 4:4:4 chroma strides.
 //! - **Legacy planar** (`Yuv411p`, `Yuv410p`) — DV / Cinepak only;
 //!   uncommon enough that adding them would be speculative.
 //! - **Packed RGB sources** (`Rgb24`, `Bgr24`, `Rgba`, `Bgra`,

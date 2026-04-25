@@ -1,5 +1,73 @@
 # UNRELEASED
 
+## Ship 7 — u16 semi-planar 4:2:2 / 4:4:4 (P210 / P212 / P216 / P410 / P412 / P416)
+
+Six new high-bit-packed semi-planar formats from the FFmpeg HW-decode
+download space (CUDA / NVDEC / QSV emit these for HDR 4:2:2 and 4:4:4
+content).
+
+### New formats
+
+- **`P210`** / **`P212`** / **`P216`** — 4:2:2 semi-planar at 10 / 12 /
+  16 bits. Const-generic `PnFrame422<BITS>` with aliases. Per-row
+  layout is identical to P010/P012/P016 (half-width interleaved UV =
+  `width` u16 elements per row); only the walker reads chroma row
+  `r` instead of `r / 2` (4:2:2 vs 4:2:0). MixedSinker impls reuse
+  the existing `p010_to_rgb_*` / `p012_to_rgb_*` / `p016_to_rgb_*`
+  row primitives — **zero new SIMD code** for 4:2:2.
+- **`P410`** / **`P412`** / **`P416`** — 4:4:4 semi-planar at 10 / 12 /
+  16 bits. Const-generic `PnFrame444<BITS>` with aliases. UV is
+  full-width (`2 * width` u16 elements per row, one `U, V` pair per
+  pixel — no horizontal chroma subsampling). New row-primitive
+  family `p_n_444_to_rgb_*<BITS>` (BITS ∈ {10, 12}, Q15 i32 pipeline)
+  + dedicated `p_n_444_16_to_rgb_*` (16-bit, parallel i64-chroma path
+  for u16 output).
+
+Frame error type: `PnFrameError` extended with the same variants for
+both new families. The `OddWidth` variant message kept the
+4:2:0-specific wording (it applies to PnFrame422 too — 4:2:2 also
+requires even width).
+
+### SIMD coverage (4:4:4 family)
+
+| Kernel                                  | NEON | SSE4.1 | AVX2     | AVX-512  | wasm simd128 |
+| --------------------------------------- | :--: | :----: | :------: | :------: | :----------: |
+| `p_n_444_to_rgb_row<BITS>`              |  ✅  |   ✅   | (sse4.1) | (sse4.1) |   (scalar)   |
+| `p_n_444_to_rgb_u16_row<BITS>`          |  ✅  |   ✅   | (sse4.1) | (sse4.1) |   (scalar)   |
+| `p_n_444_16_to_rgb_row`                 |  ✅  |   ✅   | (sse4.1) | (sse4.1) |   (scalar)   |
+| `p_n_444_16_to_rgb_u16_row`             |  ✅  |   ✅   | (sse4.1) | (sse4.1) |   (scalar)   |
+
+NEON and SSE4.1 ship native kernels validated against the scalar
+reference. AVX2 / AVX-512 currently delegate to SSE4.1 (correct
+semantics, half / quarter the throughput of a hypothetical native
+kernel). wasm simd128 delegates to scalar pending a native simd128
+implementation. Both are tracked as TODOs in the per-arch source —
+follow-up commits in this branch will replace the delegations with
+native wider-lane / native-instruction implementations:
+
+- AVX2 native: 32 Y pixels per iter via 256-bit vectors, deinterleave
+  via `_mm256_shuffle_epi8` + `_mm256_permute2x128_si256`.
+- AVX-512 native: 64 Y pixels per iter; `_mm512_srai_epi64` enables a
+  cleaner i64-chroma path than the SSE4.1 `srai64_15` bias trick.
+- wasm simd128 native: 16 Y pixels per iter; `i64x2_shr_s` for the
+  16-bit u16 path (no bias trick needed).
+
+### MixedSinker integration
+
+6 new `MixedSinker<F>` impls (P210 / P212 / P216 / P410 / P412 /
+P416). New `RowSlice` variants for the 4:4:4 chroma rows:
+`UvFull10`, `UvFull12`, `UvFull16`. The 4:2:2 impls reuse the
+existing `UvHalf10/12/16` variants since the per-row layout is
+identical to 4:2:0.
+
+### Tests
+
+- 6 new sanity gray-to-gray `MixedSinker` integration tests.
+- 3 new walker-level SIMD-vs-scalar equivalence tests for P410 / P412
+  / P416 at width 1922 (forces tail handling), pseudo-random chroma,
+  full + limited range, all matrices.
+- **Total suite: 313 passed on aarch64** (up from 304 at Ship 6b).
+
 ## Ship 6b — 9-bit family + 4:4:0 family (Tier 1 completion)
 
 Closes the remaining FFmpeg `AVPixelFormat` Tier 1 gap. Six new

@@ -2503,6 +2503,66 @@ pub(crate) unsafe fn p16_to_rgb_u16_row(
   }
 }
 
+// ===== Pn 4:4:4 (semi-planar high-bit-packed) → RGB =======================
+//
+// wasm simd128 Pn 4:4:4 — currently delegates to scalar pending a
+// native simd128 implementation. wasm simd128 has only 128-bit vectors
+// (no narrower SIMD tier to inherit), so the fallback target is
+// scalar. Native simd128 kernel TODO — would mirror the SSE4.1 design
+// (16 Y pixels per iter, two `u8x16_swizzle`-based deinterleaves).
+
+#[inline]
+#[target_feature(enable = "simd128")]
+pub(crate) unsafe fn p_n_444_to_rgb_row<const BITS: u32>(
+  y: &[u16],
+  uv_full: &[u16],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  scalar::p_n_444_to_rgb_row::<BITS>(y, uv_full, rgb_out, width, matrix, full_range);
+}
+
+#[inline]
+#[target_feature(enable = "simd128")]
+pub(crate) unsafe fn p_n_444_to_rgb_u16_row<const BITS: u32>(
+  y: &[u16],
+  uv_full: &[u16],
+  rgb_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  scalar::p_n_444_to_rgb_u16_row::<BITS>(y, uv_full, rgb_out, width, matrix, full_range);
+}
+
+#[inline]
+#[target_feature(enable = "simd128")]
+pub(crate) unsafe fn p_n_444_16_to_rgb_row(
+  y: &[u16],
+  uv_full: &[u16],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  scalar::p_n_444_16_to_rgb_row(y, uv_full, rgb_out, width, matrix, full_range);
+}
+
+#[inline]
+#[target_feature(enable = "simd128")]
+pub(crate) unsafe fn p_n_444_16_to_rgb_u16_row(
+  y: &[u16],
+  uv_full: &[u16],
+  rgb_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  scalar::p_n_444_16_to_rgb_u16_row(y, uv_full, rgb_out, width, matrix, full_range);
+}
+
 // ===== BGR ↔ RGB byte swap ==============================================
 
 /// WASM simd128 BGR ↔ RGB byte swap. 16 pixels per iteration via the
