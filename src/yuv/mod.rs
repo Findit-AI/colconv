@@ -121,6 +121,23 @@
 //! - **Packed RGB sources** (`Rgb24`, `Bgr24`, `Rgba`, `Bgra`,
 //!   `Rgba1010102`, etc.) — follow‑up. Will land as their own
 //!   family of `*_to` kernels feeding a new row‑shape subtrait.
+//!
+//! # Tracked refactor (no behavior change)
+//!
+//! Every walker module below follows the same per‑format pattern:
+//! marker → `Row` struct → `Sink` subtrait → `*_to` walker fn. The
+//! walker bodies are ~85% duplication across the ~30 modules; only
+//! the per‑row chroma slice length, the chroma‑row index expression,
+//! and the `Row::new(...)` call vary. A `walker!` macro expanding
+//! the boilerplate from a small spec would consolidate the family.
+//!
+//! Deferred because doing it incrementally creates asymmetry
+//! (some walkers macro‑expanded, others hand‑written). The right
+//! shape is a single all‑walkers‑refactored PR with zero behavioral
+//! change — easy to review on its own merits, unrelated to any
+//! pending format‑shipping work. See `docs/color-conversion-functions.md`
+//! § "Cleanup follow‑ups → Walker module deduplication" for the full
+//! discussion (originated from PR #14 review).
 
 mod nv12;
 mod nv16;
