@@ -60,6 +60,21 @@
 //! | [`P012`]         | 12        | 4:2:0       | semi-planar, high-packed | `p012le`              |
 //! | [`P016`]         | 16        | 4:2:0       | semi-planar              | `p016le`              |
 //!
+//! ## YUVA sources (alpha-drop)
+//!
+//! Every shipped 4:2:0 / 4:2:2 / 4:4:4 planar family also covers its
+//! `yuva*` alpha variant by **alpha-drop**: the caller hands the
+//! Y / U / V slices from a 4-plane YUVA buffer to the matching
+//! `Yuv*p*Frame` constructor and ignores the alpha plane. This works
+//! today for `yuva420p`, `yuva420p9le`, `yuva420p10le`,
+//! `yuva420p16le`, `yuva422p`, `yuva422p9le`, `yuva422p10le`,
+//! `yuva422p16le`, `yuva444p`, `yuva444p9le`, `yuva444p10le`, and
+//! `yuva444p16le` (the full set of YUVA pixel formats FFmpeg
+//! produces). RGBA pass-through (preserving the alpha channel into
+//! the output) is the dedicated **Ship 8** work item — it adds
+//! `with_rgba` / `with_rgba_u16` accessors on `MixedSinker` plus
+//! native YUVA frame types.
+//!
 //! # Kernel families
 //!
 //! - **Q15 i32 family** — 8-bit kernels (`yuv_420_to_rgb_row`,
