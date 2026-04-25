@@ -34,11 +34,17 @@ color-correction in a single per-row kernel.
 - `BayerFrame16<'a, const BITS: u32>` — `&[u16]` **low-packed** at
   `BITS` ∈ {10, 12, 14, 16} (active samples in the low `BITS` bits,
   valid range `[0, (1 << BITS) - 1]`). Matches the planar
-  `Yuv420p10/12/14/16` convention; *not* the `PnFrame` (P010 / P012)
-  high-bit-packed semi-planar convention. `try_new_checked` rejects
-  samples > `(1 << BITS) - 1` via `BayerFrame16Error::SampleOutOfRange`.
-  Aliases: `Bayer10Frame` / `Bayer12Frame` / `Bayer14Frame` /
-  `Bayer16Frame`. Odd dimensions accepted.
+  `Yuv420p10/12/14/16` convention in packing; diverges in
+  validation: `BayerFrame16::try_new` validates **every active
+  sample's range** as part of construction (returning
+  `BayerFrame16Error::SampleOutOfRange` for out-of-range data),
+  not just geometry. RAW pipelines often surface trusted-but-
+  mispacked input from sensor SDKs, and the demosaic kernel has no
+  well-defined behavior on out-of-range samples; mandatory
+  validation makes the `bayer16_to` walker fully fallible — no
+  data-dependent panic surface. Aliases: `Bayer10Frame` /
+  `Bayer12Frame` / `Bayer14Frame` / `Bayer16Frame`. Odd dimensions
+  accepted.
 - `BayerFrameError` / `BayerFrame16Error` — structured error enums,
   `#[non_exhaustive]`, `IsVariant`-derived.
 
@@ -79,8 +85,9 @@ scheduled as a dedicated follow-up PR (`feat/bayer-simd`).
 ### Tests
 
 - Frame-validation tests (8-bit + high-bit-depth, including
-  `try_new_checked` rejecting samples whose value exceeds
-  `(1 << BITS) - 1` under the low-packed convention).
+  `BayerFrame16::try_new` rejecting samples whose value exceeds
+  `(1 << BITS) - 1` under the low-packed convention; both above-
+  max and the common MSB-aligned packing-mismatch case).
 - 5 type-helper tests (WB / CCM defaults, fuse arithmetic).
 - 11 end-to-end walker + kernel tests (8-bit + 12-bit, solid R / G
   / B channels, uniform-byte invariant, pattern swap RGGB↔BGGR,

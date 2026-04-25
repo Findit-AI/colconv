@@ -1721,16 +1721,14 @@ where
 ///
 /// `above` / `mid` / `below` are **low-packed** `u16` row slices —
 /// every sample must satisfy `value < (1 << BITS)`, with the high
-/// `16 - BITS` bits zero. This matches the planar high-bit-depth
-/// convention used by `Yuv420p10/12/14/16`, `Yuv422p10/12/14/16`,
-/// and `Yuv444p10/12/14/16`. Out-of-range samples violate the
-/// contract: the kernel is sound (no panic, no UB) but produces
-/// saturated output and contaminates demosaic neighbor averages,
-/// so border / interior pixels both become numerically meaningless.
-/// Use [`crate::frame::BayerFrame16::try_new_checked`] to validate
-/// untrusted input upstream — the default
-/// [`crate::frame::BayerFrame16::try_new`] only checks geometry,
-/// matching the rest of the high-bit-depth crate.
+/// `16 - BITS` bits zero. The
+/// [`crate::frame::BayerFrame16::try_new`] constructor validates
+/// this contract on every active sample, so callers using
+/// [`crate::raw::bayer16_to`] are guaranteed in-range input. Direct
+/// row-API callers passing raw `&[u16]` slices are responsible for
+/// the same contract; out-of-range samples violate it but the
+/// kernel is sound (no panic, no UB) — it produces saturated
+/// output and contaminates demosaic neighbor averages.
 ///
 /// `m` is the unscaled `CCM · diag(wb)`; this kernel bakes the
 /// input→u8 rescale (`255 / ((1 << BITS) - 1)`) into output values

@@ -268,11 +268,7 @@ impl ColorCorrectionMatrix {
       while col < 3 {
         let v = m[row][col];
         if !v.is_finite() {
-          return Err(ColorCorrectionMatrixError::NonFinite {
-            row,
-            col,
-            value: v,
-          });
+          return Err(ColorCorrectionMatrixError::NonFinite { row, col, value: v });
         }
         // Magnitude bound — see the type-level docs for the
         // overflow analysis. With `|coeff| <= 1e6`, gain ≤ 1e6,
@@ -634,19 +630,11 @@ mod tests {
     // Same principle for CCM elements — finite-but-extreme values
     // that pass the is_finite check but would overflow per-pixel
     // matmul are rejected via OutOfBounds.
-    let e = ColorCorrectionMatrix::try_new([
-      [1.0, 0.0, 1e30],
-      [0.0, 1.0, 0.0],
-      [0.0, 0.0, 1.0],
-    ])
-    .unwrap_err();
+    let e = ColorCorrectionMatrix::try_new([[1.0, 0.0, 1e30], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
+      .unwrap_err();
     assert!(matches!(
       e,
-      ColorCorrectionMatrixError::OutOfBounds {
-        row: 0,
-        col: 2,
-        ..
-      }
+      ColorCorrectionMatrixError::OutOfBounds { row: 0, col: 2, .. }
     ));
   }
 
@@ -654,19 +642,11 @@ mod tests {
   fn ccm_try_new_rejects_extreme_negative_coefficient() {
     // Symmetric negative bound: real CCMs have negative
     // off-diagonals, but only in the realistic ~[-5, 5] range.
-    let e = ColorCorrectionMatrix::try_new([
-      [1.0, -1e10, 0.0],
-      [0.0, 1.0, 0.0],
-      [0.0, 0.0, 1.0],
-    ])
-    .unwrap_err();
+    let e = ColorCorrectionMatrix::try_new([[1.0, -1e10, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
+      .unwrap_err();
     assert!(matches!(
       e,
-      ColorCorrectionMatrixError::OutOfBounds {
-        row: 0,
-        col: 1,
-        ..
-      }
+      ColorCorrectionMatrixError::OutOfBounds { row: 0, col: 1, .. }
     ));
   }
 
@@ -674,12 +654,8 @@ mod tests {
   fn ccm_try_new_accepts_typical_negative_off_diagonal() {
     // Real-world CCM with crosstalk subtraction stays well within
     // the bound and validates cleanly.
-    ColorCorrectionMatrix::try_new([
-      [1.5, -0.3, -0.2],
-      [-0.1, 1.2, -0.1],
-      [-0.05, -0.15, 1.2],
-    ])
-    .expect("typical CCM valid");
+    ColorCorrectionMatrix::try_new([[1.5, -0.3, -0.2], [-0.1, 1.2, -0.1], [-0.05, -0.15, 1.2]])
+      .expect("typical CCM valid");
   }
 
   /// Codex regression: even at the bound, fusion + per-pixel
@@ -688,12 +664,15 @@ mod tests {
   /// well under `f32::MAX ≈ 3.4e38`.
   #[test]
   fn fuse_wb_ccm_at_bounds_with_max_sample_stays_finite() {
-    let wb =
-      WhiteBalance::try_new(WhiteBalance::MAX_GAIN, WhiteBalance::MAX_GAIN, WhiteBalance::MAX_GAIN)
-        .unwrap();
+    let wb = WhiteBalance::try_new(
+      WhiteBalance::MAX_GAIN,
+      WhiteBalance::MAX_GAIN,
+      WhiteBalance::MAX_GAIN,
+    )
+    .unwrap();
     let max = ColorCorrectionMatrix::MAX_COEFFICIENT_ABS;
-    let ccm = ColorCorrectionMatrix::try_new([[max, max, max], [max, max, max], [max, max, max]])
-      .unwrap();
+    let ccm =
+      ColorCorrectionMatrix::try_new([[max, max, max], [max, max, max], [max, max, max]]).unwrap();
     let m = fuse_wb_ccm(&wb, &ccm);
     // Worst-case per-pixel sum: 3 channels * fused_max * 65535.
     let sample = 65535.0f32;

@@ -4575,8 +4575,22 @@ impl<'a> BayerFrame<'a> {
 /// (semi-planar `u16` containers carry samples in the *high* bits);
 /// Bayer is single-plane and tracks the planar family instead.
 ///
-/// Use [`Self::try_new_checked`] to additionally reject samples
-/// whose value exceeds `(1 << BITS) - 1`.
+/// **Type-level guarantee.** [`Self::try_new`] validates every
+/// active sample against the low-packed range as part of
+/// construction, so an existing `BayerFrame16<BITS>` value is
+/// guaranteed to carry only in-range samples. Downstream
+/// [`crate::raw::bayer16_to`] therefore needs no further
+/// runtime validation and never panics on bad sample data —
+/// any `Result::Err` from the conversion comes from the sink,
+/// never from the frame's contents.
+///
+/// Diverges from the rest of the high-bit-depth crate
+/// (`Yuv420pFrame16` / `Yuv422pFrame16` / `Yuv444pFrame16` ship a
+/// cheap `try_new` + opt-in `try_new_checked`) because Bayer16
+/// frames typically come from less-trusted RAW pipelines (vendor
+/// SDKs, file loaders) and have no hot-path performance pressure
+/// to skip the per-sample check. Mandatory validation makes the
+/// `bayer16_to` walker fully fallible.
 ///
 /// Odd widths and heights are accepted (cropped Bayer is a real
 /// workflow; the kernel handles partial 2×2 tiles via edge
@@ -4597,20 +4611,41 @@ pub struct BayerFrame16<'a, const BITS: u32> {
 
 impl<'a, const BITS: u32> BayerFrame16<'a, BITS> {
   /// Constructs a new [`BayerFrame16`], validating dimensions,
-  /// plane length, and the `BITS` parameter.
+  /// plane length, the `BITS` parameter, **and every active
+  /// sample's value**.
+  ///
+  /// Unlike the rest of the high-bit-depth crate (`Yuv420pFrame16`,
+  /// `Yuv422pFrame16`, etc.) which split the validation into
+  /// `try_new` (geometry) + `try_new_checked` (samples), Bayer16
+  /// always validates samples here. RAW pipelines often surface
+  /// trusted-but-actually-mispacked input (MSB-aligned bytes from
+  /// a sensor SDK, stale high bits from a copy that didn't mask
+  /// the source), and downstream demosaic / WB / CCM math has no
+  /// well-defined behavior on out-of-range samples. Catching at
+  /// construction lets callers handle the failure as a normal
+  /// `Result` instead of risking a panic later in
+  /// [`crate::raw::bayer16_to`].
   ///
   /// `stride` is in **samples** (`u16` elements). Returns
   /// [`BayerFrame16Error`] if any of:
   /// - `BITS` is not 10, 12, 14, or 16,
   /// - `width` or `height` is zero,
   /// - `stride < width`,
-  /// - `data.len() < stride * height`, or
-  /// - `stride * height` overflows `usize`.
+  /// - `data.len() < stride * height`,
+  /// - `stride * height` overflows `usize`, or
+  /// - any sample's value exceeds `(1 << BITS) - 1` (returned as
+  ///   [`BayerFrame16Error::SampleOutOfRange`]).
   ///
   /// Odd widths and heights are accepted; see the type-level docs
   /// for the rationale.
+  ///
+  /// Cost: O(width × height) sample scan in addition to the
+  /// O(1) geometry checks. The scan is a tight loop over `u16`
+  /// values per row and runs once per frame; downstream
+  /// [`crate::raw::bayer16_to`] therefore needs no further
+  /// sample validation.
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub const fn try_new(
+  pub fn try_new(
     data: &'a [u16],
     width: u32,
     height: u32,
@@ -4643,41 +4678,11 @@ impl<'a, const BITS: u32> BayerFrame16<'a, BITS> {
         actual: data.len(),
       });
     }
-    Ok(Self {
-      data,
-      width,
-      height,
-      stride,
-    })
-  }
-
-  /// Constructs a new [`BayerFrame16`], panicking on invalid inputs.
-  #[cfg_attr(not(tarpaulin), inline(always))]
-  pub const fn new(data: &'a [u16], width: u32, height: u32, stride: u32) -> Self {
-    match Self::try_new(data, width, height, stride) {
-      Ok(frame) => frame,
-      Err(_) => panic!("invalid BayerFrame16 dimensions, plane length, or BITS value"),
-    }
-  }
-
-  /// Like [`Self::try_new`] but additionally scans every sample and
-  /// rejects any value greater than `(1 << BITS) - 1` (i.e., any
-  /// sample whose high `16 - BITS` bits are non-zero — the Bayer16
-  /// convention is **low-packed**). Cost: one O(declared payload)
-  /// linear scan; the default [`Self::try_new`] skips this so the
-  /// hot path stays O(1).
-  ///
-  /// Returns [`BayerFrame16Error::SampleOutOfRange`] on the first
-  /// offending sample with the plane index, the offending value,
-  /// and the valid maximum so callers can pinpoint the bad sample.
-  #[cfg_attr(not(tarpaulin), inline(always))]
-  pub fn try_new_checked(
-    data: &'a [u16],
-    width: u32,
-    height: u32,
-    stride: u32,
-  ) -> Result<Self, BayerFrame16Error> {
-    let frame = Self::try_new(data, width, height, stride)?;
+    // Sample range scan — only the **active** per-row region
+    // (`r * stride .. r * stride + width`) is checked. Row padding
+    // and trailing storage are deliberately skipped because the
+    // walker never reads them, matching the boundary contract of
+    // the row dispatchers.
     let max_valid: u16 = ((1u32 << BITS) - 1) as u16;
     let w = width as usize;
     let h = height as usize;
@@ -4693,7 +4698,24 @@ impl<'a, const BITS: u32> BayerFrame16<'a, BITS> {
         }
       }
     }
-    Ok(frame)
+    Ok(Self {
+      data,
+      width,
+      height,
+      stride,
+    })
+  }
+
+  /// Constructs a new [`BayerFrame16`], panicking on invalid inputs.
+  /// Includes sample-range validation; see [`Self::try_new`].
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn new(data: &'a [u16], width: u32, height: u32, stride: u32) -> Self {
+    match Self::try_new(data, width, height, stride) {
+      Ok(frame) => frame,
+      Err(_) => {
+        panic!("invalid BayerFrame16 dimensions, plane length, BITS value, or sample range")
+      }
+    }
   }
 
   /// The Bayer plane samples. Row `r` starts at sample offset
@@ -4779,8 +4801,7 @@ pub enum BayerFrameError {
   },
 }
 
-/// Errors returned by [`BayerFrame16::try_new`] /
-/// [`BayerFrame16::try_new_checked`].
+/// Errors returned by [`BayerFrame16::try_new`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Error)]
 #[non_exhaustive]
 pub enum BayerFrame16Error {
@@ -4824,8 +4845,11 @@ pub enum BayerFrame16Error {
   },
   /// A sample's value exceeds `(1 << BITS) - 1` — the sample's
   /// high `16 - BITS` bits are non-zero, which is invalid under
-  /// the low-packed Bayer16 convention. Only
-  /// [`BayerFrame16::try_new_checked`] can produce this error.
+  /// the low-packed Bayer16 convention. Returned by
+  /// [`BayerFrame16::try_new`] (and [`BayerFrame16::new`] which
+  /// wraps it) — sample-range validation is part of standard
+  /// frame construction so the [`crate::raw::bayer16_to`] walker
+  /// is fully fallible.
   #[error("sample {value} at element {index} exceeds {max_valid} ((1 << BITS) - 1)")]
   SampleOutOfRange {
     /// Element index within the plane's slice.
@@ -6359,19 +6383,19 @@ mod tests {
   }
 
   #[test]
-  fn bayer16_try_new_checked_accepts_low_packed_12bit() {
+  fn bayer16_try_new_accepts_low_packed_12bit() {
     // 12-bit low-packed: every value ≤ 4095 is valid.
     let mut data = std::vec![2048u16; 16 * 8];
     data[7] = 4095; // max valid 12-bit
     data[42] = 0; // black
-    Bayer12Frame::try_new_checked(&data, 16, 8, 16).expect("12-bit low-packed");
+    Bayer12Frame::try_new(&data, 16, 8, 16).expect("12-bit low-packed");
   }
 
   #[test]
-  fn bayer16_try_new_checked_rejects_above_max_at_12bit() {
+  fn bayer16_try_new_rejects_above_max_at_12bit() {
     let mut data = std::vec![2048u16; 16 * 8];
     data[42] = 4096; // just above 12-bit max
-    let e = Bayer12Frame::try_new_checked(&data, 16, 8, 16).unwrap_err();
+    let e = Bayer12Frame::try_new(&data, 16, 8, 16).unwrap_err();
     assert!(matches!(
       e,
       BayerFrame16Error::SampleOutOfRange {
@@ -6383,10 +6407,10 @@ mod tests {
   }
 
   #[test]
-  fn bayer16_try_new_checked_rejects_above_max_at_10bit() {
+  fn bayer16_try_new_rejects_above_max_at_10bit() {
     let mut data = std::vec![512u16; 16 * 8];
     data[3] = 1024; // just above 10-bit max
-    let e = Bayer10Frame::try_new_checked(&data, 16, 8, 16).unwrap_err();
+    let e = Bayer10Frame::try_new(&data, 16, 8, 16).unwrap_err();
     assert!(matches!(
       e,
       BayerFrame16Error::SampleOutOfRange {
@@ -6398,12 +6422,12 @@ mod tests {
   }
 
   #[test]
-  fn bayer16_try_new_checked_accepts_full_u16_range_at_16bit() {
+  fn bayer16_try_new_accepts_full_u16_range_at_16bit() {
     // At BITS=16 every u16 is valid.
     let mut data = std::vec![0u16; 16 * 8];
     data[7] = 0xFFFF;
     data[42] = 0x1234;
-    Bayer16Frame::try_new_checked(&data, 16, 8, 16).expect("any u16 valid at 16-bit");
+    Bayer16Frame::try_new(&data, 16, 8, 16).expect("any u16 valid at 16-bit");
   }
 
   #[test]

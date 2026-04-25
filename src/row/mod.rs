@@ -2734,94 +2734,6 @@ fn rgb_row_elems(width: usize) -> usize {
   }
 }
 
-/// Asserts every **active** `u16` sample in a Bayer16 plane is
-/// low-packed at `BITS`. Used by [`crate::raw::bayer16_to`] as an
-/// upfront safety net **before** the first sink mutation, so a
-/// contract violation (caller used
-/// [`crate::frame::BayerFrame16::try_new`] — geometry-only — with
-/// mispacked or stale-high-bits data) fails loudly with the
-/// user's output buffer untouched, rather than panicking
-/// mid-stream after earlier rows are already written.
-///
-/// Important: only the per-row **active** region (`r * stride ..
-/// r * stride + width`) is scanned. Row padding (`stride > width`)
-/// and any trailing backing storage past `(height - 1) * stride +
-/// width` are **deliberately skipped** because the walker never
-/// reads those bytes, and validating them would reject ordinary
-/// padded decoder output that's perfectly safe to convert. This
-/// matches `BayerFrame16::try_new_checked`'s scan window.
-///
-/// Implementation: per-row OR-fold over the active region; one
-/// AND with the bad-bit mask after combining all rows. Total work
-/// is O(width × height) with one OR per `u16` — well below the
-/// demosaic + matmul that follows. For `BITS == 16` this is a
-/// no-op (the bad-bit mask is zero; const-folded out by the
-/// compiler).
-#[cfg_attr(not(tarpaulin), inline(always))]
-pub(crate) fn assert_bayer16_plane_in_range<const BITS: u32>(
-  data: &[u16],
-  width: usize,
-  height: usize,
-  stride: usize,
-) {
-  if BITS == 16 {
-    return;
-  }
-  let max_valid: u16 = ((1u32 << BITS) - 1) as u16;
-  let bad_mask: u16 = !max_valid;
-  let mut or_all: u16 = 0;
-  for r in 0..height {
-    let start = r * stride;
-    let row = &data[start..start + width];
-    or_all |= row.iter().fold(0u16, |acc, &x| acc | x);
-  }
-  assert!(
-    or_all & bad_mask == 0,
-    "Bayer16 active samples contain bits above (1 << BITS) - 1 = {max_valid}; \
-     use BayerFrame16::try_new_checked to validate untrusted input \
-     (BITS = {BITS})"
-  );
-}
-
-/// Asserts every `u16` sample in `above` / `mid` / `below` is
-/// **low-packed** at `BITS`, i.e. fits in `[0, (1 << BITS) - 1]`.
-/// Implemented as an OR-fold per row — single tight loop, single
-/// AND at the end — so the check is O(width) per row but tiny per
-/// sample (one OR vs the kernel's ~9 f32 ops). For `BITS == 16`
-/// the bad-bit mask is zero and the check trivially passes; the
-/// compiler short-circuits the work via the const branch.
-///
-/// Out-of-range samples mean the caller violated the low-packed
-/// contract — usually MSB-aligned input passed to a Bayer16 path,
-/// or stale high bits from an upstream copy. The kernel would
-/// otherwise scale those values against `(1 << BITS) - 1` and
-/// emit silently-saturated RGB; failing loudly here turns the
-/// contract violation into an actionable panic instead of
-/// undetectable garbled output.
-#[cfg_attr(not(tarpaulin), inline(always))]
-fn assert_bayer16_samples_in_range<const BITS: u32>(
-  above: &[u16],
-  mid: &[u16],
-  below: &[u16],
-) {
-  // BITS=16: every u16 is valid; max_valid wraps to 0xFFFF and
-  // bad_mask = !0xFFFF = 0. Compiler folds this branch out.
-  if BITS == 16 {
-    return;
-  }
-  let max_valid: u16 = ((1u32 << BITS) - 1) as u16;
-  let bad_mask: u16 = !max_valid;
-  let or_above: u16 = above.iter().fold(0, |acc, &x| acc | x);
-  let or_mid: u16 = mid.iter().fold(0, |acc, &x| acc | x);
-  let or_below: u16 = below.iter().fold(0, |acc, &x| acc | x);
-  assert!(
-    (or_above | or_mid | or_below) & bad_mask == 0,
-    "Bayer16 sample exceeds (1 << BITS) - 1 = {max_valid}; \
-     use BayerFrame16::try_new_checked to validate untrusted input \
-     (BITS = {BITS})"
-  );
-}
-
 /// Maximum permitted magnitude of any element of a fused color
 /// transform handed to a Bayer row dispatcher.
 ///
@@ -3051,14 +2963,13 @@ pub fn bayer_to_rgb_row(
 ///
 /// `BITS` ∈ {10, 12, 14, 16}; samples are low-packed `u16` (active
 /// values in the low `BITS` bits, range `[0, (1 << BITS) - 1]`).
-/// **The dispatcher panics in release mode if any sample's high
-/// `16 - BITS` bits are non-zero** — that is the only out-of-range
-/// case [`crate::frame::BayerFrame16::try_new`] doesn't catch
-/// (`try_new` validates geometry only). Pass MSB-aligned input
-/// through `>> (16 - BITS)` first, or build the frame via
-/// [`crate::frame::BayerFrame16::try_new_checked`] for upstream
-/// validation. The check is an O(width) OR-fold per row and is
-/// elided entirely for `BITS == 16`.
+/// Direct row-API callers are responsible for upholding the
+/// low-packed contract; samples whose value exceeds
+/// `(1 << BITS) - 1` produce defined-but-saturated output (no
+/// panic, no UB). The walker
+/// [`crate::raw::bayer16_to`] never sees out-of-range input
+/// because [`crate::frame::BayerFrame16::try_new`] validates every
+/// active sample at frame-construction time.
 ///
 /// `m` is the unscaled `CCM · diag(wb)` — the kernel bakes the
 /// input→u8 rescale (`255 / ((1 << BITS) - 1)`) at output time.
@@ -3092,7 +3003,6 @@ pub fn bayer16_to_rgb_row<const BITS: u32>(
   let rgb_min = rgb_row_bytes(width);
   assert!(rgb_out.len() >= rgb_min, "rgb_out row too short");
   assert_color_transform_well_formed(m);
-  assert_bayer16_samples_in_range::<BITS>(above, mid, below);
 
   scalar::bayer16_to_rgb_row::<BITS>(above, mid, below, row_parity, pattern, demosaic, m, rgb_out);
 }
@@ -3137,7 +3047,6 @@ pub fn bayer16_to_rgb_u16_row<const BITS: u32>(
   let rgb_min = rgb_row_elems(width);
   assert!(rgb_out.len() >= rgb_min, "rgb_out row too short");
   assert_color_transform_well_formed(m);
-  assert_bayer16_samples_in_range::<BITS>(above, mid, below);
 
   scalar::bayer16_to_rgb_u16_row::<BITS>(
     above, mid, below, row_parity, pattern, demosaic, m, rgb_out,
