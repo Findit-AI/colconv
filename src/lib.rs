@@ -368,6 +368,18 @@ pub trait PixelSink {
 /// `SMPTE2085`, `IPT_C2`, `CHROMA_DERIVED_NCL/CL`, and
 /// `YCGCO_RE`/`YCGCO_RO`. The enum is `#[non_exhaustive]` so variants
 /// can be added without a breaking change when a real use case arrives.
+///
+/// **Color-space scope.** This enum picks the **matrix** for the
+/// YUV → RGB step only. The resulting RGB carries whatever
+/// transfer function was on the source — typically gamma-encoded
+/// for video (sRGB / Rec.709 OETF / Rec.2020 OETF). Linearizing
+/// the output, transforming between gamuts (Rec.709 ↔ Rec.2020 ↔
+/// ACES), and HDR transfer functions (HLG, PQ) are not in
+/// `colconv`'s current scope — typically handled via OCIO or a
+/// dedicated tonemap layer downstream. See
+/// `docs/color-conversion-functions.md` § "Cleanup follow-ups →
+/// Color-space handling" for the deferred in-crate
+/// convenience-layer roadmap.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant)]
 #[non_exhaustive]
 pub enum ColorMatrix {

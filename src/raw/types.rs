@@ -261,6 +261,19 @@ impl Default for WhiteBalance {
 /// white-balanced sensor RGB is passed through.
 ///
 /// Source: RED / BMD / Nikon SDKs hand a 3×3 back natively.
+///
+/// **Color-space note.** This matrix is *opaque* about the target
+/// gamut — the caller decides whether the output is in Rec.709 /
+/// Rec.2020 / DCI-P3 / ACES AP0 or AP1 / sensor-native primaries
+/// by choosing the coefficients accordingly. The output is always
+/// **scene-linear** (no transfer-function / log / gamma encoding
+/// applied; the demosaic kernel does linear arithmetic).
+/// Downstream gamut transforms and transfer-function encoding
+/// (sRGB, Rec.709 OETF, log, HLG, PQ) are not in `colconv`'s
+/// current scope — typically handled via OCIO or a dedicated
+/// tonemap layer. See `docs/color-conversion-functions.md` §
+/// "Cleanup follow-ups → Color-space handling" for the deferred
+/// in-crate convenience-layer roadmap.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ColorCorrectionMatrix {
   m: [[f32; 3]; 3],
