@@ -31,6 +31,17 @@ use thiserror::Error;
 /// (`AV_PIX_FMT_BAYER_BGGR8` / `RGGB8` / `GRBG8` / `GBRG8` and the
 /// `*_16LE` siblings) carry the pattern in the format identifier
 /// itself.
+///
+/// **Scope.** This enum covers the four standard 2×2 Bayer
+/// arrangements only. Other CFA families used by modern
+/// professional cameras (Quad Bayer / Sony, X-Trans / Fujifilm,
+/// RGBW / BMD URSA 12K, Foveon stacked photosites / Sigma,
+/// monochrome / Leica) are tracked separately as future RAW
+/// pixel-buffer types — they need different walker shapes
+/// and / or completely different demosaic algorithms, so they
+/// won't ride on this enum. See
+/// `docs/color-conversion-functions.md` § "Cleanup follow-ups
+/// → Tier 14 RAW family extensions" for the full roadmap.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant)]
 #[non_exhaustive]
 pub enum BayerPattern {
