@@ -137,8 +137,45 @@ impl WhiteBalance {
         value: b,
       });
     }
+    // Magnitude bound. Real WB gains rarely exceed 10× (extreme
+    // tungsten correction); the bound is generous (`1e6`) but
+    // closes the door on finite-but-pathological metadata that
+    // would overflow per-pixel f32 math during the matmul. With
+    // gains ≤ 1e6 and 16-bit samples (≤ 65535) and CCM coefficients
+    // bounded by [`ColorCorrectionMatrix::MAX_COEFFICIENT`],
+    // the largest per-channel sum stays well under `f32::MAX`,
+    // so the kernel can never produce Inf or NaN from validated
+    // inputs.
+    if r > Self::MAX_GAIN {
+      return Err(WhiteBalanceError::OutOfBounds {
+        channel: WbChannel::R,
+        value: r,
+        max: Self::MAX_GAIN,
+      });
+    }
+    if g > Self::MAX_GAIN {
+      return Err(WhiteBalanceError::OutOfBounds {
+        channel: WbChannel::G,
+        value: g,
+        max: Self::MAX_GAIN,
+      });
+    }
+    if b > Self::MAX_GAIN {
+      return Err(WhiteBalanceError::OutOfBounds {
+        channel: WbChannel::B,
+        value: b,
+        max: Self::MAX_GAIN,
+      });
+    }
     Ok(Self { r, g, b })
   }
+
+  /// Maximum permitted gain magnitude. `1e6` is far above any
+  /// realistic camera-metadata value (real WB gains are O(1–10))
+  /// and far below the value at which per-pixel f32 matmul could
+  /// overflow given sample range `[0, 65535]` and CCM coefficient
+  /// bounds — see [`Self::try_new`] for the full overflow analysis.
+  pub const MAX_GAIN: f32 = 1.0e6;
 
   /// Constructs a [`WhiteBalance`], panicking on invalid input.
   /// Prefer [`Self::try_new`] when gains may be invalid at runtime.
@@ -214,24 +251,40 @@ pub struct ColorCorrectionMatrix {
 impl ColorCorrectionMatrix {
   /// Constructs a [`ColorCorrectionMatrix`] from a row-major 3×3,
   /// validating that every element is **finite** (not NaN, not
-  /// ±∞). CCM elements may legitimately be negative (color matrices
-  /// regularly subtract crosstalk), but never non-finite — a single
-  /// such value would propagate through the fused transform and
-  /// silently corrupt every output pixel.
+  /// ±∞) and bounded by `|value| <= [`Self::MAX_COEFFICIENT_ABS`]
+  /// (= 1e6). CCM elements may legitimately be negative (color
+  /// matrices regularly subtract crosstalk), and the magnitude
+  /// bound is well above any realistic camera value (real CCMs
+  /// are O(1–5)) but closes the door on finite-but-pathological
+  /// metadata that would overflow per-pixel f32 math.
   ///
-  /// Returns [`ColorCorrectionMatrixError`] on the first non-finite
-  /// element, naming its `(row, col)` coordinates.
+  /// Returns [`ColorCorrectionMatrixError`] on the first
+  /// out-of-spec element, naming its `(row, col)` coordinates.
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn try_new(m: [[f32; 3]; 3]) -> Result<Self, ColorCorrectionMatrixError> {
     let mut row = 0;
     while row < 3 {
       let mut col = 0;
       while col < 3 {
-        if !m[row][col].is_finite() {
+        let v = m[row][col];
+        if !v.is_finite() {
           return Err(ColorCorrectionMatrixError::NonFinite {
             row,
             col,
-            value: m[row][col],
+            value: v,
+          });
+        }
+        // Magnitude bound — see the type-level docs for the
+        // overflow analysis. With `|coeff| <= 1e6`, gain ≤ 1e6,
+        // and sample range `[0, 65535]`, the largest per-channel
+        // sum is `3 * 1e6 * 1e6 * 65535 ≈ 1.97e17`, ~21 orders
+        // of magnitude under `f32::MAX ≈ 3.4e38`. No Inf, no NaN.
+        if !(v >= -Self::MAX_COEFFICIENT_ABS && v <= Self::MAX_COEFFICIENT_ABS) {
+          return Err(ColorCorrectionMatrixError::OutOfBounds {
+            row,
+            col,
+            value: v,
+            max_abs: Self::MAX_COEFFICIENT_ABS,
           });
         }
         col += 1;
@@ -240,6 +293,12 @@ impl ColorCorrectionMatrix {
     }
     Ok(Self { m })
   }
+
+  /// Maximum permitted absolute value of any CCM element. `1e6`
+  /// is far above any realistic camera-metadata value (real CCMs
+  /// are O(1–5)) and closes the door on finite-but-pathological
+  /// metadata. See [`Self::try_new`] for the overflow analysis.
+  pub const MAX_COEFFICIENT_ABS: f32 = 1.0e6;
 
   /// Constructs a [`ColorCorrectionMatrix`], panicking on invalid
   /// input. Prefer [`Self::try_new`] when matrix elements may be
@@ -307,6 +366,19 @@ pub enum WhiteBalanceError {
     /// The offending gain value.
     value: f32,
   },
+  /// A gain exceeds [`WhiteBalance::MAX_GAIN`] (`1e6`). The bound
+  /// is far above any realistic camera value but closes the door
+  /// on finite-but-pathological metadata that would overflow
+  /// per-pixel f32 matmul.
+  #[error("WhiteBalance.{channel:?} = {value} exceeds the magnitude bound ({max})")]
+  OutOfBounds {
+    /// Which channel failed validation.
+    channel: WbChannel,
+    /// The offending gain value.
+    value: f32,
+    /// The bound that was exceeded ([`WhiteBalance::MAX_GAIN`]).
+    max: f32,
+  },
 }
 
 /// Errors returned by [`ColorCorrectionMatrix::try_new`].
@@ -322,6 +394,24 @@ pub enum ColorCorrectionMatrixError {
     col: usize,
     /// The offending value.
     value: f32,
+  },
+  /// An element's absolute value exceeds
+  /// [`ColorCorrectionMatrix::MAX_COEFFICIENT_ABS`] (`1e6`). The
+  /// bound is far above any realistic camera value but closes the
+  /// door on finite-but-pathological metadata.
+  #[error(
+    "ColorCorrectionMatrix[{row}][{col}] = {value} exceeds the magnitude bound (|coeff| ≤ {max_abs})"
+  )]
+  OutOfBounds {
+    /// Row index of the offending element (0..3).
+    row: usize,
+    /// Column index of the offending element (0..3).
+    col: usize,
+    /// The offending value.
+    value: f32,
+    /// The bound that was exceeded
+    /// ([`ColorCorrectionMatrix::MAX_COEFFICIENT_ABS`]).
+    max_abs: f32,
   },
 }
 
@@ -510,6 +600,106 @@ mod tests {
       for &v in row.iter() {
         assert!(v.is_finite(), "fused matrix has non-finite value: {v}");
       }
+    }
+  }
+
+  // ---- WhiteBalance / ColorCorrectionMatrix magnitude bounds -------------
+
+  #[test]
+  fn wb_try_new_rejects_extreme_finite_gain() {
+    // A finite gain above the magnitude bound is rejected even
+    // though it would pass the NaN / Inf / negative checks. Real
+    // camera WB gains are O(1–10); 1e10 is well past the bound
+    // and would risk overflowing the per-pixel matmul.
+    let e = WhiteBalance::try_new(1e10, 1.0, 1.0).unwrap_err();
+    assert!(matches!(
+      e,
+      WhiteBalanceError::OutOfBounds {
+        channel: WbChannel::R,
+        ..
+      }
+    ));
+  }
+
+  #[test]
+  fn wb_try_new_accepts_value_at_bound() {
+    // Exactly at the bound is permitted; the bound itself doesn't
+    // overflow downstream arithmetic.
+    let wb = WhiteBalance::try_new(WhiteBalance::MAX_GAIN, 1.0, 1.0).expect("at-bound valid");
+    assert_eq!(wb.r(), WhiteBalance::MAX_GAIN);
+  }
+
+  #[test]
+  fn ccm_try_new_rejects_extreme_finite_coefficient() {
+    // Same principle for CCM elements — finite-but-extreme values
+    // that pass the is_finite check but would overflow per-pixel
+    // matmul are rejected via OutOfBounds.
+    let e = ColorCorrectionMatrix::try_new([
+      [1.0, 0.0, 1e30],
+      [0.0, 1.0, 0.0],
+      [0.0, 0.0, 1.0],
+    ])
+    .unwrap_err();
+    assert!(matches!(
+      e,
+      ColorCorrectionMatrixError::OutOfBounds {
+        row: 0,
+        col: 2,
+        ..
+      }
+    ));
+  }
+
+  #[test]
+  fn ccm_try_new_rejects_extreme_negative_coefficient() {
+    // Symmetric negative bound: real CCMs have negative
+    // off-diagonals, but only in the realistic ~[-5, 5] range.
+    let e = ColorCorrectionMatrix::try_new([
+      [1.0, -1e10, 0.0],
+      [0.0, 1.0, 0.0],
+      [0.0, 0.0, 1.0],
+    ])
+    .unwrap_err();
+    assert!(matches!(
+      e,
+      ColorCorrectionMatrixError::OutOfBounds {
+        row: 0,
+        col: 1,
+        ..
+      }
+    ));
+  }
+
+  #[test]
+  fn ccm_try_new_accepts_typical_negative_off_diagonal() {
+    // Real-world CCM with crosstalk subtraction stays well within
+    // the bound and validates cleanly.
+    ColorCorrectionMatrix::try_new([
+      [1.5, -0.3, -0.2],
+      [-0.1, 1.2, -0.1],
+      [-0.05, -0.15, 1.2],
+    ])
+    .expect("typical CCM valid");
+  }
+
+  /// Codex regression: even at the bound, fusion + per-pixel
+  /// matmul stays finite for the maximum-stress 16-bit input.
+  /// `WB.MAX_GAIN * CCM.MAX_COEFFICIENT_ABS * 65535 ≈ 6.55e16`,
+  /// well under `f32::MAX ≈ 3.4e38`.
+  #[test]
+  fn fuse_wb_ccm_at_bounds_with_max_sample_stays_finite() {
+    let wb =
+      WhiteBalance::try_new(WhiteBalance::MAX_GAIN, WhiteBalance::MAX_GAIN, WhiteBalance::MAX_GAIN)
+        .unwrap();
+    let max = ColorCorrectionMatrix::MAX_COEFFICIENT_ABS;
+    let ccm = ColorCorrectionMatrix::try_new([[max, max, max], [max, max, max], [max, max, max]])
+      .unwrap();
+    let m = fuse_wb_ccm(&wb, &ccm);
+    // Worst-case per-pixel sum: 3 channels * fused_max * 65535.
+    let sample = 65535.0f32;
+    for row in m.iter() {
+      let s = (row[0] + row[1] + row[2]) * sample;
+      assert!(s.is_finite(), "per-pixel sum overflowed at bound: {s}");
     }
   }
 }
