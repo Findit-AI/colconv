@@ -3016,9 +3016,11 @@ pub fn bayer16_to_rgb_row<const BITS: u32>(
 /// same length; `rgb_out` must have at least `3 * mid.len()` `u16`
 /// elements.
 ///
-/// **The dispatcher panics in release mode if any sample's high
-/// `16 - BITS` bits are non-zero** — see [`bayer16_to_rgb_row`]
-/// for the full rationale.
+/// Direct row-API callers are responsible for upholding the
+/// low-packed contract — see [`bayer16_to_rgb_row`] for the
+/// full rationale on the safe path
+/// ([`crate::frame::BayerFrame16::try_new`] + [`crate::raw::bayer16_to`])
+/// vs. the direct row API.
 ///
 /// **`use_simd` is currently a no-op** (see
 /// [`bayer_to_rgb_row`] for the deferred-SIMD note).
@@ -3422,6 +3424,109 @@ mod bayer_dispatcher_tests {
       &m,
       &mut rgb,
       false,
+    );
+  }
+
+  // ---- Direct Bayer16 row-API contract behavior --------------------------
+  //
+  // The walker path (`bayer16_to`) cannot reach the kernel with
+  // out-of-range samples because `BayerFrame16::try_new` validates
+  // every active sample at construction. The direct row API
+  // (`bayer16_to_rgb_row`, `bayer16_to_rgb_u16_row`) takes raw
+  // `&[u16]` slices and trusts the low-packed contract — out-of-
+  // range samples are documented as "defined-but-saturated output,
+  // no panic, no UB." These regressions pin that behavior so a
+  // future change can't silently flip it (e.g., to a panic or to
+  // masking) without updating the documented contract first.
+
+  /// 12-bit dispatcher with MSB-aligned `0x8000` input
+  /// (the classic packing-mismatch bug, where the caller forgot
+  /// to right-shift before feeding the row API). Out-of-range
+  /// per the low-packed contract; the kernel saturates the matmul
+  /// output to `255` rather than panicking. Walker users get
+  /// `Err(SampleOutOfRange)` from `try_new` instead.
+  #[test]
+  fn bayer16_u8_dispatcher_saturates_on_msb_aligned_input() {
+    let above = [0x8000u16; 4];
+    let mid = [0x8000u16; 4];
+    let below = [0x8000u16; 4];
+    let mut rgb = [0u8; 12];
+    let m = ident();
+    bayer16_to_rgb_row::<12>(
+      &above,
+      &mid,
+      &below,
+      0,
+      BayerPattern::Rggb,
+      BayerDemosaic::Bilinear,
+      &m,
+      &mut rgb,
+      false,
+    );
+    // 0x8000 = 32768 ≫ max_in (4095). All output channels clamp
+    // to 255. No panic, no UB — defined behavior.
+    assert!(
+      rgb.iter().all(|&c| c == 255),
+      "MSB-aligned 12-bit input expected to saturate to 255 across all channels; got {rgb:?}"
+    );
+  }
+
+  /// Same regression for the u16 dispatcher: MSB-aligned 10-bit
+  /// input saturates to the low-packed max (1023) rather than
+  /// panicking.
+  #[test]
+  fn bayer16_u16_dispatcher_saturates_on_msb_aligned_input() {
+    let above = [0xFFC0u16; 4]; // MSB-aligned 10-bit "white" (1023 << 6)
+    let mid = [0xFFC0u16; 4];
+    let below = [0xFFC0u16; 4];
+    let mut rgb = [0u16; 12];
+    let m = ident();
+    bayer16_to_rgb_u16_row::<10>(
+      &above,
+      &mid,
+      &below,
+      0,
+      BayerPattern::Rggb,
+      BayerDemosaic::Bilinear,
+      &m,
+      &mut rgb,
+      false,
+    );
+    // 0xFFC0 ≫ low-packed-10 max (1023). Output saturates to
+    // 1023 (the u16 path's max_out). No panic.
+    assert!(
+      rgb.iter().all(|&c| c == 1023),
+      "MSB-aligned 10-bit input expected to saturate to 1023 across all channels; got {rgb:?}"
+    );
+  }
+
+  /// In-range Bayer16 input still works correctly through the
+  /// direct row API (this protects the rest of the contract while
+  /// the saturation tests pin the out-of-range behavior).
+  #[test]
+  fn bayer16_u8_dispatcher_in_range_input_correct() {
+    let above = [4095u16; 4]; // 12-bit white, in range
+    let mid = [4095u16; 4];
+    let below = [4095u16; 4];
+    let mut rgb = [0u8; 12];
+    let m = ident();
+    bayer16_to_rgb_row::<12>(
+      &above,
+      &mid,
+      &below,
+      0,
+      BayerPattern::Rggb,
+      BayerDemosaic::Bilinear,
+      &m,
+      &mut rgb,
+      false,
+    );
+    // Solid white (4095) at every site → output 255 on every
+    // channel. Same final value as the saturated case, but the
+    // path is correct (not a clamp).
+    assert!(
+      rgb.iter().all(|&c| c == 255),
+      "in-range 12-bit white expected to map to 255; got {rgb:?}"
     );
   }
 }

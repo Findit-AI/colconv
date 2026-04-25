@@ -1752,10 +1752,11 @@ pub(crate) fn bayer16_to_rgb_row<const BITS: u32>(
   debug_assert_eq!(below.len(), w);
   debug_assert!(rgb_out.len() >= 3 * w);
   // Sample-range contract: caller guarantees every sample is
-  // `< (1 << BITS)` (low-packed convention). The public dispatcher
-  // [`crate::row::bayer16_to_rgb_row`] enforces this at the
-  // boundary in release mode via an OR-fold; this kernel trusts
-  // the precondition.
+  // `< (1 << BITS)` (low-packed convention). For walker callers
+  // this is upheld by `BayerFrame16::try_new` (which validates
+  // every active sample at construction); direct row-API callers
+  // accept the contract — out-of-range samples produce
+  // defined-but-saturated output, no panic, no UB.
 
   let (r_par, b_par) = pattern_phases(pattern);
   let rp = (row_parity & 1) as usize;
@@ -1805,8 +1806,12 @@ pub(crate) fn bayer16_to_rgb_u16_row<const BITS: u32>(
   debug_assert_eq!(above.len(), w);
   debug_assert_eq!(below.len(), w);
   debug_assert!(rgb_out.len() >= 3 * w);
-  // Same sample-range contract as `bayer16_to_rgb_row<BITS>`; the
-  // public dispatcher enforces it at the boundary.
+  // Same sample-range contract as `bayer16_to_rgb_row<BITS>`; for
+  // walker callers the contract is upheld by
+  // `BayerFrame16::try_new` (which validates every active sample
+  // at construction); direct row-API callers accept the contract
+  // and out-of-range samples produce defined-but-saturated output
+  // (no panic, no UB).
 
   let (r_par, b_par) = pattern_phases(pattern);
   let rp = (row_parity & 1) as usize;
