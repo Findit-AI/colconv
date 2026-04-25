@@ -413,8 +413,10 @@ pub enum RowSlice {
   #[display("UV Full 16")]
   UvFull16,
   /// `above` row of an **8-bit Bayer** source
-  /// ([`Bayer`](crate::raw::Bayer)). `u8` samples, `width` elements
-  /// (`==` `mid`); clamped to `mid` at the top edge by the walker.
+  /// ([`Bayer`](crate::raw::Bayer)). `u8` samples, `width` elements;
+  /// supplied by the walker via the **mirror-by-2** boundary
+  /// contract — see [`crate::raw::BayerRow::above`] — so at the
+  /// top edge this is `mid_row(1)`, not `mid` itself.
   #[display("Bayer Above")]
   BayerAbove,
   /// `mid` row of an **8-bit Bayer** source. `u8` samples, `width`
@@ -422,12 +424,14 @@ pub enum RowSlice {
   #[display("Bayer Mid")]
   BayerMid,
   /// `below` row of an **8-bit Bayer** source. `u8` samples, `width`
-  /// elements (`==` `mid`); clamped to `mid` at the bottom edge.
+  /// elements; mirror-by-2 supplies `mid_row(h - 2)` at the bottom
+  /// edge — see [`crate::raw::BayerRow::below`].
   #[display("Bayer Below")]
   BayerBelow,
   /// `above` row of a **high-bit-depth Bayer** source
   /// ([`Bayer16<BITS>`](crate::raw::Bayer16)). `u16` samples,
-  /// `width` elements; clamped to `mid` at the top edge.
+  /// `width` elements; mirror-by-2 supplies `mid_row(1)` at the
+  /// top edge.
   #[display("Bayer16 Above")]
   Bayer16Above,
   /// `mid` row of a **high-bit-depth Bayer** source. `u16` samples,
@@ -435,7 +439,8 @@ pub enum RowSlice {
   #[display("Bayer16 Mid")]
   Bayer16Mid,
   /// `below` row of a **high-bit-depth Bayer** source. `u16`
-  /// samples, `width` elements; clamped to `mid` at the bottom edge.
+  /// samples, `width` elements; mirror-by-2 supplies
+  /// `mid_row(h - 2)` at the bottom edge.
   #[display("Bayer16 Below")]
   Bayer16Below,
 }

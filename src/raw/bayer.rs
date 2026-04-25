@@ -25,10 +25,20 @@ impl SourceFormat for Bayer {}
 
 /// One output row of a Bayer source handed to a [`BayerSink`].
 ///
-/// Carries the three row-aligned slices the demosaic kernel needs
-/// (top edge: `above` clamped to `mid`; bottom edge: `below`
-/// clamped to `mid`), the row index, the pattern, the demosaic
-/// algorithm, and the fused 3×3 transform.
+/// Carries the three row-aligned slices the demosaic kernel needs,
+/// the row index, the pattern, the demosaic algorithm, and the
+/// fused 3×3 transform.
+///
+/// **Boundary contract: mirror-by-2.** At the top edge (row 0) the
+/// walker supplies `above = mid_row(1)`, and at the bottom edge
+/// (row `h - 1`) it supplies `below = mid_row(h - 2)` — *not* a
+/// replicate clamp. This preserves CFA parity across the row
+/// boundary because Bayer tiles in 2×2: skipping two rows lands on
+/// the same color the missing-tap site would have provided.
+/// Falls back to replicate when `height < 2`. Custom sinks must
+/// honor this convention; calling [`crate::row::bayer_to_rgb_row`]
+/// from a sink that supplies replicate-clamped row borrows will
+/// produce different border pixels than [`super::bayer_to`] does.
 ///
 /// Sinks call into [`crate::row::bayer_to_rgb_row`] (or directly
 /// the scalar / SIMD primitive of their choice) with these slices to
@@ -68,8 +78,10 @@ impl<'a> BayerRow<'a> {
     }
   }
 
-  /// Row above `mid`, clamped to `mid` when this is the top row.
-  /// Same length as [`Self::mid`].
+  /// Row above `mid` per the **mirror-by-2** boundary contract:
+  /// for an interior row this is `mid_row(row - 1)`; at the top
+  /// edge (`row == 0`) it is `mid_row(1)`. Falls back to `mid` when
+  /// `height < 2`. Same length as [`Self::mid`].
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub fn above(&self) -> &'a [u8] {
     self.above
@@ -81,8 +93,10 @@ impl<'a> BayerRow<'a> {
     self.mid
   }
 
-  /// Row below `mid`, clamped to `mid` when this is the bottom row.
-  /// Same length as [`Self::mid`].
+  /// Row below `mid` per the **mirror-by-2** boundary contract:
+  /// for an interior row this is `mid_row(row + 1)`; at the bottom
+  /// edge (`row == h - 1`) it is `mid_row(h - 2)`. Falls back to
+  /// `mid` when `height < 2`. Same length as [`Self::mid`].
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub fn below(&self) -> &'a [u8] {
     self.below
@@ -129,11 +143,14 @@ pub trait BayerSink: for<'a> PixelSink<Input<'a> = BayerRow<'a>> {}
 /// Walks an 8-bit [`BayerFrame`] row by row, handing each row to the
 /// sink along with the precomputed `M = CCM · diag(wb)` transform.
 ///
+/// **Boundary contract.** `above` / `below` use **mirror-by-2** at
+/// the top and bottom edges (`row 0 → above = row 1`, `row h-1 →
+/// below = row h-2`); see [`BayerRow`] for the full discussion.
+///
 /// **Allocation profile.** Zero per-row and zero per-frame heap
 /// allocation. The walker computes `M` once on the stack at entry,
-/// slices `above` / `mid` / `below` references into the source
-/// plane (clamping at row 0 and `height − 1`), and hands them to
-/// the sink. The sink owns the RGB output buffer.
+/// slices three row borrows into the source plane, and hands them
+/// to the sink. The sink owns the RGB output buffer.
 pub fn bayer_to<S: BayerSink>(
   src: &BayerFrame<'_>,
   pattern: BayerPattern,
@@ -484,5 +501,93 @@ mod tests {
     // Single R-site (RGGB at (0,0) = R): output R = 123, G/B
     // averaged from the same sample = 123.
     assert_eq!(rgb, std::vec![123, 123, 123]);
+  }
+
+  /// Asserts the documented mirror-by-2 boundary contract: at the
+  /// top edge `above` is `mid_row(1)`, at the bottom edge `below`
+  /// is `mid_row(h - 2)`. A custom sink that captures the row
+  /// borrows directly can verify this without re-running the
+  /// kernel.
+  #[test]
+  fn bayer_walker_supplies_mirror_by_2_row_borrows() {
+    /// Captures the first byte of `above` and `below` for each row.
+    struct EdgeCapture {
+      above_first: std::vec::Vec<u8>,
+      below_first: std::vec::Vec<u8>,
+    }
+    impl PixelSink for EdgeCapture {
+      type Input<'a> = BayerRow<'a>;
+      type Error = Infallible;
+      fn process(&mut self, row: BayerRow<'_>) -> Result<(), Self::Error> {
+        self.above_first.push(row.above()[0]);
+        self.below_first.push(row.below()[0]);
+        Ok(())
+      }
+    }
+    impl BayerSink for EdgeCapture {}
+
+    // 4×4 plane where every row's first byte is the row index. So
+    // mid_row(r)[0] == r, and mirror-by-2 should produce
+    // above_first = [1, 0, 1, 2] and below_first = [1, 2, 3, 2].
+    let raw: std::vec::Vec<u8> = (0..16u8).map(|i| (i / 4) as u8).collect();
+    let frame = BayerFrame::try_new(&raw, 4, 4, 4).unwrap();
+    let mut sink = EdgeCapture {
+      above_first: std::vec::Vec::new(),
+      below_first: std::vec::Vec::new(),
+    };
+    bayer_to(
+      &frame,
+      BayerPattern::Rggb,
+      BayerDemosaic::Bilinear,
+      WhiteBalance::neutral(),
+      ColorCorrectionMatrix::identity(),
+      &mut sink,
+    )
+    .unwrap();
+    // row 0: above = mid_row(1), below = mid_row(1)
+    // row 1: above = mid_row(0), below = mid_row(2)
+    // row 2: above = mid_row(1), below = mid_row(3)
+    // row 3: above = mid_row(2), below = mid_row(2)  (mirror-by-2)
+    assert_eq!(sink.above_first, std::vec![1u8, 0, 1, 2]);
+    assert_eq!(sink.below_first, std::vec![1u8, 2, 3, 2]);
+  }
+
+  /// Same contract test for `height < 2` — falls back to replicate
+  /// (no mirror partner exists).
+  #[test]
+  fn bayer_walker_falls_back_to_replicate_when_height_below_2() {
+    struct EdgeCapture {
+      above_first: std::vec::Vec<u8>,
+      below_first: std::vec::Vec<u8>,
+    }
+    impl PixelSink for EdgeCapture {
+      type Input<'a> = BayerRow<'a>;
+      type Error = Infallible;
+      fn process(&mut self, row: BayerRow<'_>) -> Result<(), Self::Error> {
+        self.above_first.push(row.above()[0]);
+        self.below_first.push(row.below()[0]);
+        Ok(())
+      }
+    }
+    impl BayerSink for EdgeCapture {}
+
+    let raw = std::vec![42u8; 4]; // 4 columns, 1 row
+    let frame = BayerFrame::try_new(&raw, 4, 1, 4).unwrap();
+    let mut sink = EdgeCapture {
+      above_first: std::vec::Vec::new(),
+      below_first: std::vec::Vec::new(),
+    };
+    bayer_to(
+      &frame,
+      BayerPattern::Rggb,
+      BayerDemosaic::Bilinear,
+      WhiteBalance::neutral(),
+      ColorCorrectionMatrix::identity(),
+      &mut sink,
+    )
+    .unwrap();
+    // h=1: replicate fallback. above = below = mid = 42.
+    assert_eq!(sink.above_first, std::vec![42u8]);
+    assert_eq!(sink.below_first, std::vec![42u8]);
   }
 }

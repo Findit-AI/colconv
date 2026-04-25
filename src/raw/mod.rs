@@ -54,6 +54,9 @@ pub use bayer::{Bayer, BayerRow, BayerSink, bayer_to};
 pub use bayer16::{
   Bayer10, Bayer12, Bayer14, Bayer16, Bayer16Bit, BayerRow16, BayerSink16, bayer16_to,
 };
-pub use types::{BayerDemosaic, BayerPattern, ColorCorrectionMatrix, WhiteBalance};
+pub use types::{
+  BayerDemosaic, BayerPattern, ColorCorrectionMatrix, ColorCorrectionMatrixError, WbChannel,
+  WhiteBalance, WhiteBalanceError,
+};
 
 pub(crate) use types::fuse_wb_ccm;

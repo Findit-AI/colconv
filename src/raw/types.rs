@@ -16,6 +16,7 @@
 //! so the per-pixel arithmetic is one 3×3 matmul, not two passes.
 
 use derive_more::IsVariant;
+use thiserror::Error;
 
 /// Bayer pattern — which sensor color sits at the top-left of the
 /// repeating 2×2 tile.
@@ -65,11 +66,16 @@ pub enum BayerDemosaic {
 
 /// Per-channel white-balance gains.
 ///
-/// Each gain is a positive `f32` multiplier applied to the
-/// corresponding raw color channel before the [`ColorCorrectionMatrix`]
-/// is applied. Source: camera metadata (`WB_RGGB_LEVELS` family, RED
-/// `Kelvin` / `Tint` resolved to gains by the SDK, BRAW
-/// `whiteBalanceKelvin` resolved similarly).
+/// Each gain is a **finite, non-negative** `f32` multiplier applied
+/// to the corresponding raw color channel before the
+/// [`ColorCorrectionMatrix`] is applied. Source: camera metadata
+/// (`WB_RGGB_LEVELS` family, RED `Kelvin` / `Tint` resolved to
+/// gains by the SDK, BRAW `whiteBalanceKelvin` resolved similarly).
+/// [`WhiteBalance::try_new`] enforces the invariant; any NaN, ±∞,
+/// or negative gain is rejected via [`WhiteBalanceError`].
+///
+/// Zero is permitted (zeroes that channel — degenerate but
+/// well-defined).
 ///
 /// A neutral [`WhiteBalance::neutral`] (`R = G = B = 1.0`) means
 /// "no white-balance correction" — the sensor's native primaries are
@@ -82,10 +88,66 @@ pub struct WhiteBalance {
 }
 
 impl WhiteBalance {
-  /// Constructs a [`WhiteBalance`] from explicit R / G / B gains.
+  /// Constructs a [`WhiteBalance`] from explicit R / G / B gains,
+  /// validating that each is **finite and non-negative**. Camera
+  /// metadata pipelines occasionally surface NaN / ±∞ (failed Kelvin
+  /// → gain conversions, missing sensor metadata) and a single such
+  /// value would propagate through the fused 3×3 transform and
+  /// produce silently-corrupt output (NaN clamps to 0 on cast,
+  /// turning unrelated channels black). Reject upstream instead.
+  ///
+  /// Returns [`WhiteBalanceError`] if any gain is non-finite or
+  /// negative. A gain of `0` is permitted (zeroes out that channel —
+  /// degenerate but well-defined).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn try_new(r: f32, g: f32, b: f32) -> Result<Self, WhiteBalanceError> {
+    if !r.is_finite() {
+      return Err(WhiteBalanceError::NonFinite {
+        channel: WbChannel::R,
+        value: r,
+      });
+    }
+    if !g.is_finite() {
+      return Err(WhiteBalanceError::NonFinite {
+        channel: WbChannel::G,
+        value: g,
+      });
+    }
+    if !b.is_finite() {
+      return Err(WhiteBalanceError::NonFinite {
+        channel: WbChannel::B,
+        value: b,
+      });
+    }
+    if r < 0.0 {
+      return Err(WhiteBalanceError::Negative {
+        channel: WbChannel::R,
+        value: r,
+      });
+    }
+    if g < 0.0 {
+      return Err(WhiteBalanceError::Negative {
+        channel: WbChannel::G,
+        value: g,
+      });
+    }
+    if b < 0.0 {
+      return Err(WhiteBalanceError::Negative {
+        channel: WbChannel::B,
+        value: b,
+      });
+    }
+    Ok(Self { r, g, b })
+  }
+
+  /// Constructs a [`WhiteBalance`], panicking on invalid input.
+  /// Prefer [`Self::try_new`] when gains may be invalid at runtime.
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn new(r: f32, g: f32, b: f32) -> Self {
-    Self { r, g, b }
+    match Self::try_new(r, g, b) {
+      Ok(wb) => wb,
+      Err(_) => panic!("invalid WhiteBalance gains (non-finite or negative)"),
+    }
   }
 
   /// Neutral white-balance (`R = G = B = 1.0`) — sensor primaries
@@ -150,10 +212,44 @@ pub struct ColorCorrectionMatrix {
 }
 
 impl ColorCorrectionMatrix {
-  /// Constructs a [`ColorCorrectionMatrix`] from a row-major 3×3.
+  /// Constructs a [`ColorCorrectionMatrix`] from a row-major 3×3,
+  /// validating that every element is **finite** (not NaN, not
+  /// ±∞). CCM elements may legitimately be negative (color matrices
+  /// regularly subtract crosstalk), but never non-finite — a single
+  /// such value would propagate through the fused transform and
+  /// silently corrupt every output pixel.
+  ///
+  /// Returns [`ColorCorrectionMatrixError`] on the first non-finite
+  /// element, naming its `(row, col)` coordinates.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn try_new(m: [[f32; 3]; 3]) -> Result<Self, ColorCorrectionMatrixError> {
+    let mut row = 0;
+    while row < 3 {
+      let mut col = 0;
+      while col < 3 {
+        if !m[row][col].is_finite() {
+          return Err(ColorCorrectionMatrixError::NonFinite {
+            row,
+            col,
+            value: m[row][col],
+          });
+        }
+        col += 1;
+      }
+      row += 1;
+    }
+    Ok(Self { m })
+  }
+
+  /// Constructs a [`ColorCorrectionMatrix`], panicking on invalid
+  /// input. Prefer [`Self::try_new`] when matrix elements may be
+  /// invalid at runtime.
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn new(m: [[f32; 3]; 3]) -> Self {
-    Self { m }
+    match Self::try_new(m) {
+      Ok(ccm) => ccm,
+      Err(_) => panic!("invalid ColorCorrectionMatrix element (non-finite)"),
+    }
   }
 
   /// The identity matrix — no color correction. Equivalent to
@@ -177,6 +273,56 @@ impl Default for ColorCorrectionMatrix {
   fn default() -> Self {
     Self::identity()
   }
+}
+
+/// Identifies which white-balance channel failed validation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant)]
+#[non_exhaustive]
+pub enum WbChannel {
+  /// Red gain.
+  R,
+  /// Green gain.
+  G,
+  /// Blue gain.
+  B,
+}
+
+/// Errors returned by [`WhiteBalance::try_new`].
+#[derive(Debug, Clone, Copy, PartialEq, IsVariant, Error)]
+#[non_exhaustive]
+pub enum WhiteBalanceError {
+  /// A gain is non-finite (NaN, +∞, or -∞).
+  #[error("WhiteBalance.{channel:?} is non-finite (got {value})")]
+  NonFinite {
+    /// Which channel failed validation.
+    channel: WbChannel,
+    /// The offending gain value.
+    value: f32,
+  },
+  /// A gain is negative. Zero is allowed (zeroes the channel).
+  #[error("WhiteBalance.{channel:?} is negative (got {value})")]
+  Negative {
+    /// Which channel failed validation.
+    channel: WbChannel,
+    /// The offending gain value.
+    value: f32,
+  },
+}
+
+/// Errors returned by [`ColorCorrectionMatrix::try_new`].
+#[derive(Debug, Clone, Copy, PartialEq, IsVariant, Error)]
+#[non_exhaustive]
+pub enum ColorCorrectionMatrixError {
+  /// An element is non-finite (NaN, +∞, or -∞).
+  #[error("ColorCorrectionMatrix[{row}][{col}] is non-finite (got {value})")]
+  NonFinite {
+    /// Row index of the offending element (0..3).
+    row: usize,
+    /// Column index of the offending element (0..3).
+    col: usize,
+    /// The offending value.
+    value: f32,
+  },
 }
 
 /// Internal: fuse white-balance and CCM into a single 3×3 transform
@@ -242,5 +388,128 @@ mod tests {
     assert_eq!(m[0], [0.5, 2.0, 1.0]);
     assert_eq!(m[1], [4.0, 16.0, 8.0]);
     assert_eq!(m[2], [32.0, 128.0, 64.0]);
+  }
+
+  // ---- WhiteBalance validation ------------------------------------------
+
+  #[test]
+  fn wb_try_new_rejects_nan() {
+    let e = WhiteBalance::try_new(f32::NAN, 1.0, 1.0).unwrap_err();
+    assert!(matches!(
+      e,
+      WhiteBalanceError::NonFinite {
+        channel: WbChannel::R,
+        ..
+      }
+    ));
+    let e = WhiteBalance::try_new(1.0, f32::NAN, 1.0).unwrap_err();
+    assert!(matches!(
+      e,
+      WhiteBalanceError::NonFinite {
+        channel: WbChannel::G,
+        ..
+      }
+    ));
+    let e = WhiteBalance::try_new(1.0, 1.0, f32::NAN).unwrap_err();
+    assert!(matches!(
+      e,
+      WhiteBalanceError::NonFinite {
+        channel: WbChannel::B,
+        ..
+      }
+    ));
+  }
+
+  #[test]
+  fn wb_try_new_rejects_infinity() {
+    let e = WhiteBalance::try_new(f32::INFINITY, 1.0, 1.0).unwrap_err();
+    assert!(matches!(e, WhiteBalanceError::NonFinite { .. }));
+    let e = WhiteBalance::try_new(1.0, f32::NEG_INFINITY, 1.0).unwrap_err();
+    assert!(matches!(e, WhiteBalanceError::NonFinite { .. }));
+  }
+
+  #[test]
+  fn wb_try_new_rejects_negative() {
+    let e = WhiteBalance::try_new(-0.1, 1.0, 1.0).unwrap_err();
+    assert!(matches!(
+      e,
+      WhiteBalanceError::Negative {
+        channel: WbChannel::R,
+        ..
+      }
+    ));
+  }
+
+  #[test]
+  fn wb_try_new_accepts_zero_gain() {
+    // Zero gain zeroes the channel — degenerate but well-defined.
+    let wb = WhiteBalance::try_new(0.0, 1.0, 0.0).expect("zero gain valid");
+    assert_eq!(wb.r(), 0.0);
+  }
+
+  #[test]
+  fn wb_try_new_accepts_typical_gains() {
+    let wb = WhiteBalance::try_new(1.95, 1.0, 1.55).expect("typical");
+    assert_eq!((wb.r(), wb.g(), wb.b()), (1.95, 1.0, 1.55));
+  }
+
+  #[test]
+  #[should_panic(expected = "invalid WhiteBalance")]
+  fn wb_new_panics_on_nan() {
+    let _ = WhiteBalance::new(f32::NAN, 1.0, 1.0);
+  }
+
+  // ---- ColorCorrectionMatrix validation ---------------------------------
+
+  #[test]
+  fn ccm_try_new_rejects_nan_off_diagonal() {
+    let e =
+      ColorCorrectionMatrix::try_new([[1.0, f32::NAN, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
+        .unwrap_err();
+    assert!(matches!(
+      e,
+      ColorCorrectionMatrixError::NonFinite { row: 0, col: 1, .. }
+    ));
+  }
+
+  #[test]
+  fn ccm_try_new_rejects_infinity_diagonal() {
+    let e =
+      ColorCorrectionMatrix::try_new([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, f32::INFINITY]])
+        .unwrap_err();
+    assert!(matches!(
+      e,
+      ColorCorrectionMatrixError::NonFinite { row: 2, col: 2, .. }
+    ));
+  }
+
+  #[test]
+  fn ccm_try_new_accepts_negative_off_diagonal() {
+    // Real CCMs subtract crosstalk → negative off-diagonal entries
+    // are normal. Only non-finite values should fail.
+    let ccm =
+      ColorCorrectionMatrix::try_new([[1.5, -0.3, -0.2], [-0.1, 1.2, -0.1], [-0.05, -0.15, 1.2]])
+        .expect("negative entries valid");
+    assert_eq!(ccm.as_array()[0][1], -0.3);
+  }
+
+  #[test]
+  #[should_panic(expected = "invalid ColorCorrectionMatrix")]
+  fn ccm_new_panics_on_nan() {
+    let _ = ColorCorrectionMatrix::new([[f32::NAN, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]);
+  }
+
+  #[test]
+  fn fuse_wb_ccm_with_validated_inputs_is_finite() {
+    // Sanity: validated inputs always produce a finite fused matrix.
+    let wb = WhiteBalance::new(1.95, 1.0, 1.55);
+    let ccm =
+      ColorCorrectionMatrix::new([[1.5, -0.3, -0.2], [-0.1, 1.2, -0.1], [-0.05, -0.15, 1.2]]);
+    let m = fuse_wb_ccm(&wb, &ccm);
+    for row in m.iter() {
+      for &v in row.iter() {
+        assert!(v.is_finite(), "fused matrix has non-finite value: {v}");
+      }
+    }
   }
 }

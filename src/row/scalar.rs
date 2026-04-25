@@ -1560,10 +1560,14 @@ pub(crate) fn bgr_rgb_swap_row(input: &[u8], output: &mut [u8], width: usize) {
 /// Scalar bilinear demosaic + 3×3 matmul for one row of an 8-bit
 /// Bayer plane.
 ///
-/// Walker hands three row-aligned slices: `above` (clamp = `mid` at
-/// the top edge), `mid` (the row being produced), `below` (clamp =
-/// `mid` at the bottom edge). All three share the row's pixel
-/// width (`mid.len()`); column edges clamp inside this kernel.
+/// Walker hands three row-aligned slices via the **mirror-by-2**
+/// boundary contract: `above` is `mid_row(row - 1)` for interior
+/// rows and `mid_row(1)` at the top edge; `below` is
+/// `mid_row(row + 1)` for interior rows and `mid_row(h - 2)` at
+/// the bottom edge (replicate fallback when `height < 2`). `mid`
+/// is the row being produced. All three share the row's pixel
+/// width (`mid.len()`); column edges mirror-by-2 inside this
+/// kernel for the same CFA-parity reason.
 ///
 /// `m` is the precomputed `CCM · diag(wb)` 3×3 transform — the
 /// walker fuses the two parameters once at frame entry so per-pixel

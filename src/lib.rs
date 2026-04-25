@@ -76,11 +76,14 @@
 //! [`raw::WhiteBalance`] gains, and a [`raw::ColorCorrectionMatrix`].
 //! See [`raw`] for the full design and parameter docs.
 //!
-//! Scope: `colconv` covers demosaic onwards. Decoding the camera's
-//! compressed bitstream (R3D / BRAW / NRAW / `bayer_*` AVI) into
-//! a Bayer plane is the upstream pipeline's job; once you have a
-//! `BayerFrame` / `BayerFrame16`, hand it to [`raw::bayer_to`] /
-//! [`raw::bayer16_to`] with your sink of choice.
+//! Scope: `colconv` covers demosaic onwards. Producing the Bayer
+//! plane itself is the upstream pipeline's job — vendor-SDK
+//! camera-RAW decoders (R3D / BRAW / NRAW) for compressed
+//! camera bitstreams, or FFmpeg's `AV_PIX_FMT_BAYER_*` pixel
+//! formats / `bayer_*` decoders for already-uncompressed Bayer
+//! sources. Once you have a `BayerFrame` / `BayerFrame16`, hand it
+//! to [`raw::bayer_to`] / [`raw::bayer16_to`] with your sink of
+//! choice.
 //!
 //! ## YUVA sources (alpha-drop)
 //!

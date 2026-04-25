@@ -16,9 +16,15 @@ color-correction in a single per-row kernel.
   `Default = Bilinear`. Future variants (Malvar-He-Cutler, etc.)
   will land without a breaking change.
 - `WhiteBalance { r, g, b: f32 }` — per-channel gain newtype with
-  `::new`, `::neutral`, accessors, `Default = neutral()`.
-- `ColorCorrectionMatrix` — 3×3 newtype with `::new`, `::identity`,
-  `as_array`, `Default = identity()`.
+  `::try_new` (validating: rejects NaN / ±∞ / negative via
+  [`WhiteBalanceError`]), panicking `::new`, `::neutral`,
+  accessors, `Default = neutral()`. `WbChannel` enum names which
+  channel failed validation.
+- `ColorCorrectionMatrix` — 3×3 newtype with `::try_new`
+  (validating: rejects any non-finite element via
+  [`ColorCorrectionMatrixError`]; negative entries are allowed
+  because real CCMs subtract crosstalk), panicking `::new`,
+  `::identity`, `as_array`, `Default = identity()`.
 
 ### New frame types (in `colconv::frame`)
 
@@ -42,7 +48,11 @@ color-correction in a single per-row kernel.
   `raw::bayer16_to::<BITS, _>(...)` walkers — zero per-row and
   per-frame allocation. Walker fuses `M = CCM · diag(wb)` once at
   entry; row scratch is the source plane itself (`above` / `mid` /
-  `below` row borrows with top / bottom replicate clamp).
+  `below` row borrows with **mirror-by-2** boundary handling at
+  top / bottom edges — `row 0 → above = row 1`, `row h-1 → below =
+  row h-2`; replicate fallback only when `height < 2`). Same
+  contract surfaces through `BayerRow::above()` / `below()` so
+  custom sinks see the mirror borrows directly.
 - Public dispatchers: `row::bayer_to_rgb_row`,
   `row::bayer16_to_rgb_row<BITS>`,
   `row::bayer16_to_rgb_u16_row<BITS>`. Each runs release-mode

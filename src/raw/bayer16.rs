@@ -45,13 +45,17 @@ pub type Bayer16Bit = Bayer16<16>;
 /// One output row of a high-bit-depth Bayer source handed to a
 /// [`BayerSink16<BITS>`].
 ///
-/// Carries `&[u16]` slices for `above` / `mid` / `below` (clamped at
-/// the top / bottom edges by the walker), the row index, the
-/// pattern, the demosaic algorithm, and the **unscaled** fused
-/// `M = CCM · diag(wb)` 3×3. Output-bit-depth scaling (multiply
-/// by `255 / max_msb` for u8 output, or `1 / (1 << (16 - BITS))`
-/// for low-packed u16 output) is the kernel's job — different
-/// kernels for different output types.
+/// Carries `&[u16]` slices for `above` / `mid` / `below`, the row
+/// index, the pattern, the demosaic algorithm, and the **unscaled**
+/// fused `M = CCM · diag(wb)` 3×3. Output-bit-depth scaling
+/// (multiply by `255 / ((1 << BITS) - 1)` for u8 output; identity
+/// for low-packed u16 output) is the kernel's job.
+///
+/// **Boundary contract: mirror-by-2** — see [`super::BayerRow`]
+/// for the full discussion. Top edge supplies `above = mid_row(1)`,
+/// bottom edge supplies `below = mid_row(h - 2)`; replicate
+/// fallback applies only when `height < 2`. Custom sinks must
+/// honor this convention.
 #[derive(Debug, Clone, Copy)]
 pub struct BayerRow16<'a, const BITS: u32> {
   above: &'a [u16],
@@ -88,7 +92,9 @@ impl<'a, const BITS: u32> BayerRow16<'a, BITS> {
     }
   }
 
-  /// Row above `mid`, clamped to `mid` when this is the top row.
+  /// Row above `mid` per the **mirror-by-2** boundary contract:
+  /// `mid_row(row - 1)` for interior rows; `mid_row(1)` at the top
+  /// edge. See [`super::BayerRow::above`].
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub fn above(&self) -> &'a [u16] {
     self.above
@@ -100,7 +106,9 @@ impl<'a, const BITS: u32> BayerRow16<'a, BITS> {
     self.mid
   }
 
-  /// Row below `mid`, clamped to `mid` when this is the bottom row.
+  /// Row below `mid` per the **mirror-by-2** boundary contract:
+  /// `mid_row(row + 1)` for interior rows; `mid_row(h - 2)` at the
+  /// bottom edge. See [`super::BayerRow::below`].
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub fn below(&self) -> &'a [u16] {
     self.below
