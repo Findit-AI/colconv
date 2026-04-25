@@ -2845,6 +2845,91 @@ const fn simd128_available() -> bool {
   !cfg!(colconv_force_scalar) && cfg!(target_feature = "simd128")
 }
 
+/// Converts one row of an 8-bit Bayer plane to packed RGB.
+///
+/// Dispatches to the best available backend for the current target.
+/// See [`scalar::bayer_to_rgb_row`] for the full semantic specification
+/// (bilinear demosaic geometry, edge-clamp behavior, output layout).
+///
+/// `above` / `mid` / `below` are row-aligned slices into the source
+/// Bayer plane; the walker is responsible for clamping `above` =
+/// `mid` at the top edge and `below` = `mid` at the bottom edge.
+///
+/// `m` is the precomputed `CCM · diag(wb)` 3×3 transform.
+///
+/// `rgb_out` must have at least `3 * mid.len()` bytes.
+///
+/// `use_simd` is reserved — currently the scalar reference path is
+/// the only backend and the parameter is ignored. SIMD backends
+/// will land per [`scalar::bayer_to_rgb_row`]'s contract in a
+/// follow-up commit.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn bayer_to_rgb_row(
+  above: &[u8],
+  mid: &[u8],
+  below: &[u8],
+  row_parity: u32,
+  pattern: crate::raw::BayerPattern,
+  demosaic: crate::raw::BayerDemosaic,
+  m: &[[f32; 3]; 3],
+  rgb_out: &mut [u8],
+  _use_simd: bool,
+) {
+  scalar::bayer_to_rgb_row(above, mid, below, row_parity, pattern, demosaic, m, rgb_out);
+}
+
+/// Converts one row of a 10/12/14/16-bit MSB-aligned Bayer plane
+/// to packed `u8` RGB.
+///
+/// `BITS` ∈ {10, 12, 14, 16}; samples are MSB-aligned `u16`. `m`
+/// is the unscaled `CCM · diag(wb)` — the kernel bakes the
+/// input→u8 rescale (`255 / max_msb`) at output time. `rgb_out`
+/// must have at least `3 * mid.len()` bytes.
+///
+/// `_use_simd` is reserved (scalar-only today).
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn bayer16_to_rgb_row<const BITS: u32>(
+  above: &[u16],
+  mid: &[u16],
+  below: &[u16],
+  row_parity: u32,
+  pattern: crate::raw::BayerPattern,
+  demosaic: crate::raw::BayerDemosaic,
+  m: &[[f32; 3]; 3],
+  rgb_out: &mut [u8],
+  _use_simd: bool,
+) {
+  scalar::bayer16_to_rgb_row::<BITS>(above, mid, below, row_parity, pattern, demosaic, m, rgb_out);
+}
+
+/// Converts one row of a 10/12/14/16-bit MSB-aligned Bayer plane
+/// to packed `u16` RGB (low-packed at `BITS`).
+///
+/// `BITS` ∈ {10, 12, 14, 16}. Output range: `[0, (1 << BITS) - 1]`
+/// per channel. `rgb_out` must have at least `3 * mid.len()` `u16`
+/// elements.
+///
+/// `_use_simd` is reserved (scalar-only today).
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn bayer16_to_rgb_u16_row<const BITS: u32>(
+  above: &[u16],
+  mid: &[u16],
+  below: &[u16],
+  row_parity: u32,
+  pattern: crate::raw::BayerPattern,
+  demosaic: crate::raw::BayerDemosaic,
+  m: &[[f32; 3]; 3],
+  rgb_out: &mut [u16],
+  _use_simd: bool,
+) {
+  scalar::bayer16_to_rgb_u16_row::<BITS>(
+    above, mid, below, row_parity, pattern, demosaic, m, rgb_out,
+  );
+}
+
 #[cfg(all(test, feature = "std"))]
 mod overflow_tests {
   //! 32-bit RGB-row-bytes overflow regressions for the public

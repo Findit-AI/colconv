@@ -1,5 +1,72 @@
 # UNRELEASED
 
+## Tier 14 (in progress) — Bayer demosaic + WB + CCM
+
+New RAW source family for camera-RAW pipelines (RED R3D, Blackmagic
+BRAW, Nikon NRAW, FFmpeg `bayer_*`). `colconv` covers demosaic
+onwards: vendor SDKs decode the camera bitstream into a Bayer plane,
+`colconv` runs bilinear demosaic + per-channel white balance + 3×3
+color-correction in a single per-row kernel.
+
+### New types (all in `colconv::raw`)
+
+- `BayerPattern` — `enum { Bggr, Rggb, Grbg, Gbrg }`,
+  `#[non_exhaustive]`, `IsVariant`-derived.
+- `BayerDemosaic` — `enum { Bilinear }`, `#[non_exhaustive]`,
+  `Default = Bilinear`. Future variants (Malvar-He-Cutler, etc.)
+  will land without a breaking change.
+- `WhiteBalance { r, g, b: f32 }` — per-channel gain newtype with
+  `::new`, `::neutral`, accessors, `Default = neutral()`.
+- `ColorCorrectionMatrix` — 3×3 newtype with `::new`, `::identity`,
+  `as_array`, `Default = identity()`.
+
+### New frame types (in `colconv::frame`)
+
+- `BayerFrame<'a>` — single `&[u8]` plane, even width / height.
+- `BayerFrame16<'a, const BITS: u32>` — `&[u16]` MSB-aligned at
+  `BITS` ∈ {10, 12, 14, 16}. Aliases: `Bayer10Frame` / `Bayer12Frame`
+  / `Bayer14Frame` / `Bayer16Frame`. `try_new_checked` rejects
+  samples with non-zero low bits.
+- `BayerFrameError` / `BayerFrame16Error` — structured error enums,
+  `#[non_exhaustive]`, `IsVariant`-derived.
+
+### New walkers / kernels
+
+- `raw::bayer_to(src, pattern, demosaic, wb, ccm, sink)` and
+  `raw::bayer16_to::<BITS, _>(...)` walkers — zero per-row and
+  per-frame allocation. Walker fuses `M = CCM · diag(wb)` once at
+  entry; row scratch is the source plane itself (`above` / `mid` /
+  `below` row borrows with top / bottom replicate clamp).
+- Public dispatchers: `row::bayer_to_rgb_row`,
+  `row::bayer16_to_rgb_row<BITS>`,
+  `row::bayer16_to_rgb_u16_row<BITS>` (`use_simd` parameter
+  reserved while SIMD backends are pending).
+- Sink subtraits: `BayerSink`, `BayerSink16<BITS>`. Source markers:
+  `Bayer`, `Bayer16<BITS>` plus `Bayer10` / `Bayer12` / `Bayer14` /
+  `Bayer16Bit` aliases.
+
+### SIMD coverage
+
+| Kernel                                  | NEON | SSE4.1 | AVX2 | AVX-512 | wasm simd128 |
+| --------------------------------------- | :--: | :----: | :--: | :-----: | :----------: |
+| `bayer_to_rgb_row` (8-bit)              |  ⏳  |   ⏳   |  ⏳  |    ⏳   |      ⏳      |
+| `bayer16_to_rgb_row<BITS>` (→u8)        |  ⏳  |   ⏳   |  ⏳  |    ⏳   |      ⏳      |
+| `bayer16_to_rgb_u16_row<BITS>` (→u16)   |  ⏳  |   ⏳   |  ⏳  |    ⏳   |      ⏳      |
+
+Scalar reference path lands first; per-arch SIMD backends are
+scheduled as follow-up commits before the merge.
+
+### Tests
+
+- 15 frame-validation tests (8-bit + high-bit-depth, including
+  `try_new_checked` low-bit-set rejection).
+- 5 type-helper tests (WB / CCM defaults, fuse arithmetic).
+- 11 end-to-end walker + kernel tests (8-bit + 12-bit, solid R / G
+  / B channels, uniform-byte invariant, pattern swap RGGB↔BGGR,
+  walker row-count). Solid-channel assertions cover the interior
+  `[1, h-2] × [1, w-2]`; clamp-induced edge bleed is the standard
+  bilinear-edge tradeoff.
+
 ## Ship 7 — u16 semi-planar 4:2:2 / 4:4:4 (P210 / P212 / P216 / P410 / P412 / P416)
 
 Six new high-bit-packed semi-planar formats from the FFmpeg HW-decode

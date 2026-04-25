@@ -60,17 +60,18 @@ use thiserror::Error;
 
 use crate::{
   HsvBuffers, PixelSink, SourceFormat,
+  raw::{Bayer, Bayer16, BayerRow, BayerRow16, BayerSink, BayerSink16},
   row::{
-    nv12_to_rgb_row, nv21_to_rgb_row, nv24_to_rgb_row, nv42_to_rgb_row, p010_to_rgb_row,
-    p010_to_rgb_u16_row, p012_to_rgb_row, p012_to_rgb_u16_row, p016_to_rgb_row,
-    p016_to_rgb_u16_row, p410_to_rgb_row, p410_to_rgb_u16_row, p412_to_rgb_row,
-    p412_to_rgb_u16_row, p416_to_rgb_row, p416_to_rgb_u16_row, rgb_to_hsv_row, yuv_420_to_rgb_row,
-    yuv_444_to_rgb_row, yuv420p9_to_rgb_row, yuv420p9_to_rgb_u16_row, yuv420p10_to_rgb_row,
-    yuv420p10_to_rgb_u16_row, yuv420p12_to_rgb_row, yuv420p12_to_rgb_u16_row, yuv420p14_to_rgb_row,
-    yuv420p14_to_rgb_u16_row, yuv420p16_to_rgb_row, yuv420p16_to_rgb_u16_row, yuv444p9_to_rgb_row,
-    yuv444p9_to_rgb_u16_row, yuv444p10_to_rgb_row, yuv444p10_to_rgb_u16_row, yuv444p12_to_rgb_row,
-    yuv444p12_to_rgb_u16_row, yuv444p14_to_rgb_row, yuv444p14_to_rgb_u16_row, yuv444p16_to_rgb_row,
-    yuv444p16_to_rgb_u16_row,
+    bayer16_to_rgb_row, bayer16_to_rgb_u16_row, bayer_to_rgb_row, nv12_to_rgb_row, nv21_to_rgb_row,
+    nv24_to_rgb_row, nv42_to_rgb_row, p010_to_rgb_row, p010_to_rgb_u16_row, p012_to_rgb_row,
+    p012_to_rgb_u16_row, p016_to_rgb_row, p016_to_rgb_u16_row, p410_to_rgb_row,
+    p410_to_rgb_u16_row, p412_to_rgb_row, p412_to_rgb_u16_row, p416_to_rgb_row,
+    p416_to_rgb_u16_row, rgb_to_hsv_row, yuv_420_to_rgb_row, yuv_444_to_rgb_row,
+    yuv420p9_to_rgb_row, yuv420p9_to_rgb_u16_row, yuv420p10_to_rgb_row, yuv420p10_to_rgb_u16_row,
+    yuv420p12_to_rgb_row, yuv420p12_to_rgb_u16_row, yuv420p14_to_rgb_row, yuv420p14_to_rgb_u16_row,
+    yuv420p16_to_rgb_row, yuv420p16_to_rgb_u16_row, yuv444p9_to_rgb_row, yuv444p9_to_rgb_u16_row,
+    yuv444p10_to_rgb_row, yuv444p10_to_rgb_u16_row, yuv444p12_to_rgb_row, yuv444p12_to_rgb_u16_row,
+    yuv444p14_to_rgb_row, yuv444p14_to_rgb_u16_row, yuv444p16_to_rgb_row, yuv444p16_to_rgb_u16_row,
   },
   yuv::{
     Nv12, Nv12Row, Nv12Sink, Nv16, Nv16Row, Nv16Sink, Nv21, Nv21Row, Nv21Sink, Nv24, Nv24Row,
@@ -6359,6 +6360,294 @@ fn check_dimensions_match(
   Ok(())
 }
 
+// ---- Bayer (8-bit) impl --------------------------------------------------
+
+impl BayerSink for MixedSinker<'_, Bayer> {}
+
+impl PixelSink for MixedSinker<'_, Bayer> {
+  type Input<'r> = BayerRow<'r>;
+  type Error = MixedSinkerError;
+
+  fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
+    if self.width & 1 != 0 {
+      return Err(MixedSinkerError::OddWidth { width: self.width });
+    }
+    check_dimensions_match(self.width, self.height, width, height)
+  }
+
+  fn process(&mut self, row: BayerRow<'_>) -> Result<(), Self::Error> {
+    let w = self.width;
+    let h = self.height;
+    let idx = row.row();
+    let use_simd = self.simd;
+
+    if w & 1 != 0 {
+      return Err(MixedSinkerError::OddWidth { width: w });
+    }
+    if idx >= self.height {
+      return Err(MixedSinkerError::RowIndexOutOfRange {
+        row: idx,
+        configured_height: self.height,
+      });
+    }
+
+    let Self {
+      rgb,
+      luma,
+      hsv,
+      rgb_scratch,
+      ..
+    } = self;
+
+    let want_rgb = rgb.is_some();
+    let want_luma = luma.is_some();
+    let want_hsv = hsv.is_some();
+    if !want_rgb && !want_luma && !want_hsv {
+      return Ok(());
+    }
+
+    let one_plane_start = idx * w;
+    let one_plane_end = one_plane_start + w;
+
+    // 8-bit RGB scratch / output buffer. Bayer always derives every
+    // output channel from the demosaiced RGB, so the RGB row exists
+    // unconditionally when any of `rgb` / `luma` / `hsv` is set.
+    let rgb_row: &mut [u8] = match rgb.as_deref_mut() {
+      Some(buf) => {
+        let rgb_plane_end =
+          one_plane_end
+            .checked_mul(3)
+            .ok_or(MixedSinkerError::GeometryOverflow {
+              width: w,
+              height: h,
+              channels: 3,
+            })?;
+        let rgb_plane_start = one_plane_start * 3;
+        &mut buf[rgb_plane_start..rgb_plane_end]
+      }
+      None => {
+        let rgb_row_bytes = w.checked_mul(3).ok_or(MixedSinkerError::GeometryOverflow {
+          width: w,
+          height: h,
+          channels: 3,
+        })?;
+        if rgb_scratch.len() < rgb_row_bytes {
+          rgb_scratch.resize(rgb_row_bytes, 0);
+        }
+        &mut rgb_scratch[..rgb_row_bytes]
+      }
+    };
+
+    bayer_to_rgb_row(
+      row.above(),
+      row.mid(),
+      row.below(),
+      row.row_parity(),
+      row.pattern(),
+      row.demosaic(),
+      row.m(),
+      rgb_row,
+      use_simd,
+    );
+
+    // BT.709 luma from RGB. Q8 fixed-point: Y ≈ 0.2126R + 0.7152G +
+    // 0.0722B, scaled to (54, 183, 19) with `+128 >> 8` rounding.
+    if let Some(luma) = luma.as_deref_mut() {
+      let dst = &mut luma[one_plane_start..one_plane_end];
+      for (i, d) in dst.iter_mut().enumerate() {
+        let r = rgb_row[3 * i] as u32;
+        let g = rgb_row[3 * i + 1] as u32;
+        let b = rgb_row[3 * i + 2] as u32;
+        *d = ((54 * r + 183 * g + 19 * b + 128) >> 8) as u8;
+      }
+    }
+
+    if let Some(hsv) = hsv.as_mut() {
+      rgb_to_hsv_row(
+        rgb_row,
+        &mut hsv.h[one_plane_start..one_plane_end],
+        &mut hsv.s[one_plane_start..one_plane_end],
+        &mut hsv.v[one_plane_start..one_plane_end],
+        w,
+        use_simd,
+      );
+    }
+    Ok(())
+  }
+}
+
+// ---- Bayer16<BITS> impl --------------------------------------------------
+
+impl<'a, const BITS: u32> MixedSinker<'a, Bayer16<BITS>> {
+  /// Attaches a packed **`u16`** RGB output buffer.
+  ///
+  /// Length is measured in `u16` **elements** (not bytes): minimum
+  /// `width × height × 3`. Output is **low-packed** at `BITS`
+  /// (10-bit white = 1023, 12-bit = 4095, 14-bit = 16383, 16-bit =
+  /// 65535) — matches the rest of the high-bit-depth crate.
+  ///
+  /// Returns `Err(RgbU16BufferTooShort)` if
+  /// `buf.len() < width × height × 3`, or `Err(GeometryOverflow)`
+  /// on 32-bit overflow.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn with_rgb_u16(mut self, buf: &'a mut [u16]) -> Result<Self, MixedSinkerError> {
+    self.set_rgb_u16(buf)?;
+    Ok(self)
+  }
+
+  /// In-place variant of [`with_rgb_u16`](Self::with_rgb_u16). The
+  /// required length is measured in `u16` **elements**, not bytes.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn set_rgb_u16(&mut self, buf: &'a mut [u16]) -> Result<&mut Self, MixedSinkerError> {
+    let expected = self.frame_bytes(3)?;
+    if buf.len() < expected {
+      return Err(MixedSinkerError::RgbU16BufferTooShort {
+        expected,
+        actual: buf.len(),
+      });
+    }
+    self.rgb_u16 = Some(buf);
+    Ok(self)
+  }
+}
+
+impl<const BITS: u32> BayerSink16<BITS> for MixedSinker<'_, Bayer16<BITS>> {}
+
+impl<const BITS: u32> PixelSink for MixedSinker<'_, Bayer16<BITS>> {
+  type Input<'r> = BayerRow16<'r, BITS>;
+  type Error = MixedSinkerError;
+
+  fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
+    if self.width & 1 != 0 {
+      return Err(MixedSinkerError::OddWidth { width: self.width });
+    }
+    check_dimensions_match(self.width, self.height, width, height)
+  }
+
+  fn process(&mut self, row: BayerRow16<'_, BITS>) -> Result<(), Self::Error> {
+    let w = self.width;
+    let h = self.height;
+    let idx = row.row();
+    let use_simd = self.simd;
+
+    if w & 1 != 0 {
+      return Err(MixedSinkerError::OddWidth { width: w });
+    }
+    if idx >= self.height {
+      return Err(MixedSinkerError::RowIndexOutOfRange {
+        row: idx,
+        configured_height: self.height,
+      });
+    }
+
+    let Self {
+      rgb,
+      rgb_u16,
+      luma,
+      hsv,
+      rgb_scratch,
+      ..
+    } = self;
+
+    let one_plane_start = idx * w;
+    let one_plane_end = one_plane_start + w;
+
+    // u16 RGB output runs the native-depth kernel directly. Output
+    // is low-packed at `BITS` per the `*_to_rgb_u16_row` convention.
+    if let Some(buf) = rgb_u16.as_deref_mut() {
+      let rgb_plane_end =
+        one_plane_end
+          .checked_mul(3)
+          .ok_or(MixedSinkerError::GeometryOverflow {
+            width: w,
+            height: h,
+            channels: 3,
+          })?;
+      let rgb_plane_start = one_plane_start * 3;
+      bayer16_to_rgb_u16_row::<BITS>(
+        row.above(),
+        row.mid(),
+        row.below(),
+        row.row_parity(),
+        row.pattern(),
+        row.demosaic(),
+        row.m(),
+        &mut buf[rgb_plane_start..rgb_plane_end],
+        use_simd,
+      );
+    }
+
+    let want_rgb = rgb.is_some();
+    let want_luma = luma.is_some();
+    let want_hsv = hsv.is_some();
+    if !want_rgb && !want_luma && !want_hsv {
+      return Ok(());
+    }
+
+    // 8-bit RGB scratch / output. Same lazy-grow pattern as the
+    // 8-bit Bayer impl above.
+    let rgb_row: &mut [u8] = match rgb.as_deref_mut() {
+      Some(buf) => {
+        let rgb_plane_end =
+          one_plane_end
+            .checked_mul(3)
+            .ok_or(MixedSinkerError::GeometryOverflow {
+              width: w,
+              height: h,
+              channels: 3,
+            })?;
+        let rgb_plane_start = one_plane_start * 3;
+        &mut buf[rgb_plane_start..rgb_plane_end]
+      }
+      None => {
+        let rgb_row_bytes = w.checked_mul(3).ok_or(MixedSinkerError::GeometryOverflow {
+          width: w,
+          height: h,
+          channels: 3,
+        })?;
+        if rgb_scratch.len() < rgb_row_bytes {
+          rgb_scratch.resize(rgb_row_bytes, 0);
+        }
+        &mut rgb_scratch[..rgb_row_bytes]
+      }
+    };
+
+    bayer16_to_rgb_row::<BITS>(
+      row.above(),
+      row.mid(),
+      row.below(),
+      row.row_parity(),
+      row.pattern(),
+      row.demosaic(),
+      row.m(),
+      rgb_row,
+      use_simd,
+    );
+
+    if let Some(luma) = luma.as_deref_mut() {
+      let dst = &mut luma[one_plane_start..one_plane_end];
+      for (i, d) in dst.iter_mut().enumerate() {
+        let r = rgb_row[3 * i] as u32;
+        let g = rgb_row[3 * i + 1] as u32;
+        let b = rgb_row[3 * i + 2] as u32;
+        *d = ((54 * r + 183 * g + 19 * b + 128) >> 8) as u8;
+      }
+    }
+
+    if let Some(hsv) = hsv.as_mut() {
+      rgb_to_hsv_row(
+        rgb_row,
+        &mut hsv.h[one_plane_start..one_plane_end],
+        &mut hsv.s[one_plane_start..one_plane_end],
+        &mut hsv.v[one_plane_start..one_plane_end],
+        w,
+        use_simd,
+      );
+    }
+    Ok(())
+  }
+}
+
 #[cfg(all(test, feature = "std"))]
 mod tests {
   use super::*;
@@ -10113,6 +10402,250 @@ mod tests {
 
       assert_eq!(rgb_simd, rgb_scalar, "P416 SIMD u8 ≠ scalar u8");
       assert_eq!(rgb_u16_simd, rgb_u16_scalar, "P416 SIMD u16 ≠ scalar u16");
+    }
+  }
+
+  // ---- Bayer + Bayer16 MixedSinker integration tests ----------------------
+
+  /// Build a solid-channel RGGB Bayer plane (8-bit) so every R site
+  /// holds `r`, every B site holds `b`, and both G sites hold `g`.
+  fn solid_rggb8(width: u32, height: u32, r: u8, g: u8, b: u8) -> std::vec::Vec<u8> {
+    let w = width as usize;
+    let h = height as usize;
+    let mut data = std::vec![0u8; w * h];
+    for y in 0..h {
+      for x in 0..w {
+        data[y * w + x] = match (y & 1, x & 1) {
+          (0, 0) => r,
+          (0, 1) => g,
+          (1, 0) => g,
+          (1, 1) => b,
+          _ => unreachable!(),
+        };
+      }
+    }
+    data
+  }
+
+  /// Build a 12-bit MSB-aligned RGGB Bayer plane.
+  fn solid_rggb12(width: u32, height: u32, r: u16, g: u16, b: u16) -> std::vec::Vec<u16> {
+    let w = width as usize;
+    let h = height as usize;
+    let mut data = std::vec![0u16; w * h];
+    for y in 0..h {
+      for x in 0..w {
+        let v = match (y & 1, x & 1) {
+          (0, 0) => r,
+          (0, 1) => g,
+          (1, 0) => g,
+          (1, 1) => b,
+          _ => unreachable!(),
+        };
+        data[y * w + x] = v << 4; // MSB-align 12 → 16
+      }
+    }
+    data
+  }
+
+  #[test]
+  fn bayer_mixed_sinker_with_rgb_red_interior() {
+    use crate::{
+      frame::BayerFrame,
+      raw::{BayerDemosaic, BayerPattern, ColorCorrectionMatrix, WhiteBalance, bayer_to},
+    };
+    let (w, h) = (8u32, 6u32);
+    let raw = solid_rggb8(w, h, 255, 0, 0);
+    let frame = BayerFrame::try_new(&raw, w, h, w).unwrap();
+    let mut rgb = std::vec![0u8; (w * h * 3) as usize];
+    let mut sinker = MixedSinker::<Bayer>::new(w as usize, h as usize)
+      .with_rgb(&mut rgb)
+      .unwrap();
+    bayer_to(
+      &frame,
+      BayerPattern::Rggb,
+      BayerDemosaic::Bilinear,
+      WhiteBalance::neutral(),
+      ColorCorrectionMatrix::identity(),
+      &mut sinker,
+    )
+    .unwrap();
+    // Interior should be exactly red.
+    let wu = w as usize;
+    for y in 1..(h as usize) - 1 {
+      for x in 1..wu - 1 {
+        let i = (y * wu + x) * 3;
+        assert_eq!(rgb[i], 255, "px ({x},{y}) R");
+        assert_eq!(rgb[i + 1], 0, "px ({x},{y}) G");
+        assert_eq!(rgb[i + 2], 0, "px ({x},{y}) B");
+      }
+    }
+  }
+
+  #[test]
+  fn bayer_mixed_sinker_with_luma_uniform_byte() {
+    use crate::{
+      frame::BayerFrame,
+      raw::{BayerDemosaic, BayerPattern, ColorCorrectionMatrix, WhiteBalance, bayer_to},
+    };
+    // Uniform byte → uniform RGB → uniform luma at the same value.
+    let (w, h) = (8u32, 6u32);
+    let raw = std::vec![200u8; (w * h) as usize];
+    let frame = BayerFrame::try_new(&raw, w, h, w).unwrap();
+    let mut luma = std::vec![0u8; (w * h) as usize];
+    let mut sinker = MixedSinker::<Bayer>::new(w as usize, h as usize)
+      .with_luma(&mut luma)
+      .unwrap();
+    bayer_to(
+      &frame,
+      BayerPattern::Rggb,
+      BayerDemosaic::Bilinear,
+      WhiteBalance::neutral(),
+      ColorCorrectionMatrix::identity(),
+      &mut sinker,
+    )
+    .unwrap();
+    // BT.709 luma of (200, 200, 200) = 200 (within 1 LSB rounding).
+    for &y in &luma {
+      assert!((y as i32 - 200).abs() <= 1, "luma got {y}");
+    }
+  }
+
+  #[test]
+  fn bayer_mixed_sinker_with_hsv_solid_red_interior() {
+    use crate::{
+      frame::BayerFrame,
+      raw::{BayerDemosaic, BayerPattern, ColorCorrectionMatrix, WhiteBalance, bayer_to},
+    };
+    let (w, h) = (8u32, 6u32);
+    let raw = solid_rggb8(w, h, 255, 0, 0);
+    let frame = BayerFrame::try_new(&raw, w, h, w).unwrap();
+    let mut hh = std::vec![0u8; (w * h) as usize];
+    let mut ss = std::vec![0u8; (w * h) as usize];
+    let mut vv = std::vec![0u8; (w * h) as usize];
+    let mut sinker = MixedSinker::<Bayer>::new(w as usize, h as usize)
+      .with_hsv(&mut hh, &mut ss, &mut vv)
+      .unwrap();
+    bayer_to(
+      &frame,
+      BayerPattern::Rggb,
+      BayerDemosaic::Bilinear,
+      WhiteBalance::neutral(),
+      ColorCorrectionMatrix::identity(),
+      &mut sinker,
+    )
+    .unwrap();
+    // Pure red at interior → H = 0 (red), S = 255 (max), V = 255.
+    let wu = w as usize;
+    for y in 1..(h as usize) - 1 {
+      for x in 1..wu - 1 {
+        let i = y * wu + x;
+        assert_eq!(hh[i], 0, "px ({x},{y}) H");
+        assert_eq!(ss[i], 255, "px ({x},{y}) S");
+        assert_eq!(vv[i], 255, "px ({x},{y}) V");
+      }
+    }
+  }
+
+  #[test]
+  fn bayer16_mixed_sinker_with_rgb_red_interior() {
+    use crate::{
+      frame::Bayer12Frame,
+      raw::{BayerDemosaic, BayerPattern, ColorCorrectionMatrix, WhiteBalance, bayer16_to},
+    };
+    let (w, h) = (8u32, 6u32);
+    let raw = solid_rggb12(w, h, 4095, 0, 0);
+    let frame = Bayer12Frame::try_new(&raw, w, h, w).unwrap();
+    let mut rgb = std::vec![0u8; (w * h * 3) as usize];
+    let mut sinker = MixedSinker::<Bayer16<12>>::new(w as usize, h as usize)
+      .with_rgb(&mut rgb)
+      .unwrap();
+    bayer16_to::<12, _>(
+      &frame,
+      BayerPattern::Rggb,
+      BayerDemosaic::Bilinear,
+      WhiteBalance::neutral(),
+      ColorCorrectionMatrix::identity(),
+      &mut sinker,
+    )
+    .unwrap();
+    let wu = w as usize;
+    for y in 1..(h as usize) - 1 {
+      for x in 1..wu - 1 {
+        let i = (y * wu + x) * 3;
+        assert_eq!(rgb[i], 255, "px ({x},{y}) R");
+        assert_eq!(rgb[i + 1], 0, "px ({x},{y}) G");
+        assert_eq!(rgb[i + 2], 0, "px ({x},{y}) B");
+      }
+    }
+  }
+
+  #[test]
+  fn bayer16_mixed_sinker_with_rgb_u16_red_interior() {
+    use crate::{
+      frame::Bayer12Frame,
+      raw::{BayerDemosaic, BayerPattern, ColorCorrectionMatrix, WhiteBalance, bayer16_to},
+    };
+    let (w, h) = (8u32, 6u32);
+    let raw = solid_rggb12(w, h, 4095, 0, 0);
+    let frame = Bayer12Frame::try_new(&raw, w, h, w).unwrap();
+    let mut rgb = std::vec![0u16; (w * h * 3) as usize];
+    let mut sinker = MixedSinker::<Bayer16<12>>::new(w as usize, h as usize)
+      .with_rgb_u16(&mut rgb)
+      .unwrap();
+    bayer16_to::<12, _>(
+      &frame,
+      BayerPattern::Rggb,
+      BayerDemosaic::Bilinear,
+      WhiteBalance::neutral(),
+      ColorCorrectionMatrix::identity(),
+      &mut sinker,
+    )
+    .unwrap();
+    // Low-packed 12-bit white = 4095 at interior.
+    let wu = w as usize;
+    for y in 1..(h as usize) - 1 {
+      for x in 1..wu - 1 {
+        let i = (y * wu + x) * 3;
+        assert_eq!(rgb[i], 4095, "px ({x},{y}) R");
+        assert_eq!(rgb[i + 1], 0, "px ({x},{y}) G");
+        assert_eq!(rgb[i + 2], 0, "px ({x},{y}) B");
+      }
+    }
+  }
+
+  #[test]
+  fn bayer16_mixed_sinker_dual_rgb_and_rgb_u16() {
+    use crate::{
+      frame::Bayer12Frame,
+      raw::{BayerDemosaic, BayerPattern, ColorCorrectionMatrix, WhiteBalance, bayer16_to},
+    };
+    // Both u8 RGB and u16 RGB attached — both kernels run.
+    let (w, h) = (8u32, 6u32);
+    let raw = solid_rggb12(w, h, 4095, 0, 0);
+    let frame = Bayer12Frame::try_new(&raw, w, h, w).unwrap();
+    let mut rgb_u8 = std::vec![0u8; (w * h * 3) as usize];
+    let mut rgb_u16 = std::vec![0u16; (w * h * 3) as usize];
+    let mut sinker = MixedSinker::<Bayer16<12>>::new(w as usize, h as usize)
+      .with_rgb(&mut rgb_u8)
+      .unwrap()
+      .with_rgb_u16(&mut rgb_u16)
+      .unwrap();
+    bayer16_to::<12, _>(
+      &frame,
+      BayerPattern::Rggb,
+      BayerDemosaic::Bilinear,
+      WhiteBalance::neutral(),
+      ColorCorrectionMatrix::identity(),
+      &mut sinker,
+    )
+    .unwrap();
+    let wu = w as usize;
+    for y in 1..(h as usize) - 1 {
+      for x in 1..wu - 1 {
+        let i = (y * wu + x) * 3;
+        assert_eq!(rgb_u8[i], 255);
+        assert_eq!(rgb_u16[i], 4095);
+      }
     }
   }
 }

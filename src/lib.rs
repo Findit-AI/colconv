@@ -66,6 +66,21 @@
 //! | [`P412`]         | 12        | 4:4:4       | semi-planar, high-packed | `p412le`              |
 //! | [`P416`]         | 16        | 4:4:4       | semi-planar              | `p416le`              |
 //!
+//! ## RAW (Bayer) sources
+//!
+//! [`raw::Bayer`] (8-bit) and [`raw::Bayer16<BITS>`] (10/12/14/16-bit
+//! MSB-aligned) feed bilinear demosaic + white balance + 3×3
+//! color-correction in a single per-row kernel. Caller supplies
+//! [`raw::BayerPattern`] (BGGR / RGGB / GRBG / GBRG),
+//! [`raw::WhiteBalance`] gains, and a [`raw::ColorCorrectionMatrix`].
+//! See [`raw`] for the full design and parameter docs.
+//!
+//! Scope: `colconv` covers demosaic onwards. Decoding the camera's
+//! compressed bitstream (R3D / BRAW / NRAW / `bayer_*` AVI) into
+//! a Bayer plane is the upstream pipeline's job; once you have a
+//! `BayerFrame` / `BayerFrame16`, hand it to [`raw::bayer_to`] /
+//! [`raw::bayer16_to`] with your sink of choice.
+//!
 //! ## YUVA sources (alpha-drop)
 //!
 //! Every shipped 4:2:0 / 4:2:2 / 4:4:4 planar family also covers its
@@ -120,9 +135,17 @@
 //! # Not yet shipped (follow-up)
 //!
 //! - **Packed RGB sources** (`Rgb24`, `Bgr24`, `Rgba`, `Bgra`,
-//!   `Rgba1010102`, etc.).
-//! - **u16 semi-planar 4:2:2 / 4:4:4** (`P210`, `P216`, `P410`,
-//!   `P416`) — would reuse the 16-bit `PnFrame` pattern.
+//!   `Rgba1010102`, etc.) — Tier 6+.
+//! - **Packed YUV** (Tier 3 `YUY2` / `UYVY` / `YVYU`; Tier 4
+//!   `V210` / `Y210` / `Y212` / `Y216`; Tier 5
+//!   `V410` / `XV36` / `VUYA` / `AYUV64` / `UYYVYY411`).
+//! - **Alpha + RGBA output** (Ship 8) — `with_rgba` /
+//!   `with_rgba_u16` `MixedSinker` accessors plus native YUVA
+//!   frame types.
+//! - **Bayer SIMD backends** — Tier 14 currently dispatches to the
+//!   scalar reference path on every target; NEON / SSE4.1 / AVX2 /
+//!   AVX-512 / wasm simd128 follow-ups will land per the established
+//!   backend-symmetry pattern.
 //!
 //! See [`yuv`] for the per-format module-level breakdown and
 //! [`frame`] for the validated frame types plus the `BITS` const
@@ -180,6 +203,7 @@ extern crate std;
 
 pub mod frame;
 
+pub mod raw;
 pub mod row;
 pub mod sinker;
 pub mod yuv;
