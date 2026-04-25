@@ -30,27 +30,25 @@ requires even width).
 
 ### SIMD coverage (4:4:4 family)
 
-| Kernel                                  | NEON | SSE4.1 | AVX2     | AVX-512  | wasm simd128 |
-| --------------------------------------- | :--: | :----: | :------: | :------: | :----------: |
-| `p_n_444_to_rgb_row<BITS>`              |  ✅  |   ✅   | (sse4.1) | (sse4.1) |   (scalar)   |
-| `p_n_444_to_rgb_u16_row<BITS>`          |  ✅  |   ✅   | (sse4.1) | (sse4.1) |   (scalar)   |
-| `p_n_444_16_to_rgb_row`                 |  ✅  |   ✅   | (sse4.1) | (sse4.1) |   (scalar)   |
-| `p_n_444_16_to_rgb_u16_row`             |  ✅  |   ✅   | (sse4.1) | (sse4.1) |   (scalar)   |
+| Kernel                                  | NEON | SSE4.1 | AVX2 | AVX-512 | wasm simd128 |
+| --------------------------------------- | :--: | :----: | :--: | :-----: | :----------: |
+| `p_n_444_to_rgb_row<BITS>`              |  ✅  |   ✅   |  ✅  |  (avx2) |      ✅      |
+| `p_n_444_to_rgb_u16_row<BITS>`          |  ✅  |   ✅   |  ✅  |  (avx2) |      ✅      |
+| `p_n_444_16_to_rgb_row`                 |  ✅  |   ✅   |  ✅  |  (avx2) |      ✅      |
+| `p_n_444_16_to_rgb_u16_row`             |  ✅  |   ✅   |  ✅  |  (avx2) |      ✅      |
 
-NEON and SSE4.1 ship native kernels validated against the scalar
-reference. AVX2 / AVX-512 currently delegate to SSE4.1 (correct
-semantics, half / quarter the throughput of a hypothetical native
-kernel). wasm simd128 delegates to scalar pending a native simd128
-implementation. Both are tracked as TODOs in the per-arch source —
-follow-up commits in this branch will replace the delegations with
-native wider-lane / native-instruction implementations:
+Native SIMD kernels on NEON (16 px/iter), SSE4.1 (16 px/iter), AVX2
+(32 px/iter via 256-bit vectors with `_mm256_shuffle_epi8` +
+`_mm256_permute2x128_si256` deinterleave), and wasm simd128 (16
+px/iter via `u8x16_swizzle` deinterleave). The 16-bit u16-output
+path uses native `i64x2_shr` on wasm and the `srai64_15` bias trick
+on AVX2 / SSE4.1 (i64 chroma narrows throughput to 8 px/iter on the
+narrower backends, 16 on AVX2).
 
-- AVX2 native: 32 Y pixels per iter via 256-bit vectors, deinterleave
-  via `_mm256_shuffle_epi8` + `_mm256_permute2x128_si256`.
-- AVX-512 native: 64 Y pixels per iter; `_mm512_srai_epi64` enables a
-  cleaner i64-chroma path than the SSE4.1 `srai64_15` bias trick.
-- wasm simd128 native: 16 Y pixels per iter; `i64x2_shr_s` for the
-  16-bit u16 path (no bias trick needed).
+AVX-512 currently delegates to AVX2 (32 px/iter — 2× SSE4.1 throughput
+on AVX-512 hardware). A native AVX-512 kernel (64 px/iter via 512-bit
+vectors; native `_mm512_srai_epi64` removes the bias-trick cost on
+the i64 path) is a tracked follow-up.
 
 ### MixedSinker integration
 

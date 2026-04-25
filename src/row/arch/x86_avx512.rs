@@ -2936,11 +2936,12 @@ unsafe fn p16_to_rgb_u16_row_impl(
 
 // ===== Pn 4:4:4 (semi-planar high-bit-packed) → RGB =======================
 //
-// AVX-512 thin wrappers delegating to the SSE4.1 4:4:4 Pn kernels.
-// AVX-512 implies SSE4.1, so delegation is safe. Native AVX-512
-// kernel (64 Y pixels per iter, native `_mm512_srai_epi64` for the
-// 16-bit u16-output i64 chroma path) is a follow-up — would give
-// ~4× throughput over SSE4.1 on AVX-512BW-capable CPUs.
+// AVX-512 wrappers delegating to the AVX2 4:4:4 Pn kernels (32 px /
+// iter native AVX2). AVX-512 implies AVX2, so delegation is safe.
+// Native AVX-512 kernel (64 Y pixels per iter via 512-bit vectors,
+// native `_mm512_srai_epi64` for the 16-bit u16-output i64 chroma
+// path — no bias trick needed unlike AVX2) is a follow-up — would
+// give ~2× throughput over the AVX2 path on AVX-512BW-capable CPUs.
 
 #[inline]
 #[target_feature(enable = "avx512bw,avx512f")]
@@ -2952,9 +2953,9 @@ pub(crate) unsafe fn p_n_444_to_rgb_row<const BITS: u32>(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  // SAFETY: AVX-512 implies SSE4.1.
+  // SAFETY: AVX-512 implies AVX2.
   unsafe {
-    super::x86_sse41::p_n_444_to_rgb_row::<BITS>(y, uv_full, rgb_out, width, matrix, full_range);
+    super::x86_avx2::p_n_444_to_rgb_row::<BITS>(y, uv_full, rgb_out, width, matrix, full_range);
   }
 }
 
@@ -2968,11 +2969,9 @@ pub(crate) unsafe fn p_n_444_to_rgb_u16_row<const BITS: u32>(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  // SAFETY: AVX-512 implies SSE4.1.
+  // SAFETY: AVX-512 implies AVX2.
   unsafe {
-    super::x86_sse41::p_n_444_to_rgb_u16_row::<BITS>(
-      y, uv_full, rgb_out, width, matrix, full_range,
-    );
+    super::x86_avx2::p_n_444_to_rgb_u16_row::<BITS>(y, uv_full, rgb_out, width, matrix, full_range);
   }
 }
 
@@ -2986,9 +2985,9 @@ pub(crate) unsafe fn p_n_444_16_to_rgb_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  // SAFETY: AVX-512 implies SSE4.1.
+  // SAFETY: AVX-512 implies AVX2.
   unsafe {
-    super::x86_sse41::p_n_444_16_to_rgb_row(y, uv_full, rgb_out, width, matrix, full_range);
+    super::x86_avx2::p_n_444_16_to_rgb_row(y, uv_full, rgb_out, width, matrix, full_range);
   }
 }
 
@@ -3002,9 +3001,9 @@ pub(crate) unsafe fn p_n_444_16_to_rgb_u16_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  // SAFETY: AVX-512 implies SSE4.1.
+  // SAFETY: AVX-512 implies AVX2.
   unsafe {
-    super::x86_sse41::p_n_444_16_to_rgb_u16_row(y, uv_full, rgb_out, width, matrix, full_range);
+    super::x86_avx2::p_n_444_16_to_rgb_u16_row(y, uv_full, rgb_out, width, matrix, full_range);
   }
 }
 
