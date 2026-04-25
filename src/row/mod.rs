@@ -984,6 +984,176 @@ pub fn yuv444p16_to_rgb_u16_row(
   scalar::yuv_444p16_to_rgb_u16_row(y, u, v, rgb_out, width, matrix, full_range);
 }
 
+/// Converts one row of **9‑bit** YUV 4:2:0 to packed **8‑bit** RGB.
+///
+/// Samples are `u16` with 9 active bits in the low bits of each
+/// element. Niche format (AVC High 9 profile only). Reuses the same
+/// `yuv_420p_n_to_rgb_row<BITS>` kernel family as 10/12/14-bit; the
+/// only per-call difference is the const-generic `BITS = 9` which
+/// fixes the AND-mask to `0x1FF` and the Q15 scale via
+/// `range_params_n::<9, 8>`.
+///
+/// See `scalar::yuv_420p_n_to_rgb_row` for the full semantic
+/// specification. `use_simd = false` forces the scalar reference
+/// path.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn yuv420p9_to_rgb_row(
+  y: &[u16],
+  u_half: &[u16],
+  v_half: &[u16],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  use_simd: bool,
+) {
+  assert_eq!(width & 1, 0, "YUV 4:2:0 requires even width");
+  let rgb_min = rgb_row_bytes(width);
+  assert!(y.len() >= width, "y row too short");
+  assert!(u_half.len() >= width / 2, "u_half row too short");
+  assert!(v_half.len() >= width / 2, "v_half row too short");
+  assert!(rgb_out.len() >= rgb_min, "rgb_out row too short");
+
+  if use_simd {
+    cfg_select! {
+      target_arch = "aarch64" => {
+        if neon_available() {
+          // SAFETY: NEON verified.
+          unsafe {
+            arch::neon::yuv_420p_n_to_rgb_row::<9>(y, u_half, v_half, rgb_out, width, matrix, full_range);
+          }
+          return;
+        }
+      },
+      target_arch = "x86_64" => {
+        if avx512_available() {
+          // SAFETY: AVX‑512BW verified.
+          unsafe {
+            arch::x86_avx512::yuv_420p_n_to_rgb_row::<9>(
+              y, u_half, v_half, rgb_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+        if avx2_available() {
+          // SAFETY: AVX2 verified.
+          unsafe {
+            arch::x86_avx2::yuv_420p_n_to_rgb_row::<9>(
+              y, u_half, v_half, rgb_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+        if sse41_available() {
+          // SAFETY: SSE4.1 verified.
+          unsafe {
+            arch::x86_sse41::yuv_420p_n_to_rgb_row::<9>(
+              y, u_half, v_half, rgb_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+      },
+      target_arch = "wasm32" => {
+        if simd128_available() {
+          // SAFETY: simd128 compile‑time verified.
+          unsafe {
+            arch::wasm_simd128::yuv_420p_n_to_rgb_row::<9>(
+              y, u_half, v_half, rgb_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+      },
+      _ => {}
+    }
+  }
+
+  scalar::yuv_420p_n_to_rgb_row::<9>(y, u_half, v_half, rgb_out, width, matrix, full_range);
+}
+
+/// Converts one row of **9‑bit** YUV 4:2:0 to **native‑depth** packed
+/// `u16` RGB (9-bit values in the **low** 9 bits of each `u16`).
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn yuv420p9_to_rgb_u16_row(
+  y: &[u16],
+  u_half: &[u16],
+  v_half: &[u16],
+  rgb_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  use_simd: bool,
+) {
+  assert_eq!(width & 1, 0, "YUV 4:2:0 requires even width");
+  let rgb_min = rgb_row_elems(width);
+  assert!(y.len() >= width, "y row too short");
+  assert!(u_half.len() >= width / 2, "u_half row too short");
+  assert!(v_half.len() >= width / 2, "v_half row too short");
+  assert!(rgb_out.len() >= rgb_min, "rgb_out row too short");
+
+  if use_simd {
+    cfg_select! {
+      target_arch = "aarch64" => {
+        if neon_available() {
+          // SAFETY: NEON verified.
+          unsafe {
+            arch::neon::yuv_420p_n_to_rgb_u16_row::<9>(
+              y, u_half, v_half, rgb_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+      },
+      target_arch = "x86_64" => {
+        if avx512_available() {
+          // SAFETY: AVX‑512BW verified.
+          unsafe {
+            arch::x86_avx512::yuv_420p_n_to_rgb_u16_row::<9>(
+              y, u_half, v_half, rgb_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+        if avx2_available() {
+          // SAFETY: AVX2 verified.
+          unsafe {
+            arch::x86_avx2::yuv_420p_n_to_rgb_u16_row::<9>(
+              y, u_half, v_half, rgb_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+        if sse41_available() {
+          // SAFETY: SSE4.1 verified.
+          unsafe {
+            arch::x86_sse41::yuv_420p_n_to_rgb_u16_row::<9>(
+              y, u_half, v_half, rgb_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+      },
+      target_arch = "wasm32" => {
+        if simd128_available() {
+          // SAFETY: simd128 compile‑time verified.
+          unsafe {
+            arch::wasm_simd128::yuv_420p_n_to_rgb_u16_row::<9>(
+              y, u_half, v_half, rgb_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+      },
+      _ => {}
+    }
+  }
+
+  scalar::yuv_420p_n_to_rgb_u16_row::<9>(y, u_half, v_half, rgb_out, width, matrix, full_range);
+}
+
 /// Converts one row of **10‑bit** YUV 4:2:0 to packed **8‑bit** RGB.
 ///
 /// Samples are `u16` with 10 active bits in the low bits of each
