@@ -4748,4 +4748,170 @@ mod tests {
       check_yuv444p16_u16_neon_equivalence(w, ColorMatrix::Bt2020Ncl, true);
     }
   }
+
+  // ---- Pn 4:4:4 (P410 / P412 / P416) NEON equivalence -----------------
+
+  /// Generates a high-bit-packed `u16` plane: random `BITS`-bit values
+  /// shifted left by `16 - BITS` (P410/P412 convention).
+  fn high_bit_plane<const BITS: u32>(n: usize, seed: usize) -> std::vec::Vec<u16> {
+    let mask = ((1u32 << BITS) - 1) as u16;
+    let shift = 16 - BITS;
+    (0..n)
+      .map(|i| (((i.wrapping_mul(seed).wrapping_add(seed * 3)) as u16) & mask) << shift)
+      .collect()
+  }
+
+  fn interleave_uv(u_full: &[u16], v_full: &[u16]) -> std::vec::Vec<u16> {
+    debug_assert_eq!(u_full.len(), v_full.len());
+    let mut out = std::vec::Vec::with_capacity(u_full.len() * 2);
+    for i in 0..u_full.len() {
+      out.push(u_full[i]);
+      out.push(v_full[i]);
+    }
+    out
+  }
+
+  fn check_p_n_444_u8_neon_equivalence<const BITS: u32>(
+    width: usize,
+    matrix: ColorMatrix,
+    full_range: bool,
+  ) {
+    let y = high_bit_plane::<BITS>(width, 37);
+    let u = high_bit_plane::<BITS>(width, 53);
+    let v = high_bit_plane::<BITS>(width, 71);
+    let uv = interleave_uv(&u, &v);
+    let mut rgb_scalar = std::vec![0u8; width * 3];
+    let mut rgb_neon = std::vec![0u8; width * 3];
+    scalar::p_n_444_to_rgb_row::<BITS>(&y, &uv, &mut rgb_scalar, width, matrix, full_range);
+    unsafe {
+      p_n_444_to_rgb_row::<BITS>(&y, &uv, &mut rgb_neon, width, matrix, full_range);
+    }
+    assert_eq!(
+      rgb_scalar, rgb_neon,
+      "NEON Pn4:4:4 {BITS}-bit → u8 diverges (width={width}, matrix={matrix:?}, full_range={full_range})"
+    );
+  }
+
+  fn check_p_n_444_u16_neon_equivalence<const BITS: u32>(
+    width: usize,
+    matrix: ColorMatrix,
+    full_range: bool,
+  ) {
+    let y = high_bit_plane::<BITS>(width, 37);
+    let u = high_bit_plane::<BITS>(width, 53);
+    let v = high_bit_plane::<BITS>(width, 71);
+    let uv = interleave_uv(&u, &v);
+    let mut rgb_scalar = std::vec![0u16; width * 3];
+    let mut rgb_neon = std::vec![0u16; width * 3];
+    scalar::p_n_444_to_rgb_u16_row::<BITS>(&y, &uv, &mut rgb_scalar, width, matrix, full_range);
+    unsafe {
+      p_n_444_to_rgb_u16_row::<BITS>(&y, &uv, &mut rgb_neon, width, matrix, full_range);
+    }
+    assert_eq!(
+      rgb_scalar, rgb_neon,
+      "NEON Pn4:4:4 {BITS}-bit → u16 diverges (width={width}, matrix={matrix:?}, full_range={full_range})"
+    );
+  }
+
+  fn check_p_n_444_16_u8_neon_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+    let y = p16_plane_neon(width, 37);
+    let u = p16_plane_neon(width, 53);
+    let v = p16_plane_neon(width, 71);
+    let uv = interleave_uv(&u, &v);
+    let mut rgb_scalar = std::vec![0u8; width * 3];
+    let mut rgb_neon = std::vec![0u8; width * 3];
+    scalar::p_n_444_16_to_rgb_row(&y, &uv, &mut rgb_scalar, width, matrix, full_range);
+    unsafe {
+      p_n_444_16_to_rgb_row(&y, &uv, &mut rgb_neon, width, matrix, full_range);
+    }
+    assert_eq!(
+      rgb_scalar, rgb_neon,
+      "NEON P416 → u8 diverges (width={width}, matrix={matrix:?}, full_range={full_range})"
+    );
+  }
+
+  fn check_p_n_444_16_u16_neon_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+    let y = p16_plane_neon(width, 37);
+    let u = p16_plane_neon(width, 53);
+    let v = p16_plane_neon(width, 71);
+    let uv = interleave_uv(&u, &v);
+    let mut rgb_scalar = std::vec![0u16; width * 3];
+    let mut rgb_neon = std::vec![0u16; width * 3];
+    scalar::p_n_444_16_to_rgb_u16_row(&y, &uv, &mut rgb_scalar, width, matrix, full_range);
+    unsafe {
+      p_n_444_16_to_rgb_u16_row(&y, &uv, &mut rgb_neon, width, matrix, full_range);
+    }
+    assert_eq!(
+      rgb_scalar, rgb_neon,
+      "NEON P416 → u16 diverges (width={width}, matrix={matrix:?}, full_range={full_range})"
+    );
+  }
+
+  #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
+  fn neon_p410_matches_scalar_all_matrices() {
+    for m in [
+      ColorMatrix::Bt601,
+      ColorMatrix::Bt709,
+      ColorMatrix::Bt2020Ncl,
+      ColorMatrix::Smpte240m,
+      ColorMatrix::Fcc,
+      ColorMatrix::YCgCo,
+    ] {
+      for full in [true, false] {
+        check_p_n_444_u8_neon_equivalence::<10>(16, m, full);
+        check_p_n_444_u16_neon_equivalence::<10>(16, m, full);
+      }
+    }
+  }
+
+  #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
+  fn neon_p412_matches_scalar_all_matrices() {
+    for m in [ColorMatrix::Bt709, ColorMatrix::Bt2020Ncl] {
+      for full in [true, false] {
+        check_p_n_444_u8_neon_equivalence::<12>(16, m, full);
+        check_p_n_444_u16_neon_equivalence::<12>(16, m, full);
+      }
+    }
+  }
+
+  #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
+  fn neon_p410_p412_matches_scalar_tail_widths() {
+    // Tail widths force scalar fallback past the SIMD main loop.
+    // 4:4:4 has no width-parity constraint.
+    for w in [1usize, 3, 7, 15, 17, 31, 33, 1920, 1921] {
+      check_p_n_444_u8_neon_equivalence::<10>(w, ColorMatrix::Bt601, false);
+      check_p_n_444_u16_neon_equivalence::<10>(w, ColorMatrix::Bt709, true);
+      check_p_n_444_u8_neon_equivalence::<12>(w, ColorMatrix::Bt2020Ncl, false);
+    }
+  }
+
+  #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
+  fn neon_p416_matches_scalar_all_matrices() {
+    for m in [
+      ColorMatrix::Bt601,
+      ColorMatrix::Bt709,
+      ColorMatrix::Bt2020Ncl,
+      ColorMatrix::Smpte240m,
+      ColorMatrix::Fcc,
+      ColorMatrix::YCgCo,
+    ] {
+      for full in [true, false] {
+        check_p_n_444_16_u8_neon_equivalence(16, m, full);
+        check_p_n_444_16_u16_neon_equivalence(16, m, full);
+      }
+    }
+  }
+
+  #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
+  fn neon_p416_matches_scalar_tail_widths() {
+    for w in [1usize, 3, 7, 8, 9, 15, 16, 17, 31, 33, 1920, 1921] {
+      check_p_n_444_16_u8_neon_equivalence(w, ColorMatrix::Bt709, false);
+      check_p_n_444_16_u16_neon_equivalence(w, ColorMatrix::Bt2020Ncl, true);
+    }
+  }
 }

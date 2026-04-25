@@ -64,7 +64,14 @@ identical to 4:2:0.
 - 3 new walker-level SIMD-vs-scalar equivalence tests for P410 / P412
   / P416 at width 1922 (forces tail handling), pseudo-random chroma,
   full + limited range, all matrices.
-- **Total suite: 313 passed on aarch64** (up from 304 at Ship 6b).
+- 20 new per-arch SIMD scalar-equivalence tests for the new
+  `p_n_444_to_rgb_*<BITS>` and `p_n_444_16_to_rgb_*` kernels —
+  5 tests × 4 backends (NEON, SSE4.1, AVX2, wasm simd128). Cover all
+  6 ColorMatrix variants × full + limited range at the backend's
+  natural width, plus tail widths {1, 3, 7, 8, 9, 15, 16, 17, 31, 33,
+  47, 63, 65, 1920, 1921} forcing scalar-tail fallback.
+- **Total suite: 318 passed on aarch64** (up from 304 at Ship 6b);
+  +20 tests fire on x86_64 / wasm32 CI runners.
 
 ## Ship 6b — 9-bit family + 4:4:0 family (Tier 1 completion)
 

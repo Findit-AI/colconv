@@ -4230,4 +4230,173 @@ mod tests {
     check_p16_u8_sse41_equivalence(1920, ColorMatrix::Bt709, false);
     check_p16_u16_sse41_equivalence(1920, ColorMatrix::Bt2020Ncl, false);
   }
+
+  // ---- Pn 4:4:4 (P410 / P412 / P416) SSE4.1 equivalence ---------------
+
+  fn high_bit_plane_sse41<const BITS: u32>(n: usize, seed: usize) -> std::vec::Vec<u16> {
+    let mask = ((1u32 << BITS) - 1) as u16;
+    let shift = 16 - BITS;
+    (0..n)
+      .map(|i| (((i.wrapping_mul(seed).wrapping_add(seed * 3)) as u16) & mask) << shift)
+      .collect()
+  }
+
+  fn interleave_uv_sse41(u_full: &[u16], v_full: &[u16]) -> std::vec::Vec<u16> {
+    debug_assert_eq!(u_full.len(), v_full.len());
+    let mut out = std::vec::Vec::with_capacity(u_full.len() * 2);
+    for i in 0..u_full.len() {
+      out.push(u_full[i]);
+      out.push(v_full[i]);
+    }
+    out
+  }
+
+  fn check_p_n_444_u8_sse41_equivalence<const BITS: u32>(
+    width: usize,
+    matrix: ColorMatrix,
+    full_range: bool,
+  ) {
+    if !std::arch::is_x86_feature_detected!("sse4.1") {
+      return;
+    }
+    let y = high_bit_plane_sse41::<BITS>(width, 37);
+    let u = high_bit_plane_sse41::<BITS>(width, 53);
+    let v = high_bit_plane_sse41::<BITS>(width, 71);
+    let uv = interleave_uv_sse41(&u, &v);
+    let mut rgb_scalar = std::vec![0u8; width * 3];
+    let mut rgb_simd = std::vec![0u8; width * 3];
+    scalar::p_n_444_to_rgb_row::<BITS>(&y, &uv, &mut rgb_scalar, width, matrix, full_range);
+    unsafe {
+      p_n_444_to_rgb_row::<BITS>(&y, &uv, &mut rgb_simd, width, matrix, full_range);
+    }
+    assert_eq!(
+      rgb_scalar, rgb_simd,
+      "SSE4.1 Pn4:4:4 {BITS}-bit → u8 diverges (width={width}, matrix={matrix:?}, full_range={full_range})"
+    );
+  }
+
+  fn check_p_n_444_u16_sse41_equivalence<const BITS: u32>(
+    width: usize,
+    matrix: ColorMatrix,
+    full_range: bool,
+  ) {
+    if !std::arch::is_x86_feature_detected!("sse4.1") {
+      return;
+    }
+    let y = high_bit_plane_sse41::<BITS>(width, 37);
+    let u = high_bit_plane_sse41::<BITS>(width, 53);
+    let v = high_bit_plane_sse41::<BITS>(width, 71);
+    let uv = interleave_uv_sse41(&u, &v);
+    let mut rgb_scalar = std::vec![0u16; width * 3];
+    let mut rgb_simd = std::vec![0u16; width * 3];
+    scalar::p_n_444_to_rgb_u16_row::<BITS>(&y, &uv, &mut rgb_scalar, width, matrix, full_range);
+    unsafe {
+      p_n_444_to_rgb_u16_row::<BITS>(&y, &uv, &mut rgb_simd, width, matrix, full_range);
+    }
+    assert_eq!(
+      rgb_scalar, rgb_simd,
+      "SSE4.1 Pn4:4:4 {BITS}-bit → u16 diverges (width={width}, matrix={matrix:?}, full_range={full_range})"
+    );
+  }
+
+  fn check_p_n_444_16_u8_sse41_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+    if !std::arch::is_x86_feature_detected!("sse4.1") {
+      return;
+    }
+    let y = p16_plane(width, 37);
+    let u = p16_plane(width, 53);
+    let v = p16_plane(width, 71);
+    let uv = interleave_uv_sse41(&u, &v);
+    let mut rgb_scalar = std::vec![0u8; width * 3];
+    let mut rgb_simd = std::vec![0u8; width * 3];
+    scalar::p_n_444_16_to_rgb_row(&y, &uv, &mut rgb_scalar, width, matrix, full_range);
+    unsafe {
+      p_n_444_16_to_rgb_row(&y, &uv, &mut rgb_simd, width, matrix, full_range);
+    }
+    assert_eq!(
+      rgb_scalar, rgb_simd,
+      "SSE4.1 P416 → u8 diverges (width={width}, matrix={matrix:?}, full_range={full_range})"
+    );
+  }
+
+  fn check_p_n_444_16_u16_sse41_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+    if !std::arch::is_x86_feature_detected!("sse4.1") {
+      return;
+    }
+    let y = p16_plane(width, 37);
+    let u = p16_plane(width, 53);
+    let v = p16_plane(width, 71);
+    let uv = interleave_uv_sse41(&u, &v);
+    let mut rgb_scalar = std::vec![0u16; width * 3];
+    let mut rgb_simd = std::vec![0u16; width * 3];
+    scalar::p_n_444_16_to_rgb_u16_row(&y, &uv, &mut rgb_scalar, width, matrix, full_range);
+    unsafe {
+      p_n_444_16_to_rgb_u16_row(&y, &uv, &mut rgb_simd, width, matrix, full_range);
+    }
+    assert_eq!(
+      rgb_scalar, rgb_simd,
+      "SSE4.1 P416 → u16 diverges (width={width}, matrix={matrix:?}, full_range={full_range})"
+    );
+  }
+
+  #[test]
+  fn sse41_p410_matches_scalar_all_matrices() {
+    for m in [
+      ColorMatrix::Bt601,
+      ColorMatrix::Bt709,
+      ColorMatrix::Bt2020Ncl,
+      ColorMatrix::Smpte240m,
+      ColorMatrix::Fcc,
+      ColorMatrix::YCgCo,
+    ] {
+      for full in [true, false] {
+        check_p_n_444_u8_sse41_equivalence::<10>(16, m, full);
+        check_p_n_444_u16_sse41_equivalence::<10>(16, m, full);
+      }
+    }
+  }
+
+  #[test]
+  fn sse41_p412_matches_scalar_all_matrices() {
+    for m in [ColorMatrix::Bt709, ColorMatrix::Bt2020Ncl] {
+      for full in [true, false] {
+        check_p_n_444_u8_sse41_equivalence::<12>(16, m, full);
+        check_p_n_444_u16_sse41_equivalence::<12>(16, m, full);
+      }
+    }
+  }
+
+  #[test]
+  fn sse41_p410_p412_matches_scalar_tail_widths() {
+    for w in [1usize, 3, 7, 15, 17, 31, 33, 1920, 1921] {
+      check_p_n_444_u8_sse41_equivalence::<10>(w, ColorMatrix::Bt601, false);
+      check_p_n_444_u16_sse41_equivalence::<10>(w, ColorMatrix::Bt709, true);
+      check_p_n_444_u8_sse41_equivalence::<12>(w, ColorMatrix::Bt2020Ncl, false);
+    }
+  }
+
+  #[test]
+  fn sse41_p416_matches_scalar_all_matrices() {
+    for m in [
+      ColorMatrix::Bt601,
+      ColorMatrix::Bt709,
+      ColorMatrix::Bt2020Ncl,
+      ColorMatrix::Smpte240m,
+      ColorMatrix::Fcc,
+      ColorMatrix::YCgCo,
+    ] {
+      for full in [true, false] {
+        check_p_n_444_16_u8_sse41_equivalence(16, m, full);
+        check_p_n_444_16_u16_sse41_equivalence(16, m, full);
+      }
+    }
+  }
+
+  #[test]
+  fn sse41_p416_matches_scalar_tail_widths() {
+    for w in [1usize, 3, 7, 8, 9, 15, 16, 17, 31, 33, 1920, 1921] {
+      check_p_n_444_16_u8_sse41_equivalence(w, ColorMatrix::Bt709, false);
+      check_p_n_444_16_u16_sse41_equivalence(w, ColorMatrix::Bt2020Ncl, true);
+    }
+  }
 }
