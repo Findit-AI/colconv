@@ -84,6 +84,8 @@ pub fn p416_to<S: P416Sink>(
   let h = src.height() as usize;
   let y_stride = src.y_stride() as usize;
   let uv_stride = src.uv_stride() as usize;
+  // 4:4:4 semi-planar: full-width × 2 elements per pair. See
+  // P410's walker for the rationale.
   let uv_row_elems = 2 * w;
 
   let y_plane = src.y();

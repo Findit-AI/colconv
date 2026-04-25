@@ -1958,6 +1958,13 @@ impl<'a, const BITS: u32> PnFrame<'a, BITS> {
         uv_stride,
       });
     }
+    // Interleaved UV is consecutive `(U, V)` u16 pairs. An odd
+    // u16-element stride would start every other chroma row on the
+    // V element of the previous pair, swapping U / V interpretation
+    // deterministically and producing wrong colors on alternate rows.
+    if uv_stride & 1 != 0 {
+      return Err(PnFrameError::UvStrideOdd { uv_stride });
+    }
 
     let y_min = match (y_stride as usize).checked_mul(height as usize) {
       Some(v) => v,
@@ -2253,6 +2260,11 @@ impl<'a, const BITS: u32> PnFrame422<'a, BITS> {
         uv_stride,
       });
     }
+    // Interleaved UV is consecutive `(U, V)` u16 pairs — see
+    // [`PnFrame::try_new`] for the full rationale.
+    if uv_stride & 1 != 0 {
+      return Err(PnFrameError::UvStrideOdd { uv_stride });
+    }
 
     let y_min = match (y_stride as usize).checked_mul(height as usize) {
       Some(v) => v,
@@ -2484,6 +2496,11 @@ impl<'a, const BITS: u32> PnFrame444<'a, BITS> {
         uv_stride,
       });
     }
+    // Interleaved UV is consecutive `(U, V)` u16 pairs — see
+    // [`PnFrame::try_new`] for the full rationale.
+    if uv_stride & 1 != 0 {
+      return Err(PnFrameError::UvStrideOdd { uv_stride });
+    }
 
     let y_min = match (y_stride as usize).checked_mul(height as usize) {
       Some(v) => v,
@@ -2693,12 +2710,29 @@ pub enum PnFrameError {
     /// The supplied Y‑plane stride (samples).
     y_stride: u32,
   },
-  /// `uv_stride` is smaller than the `width` `u16` elements of
-  /// interleaved UV payload one chroma row must hold.
+  /// `uv_stride` is smaller than the interleaved UV row payload
+  /// one chroma row must hold (in `u16` elements). The required
+  /// payload depends on the format: `width` for 4:2:0 / 4:2:2
+  /// (half-width × 2 elements per pair) and `2 * width` for 4:4:4
+  /// (full-width × 2 elements per pair).
   #[error("uv_stride ({uv_stride}) is smaller than UV row payload ({uv_row_elems} u16 elements)")]
   UvStrideTooSmall {
-    /// Required minimum UV‑plane stride (`= width`).
+    /// Required minimum UV‑plane stride, in `u16` elements.
     uv_row_elems: u32,
+    /// The supplied UV‑plane stride (samples).
+    uv_stride: u32,
+  },
+  /// `uv_stride` is odd. Each interleaved chroma row is laid out as
+  /// `(U, V)` pairs of `u16` elements; an odd stride starts every
+  /// other row on the opposite element of the pair, swapping the U /
+  /// V interpretation deterministically and producing wrong colors on
+  /// alternate rows. Returned by all three `PnFrame*::try_new`
+  /// constructors (`PnFrame` 4:2:0, `PnFrame422` 4:2:2,
+  /// `PnFrame444` 4:4:4).
+  #[error(
+    "uv_stride ({uv_stride}) is odd; semi-planar interleaved UV requires an even u16-element stride"
+  )]
+  UvStrideOdd {
     /// The supplied UV‑plane stride (samples).
     uv_stride: u32,
   },
@@ -2718,12 +2752,19 @@ pub enum PnFrameError {
     /// Actual samples supplied.
     actual: usize,
   },
-  /// `stride * rows` overflows `usize` (32‑bit targets only).
-  #[error("declared geometry overflows usize: stride={stride} * rows={rows}")]
+  /// Size arithmetic overflowed. Fires for either
+  /// `stride * rows` exceeding `usize::MAX` (the usual case, only
+  /// reachable on 32‑bit targets like wasm32 / i686 with extreme
+  /// dimensions) **or** the `width * 2` `u32` computation for the
+  /// 4:4:4 UV-row-payload length (`PnFrame444::try_new` only)
+  /// exceeding `u32::MAX` at extreme widths.
+  #[error("declared geometry overflows: stride={stride} * rows={rows}")]
   GeometryOverflow {
-    /// Stride of the plane whose size overflowed.
+    /// Stride (or `width`, for the `width * 2` overflow case) of
+    /// the dimension whose product overflowed.
     stride: u32,
-    /// Row count that overflowed against the stride.
+    /// Row count (or `2`, for the `width * 2` overflow case) that
+    /// overflowed against the stride.
     rows: u32,
   },
   /// A sample's low `16 - BITS` bits were non‑zero — a Pn sample
@@ -5286,6 +5327,37 @@ mod tests {
     let (y, uv) = p010_planes();
     let e = P010Frame::try_new(&y, &uv, 16, 8, 16, 8).unwrap_err();
     assert!(matches!(e, PnFrameError::UvStrideTooSmall { .. }));
+  }
+
+  #[test]
+  fn p010_try_new_rejects_odd_uv_stride() {
+    // uv_stride = 17 passes the size check (>= width = 16) but is
+    // odd, which would mis-align the (U, V) pair on every other row.
+    let y = std::vec![0u16; 16 * 8];
+    let uv = std::vec![0x8000u16; 17 * 4];
+    let e = P010Frame::try_new(&y, &uv, 16, 8, 16, 17).unwrap_err();
+    assert!(matches!(e, PnFrameError::UvStrideOdd { uv_stride: 17 }));
+  }
+
+  #[test]
+  fn p210_try_new_rejects_odd_uv_stride() {
+    // PnFrame422 chroma is half-width × full-height with 2 u16 per
+    // pair → uv_row_elems = width. Same odd-stride bug as P010.
+    let y = std::vec![0u16; 16 * 8];
+    let uv = std::vec![0x8000u16; 17 * 8];
+    let e = P210Frame::try_new(&y, &uv, 16, 8, 16, 17).unwrap_err();
+    assert!(matches!(e, PnFrameError::UvStrideOdd { uv_stride: 17 }));
+  }
+
+  #[test]
+  fn p410_try_new_rejects_odd_uv_stride() {
+    // PnFrame444 chroma is full-width × full-height with 2 u16 per
+    // pair → uv_row_elems = 2 * width = 32. uv_stride = 33 passes
+    // the size check but is odd.
+    let y = std::vec![0u16; 16 * 8];
+    let uv = std::vec![0x8000u16; 33 * 8];
+    let e = P410Frame::try_new(&y, &uv, 16, 8, 16, 33).unwrap_err();
+    assert!(matches!(e, PnFrameError::UvStrideOdd { uv_stride: 33 }));
   }
 
   #[test]

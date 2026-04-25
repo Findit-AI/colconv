@@ -2228,8 +2228,9 @@ pub(crate) fn p_n_444_to_rgb_row<const BITS: u32>(
   use_simd: bool,
 ) {
   let rgb_min = rgb_row_bytes(width);
+  let uv_min = uv_full_row_elems(width);
   assert!(y.len() >= width, "y row too short");
-  assert!(uv_full.len() >= 2 * width, "uv_full row too short");
+  assert!(uv_full.len() >= uv_min, "uv_full row too short");
   assert!(rgb_out.len() >= rgb_min, "rgb_out row too short");
 
   if use_simd {
@@ -2298,8 +2299,9 @@ pub(crate) fn p_n_444_to_rgb_u16_row<const BITS: u32>(
   use_simd: bool,
 ) {
   let rgb_min = rgb_row_elems(width);
+  let uv_min = uv_full_row_elems(width);
   assert!(y.len() >= width, "y row too short");
-  assert!(uv_full.len() >= 2 * width, "uv_full row too short");
+  assert!(uv_full.len() >= uv_min, "uv_full row too short");
   assert!(rgb_out.len() >= rgb_min, "rgb_out row too short");
 
   if use_simd {
@@ -2365,8 +2367,9 @@ pub fn p416_to_rgb_row(
   use_simd: bool,
 ) {
   let rgb_min = rgb_row_bytes(width);
+  let uv_min = uv_full_row_elems(width);
   assert!(y.len() >= width, "y row too short");
-  assert!(uv_full.len() >= 2 * width, "uv_full row too short");
+  assert!(uv_full.len() >= uv_min, "uv_full row too short");
   assert!(rgb_out.len() >= rgb_min, "rgb_out row too short");
 
   if use_simd {
@@ -2430,8 +2433,9 @@ pub fn p416_to_rgb_u16_row(
   use_simd: bool,
 ) {
   let rgb_min = rgb_row_elems(width);
+  let uv_min = uv_full_row_elems(width);
   assert!(y.len() >= width, "y row too short");
-  assert!(uv_full.len() >= 2 * width, "uv_full row too short");
+  assert!(uv_full.len() >= uv_min, "uv_full row too short");
   assert!(rgb_out.len() >= rgb_min, "rgb_out row too short");
 
   if use_simd {
@@ -2727,6 +2731,21 @@ fn rgb_row_elems(width: usize) -> usize {
   match width.checked_mul(3) {
     Some(n) => n,
     None => panic!("width ({width}) × 3 overflows usize"),
+  }
+}
+
+/// Element count of one full-width interleaved-UV row (`width × 2`)
+/// for semi-planar 4:4:4 sources (`P410` / `P412` / `P416`). One
+/// `(U, V)` pair per pixel = `2 * width` `u16` elements per row.
+/// Same `checked_mul` rationale as [`rgb_row_bytes`] — the returned
+/// length feeds into unsafe SIMD kernels' bounds via the dispatcher's
+/// `assert!`, so an unchecked multiplication on 32-bit targets could
+/// silently admit an undersized buffer.
+#[cfg_attr(not(tarpaulin), inline(always))]
+fn uv_full_row_elems(width: usize) -> usize {
+  match width.checked_mul(2) {
+    Some(n) => n,
+    None => panic!("width ({width}) × 2 overflows usize (UV row)"),
   }
 }
 

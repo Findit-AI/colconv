@@ -92,7 +92,10 @@ pub fn p410_to<S: P410Sink>(
   let h = src.height() as usize;
   let y_stride = src.y_stride() as usize;
   let uv_stride = src.uv_stride() as usize;
-  let uv_row_elems = 2 * w; // full-width × 2 elements per pair
+  // 4:4:4 semi-planar: full-width × 2 elements per pair. The
+  // PnFrame444 validator already rejects geometries where `2 * width`
+  // overflows, so a plain multiplication is safe here.
+  let uv_row_elems = 2 * w;
 
   let y_plane = src.y();
   let uv_plane = src.uv();
