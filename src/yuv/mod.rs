@@ -86,10 +86,9 @@
 //!
 //! # Kernel families
 //!
-//! - **Q15 i32 family** covers 8‑bit (non-generic `yuv_420_to_rgb_row`
-//!   + siblings) and 9/10/12/14‑bit (const-generic
-//!   `yuv_420p_n_to_rgb_*<BITS>` and `yuv_444p_n_to_rgb_*<BITS>` +
-//!   siblings). Hot path for SDR + most HDR workflows.
+//! - **Q15 i32 family** covers 8‑bit (non-generic `yuv_420_to_rgb_row` + siblings)
+//!   and 9/10/12/14‑bit (const-generic `yuv_420p_n_to_rgb_*<BITS>`
+//!   and `yuv_444p_n_to_rgb_*<BITS>` + siblings). Hot path for SDR + most HDR workflows.
 //! - **i64 chroma-widened family** covers 16‑bit
 //!   (`yuv_420p16_to_rgb_*` + `yuv_444p16_to_rgb_*` +
 //!   `p16_to_rgb_*`). The chroma matrix multiply
