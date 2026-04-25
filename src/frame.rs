@@ -1958,6 +1958,13 @@ impl<'a, const BITS: u32> PnFrame<'a, BITS> {
         uv_stride,
       });
     }
+    // Interleaved UV is consecutive `(U, V)` u16 pairs. An odd
+    // u16-element stride would start every other chroma row on the
+    // V element of the previous pair, swapping U / V interpretation
+    // deterministically and producing wrong colors on alternate rows.
+    if uv_stride & 1 != 0 {
+      return Err(PnFrameError::UvStrideOdd { uv_stride });
+    }
 
     let y_min = match (y_stride as usize).checked_mul(height as usize) {
       Some(v) => v,
@@ -2175,6 +2182,482 @@ pub type P012Frame<'a> = PnFrame<'a, 12>;
 /// unchanged.
 pub type P016Frame<'a> = PnFrame<'a, 16>;
 
+/// A validated **4:2:2** semi-planar high-bit-packed frame, generic
+/// over `const BITS: u32 ∈ {10, 12, 16}`.
+///
+/// The 4:2:2 twin of [`PnFrame`]: same Y + interleaved-UV plane shape,
+/// but chroma is **full-height** (one chroma row per Y row, not one
+/// per two). UV remains horizontally subsampled — each chroma row
+/// holds `width / 2` interleaved `U, V` pairs = `width` `u16` elements.
+/// Hardware decoders / transcode pipelines emit this layout for
+/// chroma-rich pro-video sources (NVDEC / CUDA HDR 4:2:2 download
+/// targets and some QSV configurations).
+///
+/// FFmpeg variants: `P210LE` (10-bit), `P212LE` (12-bit, FFmpeg 5.0+),
+/// `P216LE` (16-bit). Each `u16` packs its `BITS` active bits in the
+/// **high** `BITS` positions, matching the [`PnFrame`] convention; at
+/// `BITS == 16` every bit is active.
+///
+/// Stride is in **`u16` samples**, not bytes (callers holding an
+/// FFmpeg byte buffer must cast and divide `linesize[i]` by 2).
+///
+/// Two planes:
+/// - `y` — full-size luma, `y_stride >= width`, length
+///   `>= y_stride * height`.
+/// - `uv` — interleaved chroma at **half-width × full-height**, so
+///   each chroma row holds `width` `u16` elements (= `width / 2`
+///   pairs); `uv_stride >= width`, length `>= uv_stride * height`.
+///
+/// `width` must be even (4:2:2 subsamples chroma horizontally).
+/// `height` has no parity constraint.
+///
+/// # Input sample range and packing sanity
+///
+/// Same conventions and caveats as [`PnFrame`] —
+/// [`Self::try_new_checked`] scans every sample and rejects any with
+/// non-zero low `16 - BITS` bits. The catch rate is identical to
+/// [`PnFrame`] at the same `BITS`. See [`PnFrame::try_new_checked`]
+/// for the full discussion of why this is a packing sanity check, not
+/// a provenance validator.
+#[derive(Debug, Clone, Copy)]
+pub struct PnFrame422<'a, const BITS: u32> {
+  y: &'a [u16],
+  uv: &'a [u16],
+  width: u32,
+  height: u32,
+  y_stride: u32,
+  uv_stride: u32,
+}
+
+impl<'a, const BITS: u32> PnFrame422<'a, BITS> {
+  /// Constructs a new [`PnFrame422`], validating dimensions, plane
+  /// lengths, and the `BITS` parameter.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn try_new(
+    y: &'a [u16],
+    uv: &'a [u16],
+    width: u32,
+    height: u32,
+    y_stride: u32,
+    uv_stride: u32,
+  ) -> Result<Self, PnFrameError> {
+    if BITS != 10 && BITS != 12 && BITS != 16 {
+      return Err(PnFrameError::UnsupportedBits { bits: BITS });
+    }
+    if width == 0 || height == 0 {
+      return Err(PnFrameError::ZeroDimension { width, height });
+    }
+    if width & 1 != 0 {
+      return Err(PnFrameError::OddWidth { width });
+    }
+    if y_stride < width {
+      return Err(PnFrameError::YStrideTooSmall { width, y_stride });
+    }
+    let uv_row_elems = width;
+    if uv_stride < uv_row_elems {
+      return Err(PnFrameError::UvStrideTooSmall {
+        uv_row_elems,
+        uv_stride,
+      });
+    }
+    // Interleaved UV is consecutive `(U, V)` u16 pairs — see
+    // [`PnFrame::try_new`] for the full rationale.
+    if uv_stride & 1 != 0 {
+      return Err(PnFrameError::UvStrideOdd { uv_stride });
+    }
+
+    let y_min = match (y_stride as usize).checked_mul(height as usize) {
+      Some(v) => v,
+      None => {
+        return Err(PnFrameError::GeometryOverflow {
+          stride: y_stride,
+          rows: height,
+        });
+      }
+    };
+    if y.len() < y_min {
+      return Err(PnFrameError::YPlaneTooShort {
+        expected: y_min,
+        actual: y.len(),
+      });
+    }
+    // 4:2:2: chroma is full-height (height rows, not div_ceil(height/2)).
+    let uv_min = match (uv_stride as usize).checked_mul(height as usize) {
+      Some(v) => v,
+      None => {
+        return Err(PnFrameError::GeometryOverflow {
+          stride: uv_stride,
+          rows: height,
+        });
+      }
+    };
+    if uv.len() < uv_min {
+      return Err(PnFrameError::UvPlaneTooShort {
+        expected: uv_min,
+        actual: uv.len(),
+      });
+    }
+
+    Ok(Self {
+      y,
+      uv,
+      width,
+      height,
+      y_stride,
+      uv_stride,
+    })
+  }
+
+  /// Constructs a new [`PnFrame422`], panicking on invalid inputs.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn new(
+    y: &'a [u16],
+    uv: &'a [u16],
+    width: u32,
+    height: u32,
+    y_stride: u32,
+    uv_stride: u32,
+  ) -> Self {
+    match Self::try_new(y, uv, width, height, y_stride, uv_stride) {
+      Ok(frame) => frame,
+      Err(_) => panic!("invalid PnFrame422 dimensions, plane lengths, or BITS value"),
+    }
+  }
+
+  /// Like [`Self::try_new`] but additionally scans every sample and
+  /// rejects any whose low `16 - BITS` bits are non-zero. See
+  /// [`PnFrame::try_new_checked`] for the full discussion of catch
+  /// rates and limitations at each `BITS`.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn try_new_checked(
+    y: &'a [u16],
+    uv: &'a [u16],
+    width: u32,
+    height: u32,
+    y_stride: u32,
+    uv_stride: u32,
+  ) -> Result<Self, PnFrameError> {
+    let frame = Self::try_new(y, uv, width, height, y_stride, uv_stride)?;
+    if BITS == 16 {
+      return Ok(frame);
+    }
+    let low_bits = 16 - BITS;
+    let low_mask: u16 = ((1u32 << low_bits) - 1) as u16;
+    let w = width as usize;
+    let h = height as usize;
+    let uv_w = w; // half-width × 2 elements per pair = width u16 elements per row
+    for row in 0..h {
+      let start = row * y_stride as usize;
+      for (col, &s) in y[start..start + w].iter().enumerate() {
+        if s & low_mask != 0 {
+          return Err(PnFrameError::SampleLowBitsSet {
+            plane: PnFramePlane::Y,
+            index: start + col,
+            value: s,
+            low_bits,
+          });
+        }
+      }
+    }
+    // 4:2:2: scan every chroma row (full-height).
+    for row in 0..h {
+      let start = row * uv_stride as usize;
+      for (col, &s) in uv[start..start + uv_w].iter().enumerate() {
+        if s & low_mask != 0 {
+          return Err(PnFrameError::SampleLowBitsSet {
+            plane: PnFramePlane::Uv,
+            index: start + col,
+            value: s,
+            low_bits,
+          });
+        }
+      }
+    }
+    Ok(frame)
+  }
+
+  /// Y (luma) plane samples (`u16` elements).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn y(&self) -> &'a [u16] {
+    self.y
+  }
+  /// Interleaved UV plane samples — each row holds `width` `u16`
+  /// elements laid out as `U0, V0, U1, V1, …, U_{w/2-1}, V_{w/2-1}`.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn uv(&self) -> &'a [u16] {
+    self.uv
+  }
+  /// Frame width in pixels. Always even.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn width(&self) -> u32 {
+    self.width
+  }
+  /// Frame height in pixels.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn height(&self) -> u32 {
+    self.height
+  }
+  /// Sample stride of the Y plane (`>= width`).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn y_stride(&self) -> u32 {
+    self.y_stride
+  }
+  /// Sample stride of the interleaved UV plane (`>= width`).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn uv_stride(&self) -> u32 {
+    self.uv_stride
+  }
+  /// The `BITS` const parameter.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn bits(&self) -> u32 {
+    BITS
+  }
+}
+
+/// 4:2:2 semi-planar, 10-bit (`AV_PIX_FMT_P210LE`). Alias over
+/// [`PnFrame422`]`<10>`.
+pub type P210Frame<'a> = PnFrame422<'a, 10>;
+/// 4:2:2 semi-planar, 12-bit (`AV_PIX_FMT_P212LE`, FFmpeg 5.0+).
+/// Alias over [`PnFrame422`]`<12>`.
+pub type P212Frame<'a> = PnFrame422<'a, 12>;
+/// 4:2:2 semi-planar, 16-bit (`AV_PIX_FMT_P216LE`). Alias over
+/// [`PnFrame422`]`<16>`. At 16 bits the high-vs-low packing
+/// distinction degenerates — every bit is active.
+pub type P216Frame<'a> = PnFrame422<'a, 16>;
+
+/// A validated **4:4:4** semi-planar high-bit-packed frame, generic
+/// over `const BITS: u32 ∈ {10, 12, 16}`.
+///
+/// The 4:4:4 twin of [`PnFrame`] / [`PnFrame422`]: same Y + interleaved
+/// UV layout, but chroma is **full-width × full-height** (1:1 with Y,
+/// no subsampling). Each chroma row holds `2 * width` `u16` elements
+/// (= `width` interleaved `U, V` pairs). NVDEC / CUDA HDR 4:4:4
+/// download target.
+///
+/// FFmpeg variants: `P410LE` (10-bit), `P412LE` (12-bit, FFmpeg 5.0+),
+/// `P416LE` (16-bit). Active-bit packing identical to [`PnFrame`].
+///
+/// Stride is in **`u16` samples**, not bytes.
+///
+/// Two planes:
+/// - `y` — full-size luma, `y_stride >= width`, length
+///   `>= y_stride * height`.
+/// - `uv` — interleaved chroma at **full-width × full-height**, so
+///   each chroma row holds `2 * width` `u16` elements (= `width`
+///   pairs); `uv_stride >= 2 * width`, length `>= uv_stride * height`.
+///
+/// No width-parity constraint (4:4:4 chroma is 1:1 with Y, not paired
+/// horizontally).
+#[derive(Debug, Clone, Copy)]
+pub struct PnFrame444<'a, const BITS: u32> {
+  y: &'a [u16],
+  uv: &'a [u16],
+  width: u32,
+  height: u32,
+  y_stride: u32,
+  uv_stride: u32,
+}
+
+impl<'a, const BITS: u32> PnFrame444<'a, BITS> {
+  /// Constructs a new [`PnFrame444`], validating dimensions, plane
+  /// lengths, and the `BITS` parameter.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn try_new(
+    y: &'a [u16],
+    uv: &'a [u16],
+    width: u32,
+    height: u32,
+    y_stride: u32,
+    uv_stride: u32,
+  ) -> Result<Self, PnFrameError> {
+    if BITS != 10 && BITS != 12 && BITS != 16 {
+      return Err(PnFrameError::UnsupportedBits { bits: BITS });
+    }
+    if width == 0 || height == 0 {
+      return Err(PnFrameError::ZeroDimension { width, height });
+    }
+    // 4:4:4: no width-parity constraint.
+    if y_stride < width {
+      return Err(PnFrameError::YStrideTooSmall { width, y_stride });
+    }
+    // UV row holds 2 * width u16 elements (one pair per pixel).
+    let uv_row_elems = match width.checked_mul(2) {
+      Some(v) => v,
+      None => {
+        return Err(PnFrameError::GeometryOverflow {
+          stride: width,
+          rows: 2,
+        });
+      }
+    };
+    if uv_stride < uv_row_elems {
+      return Err(PnFrameError::UvStrideTooSmall {
+        uv_row_elems,
+        uv_stride,
+      });
+    }
+    // Interleaved UV is consecutive `(U, V)` u16 pairs — see
+    // [`PnFrame::try_new`] for the full rationale.
+    if uv_stride & 1 != 0 {
+      return Err(PnFrameError::UvStrideOdd { uv_stride });
+    }
+
+    let y_min = match (y_stride as usize).checked_mul(height as usize) {
+      Some(v) => v,
+      None => {
+        return Err(PnFrameError::GeometryOverflow {
+          stride: y_stride,
+          rows: height,
+        });
+      }
+    };
+    if y.len() < y_min {
+      return Err(PnFrameError::YPlaneTooShort {
+        expected: y_min,
+        actual: y.len(),
+      });
+    }
+    let uv_min = match (uv_stride as usize).checked_mul(height as usize) {
+      Some(v) => v,
+      None => {
+        return Err(PnFrameError::GeometryOverflow {
+          stride: uv_stride,
+          rows: height,
+        });
+      }
+    };
+    if uv.len() < uv_min {
+      return Err(PnFrameError::UvPlaneTooShort {
+        expected: uv_min,
+        actual: uv.len(),
+      });
+    }
+
+    Ok(Self {
+      y,
+      uv,
+      width,
+      height,
+      y_stride,
+      uv_stride,
+    })
+  }
+
+  /// Constructs a new [`PnFrame444`], panicking on invalid inputs.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn new(
+    y: &'a [u16],
+    uv: &'a [u16],
+    width: u32,
+    height: u32,
+    y_stride: u32,
+    uv_stride: u32,
+  ) -> Self {
+    match Self::try_new(y, uv, width, height, y_stride, uv_stride) {
+      Ok(frame) => frame,
+      Err(_) => panic!("invalid PnFrame444 dimensions, plane lengths, or BITS value"),
+    }
+  }
+
+  /// Like [`Self::try_new`] but additionally scans every sample and
+  /// rejects any whose low `16 - BITS` bits are non-zero. See
+  /// [`PnFrame::try_new_checked`] for the full discussion of catch
+  /// rates and limitations.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn try_new_checked(
+    y: &'a [u16],
+    uv: &'a [u16],
+    width: u32,
+    height: u32,
+    y_stride: u32,
+    uv_stride: u32,
+  ) -> Result<Self, PnFrameError> {
+    let frame = Self::try_new(y, uv, width, height, y_stride, uv_stride)?;
+    if BITS == 16 {
+      return Ok(frame);
+    }
+    let low_bits = 16 - BITS;
+    let low_mask: u16 = ((1u32 << low_bits) - 1) as u16;
+    let w = width as usize;
+    let h = height as usize;
+    let uv_w = 2 * w; // full-width × 2 elements per pair
+    for row in 0..h {
+      let start = row * y_stride as usize;
+      for (col, &s) in y[start..start + w].iter().enumerate() {
+        if s & low_mask != 0 {
+          return Err(PnFrameError::SampleLowBitsSet {
+            plane: PnFramePlane::Y,
+            index: start + col,
+            value: s,
+            low_bits,
+          });
+        }
+      }
+    }
+    for row in 0..h {
+      let start = row * uv_stride as usize;
+      for (col, &s) in uv[start..start + uv_w].iter().enumerate() {
+        if s & low_mask != 0 {
+          return Err(PnFrameError::SampleLowBitsSet {
+            plane: PnFramePlane::Uv,
+            index: start + col,
+            value: s,
+            low_bits,
+          });
+        }
+      }
+    }
+    Ok(frame)
+  }
+
+  /// Y (luma) plane samples (`u16` elements).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn y(&self) -> &'a [u16] {
+    self.y
+  }
+  /// Interleaved UV plane samples — each row holds `2 * width` `u16`
+  /// elements laid out as `U0, V0, U1, V1, …, U_{w-1}, V_{w-1}`.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn uv(&self) -> &'a [u16] {
+    self.uv
+  }
+  /// Frame width in pixels. No parity constraint.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn width(&self) -> u32 {
+    self.width
+  }
+  /// Frame height in pixels.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn height(&self) -> u32 {
+    self.height
+  }
+  /// Sample stride of the Y plane (`>= width`).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn y_stride(&self) -> u32 {
+    self.y_stride
+  }
+  /// Sample stride of the interleaved UV plane (`>= 2 * width`).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn uv_stride(&self) -> u32 {
+    self.uv_stride
+  }
+  /// The `BITS` const parameter.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn bits(&self) -> u32 {
+    BITS
+  }
+}
+
+/// 4:4:4 semi-planar, 10-bit (`AV_PIX_FMT_P410LE`). Alias over
+/// [`PnFrame444`]`<10>`.
+pub type P410Frame<'a> = PnFrame444<'a, 10>;
+/// 4:4:4 semi-planar, 12-bit (`AV_PIX_FMT_P412LE`, FFmpeg 5.0+).
+/// Alias over [`PnFrame444`]`<12>`.
+pub type P412Frame<'a> = PnFrame444<'a, 12>;
+/// 4:4:4 semi-planar, 16-bit (`AV_PIX_FMT_P416LE`). Alias over
+/// [`PnFrame444`]`<16>`.
+pub type P416Frame<'a> = PnFrame444<'a, 16>;
+
 /// Identifies which plane of a [`PnFrame`] a
 /// [`PnFrameError::SampleLowBitsSet`] refers to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Display)]
@@ -2209,9 +2692,12 @@ pub enum PnFrameError {
     /// The supplied height.
     height: u32,
   },
-  /// `width` was odd. Same 4:2:0 rationale as the other semi‑planar
-  /// formats.
-  #[error("width ({width}) is odd; 4:2:0 requires even width")]
+  /// `width` was odd. Returned by [`PnFrame::try_new`] (4:2:0) and
+  /// [`PnFrame422::try_new`] (4:2:2) — both subsample chroma 2:1
+  /// horizontally and pair `(U, V)` per chroma sample, so the frame
+  /// width must be even. 4:4:4 ([`PnFrame444`]) has no parity
+  /// constraint and never emits this variant.
+  #[error("width ({width}) is odd; horizontally-subsampled chroma requires even width")]
   OddWidth {
     /// The supplied width.
     width: u32,
@@ -2224,12 +2710,29 @@ pub enum PnFrameError {
     /// The supplied Y‑plane stride (samples).
     y_stride: u32,
   },
-  /// `uv_stride` is smaller than the `width` `u16` elements of
-  /// interleaved UV payload one chroma row must hold.
+  /// `uv_stride` is smaller than the interleaved UV row payload
+  /// one chroma row must hold (in `u16` elements). The required
+  /// payload depends on the format: `width` for 4:2:0 / 4:2:2
+  /// (half-width × 2 elements per pair) and `2 * width` for 4:4:4
+  /// (full-width × 2 elements per pair).
   #[error("uv_stride ({uv_stride}) is smaller than UV row payload ({uv_row_elems} u16 elements)")]
   UvStrideTooSmall {
-    /// Required minimum UV‑plane stride (`= width`).
+    /// Required minimum UV‑plane stride, in `u16` elements.
     uv_row_elems: u32,
+    /// The supplied UV‑plane stride (samples).
+    uv_stride: u32,
+  },
+  /// `uv_stride` is odd. Each interleaved chroma row is laid out as
+  /// `(U, V)` pairs of `u16` elements; an odd stride starts every
+  /// other row on the opposite element of the pair, swapping the U /
+  /// V interpretation deterministically and producing wrong colors on
+  /// alternate rows. Returned by all three `PnFrame*::try_new`
+  /// constructors (`PnFrame` 4:2:0, `PnFrame422` 4:2:2,
+  /// `PnFrame444` 4:4:4).
+  #[error(
+    "uv_stride ({uv_stride}) is odd; semi-planar interleaved UV requires an even u16-element stride"
+  )]
+  UvStrideOdd {
     /// The supplied UV‑plane stride (samples).
     uv_stride: u32,
   },
@@ -2249,12 +2752,19 @@ pub enum PnFrameError {
     /// Actual samples supplied.
     actual: usize,
   },
-  /// `stride * rows` overflows `usize` (32‑bit targets only).
-  #[error("declared geometry overflows usize: stride={stride} * rows={rows}")]
+  /// Size arithmetic overflowed. Fires for either
+  /// `stride * rows` exceeding `usize::MAX` (the usual case, only
+  /// reachable on 32‑bit targets like wasm32 / i686 with extreme
+  /// dimensions) **or** the `width * 2` `u32` computation for the
+  /// 4:4:4 UV-row-payload length (`PnFrame444::try_new` only)
+  /// exceeding `u32::MAX` at extreme widths.
+  #[error("declared geometry overflows: stride={stride} * rows={rows}")]
   GeometryOverflow {
-    /// Stride of the plane whose size overflowed.
+    /// Stride (or `width`, for the `width * 2` overflow case) of
+    /// the dimension whose product overflowed.
     stride: u32,
-    /// Row count that overflowed against the stride.
+    /// Row count (or `2`, for the `width * 2` overflow case) that
+    /// overflowed against the stride.
     rows: u32,
   },
   /// A sample's low `16 - BITS` bits were non‑zero — a Pn sample
@@ -4817,6 +5327,37 @@ mod tests {
     let (y, uv) = p010_planes();
     let e = P010Frame::try_new(&y, &uv, 16, 8, 16, 8).unwrap_err();
     assert!(matches!(e, PnFrameError::UvStrideTooSmall { .. }));
+  }
+
+  #[test]
+  fn p010_try_new_rejects_odd_uv_stride() {
+    // uv_stride = 17 passes the size check (>= width = 16) but is
+    // odd, which would mis-align the (U, V) pair on every other row.
+    let y = std::vec![0u16; 16 * 8];
+    let uv = std::vec![0x8000u16; 17 * 4];
+    let e = P010Frame::try_new(&y, &uv, 16, 8, 16, 17).unwrap_err();
+    assert!(matches!(e, PnFrameError::UvStrideOdd { uv_stride: 17 }));
+  }
+
+  #[test]
+  fn p210_try_new_rejects_odd_uv_stride() {
+    // PnFrame422 chroma is half-width × full-height with 2 u16 per
+    // pair → uv_row_elems = width. Same odd-stride bug as P010.
+    let y = std::vec![0u16; 16 * 8];
+    let uv = std::vec![0x8000u16; 17 * 8];
+    let e = P210Frame::try_new(&y, &uv, 16, 8, 16, 17).unwrap_err();
+    assert!(matches!(e, PnFrameError::UvStrideOdd { uv_stride: 17 }));
+  }
+
+  #[test]
+  fn p410_try_new_rejects_odd_uv_stride() {
+    // PnFrame444 chroma is full-width × full-height with 2 u16 per
+    // pair → uv_row_elems = 2 * width = 32. uv_stride = 33 passes
+    // the size check but is odd.
+    let y = std::vec![0u16; 16 * 8];
+    let uv = std::vec![0x8000u16; 33 * 8];
+    let e = P410Frame::try_new(&y, &uv, 16, 8, 16, 33).unwrap_err();
+    assert!(matches!(e, PnFrameError::UvStrideOdd { uv_stride: 33 }));
   }
 
   #[test]

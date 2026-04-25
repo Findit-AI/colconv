@@ -84,6 +84,23 @@
 //!   sample (reference). At 16 bits the high‑vs‑low packing
 //!   distinction degenerates — every bit is active.
 //!
+//! # Shipped (high-bit-depth 4:2:2 / 4:4:4, high-bit-packed semi-planar)
+//!
+//! - [`P210`](crate::yuv::P210) /
+//!   [`P212`](crate::yuv::P212) /
+//!   [`P216`](crate::yuv::P216) — 4:2:2 semi‑planar at 10 / 12 / 16
+//!   bits. Reuses the 4:2:0 P‑family per‑row kernels verbatim
+//!   (half‑width interleaved UV layout is identical); only the walker
+//!   reads chroma row `r` instead of `r / 2`. NVDEC / CUDA HDR 4:2:2
+//!   download targets.
+//! - [`P410`](crate::yuv::P410) /
+//!   [`P412`](crate::yuv::P412) /
+//!   [`P416`](crate::yuv::P416) — 4:4:4 semi‑planar at 10 / 12 / 16
+//!   bits. Full‑width interleaved UV (`2 * width` u16 elements per
+//!   row, one `U, V` pair per pixel). Dedicated row‑kernel family
+//!   `p_n_444_to_rgb_*<BITS>` + `p_n_444_16_to_rgb_*`. NVDEC / CUDA
+//!   HDR 4:4:4 download target.
+//!
 //! # Kernel families
 //!
 //! - **Q15 i32 family** covers 8‑bit (non-generic `yuv_420_to_rgb_row` + siblings)
@@ -99,14 +116,28 @@
 //!
 //! # Not yet shipped
 //!
-//! - **u16 semi‑planar 4:2:2 / 4:4:4** (`P210`, `P216`, `P410`,
-//!   `P416`) — follow‑up. Would reuse the 16‑bit u16 kernel family
-//!   with 4:2:2 / 4:4:4 chroma strides.
 //! - **Legacy planar** (`Yuv411p`, `Yuv410p`) — DV / Cinepak only;
 //!   uncommon enough that adding them would be speculative.
 //! - **Packed RGB sources** (`Rgb24`, `Bgr24`, `Rgba`, `Bgra`,
 //!   `Rgba1010102`, etc.) — follow‑up. Will land as their own
 //!   family of `*_to` kernels feeding a new row‑shape subtrait.
+//!
+//! # Tracked refactor (no behavior change)
+//!
+//! Every walker module below follows the same per‑format pattern:
+//! marker → `Row` struct → `Sink` subtrait → `*_to` walker fn. The
+//! walker bodies are ~85% duplication across the ~30 modules; only
+//! the per‑row chroma slice length, the chroma‑row index expression,
+//! and the `Row::new(...)` call vary. A `walker!` macro expanding
+//! the boilerplate from a small spec would consolidate the family.
+//!
+//! Deferred because doing it incrementally creates asymmetry
+//! (some walkers macro‑expanded, others hand‑written). The right
+//! shape is a single all‑walkers‑refactored PR with zero behavioral
+//! change — easy to review on its own merits, unrelated to any
+//! pending format‑shipping work. See `docs/color-conversion-functions.md`
+//! § "Cleanup follow‑ups → Walker module deduplication" for the full
+//! discussion (originated from PR #14 review).
 
 mod nv12;
 mod nv16;
@@ -116,6 +147,12 @@ mod nv42;
 mod p010;
 mod p012;
 mod p016;
+mod p210;
+mod p212;
+mod p216;
+mod p410;
+mod p412;
+mod p416;
 mod yuv420p;
 mod yuv420p10;
 mod yuv420p12;
@@ -146,6 +183,12 @@ pub use nv42::{Nv42, Nv42Row, Nv42Sink, nv42_to};
 pub use p010::{P010, P010Row, P010Sink, p010_to};
 pub use p012::{P012, P012Row, P012Sink, p012_to};
 pub use p016::{P016, P016Row, P016Sink, p016_to};
+pub use p210::{P210, P210Row, P210Sink, p210_to};
+pub use p212::{P212, P212Row, P212Sink, p212_to};
+pub use p216::{P216, P216Row, P216Sink, p216_to};
+pub use p410::{P410, P410Row, P410Sink, p410_to};
+pub use p412::{P412, P412Row, P412Sink, p412_to};
+pub use p416::{P416, P416Row, P416Sink, p416_to};
 pub use yuv420p::{Yuv420p, Yuv420pRow, Yuv420pSink, yuv420p_to};
 pub use yuv420p9::{Yuv420p9, Yuv420p9Row, Yuv420p9Sink, yuv420p9_to};
 pub use yuv420p10::{Yuv420p10, Yuv420p10Row, Yuv420p10Sink, yuv420p10_to};

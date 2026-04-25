@@ -1,5 +1,90 @@
 # UNRELEASED
 
+## Ship 7 — u16 semi-planar 4:2:2 / 4:4:4 (P210 / P212 / P216 / P410 / P412 / P416)
+
+Six new high-bit-packed semi-planar formats from the FFmpeg HW-decode
+download space (CUDA / NVDEC / QSV emit these for HDR 4:2:2 and 4:4:4
+content).
+
+### New formats
+
+- **`P210`** / **`P212`** / **`P216`** — 4:2:2 semi-planar at 10 / 12 /
+  16 bits. Const-generic `PnFrame422<BITS>` with aliases. Per-row
+  layout is identical to P010/P012/P016 (half-width interleaved UV =
+  `width` u16 elements per row); only the walker reads chroma row
+  `r` instead of `r / 2` (4:2:2 vs 4:2:0). MixedSinker impls reuse
+  the existing `p010_to_rgb_*` / `p012_to_rgb_*` / `p016_to_rgb_*`
+  row primitives — **zero new SIMD code** for 4:2:2.
+- **`P410`** / **`P412`** / **`P416`** — 4:4:4 semi-planar at 10 / 12 /
+  16 bits. Const-generic `PnFrame444<BITS>` with aliases. UV is
+  full-width (`2 * width` u16 elements per row, one `U, V` pair per
+  pixel — no horizontal chroma subsampling). New row-primitive
+  family `p_n_444_to_rgb_*<BITS>` (BITS ∈ {10, 12}, Q15 i32 pipeline)
+  + dedicated `p_n_444_16_to_rgb_*` (16-bit, parallel i64-chroma path
+  for u16 output).
+
+Frame error type: `PnFrameError` extended with the same variants for
+both new families. The `OddWidth` variant message was reworded
+format-agnostically (`"horizontally-subsampled chroma requires even
+width"`) since it now surfaces from both `PnFrame::try_new` (4:2:0)
+and `PnFrame422::try_new` (4:2:2). `PnFrame444` has no parity
+constraint and never emits this variant.
+
+### SIMD coverage (4:4:4 family)
+
+| Kernel                                  | NEON | SSE4.1 | AVX2 | AVX-512 | wasm simd128 |
+| --------------------------------------- | :--: | :----: | :--: | :-----: | :----------: |
+| `p_n_444_to_rgb_row<BITS>`              |  ✅  |   ✅   |  ✅  |    ✅   |      ✅      |
+| `p_n_444_to_rgb_u16_row<BITS>`          |  ✅  |   ✅   |  ✅  |    ✅   |      ✅      |
+| `p_n_444_16_to_rgb_row`                 |  ✅  |   ✅   |  ✅  |    ✅   |      ✅      |
+| `p_n_444_16_to_rgb_u16_row`             |  ✅  |   ✅   |  ✅  |    ✅   |      ✅      |
+
+**Native SIMD on every supported backend** for both u8 and u16 output.
+Block sizes per iteration:
+
+| Backend       | u8 / u16-low | u16 i64 (P416) |
+| ------------- | :----------: | :------------: |
+| NEON          | 16 px        | 8 px           |
+| SSE4.1        | 16 px        | 8 px           |
+| AVX2          | 32 px        | 16 px          |
+| AVX-512       | 64 px        | 32 px          |
+| wasm simd128  | 16 px        | 8 px           |
+
+UV deinterleave per-arch: `vld2q_u16` (NEON), `_mm_shuffle_epi8` +
+permutes (SSE4.1), `_mm256_shuffle_epi8` + `_mm256_permute2x128_si256`
+(AVX2), `_mm512_shuffle_epi8` + `_mm512_permutexvar_epi64` (AVX-512),
+`u8x16_swizzle` (wasm simd128).
+
+The 16-bit u16-output i64 chroma path uses **native `_mm512_srai_epi64`
+on AVX-512** and **native `i64x2_shr` on wasm** — no bias trick. AVX2
+and SSE4.1 use the `srai64_15_x4` / `srai64_15` bias trick (those ISAs
+lack arithmetic i64 right shift). NEON uses native `vshrq_n_s64`.
+
+### MixedSinker integration
+
+6 new `MixedSinker<F>` impls (P210 / P212 / P216 / P410 / P412 /
+P416). New `RowSlice` variants for the 4:4:4 chroma rows:
+`UvFull10`, `UvFull12`, `UvFull16`. The 4:2:2 impls reuse the
+existing `UvHalf10/12/16` variants since the per-row layout is
+identical to 4:2:0.
+
+### Tests
+
+- 6 new sanity gray-to-gray `MixedSinker` integration tests.
+- 3 new walker-level SIMD-vs-scalar equivalence tests for P410 / P412
+  / P416 at width 1922 (forces tail handling), pseudo-random chroma,
+  full + limited range, all matrices.
+- 25 new per-arch SIMD scalar-equivalence tests for the new
+  `p_n_444_to_rgb_*<BITS>` and `p_n_444_16_to_rgb_*` kernels —
+  5 tests × 5 backends (NEON, SSE4.1, AVX2, AVX-512, wasm simd128).
+  Cover all 6 ColorMatrix variants × full + limited range at the
+  backend's natural width, plus tail widths {1, 3, 7, 8, 9, 15, 16,
+  17, 31, 33, 47, 63, 65, 95, 127, 129, 1920, 1921} forcing
+  scalar-tail fallback at every block-size boundary.
+- **Total suite: 318 passed on aarch64** (up from 304 at Ship 6b);
+  +20 tests fire on x86_64 (15 SSE4.1 / AVX2 / AVX-512) / wasm32 (5)
+  CI runners.
+
 ## Ship 6b — 9-bit family + 4:4:0 family (Tier 1 completion)
 
 Closes the remaining FFmpeg `AVPixelFormat` Tier 1 gap. Six new
