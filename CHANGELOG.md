@@ -24,9 +24,11 @@ content).
   for u16 output).
 
 Frame error type: `PnFrameError` extended with the same variants for
-both new families. The `OddWidth` variant message kept the
-4:2:0-specific wording (it applies to PnFrame422 too — 4:2:2 also
-requires even width).
+both new families. The `OddWidth` variant message was reworded
+format-agnostically (`"horizontally-subsampled chroma requires even
+width"`) since it now surfaces from both `PnFrame::try_new` (4:2:0)
+and `PnFrame422::try_new` (4:2:2). `PnFrame444` has no parity
+constraint and never emits this variant.
 
 ### SIMD coverage (4:4:4 family)
 

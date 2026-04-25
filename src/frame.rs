@@ -2675,9 +2675,12 @@ pub enum PnFrameError {
     /// The supplied height.
     height: u32,
   },
-  /// `width` was odd. Same 4:2:0 rationale as the other semi‑planar
-  /// formats.
-  #[error("width ({width}) is odd; 4:2:0 requires even width")]
+  /// `width` was odd. Returned by [`PnFrame::try_new`] (4:2:0) and
+  /// [`PnFrame422::try_new`] (4:2:2) — both subsample chroma 2:1
+  /// horizontally and pair `(U, V)` per chroma sample, so the frame
+  /// width must be even. 4:4:4 ([`PnFrame444`]) has no parity
+  /// constraint and never emits this variant.
+  #[error("width ({width}) is odd; horizontally-subsampled chroma requires even width")]
   OddWidth {
     /// The supplied width.
     width: u32,
