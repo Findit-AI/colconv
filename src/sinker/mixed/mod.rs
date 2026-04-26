@@ -1120,9 +1120,10 @@ pub(super) fn rgba_plane_row_slice(
 }
 
 /// `u16` analogue of [`rgba_plane_row_slice`] — slices the RGBA row out
-/// of an attached `u16` RGBA plane buffer. Element count and byte
-/// offsets are identical (both `× 4`); the only difference is the
-/// element type, so the overflow check is the same. Used by the
+/// of an attached `u16` RGBA plane buffer. This helper indexes in `u16`
+/// elements, not bytes: like the `u8` variant, RGBA rows use `× 4`
+/// elements per pixel, so the overflow check is the same, but the byte
+/// offsets differ because each element is 2 bytes. Used by the
 /// high-bit-depth 4:2:0 sinkers that fan `u16` RGB out to `u16` RGBA.
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(super) fn rgba_u16_plane_row_slice(
