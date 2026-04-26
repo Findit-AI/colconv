@@ -1070,8 +1070,9 @@ impl<'a> MixedSinker<'a, Yuv422p16> {
   }
 
   /// Attaches a packed **8‑bit** RGBA output buffer. The 16‑bit YUV
-  /// source is converted to 8‑bit RGBA via the `BITS = 16` Q15 kernel
-  /// family; alpha = `0xFF` (Yuv422p16 has no alpha plane).
+  /// source is converted to 8‑bit RGBA via the dedicated `BITS = 16`
+  /// kernel family (i64 chroma multiply — not the BITS-generic Q15
+  /// pipeline); alpha = `0xFF` (Yuv422p16 has no alpha plane).
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub fn with_rgba(mut self, buf: &'a mut [u8]) -> Result<Self, MixedSinkerError> {
     self.set_rgba(buf)?;
@@ -2146,7 +2147,8 @@ impl<'a> MixedSinker<'a, P216> {
 
   /// Attaches a packed **8‑bit** RGBA output buffer. The 16‑bit P216
   /// source (semi‑planar, 16 active bits) is converted to 8‑bit RGBA
-  /// via the `BITS = 16` Q15 kernel family; alpha = `0xFF` (P216 has
+  /// via the dedicated `BITS = 16` kernel family (i64 chroma multiply
+  /// — not the BITS-generic Q15 pipeline); alpha = `0xFF` (P216 has
   /// no alpha plane).
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub fn with_rgba(mut self, buf: &'a mut [u8]) -> Result<Self, MixedSinkerError> {
