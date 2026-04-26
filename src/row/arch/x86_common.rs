@@ -233,6 +233,42 @@ pub(super) unsafe fn write_rgb_u16_8(r: __m128i, g: __m128i, b: __m128i, ptr: *m
   }
 }
 
+/// Interleaves 8 R/G/B/A `u16` samples into packed RGBA quads (32
+/// `u16` = 64 bytes). Two 16-bit unpack stages followed by two 32-bit
+/// unpack stages produce four 16-byte chunks of `[R, G, B, A]` quads,
+/// stored back-to-back via `_mm_storeu_si128`.
+///
+/// # Safety
+///
+/// - `ptr` must point to at least 64 writable bytes (aligned or
+///   unaligned — we use `storeu`).
+/// - The calling function must have SSE2 available (the unpack +
+///   `storeu_si128` intrinsics; SSE4.1 / AVX2 / AVX-512 supersets all
+///   satisfy this).
+#[inline(always)]
+pub(super) unsafe fn write_rgba_u16_8(
+  r: __m128i,
+  g: __m128i,
+  b: __m128i,
+  a: __m128i,
+  ptr: *mut u16,
+) {
+  unsafe {
+    let rg_lo = _mm_unpacklo_epi16(r, g);
+    let rg_hi = _mm_unpackhi_epi16(r, g);
+    let ba_lo = _mm_unpacklo_epi16(b, a);
+    let ba_hi = _mm_unpackhi_epi16(b, a);
+    let q0 = _mm_unpacklo_epi32(rg_lo, ba_lo);
+    let q1 = _mm_unpackhi_epi32(rg_lo, ba_lo);
+    let q2 = _mm_unpacklo_epi32(rg_hi, ba_hi);
+    let q3 = _mm_unpackhi_epi32(rg_hi, ba_hi);
+    _mm_storeu_si128(ptr.cast(), q0);
+    _mm_storeu_si128(ptr.add(8).cast(), q1);
+    _mm_storeu_si128(ptr.add(16).cast(), q2);
+    _mm_storeu_si128(ptr.add(24).cast(), q3);
+  }
+}
+
 /// Swaps the outer two channels of 16 packed 3‑byte pixels (48 bytes
 /// in, 48 bytes out). Drives both BGR→RGB and RGB→BGR conversions
 /// since the transformation is self‑inverse.
