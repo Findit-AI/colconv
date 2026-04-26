@@ -509,6 +509,11 @@ fn clamp_u8(v: i32) -> u8 {
 ///
 /// - `rgb.len() >= 3 * width`
 /// - `rgba_out.len() >= 4 * width`
+// Only the `MixedSinker` Strategy A fan-out calls this; that lives in
+// `crate::sinker::mixed`, gated on `feature = "std"` / `"alloc"`. Without
+// either feature the helper would be unused and `-D dead_code` (set by
+// `cargo clippy -- -D warnings` on CI) would fail the build.
+#[cfg(any(feature = "std", feature = "alloc"))]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn expand_rgb_to_rgba_row(rgb: &[u8], rgba_out: &mut [u8], width: usize) {
   debug_assert!(rgb.len() >= width * 3, "rgb row too short");
