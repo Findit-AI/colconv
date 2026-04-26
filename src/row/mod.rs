@@ -34,6 +34,12 @@
 pub(crate) mod arch;
 pub(crate) mod scalar;
 
+// Re-exported only when a caller is compiled. The `MixedSinker` Strategy A
+// fan-out is the sole consumer, and it lives in `crate::sinker::mixed` which
+// is gated on `feature = "std"` / `feature = "alloc"` (needs `Vec`). Without
+// either feature both this re-export and the underlying scalar function would
+// be unused, which is a hard error under `cargo clippy -- -D warnings`.
+#[cfg(any(feature = "std", feature = "alloc"))]
 pub(crate) use scalar::expand_rgb_to_rgba_row;
 
 use crate::ColorMatrix;

@@ -1,12 +1,10 @@
 //! 8-bit semi-planar YUV `MixedSinker` impls: Nv12 / Nv16 / Nv21 / Nv24 / Nv42.
 
-#![allow(unused_imports)]
-
 use super::{
-  HsvBuffers, HsvPlane, LumaChannel, LumaCoefficients, MixedSinker, MixedSinkerError, RowSlice,
-  check_dimensions_match, rgb_row_to_luma_row,
+  MixedSinker, MixedSinkerError, RowSlice, check_dimensions_match, rgb_row_buf_or_scratch,
+  rgba_plane_row_slice,
 };
-use crate::{ColorMatrix, PixelSink, SourceFormat, raw::*, row::*, yuv::*};
+use crate::{PixelSink, row::*, yuv::*};
 
 // ---- Nv12 impl ----------------------------------------------------------
 
@@ -129,19 +127,11 @@ impl PixelSink for MixedSinker<'_, Nv12> {
 
     if want_rgba && !need_rgb_kernel {
       let rgba_buf = rgba.as_deref_mut().unwrap();
-      let rgba_plane_end =
-        one_plane_end
-          .checked_mul(4)
-          .ok_or(MixedSinkerError::GeometryOverflow {
-            width: w,
-            height: h,
-            channels: 4,
-          })?;
-      let rgba_plane_start = one_plane_start * 4;
+      let rgba_row = rgba_plane_row_slice(rgba_buf, one_plane_start, one_plane_end, w, h)?;
       nv12_to_rgba_row(
         row.y(),
         row.uv_half(),
-        &mut rgba_buf[rgba_plane_start..rgba_plane_end],
+        rgba_row,
         w,
         row.matrix(),
         row.full_range(),
@@ -154,31 +144,14 @@ impl PixelSink for MixedSinker<'_, Nv12> {
       return Ok(());
     }
 
-    let rgb_row: &mut [u8] = match rgb.as_deref_mut() {
-      Some(buf) => {
-        let rgb_plane_end =
-          one_plane_end
-            .checked_mul(3)
-            .ok_or(MixedSinkerError::GeometryOverflow {
-              width: w,
-              height: h,
-              channels: 3,
-            })?;
-        let rgb_plane_start = one_plane_start * 3;
-        &mut buf[rgb_plane_start..rgb_plane_end]
-      }
-      None => {
-        let rgb_row_bytes = w.checked_mul(3).ok_or(MixedSinkerError::GeometryOverflow {
-          width: w,
-          height: h,
-          channels: 3,
-        })?;
-        if rgb_scratch.len() < rgb_row_bytes {
-          rgb_scratch.resize(rgb_row_bytes, 0);
-        }
-        &mut rgb_scratch[..rgb_row_bytes]
-      }
-    };
+    let rgb_row = rgb_row_buf_or_scratch(
+      rgb.as_deref_mut(),
+      rgb_scratch,
+      one_plane_start,
+      one_plane_end,
+      w,
+      h,
+    )?;
 
     // Fused NV12 → RGB: UV deinterleave + chroma upsample both happen
     // in registers inside the row primitive, no intermediate memory.
@@ -204,16 +177,8 @@ impl PixelSink for MixedSinker<'_, Nv12> {
     }
 
     if let Some(buf) = rgba.as_deref_mut() {
-      let rgba_plane_end =
-        one_plane_end
-          .checked_mul(4)
-          .ok_or(MixedSinkerError::GeometryOverflow {
-            width: w,
-            height: h,
-            channels: 4,
-          })?;
-      let rgba_plane_start = one_plane_start * 4;
-      expand_rgb_to_rgba_row(rgb_row, &mut buf[rgba_plane_start..rgba_plane_end], w);
+      let rgba_row = rgba_plane_row_slice(buf, one_plane_start, one_plane_end, w, h)?;
+      expand_rgb_to_rgba_row(rgb_row, rgba_row, w);
     }
 
     Ok(())
@@ -332,19 +297,11 @@ impl PixelSink for MixedSinker<'_, Nv16> {
 
     if want_rgba && !need_rgb_kernel {
       let rgba_buf = rgba.as_deref_mut().unwrap();
-      let rgba_plane_end =
-        one_plane_end
-          .checked_mul(4)
-          .ok_or(MixedSinkerError::GeometryOverflow {
-            width: w,
-            height: h,
-            channels: 4,
-          })?;
-      let rgba_plane_start = one_plane_start * 4;
+      let rgba_row = rgba_plane_row_slice(rgba_buf, one_plane_start, one_plane_end, w, h)?;
       nv12_to_rgba_row(
         row.y(),
         row.uv(),
-        &mut rgba_buf[rgba_plane_start..rgba_plane_end],
+        rgba_row,
         w,
         row.matrix(),
         row.full_range(),
@@ -357,31 +314,14 @@ impl PixelSink for MixedSinker<'_, Nv16> {
       return Ok(());
     }
 
-    let rgb_row: &mut [u8] = match rgb.as_deref_mut() {
-      Some(buf) => {
-        let rgb_plane_end =
-          one_plane_end
-            .checked_mul(3)
-            .ok_or(MixedSinkerError::GeometryOverflow {
-              width: w,
-              height: h,
-              channels: 3,
-            })?;
-        let rgb_plane_start = one_plane_start * 3;
-        &mut buf[rgb_plane_start..rgb_plane_end]
-      }
-      None => {
-        let rgb_row_bytes = w.checked_mul(3).ok_or(MixedSinkerError::GeometryOverflow {
-          width: w,
-          height: h,
-          channels: 3,
-        })?;
-        if rgb_scratch.len() < rgb_row_bytes {
-          rgb_scratch.resize(rgb_row_bytes, 0);
-        }
-        &mut rgb_scratch[..rgb_row_bytes]
-      }
-    };
+    let rgb_row = rgb_row_buf_or_scratch(
+      rgb.as_deref_mut(),
+      rgb_scratch,
+      one_plane_start,
+      one_plane_end,
+      w,
+      h,
+    )?;
 
     // Reuses the NV12 dispatcher — 4:2:2's row contract is identical.
     nv12_to_rgb_row(
@@ -406,16 +346,8 @@ impl PixelSink for MixedSinker<'_, Nv16> {
     }
 
     if let Some(buf) = rgba.as_deref_mut() {
-      let rgba_plane_end =
-        one_plane_end
-          .checked_mul(4)
-          .ok_or(MixedSinkerError::GeometryOverflow {
-            width: w,
-            height: h,
-            channels: 4,
-          })?;
-      let rgba_plane_start = one_plane_start * 4;
-      expand_rgb_to_rgba_row(rgb_row, &mut buf[rgba_plane_start..rgba_plane_end], w);
+      let rgba_row = rgba_plane_row_slice(buf, one_plane_start, one_plane_end, w, h)?;
+      expand_rgb_to_rgba_row(rgb_row, rgba_row, w);
     }
 
     Ok(())
@@ -532,19 +464,11 @@ impl PixelSink for MixedSinker<'_, Nv21> {
 
     if want_rgba && !need_rgb_kernel {
       let rgba_buf = rgba.as_deref_mut().unwrap();
-      let rgba_plane_end =
-        one_plane_end
-          .checked_mul(4)
-          .ok_or(MixedSinkerError::GeometryOverflow {
-            width: w,
-            height: h,
-            channels: 4,
-          })?;
-      let rgba_plane_start = one_plane_start * 4;
+      let rgba_row = rgba_plane_row_slice(rgba_buf, one_plane_start, one_plane_end, w, h)?;
       nv21_to_rgba_row(
         row.y(),
         row.vu_half(),
-        &mut rgba_buf[rgba_plane_start..rgba_plane_end],
+        rgba_row,
         w,
         row.matrix(),
         row.full_range(),
@@ -557,31 +481,14 @@ impl PixelSink for MixedSinker<'_, Nv21> {
       return Ok(());
     }
 
-    let rgb_row: &mut [u8] = match rgb.as_deref_mut() {
-      Some(buf) => {
-        let rgb_plane_end =
-          one_plane_end
-            .checked_mul(3)
-            .ok_or(MixedSinkerError::GeometryOverflow {
-              width: w,
-              height: h,
-              channels: 3,
-            })?;
-        let rgb_plane_start = one_plane_start * 3;
-        &mut buf[rgb_plane_start..rgb_plane_end]
-      }
-      None => {
-        let rgb_row_bytes = w.checked_mul(3).ok_or(MixedSinkerError::GeometryOverflow {
-          width: w,
-          height: h,
-          channels: 3,
-        })?;
-        if rgb_scratch.len() < rgb_row_bytes {
-          rgb_scratch.resize(rgb_row_bytes, 0);
-        }
-        &mut rgb_scratch[..rgb_row_bytes]
-      }
-    };
+    let rgb_row = rgb_row_buf_or_scratch(
+      rgb.as_deref_mut(),
+      rgb_scratch,
+      one_plane_start,
+      one_plane_end,
+      w,
+      h,
+    )?;
 
     // Fused NV21 → RGB: VU deinterleave + chroma upsample both happen
     // in registers inside the row primitive, no intermediate memory.
@@ -607,16 +514,8 @@ impl PixelSink for MixedSinker<'_, Nv21> {
     }
 
     if let Some(buf) = rgba.as_deref_mut() {
-      let rgba_plane_end =
-        one_plane_end
-          .checked_mul(4)
-          .ok_or(MixedSinkerError::GeometryOverflow {
-            width: w,
-            height: h,
-            channels: 4,
-          })?;
-      let rgba_plane_start = one_plane_start * 4;
-      expand_rgb_to_rgba_row(rgb_row, &mut buf[rgba_plane_start..rgba_plane_end], w);
+      let rgba_row = rgba_plane_row_slice(buf, one_plane_start, one_plane_end, w, h)?;
+      expand_rgb_to_rgba_row(rgb_row, rgba_row, w);
     }
 
     Ok(())
@@ -735,19 +634,11 @@ impl PixelSink for MixedSinker<'_, Nv24> {
     // Avoids both the scratch allocation and the expand-pad pass.
     if want_rgba && !need_rgb_kernel {
       let rgba_buf = rgba.as_deref_mut().unwrap();
-      let rgba_plane_end =
-        one_plane_end
-          .checked_mul(4)
-          .ok_or(MixedSinkerError::GeometryOverflow {
-            width: w,
-            height: h,
-            channels: 4,
-          })?;
-      let rgba_plane_start = one_plane_start * 4;
+      let rgba_row = rgba_plane_row_slice(rgba_buf, one_plane_start, one_plane_end, w, h)?;
       nv24_to_rgba_row(
         row.y(),
         row.uv(),
-        &mut rgba_buf[rgba_plane_start..rgba_plane_end],
+        rgba_row,
         w,
         row.matrix(),
         row.full_range(),
@@ -760,31 +651,14 @@ impl PixelSink for MixedSinker<'_, Nv24> {
       return Ok(());
     }
 
-    let rgb_row: &mut [u8] = match rgb.as_deref_mut() {
-      Some(buf) => {
-        let rgb_plane_end =
-          one_plane_end
-            .checked_mul(3)
-            .ok_or(MixedSinkerError::GeometryOverflow {
-              width: w,
-              height: h,
-              channels: 3,
-            })?;
-        let rgb_plane_start = one_plane_start * 3;
-        &mut buf[rgb_plane_start..rgb_plane_end]
-      }
-      None => {
-        let rgb_row_bytes = w.checked_mul(3).ok_or(MixedSinkerError::GeometryOverflow {
-          width: w,
-          height: h,
-          channels: 3,
-        })?;
-        if rgb_scratch.len() < rgb_row_bytes {
-          rgb_scratch.resize(rgb_row_bytes, 0);
-        }
-        &mut rgb_scratch[..rgb_row_bytes]
-      }
-    };
+    let rgb_row = rgb_row_buf_or_scratch(
+      rgb.as_deref_mut(),
+      rgb_scratch,
+      one_plane_start,
+      one_plane_end,
+      w,
+      h,
+    )?;
 
     nv24_to_rgb_row(
       row.y(),
@@ -811,16 +685,8 @@ impl PixelSink for MixedSinker<'_, Nv24> {
     // derive RGBA from the just-computed RGB row (memory-bound copy +
     // 0xFF alpha pad) instead of running a second YUV→RGB kernel.
     if let Some(buf) = rgba.as_deref_mut() {
-      let rgba_plane_end =
-        one_plane_end
-          .checked_mul(4)
-          .ok_or(MixedSinkerError::GeometryOverflow {
-            width: w,
-            height: h,
-            channels: 4,
-          })?;
-      let rgba_plane_start = one_plane_start * 4;
-      expand_rgb_to_rgba_row(rgb_row, &mut buf[rgba_plane_start..rgba_plane_end], w);
+      let rgba_row = rgba_plane_row_slice(buf, one_plane_start, one_plane_end, w, h)?;
+      expand_rgb_to_rgba_row(rgb_row, rgba_row, w);
     }
 
     Ok(())
@@ -929,19 +795,11 @@ impl PixelSink for MixedSinker<'_, Nv42> {
 
     if want_rgba && !need_rgb_kernel {
       let rgba_buf = rgba.as_deref_mut().unwrap();
-      let rgba_plane_end =
-        one_plane_end
-          .checked_mul(4)
-          .ok_or(MixedSinkerError::GeometryOverflow {
-            width: w,
-            height: h,
-            channels: 4,
-          })?;
-      let rgba_plane_start = one_plane_start * 4;
+      let rgba_row = rgba_plane_row_slice(rgba_buf, one_plane_start, one_plane_end, w, h)?;
       nv42_to_rgba_row(
         row.y(),
         row.vu(),
-        &mut rgba_buf[rgba_plane_start..rgba_plane_end],
+        rgba_row,
         w,
         row.matrix(),
         row.full_range(),
@@ -954,31 +812,14 @@ impl PixelSink for MixedSinker<'_, Nv42> {
       return Ok(());
     }
 
-    let rgb_row: &mut [u8] = match rgb.as_deref_mut() {
-      Some(buf) => {
-        let rgb_plane_end =
-          one_plane_end
-            .checked_mul(3)
-            .ok_or(MixedSinkerError::GeometryOverflow {
-              width: w,
-              height: h,
-              channels: 3,
-            })?;
-        let rgb_plane_start = one_plane_start * 3;
-        &mut buf[rgb_plane_start..rgb_plane_end]
-      }
-      None => {
-        let rgb_row_bytes = w.checked_mul(3).ok_or(MixedSinkerError::GeometryOverflow {
-          width: w,
-          height: h,
-          channels: 3,
-        })?;
-        if rgb_scratch.len() < rgb_row_bytes {
-          rgb_scratch.resize(rgb_row_bytes, 0);
-        }
-        &mut rgb_scratch[..rgb_row_bytes]
-      }
-    };
+    let rgb_row = rgb_row_buf_or_scratch(
+      rgb.as_deref_mut(),
+      rgb_scratch,
+      one_plane_start,
+      one_plane_end,
+      w,
+      h,
+    )?;
 
     nv42_to_rgb_row(
       row.y(),
@@ -1002,16 +843,8 @@ impl PixelSink for MixedSinker<'_, Nv42> {
     }
 
     if let Some(buf) = rgba.as_deref_mut() {
-      let rgba_plane_end =
-        one_plane_end
-          .checked_mul(4)
-          .ok_or(MixedSinkerError::GeometryOverflow {
-            width: w,
-            height: h,
-            channels: 4,
-          })?;
-      let rgba_plane_start = one_plane_start * 4;
-      expand_rgb_to_rgba_row(rgb_row, &mut buf[rgba_plane_start..rgba_plane_end], w);
+      let rgba_row = rgba_plane_row_slice(buf, one_plane_start, one_plane_end, w, h)?;
+      expand_rgb_to_rgba_row(rgb_row, rgba_row, w);
     }
 
     Ok(())

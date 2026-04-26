@@ -1,12 +1,9 @@
 //! High-bit-depth 4:4:4 `MixedSinker` impls: Yuv444p9/10/12/14/16 + P410/P412/P416.
 
-#![allow(unused_imports)]
-
 use super::{
-  HsvBuffers, HsvPlane, LumaChannel, LumaCoefficients, MixedSinker, MixedSinkerError, RowSlice,
-  check_dimensions_match, rgb_row_to_luma_row,
+  MixedSinker, MixedSinkerError, RowSlice, check_dimensions_match, rgb_row_buf_or_scratch,
 };
-use crate::{ColorMatrix, PixelSink, SourceFormat, raw::*, row::*, yuv::*};
+use crate::{PixelSink, row::*, yuv::*};
 
 // ---- Yuv444p9 impl -----------------------------------------------------
 
@@ -124,31 +121,14 @@ impl PixelSink for MixedSinker<'_, Yuv444p9> {
       return Ok(());
     }
 
-    let rgb_row: &mut [u8] = match rgb.as_deref_mut() {
-      Some(buf) => {
-        let rgb_plane_end =
-          one_plane_end
-            .checked_mul(3)
-            .ok_or(MixedSinkerError::GeometryOverflow {
-              width: w,
-              height: h,
-              channels: 3,
-            })?;
-        let rgb_plane_start = one_plane_start * 3;
-        &mut buf[rgb_plane_start..rgb_plane_end]
-      }
-      None => {
-        let rgb_row_bytes = w.checked_mul(3).ok_or(MixedSinkerError::GeometryOverflow {
-          width: w,
-          height: h,
-          channels: 3,
-        })?;
-        if rgb_scratch.len() < rgb_row_bytes {
-          rgb_scratch.resize(rgb_row_bytes, 0);
-        }
-        &mut rgb_scratch[..rgb_row_bytes]
-      }
-    };
+    let rgb_row = rgb_row_buf_or_scratch(
+      rgb.as_deref_mut(),
+      rgb_scratch,
+      one_plane_start,
+      one_plane_end,
+      w,
+      h,
+    )?;
 
     yuv444p9_to_rgb_row(
       row.y(),
@@ -291,31 +271,14 @@ impl PixelSink for MixedSinker<'_, Yuv444p10> {
       return Ok(());
     }
 
-    let rgb_row: &mut [u8] = match rgb.as_deref_mut() {
-      Some(buf) => {
-        let rgb_plane_end =
-          one_plane_end
-            .checked_mul(3)
-            .ok_or(MixedSinkerError::GeometryOverflow {
-              width: w,
-              height: h,
-              channels: 3,
-            })?;
-        let rgb_plane_start = one_plane_start * 3;
-        &mut buf[rgb_plane_start..rgb_plane_end]
-      }
-      None => {
-        let rgb_row_bytes = w.checked_mul(3).ok_or(MixedSinkerError::GeometryOverflow {
-          width: w,
-          height: h,
-          channels: 3,
-        })?;
-        if rgb_scratch.len() < rgb_row_bytes {
-          rgb_scratch.resize(rgb_row_bytes, 0);
-        }
-        &mut rgb_scratch[..rgb_row_bytes]
-      }
-    };
+    let rgb_row = rgb_row_buf_or_scratch(
+      rgb.as_deref_mut(),
+      rgb_scratch,
+      one_plane_start,
+      one_plane_end,
+      w,
+      h,
+    )?;
 
     yuv444p10_to_rgb_row(
       row.y(),
@@ -456,31 +419,14 @@ impl PixelSink for MixedSinker<'_, Yuv444p12> {
       return Ok(());
     }
 
-    let rgb_row: &mut [u8] = match rgb.as_deref_mut() {
-      Some(buf) => {
-        let rgb_plane_end =
-          one_plane_end
-            .checked_mul(3)
-            .ok_or(MixedSinkerError::GeometryOverflow {
-              width: w,
-              height: h,
-              channels: 3,
-            })?;
-        let rgb_plane_start = one_plane_start * 3;
-        &mut buf[rgb_plane_start..rgb_plane_end]
-      }
-      None => {
-        let rgb_row_bytes = w.checked_mul(3).ok_or(MixedSinkerError::GeometryOverflow {
-          width: w,
-          height: h,
-          channels: 3,
-        })?;
-        if rgb_scratch.len() < rgb_row_bytes {
-          rgb_scratch.resize(rgb_row_bytes, 0);
-        }
-        &mut rgb_scratch[..rgb_row_bytes]
-      }
-    };
+    let rgb_row = rgb_row_buf_or_scratch(
+      rgb.as_deref_mut(),
+      rgb_scratch,
+      one_plane_start,
+      one_plane_end,
+      w,
+      h,
+    )?;
 
     yuv444p12_to_rgb_row(
       row.y(),
@@ -621,31 +567,14 @@ impl PixelSink for MixedSinker<'_, Yuv444p14> {
       return Ok(());
     }
 
-    let rgb_row: &mut [u8] = match rgb.as_deref_mut() {
-      Some(buf) => {
-        let rgb_plane_end =
-          one_plane_end
-            .checked_mul(3)
-            .ok_or(MixedSinkerError::GeometryOverflow {
-              width: w,
-              height: h,
-              channels: 3,
-            })?;
-        let rgb_plane_start = one_plane_start * 3;
-        &mut buf[rgb_plane_start..rgb_plane_end]
-      }
-      None => {
-        let rgb_row_bytes = w.checked_mul(3).ok_or(MixedSinkerError::GeometryOverflow {
-          width: w,
-          height: h,
-          channels: 3,
-        })?;
-        if rgb_scratch.len() < rgb_row_bytes {
-          rgb_scratch.resize(rgb_row_bytes, 0);
-        }
-        &mut rgb_scratch[..rgb_row_bytes]
-      }
-    };
+    let rgb_row = rgb_row_buf_or_scratch(
+      rgb.as_deref_mut(),
+      rgb_scratch,
+      one_plane_start,
+      one_plane_end,
+      w,
+      h,
+    )?;
 
     yuv444p14_to_rgb_row(
       row.y(),
@@ -787,31 +716,14 @@ impl PixelSink for MixedSinker<'_, Yuv444p16> {
       return Ok(());
     }
 
-    let rgb_row: &mut [u8] = match rgb.as_deref_mut() {
-      Some(buf) => {
-        let rgb_plane_end =
-          one_plane_end
-            .checked_mul(3)
-            .ok_or(MixedSinkerError::GeometryOverflow {
-              width: w,
-              height: h,
-              channels: 3,
-            })?;
-        let rgb_plane_start = one_plane_start * 3;
-        &mut buf[rgb_plane_start..rgb_plane_end]
-      }
-      None => {
-        let rgb_row_bytes = w.checked_mul(3).ok_or(MixedSinkerError::GeometryOverflow {
-          width: w,
-          height: h,
-          channels: 3,
-        })?;
-        if rgb_scratch.len() < rgb_row_bytes {
-          rgb_scratch.resize(rgb_row_bytes, 0);
-        }
-        &mut rgb_scratch[..rgb_row_bytes]
-      }
-    };
+    let rgb_row = rgb_row_buf_or_scratch(
+      rgb.as_deref_mut(),
+      rgb_scratch,
+      one_plane_start,
+      one_plane_end,
+      w,
+      h,
+    )?;
 
     yuv444p16_to_rgb_row(
       row.y(),
@@ -950,31 +862,14 @@ impl PixelSink for MixedSinker<'_, P410> {
       return Ok(());
     }
 
-    let rgb_row: &mut [u8] = match rgb.as_deref_mut() {
-      Some(buf) => {
-        let rgb_plane_end =
-          one_plane_end
-            .checked_mul(3)
-            .ok_or(MixedSinkerError::GeometryOverflow {
-              width: w,
-              height: h,
-              channels: 3,
-            })?;
-        let rgb_plane_start = one_plane_start * 3;
-        &mut buf[rgb_plane_start..rgb_plane_end]
-      }
-      None => {
-        let rgb_row_bytes = w.checked_mul(3).ok_or(MixedSinkerError::GeometryOverflow {
-          width: w,
-          height: h,
-          channels: 3,
-        })?;
-        if rgb_scratch.len() < rgb_row_bytes {
-          rgb_scratch.resize(rgb_row_bytes, 0);
-        }
-        &mut rgb_scratch[..rgb_row_bytes]
-      }
-    };
+    let rgb_row = rgb_row_buf_or_scratch(
+      rgb.as_deref_mut(),
+      rgb_scratch,
+      one_plane_start,
+      one_plane_end,
+      w,
+      h,
+    )?;
 
     p410_to_rgb_row(
       row.y(),
@@ -1106,31 +1001,14 @@ impl PixelSink for MixedSinker<'_, P412> {
       return Ok(());
     }
 
-    let rgb_row: &mut [u8] = match rgb.as_deref_mut() {
-      Some(buf) => {
-        let rgb_plane_end =
-          one_plane_end
-            .checked_mul(3)
-            .ok_or(MixedSinkerError::GeometryOverflow {
-              width: w,
-              height: h,
-              channels: 3,
-            })?;
-        let rgb_plane_start = one_plane_start * 3;
-        &mut buf[rgb_plane_start..rgb_plane_end]
-      }
-      None => {
-        let rgb_row_bytes = w.checked_mul(3).ok_or(MixedSinkerError::GeometryOverflow {
-          width: w,
-          height: h,
-          channels: 3,
-        })?;
-        if rgb_scratch.len() < rgb_row_bytes {
-          rgb_scratch.resize(rgb_row_bytes, 0);
-        }
-        &mut rgb_scratch[..rgb_row_bytes]
-      }
-    };
+    let rgb_row = rgb_row_buf_or_scratch(
+      rgb.as_deref_mut(),
+      rgb_scratch,
+      one_plane_start,
+      one_plane_end,
+      w,
+      h,
+    )?;
 
     p412_to_rgb_row(
       row.y(),
@@ -1266,31 +1144,14 @@ impl PixelSink for MixedSinker<'_, P416> {
       return Ok(());
     }
 
-    let rgb_row: &mut [u8] = match rgb.as_deref_mut() {
-      Some(buf) => {
-        let rgb_plane_end =
-          one_plane_end
-            .checked_mul(3)
-            .ok_or(MixedSinkerError::GeometryOverflow {
-              width: w,
-              height: h,
-              channels: 3,
-            })?;
-        let rgb_plane_start = one_plane_start * 3;
-        &mut buf[rgb_plane_start..rgb_plane_end]
-      }
-      None => {
-        let rgb_row_bytes = w.checked_mul(3).ok_or(MixedSinkerError::GeometryOverflow {
-          width: w,
-          height: h,
-          channels: 3,
-        })?;
-        if rgb_scratch.len() < rgb_row_bytes {
-          rgb_scratch.resize(rgb_row_bytes, 0);
-        }
-        &mut rgb_scratch[..rgb_row_bytes]
-      }
-    };
+    let rgb_row = rgb_row_buf_or_scratch(
+      rgb.as_deref_mut(),
+      rgb_scratch,
+      one_plane_start,
+      one_plane_end,
+      w,
+      h,
+    )?;
 
     p416_to_rgb_row(
       row.y(),
