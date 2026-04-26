@@ -33,12 +33,12 @@ impl<'a> MixedSinker<'a, Yuv420p> {
   ///
   /// ```compile_fail
   /// // Attaching RGBA to a sink that doesn't write it is rejected
-  /// // at compile time. Yuv440p (4:4:0 planar) has not yet been
-  /// // wired for RGBA; once that lands the negative example here
-  /// // moves to the next not‑yet‑wired format.
-  /// use colconv::{sinker::MixedSinker, yuv::Yuv440p};
+  /// // at compile time. Yuv420p10 (10‑bit 4:2:0 planar) has not yet
+  /// // been wired for RGBA — Tranche 5 covers it; once that lands the
+  /// // negative example here moves to the next not‑yet‑wired format.
+  /// use colconv::{sinker::MixedSinker, yuv::Yuv420p10};
   /// let mut buf = vec![0u8; 16 * 8 * 4];
-  /// let _ = MixedSinker::<Yuv440p>::new(16, 8).with_rgba(&mut buf);
+  /// let _ = MixedSinker::<Yuv420p10>::new(16, 8).with_rgba(&mut buf);
   /// ```
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub fn with_rgba(mut self, buf: &'a mut [u8]) -> Result<Self, MixedSinkerError> {
@@ -689,7 +689,39 @@ impl PixelSink for MixedSinker<'_, Yuv444p> {
 //
 // 4:4:0 planar 8‑bit — full-width chroma, half-height. Per-row math
 // matches 4:4:4 (full-width U / V); only the walker reads chroma row
-// `r / 2`. Reuses `yuv_444_to_rgb_row` verbatim.
+// `r / 2`. Reuses `yuv_444_to_rgb_row` and `yuv_444_to_rgba_row`
+// verbatim.
+
+impl<'a> MixedSinker<'a, Yuv440p> {
+  /// Attaches a packed 32‑bit RGBA output buffer.
+  ///
+  /// See [`MixedSinker::<Yuv420p>::with_rgba`] for the rationale and
+  /// constraints. Yuv440p has no alpha plane, so every alpha byte is
+  /// filled with `0xFF` (opaque).
+  ///
+  /// Returns `Err(RgbaBufferTooShort)` if
+  /// `buf.len() < width × height × 4`, or `Err(GeometryOverflow)` on
+  /// 32‑bit targets when the product overflows.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn with_rgba(mut self, buf: &'a mut [u8]) -> Result<Self, MixedSinkerError> {
+    self.set_rgba(buf)?;
+    Ok(self)
+  }
+
+  /// In-place variant of [`with_rgba`](Self::with_rgba).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn set_rgba(&mut self, buf: &'a mut [u8]) -> Result<&mut Self, MixedSinkerError> {
+    let expected = self.frame_bytes(4)?;
+    if buf.len() < expected {
+      return Err(MixedSinkerError::RgbaBufferTooShort {
+        expected,
+        actual: buf.len(),
+      });
+    }
+    self.rgba = Some(buf);
+    Ok(self)
+  }
+}
 
 impl Yuv440pSink for MixedSinker<'_, Yuv440p> {}
 
@@ -740,6 +772,7 @@ impl PixelSink for MixedSinker<'_, Yuv440p> {
 
     let Self {
       rgb,
+      rgba,
       luma,
       hsv,
       rgb_scratch,
@@ -753,9 +786,39 @@ impl PixelSink for MixedSinker<'_, Yuv440p> {
       luma[one_plane_start..one_plane_end].copy_from_slice(&row.y()[..w]);
     }
 
+    // Strategy A output mode resolution — see Yuv420p impl above.
+    // Reuses the Yuv444p RGBA dispatcher since 4:4:0's per-row math
+    // is identical (full-width chroma).
     let want_rgb = rgb.is_some();
+    let want_rgba = rgba.is_some();
     let want_hsv = hsv.is_some();
-    if !want_rgb && !want_hsv {
+    let need_rgb_kernel = want_rgb || want_hsv;
+
+    if want_rgba && !need_rgb_kernel {
+      let rgba_buf = rgba.as_deref_mut().unwrap();
+      let rgba_plane_end =
+        one_plane_end
+          .checked_mul(4)
+          .ok_or(MixedSinkerError::GeometryOverflow {
+            width: w,
+            height: h,
+            channels: 4,
+          })?;
+      let rgba_plane_start = one_plane_start * 4;
+      yuv_444_to_rgba_row(
+        row.y(),
+        row.u(),
+        row.v(),
+        &mut rgba_buf[rgba_plane_start..rgba_plane_end],
+        w,
+        row.matrix(),
+        row.full_range(),
+        use_simd,
+      );
+      return Ok(());
+    }
+
+    if !need_rgb_kernel {
       return Ok(());
     }
 
@@ -806,6 +869,20 @@ impl PixelSink for MixedSinker<'_, Yuv440p> {
         use_simd,
       );
     }
+
+    if let Some(buf) = rgba.as_deref_mut() {
+      let rgba_plane_end =
+        one_plane_end
+          .checked_mul(4)
+          .ok_or(MixedSinkerError::GeometryOverflow {
+            width: w,
+            height: h,
+            channels: 4,
+          })?;
+      let rgba_plane_start = one_plane_start * 4;
+      expand_rgb_to_rgba_row(rgb_row, &mut buf[rgba_plane_start..rgba_plane_end], w);
+    }
+
     Ok(())
   }
 }

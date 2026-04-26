@@ -2493,8 +2493,8 @@ fn nv42_rgba_simd_matches_scalar_with_random_yuv() {
 }
 
 // Cross-format Strategy A invariant: when both RGB+RGBA are
-// attached, all 8 wired families derive RGBA from the RGB row via
-// expand_rgb_to_rgba_row. This test runs all 8 process methods with
+// attached, all 9 wired families derive RGBA from the RGB row via
+// expand_rgb_to_rgba_row. This test runs all 9 process methods with
 // the same gray input and asserts every RGBA sample equals the RGB
 // sample with alpha = 0xFF — proving the fan-out shape never
 // diverges from the kernel output.
@@ -2636,6 +2636,20 @@ fn strategy_a_rgb_and_rgba_byte_identical_for_all_wired_families() {
       .unwrap();
     nv42_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
     assert_match(&rgb, &rgba, "Nv42");
+  }
+
+  {
+    let (yp, up, vp) = solid_yuv440p_frame(w, h, 200, 128, 128);
+    let src = Yuv440pFrame::new(&yp, &up, &vp, w, h, w, w, w);
+    let mut rgb = std::vec![0u8; ws * hs * 3];
+    let mut rgba = std::vec![0u8; ws * hs * 4];
+    let mut sink = MixedSinker::<Yuv440p>::new(ws, hs)
+      .with_rgb(&mut rgb)
+      .unwrap()
+      .with_rgba(&mut rgba)
+      .unwrap();
+    yuv440p_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    assert_match(&rgb, &rgba, "Yuv440p");
   }
 }
 
@@ -4654,6 +4668,128 @@ fn yuv440p_gray_to_gray() {
     assert!(px[0].abs_diff(128) <= 1);
     assert_eq!(px[0], px[1]);
     assert_eq!(px[1], px[2]);
+  }
+}
+
+// ---- Yuv440p RGBA (Ship 8 PR 4c) tests --------------------------------
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn yuv440p_rgba_only_converts_gray_to_gray_with_opaque_alpha() {
+  let (yp, up, vp) = solid_yuv440p_frame(16, 8, 128, 128, 128);
+  let src = Yuv440pFrame::new(&yp, &up, &vp, 16, 8, 16, 16, 16);
+
+  let mut rgba = std::vec![0u8; 16 * 8 * 4];
+  let mut sink = MixedSinker::<Yuv440p>::new(16, 8)
+    .with_rgba(&mut rgba)
+    .unwrap();
+  yuv440p_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+  for px in rgba.chunks(4) {
+    assert!(px[0].abs_diff(128) <= 1, "R");
+    assert_eq!(px[0], px[1], "RGB monochromatic");
+    assert_eq!(px[1], px[2], "RGB monochromatic");
+    assert_eq!(px[3], 0xFF, "alpha must default to opaque");
+  }
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn yuv440p_with_rgb_and_with_rgba_produce_byte_identical_rgb_bytes() {
+  let w = 32u32;
+  let h = 16u32;
+  let ws = w as usize;
+  let hs = h as usize;
+  let (yp, up, vp) = solid_yuv440p_frame(w, h, 180, 60, 200);
+  let src = Yuv440pFrame::new(&yp, &up, &vp, w, h, w, w, w);
+
+  let mut rgb = std::vec![0u8; ws * hs * 3];
+  let mut rgba = std::vec![0u8; ws * hs * 4];
+  let mut sink = MixedSinker::<Yuv440p>::new(ws, hs)
+    .with_rgb(&mut rgb)
+    .unwrap()
+    .with_rgba(&mut rgba)
+    .unwrap();
+  yuv440p_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+  for i in 0..(ws * hs) {
+    assert_eq!(rgba[i * 4], rgb[i * 3], "R differs at pixel {i}");
+    assert_eq!(rgba[i * 4 + 1], rgb[i * 3 + 1], "G differs at pixel {i}");
+    assert_eq!(rgba[i * 4 + 2], rgb[i * 3 + 2], "B differs at pixel {i}");
+    assert_eq!(rgba[i * 4 + 3], 0xFF, "A not opaque at pixel {i}");
+  }
+}
+
+#[test]
+fn yuv440p_rgba_buffer_too_short_returns_err() {
+  let mut rgba_short = std::vec![0u8; 16 * 8 * 4 - 1];
+  let result = MixedSinker::<Yuv440p>::new(16, 8).with_rgba(&mut rgba_short);
+  let Err(err) = result else {
+    panic!("expected RgbaBufferTooShort error");
+  };
+  assert!(matches!(
+    err,
+    MixedSinkerError::RgbaBufferTooShort {
+      expected: 512,
+      actual: 511,
+    }
+  ));
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn yuv440p_rgba_simd_matches_scalar_with_random_yuv() {
+  // Width 1922 forces both the SIMD main loop AND scalar tail across
+  // every backend block size (16/32/64). 4:4:0 chroma is full-width
+  // but half-height, so chroma plane is `w * h/2`.
+  let w = 1922usize;
+  let h = 4usize;
+  let ch = h / 2;
+  let mut yp = std::vec![0u8; w * h];
+  let mut up = std::vec![0u8; w * ch];
+  let mut vp = std::vec![0u8; w * ch];
+  pseudo_random_u8(&mut yp, 0xC001_C0DE);
+  pseudo_random_u8(&mut up, 0xCAFE_F00D);
+  pseudo_random_u8(&mut vp, 0xDEAD_BEEF);
+  let src = Yuv440pFrame::new(
+    &yp, &up, &vp, w as u32, h as u32, w as u32, w as u32, w as u32,
+  );
+
+  for &matrix in &[
+    ColorMatrix::Bt601,
+    ColorMatrix::Bt709,
+    ColorMatrix::Bt2020Ncl,
+    ColorMatrix::YCgCo,
+  ] {
+    for &full_range in &[true, false] {
+      let mut rgba_simd = std::vec![0u8; w * h * 4];
+      let mut rgba_scalar = std::vec![0u8; w * h * 4];
+
+      let mut s_simd = MixedSinker::<Yuv440p>::new(w, h)
+        .with_rgba(&mut rgba_simd)
+        .unwrap();
+      yuv440p_to(&src, full_range, matrix, &mut s_simd).unwrap();
+
+      let mut s_scalar = MixedSinker::<Yuv440p>::new(w, h)
+        .with_rgba(&mut rgba_scalar)
+        .unwrap();
+      s_scalar.set_simd(false);
+      yuv440p_to(&src, full_range, matrix, &mut s_scalar).unwrap();
+
+      assert_eq!(
+        rgba_simd, rgba_scalar,
+        "Yuv440p RGBA SIMD ≠ scalar (matrix={matrix:?}, full_range={full_range})"
+      );
+    }
   }
 }
 
