@@ -1093,6 +1093,79 @@ pub(super) fn check_dimensions_match(
   Ok(())
 }
 
+/// Slice the RGBA row out of an attached RGBA plane buffer. Returns
+/// `Err(GeometryOverflow)` if `one_plane_end × 4` wraps `usize` (only
+/// reachable on 32-bit targets at extreme dimensions).
+///
+/// Centralises the duplicated bounds-check pattern that every
+/// `MixedSinker<F>::process` impl runs in both the standalone-RGBA
+/// branch and the Strategy-A expand branch (Copilot review #4 on PR
+/// #20).
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(super) fn rgba_plane_row_slice(
+  buf: &mut [u8],
+  one_plane_start: usize,
+  one_plane_end: usize,
+  width: usize,
+  height: usize,
+) -> Result<&mut [u8], MixedSinkerError> {
+  let end = one_plane_end
+    .checked_mul(4)
+    .ok_or(MixedSinkerError::GeometryOverflow {
+      width,
+      height,
+      channels: 4,
+    })?;
+  let start = one_plane_start * 4; // ≤ end, fits.
+  Ok(&mut buf[start..end])
+}
+
+/// Pick an RGB row buffer for the kernel to write into: caller's RGB
+/// plane slice when attached, or the growing scratch buffer otherwise
+/// (HSV-only callers don't allocate an RGB plane). Returns
+/// `Err(GeometryOverflow)` if `width × 3` or `one_plane_end × 3` wraps
+/// `usize` — see [`rgba_plane_row_slice`] for the rationale.
+///
+/// `rgb_scratch` is grown via `Vec::resize` only when too small; the
+/// caller keeps the existing capacity across rows so steady-state
+/// processing allocates zero times.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(super) fn rgb_row_buf_or_scratch<'a>(
+  rgb: Option<&'a mut [u8]>,
+  rgb_scratch: &'a mut Vec<u8>,
+  one_plane_start: usize,
+  one_plane_end: usize,
+  width: usize,
+  height: usize,
+) -> Result<&'a mut [u8], MixedSinkerError> {
+  match rgb {
+    Some(buf) => {
+      let end = one_plane_end
+        .checked_mul(3)
+        .ok_or(MixedSinkerError::GeometryOverflow {
+          width,
+          height,
+          channels: 3,
+        })?;
+      let start = one_plane_start * 3;
+      Ok(&mut buf[start..end])
+    }
+    None => {
+      let row_bytes = width
+        .checked_mul(3)
+        .ok_or(MixedSinkerError::GeometryOverflow {
+          width,
+          height,
+          channels: 3,
+        })?;
+      if rgb_scratch.len() < row_bytes {
+        rgb_scratch.resize(row_bytes, 0);
+      }
+      Ok(&mut rgb_scratch[..row_bytes])
+    }
+  }
+}
+
 /// Configurable-coefficients luma derivation from packed
 /// `R, G, B` u8 row.
 ///

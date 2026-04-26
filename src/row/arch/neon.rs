@@ -119,7 +119,7 @@ pub(crate) unsafe fn yuv_420_to_rgba_row(
 /// bytes long.
 #[inline]
 #[target_feature(enable = "neon")]
-pub(crate) unsafe fn yuv_420_to_rgb_or_rgba_row<const ALPHA: bool>(
+unsafe fn yuv_420_to_rgb_or_rgba_row<const ALPHA: bool>(
   y: &[u8],
   u_half: &[u8],
   v_half: &[u8],
@@ -1214,7 +1214,7 @@ pub(crate) unsafe fn nv21_to_rgba_row(
 /// `vld2_u8`, `vst3q_u8` / `vst4q_u8`).
 #[inline]
 #[target_feature(enable = "neon")]
-pub(crate) unsafe fn nv12_or_nv21_to_rgb_or_rgba_row_impl<
+unsafe fn nv12_or_nv21_to_rgb_or_rgba_row_impl<
   const SWAP_UV: bool,
   const ALPHA: bool,
 >(
@@ -1473,7 +1473,7 @@ pub(crate) unsafe fn nv42_to_rgba_row(
 /// No width parity constraint (4:4:4).
 #[inline]
 #[target_feature(enable = "neon")]
-pub(crate) unsafe fn nv24_or_nv42_to_rgb_or_rgba_row_impl<
+unsafe fn nv24_or_nv42_to_rgb_or_rgba_row_impl<
   const SWAP_UV: bool,
   const ALPHA: bool,
 >(
@@ -1687,7 +1687,7 @@ pub(crate) unsafe fn yuv_444_to_rgba_row(
 /// No width parity constraint (4:4:4).
 #[inline]
 #[target_feature(enable = "neon")]
-pub(crate) unsafe fn yuv_444_to_rgb_or_rgba_row<const ALPHA: bool>(
+unsafe fn yuv_444_to_rgb_or_rgba_row<const ALPHA: bool>(
   y: &[u8],
   u: &[u8],
   v: &[u8],

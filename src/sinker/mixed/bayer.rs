@@ -4,7 +4,7 @@
 
 use super::{
   HsvBuffers, HsvPlane, LumaChannel, LumaCoefficients, MixedSinker, MixedSinkerError, RowSlice,
-  check_dimensions_match, rgb_row_to_luma_row,
+  check_dimensions_match, rgb_row_buf_or_scratch, rgba_plane_row_slice, rgb_row_to_luma_row,
 };
 use crate::{ColorMatrix, PixelSink, SourceFormat, raw::*, row::*, yuv::*};
 
@@ -116,31 +116,14 @@ impl PixelSink for MixedSinker<'_, Bayer> {
     // 8-bit RGB scratch / output buffer. Bayer always derives every
     // output channel from the demosaiced RGB, so the RGB row exists
     // unconditionally when any of `rgb` / `luma` / `hsv` is set.
-    let rgb_row: &mut [u8] = match rgb.as_deref_mut() {
-      Some(buf) => {
-        let rgb_plane_end =
-          one_plane_end
-            .checked_mul(3)
-            .ok_or(MixedSinkerError::GeometryOverflow {
-              width: w,
-              height: h,
-              channels: 3,
-            })?;
-        let rgb_plane_start = one_plane_start * 3;
-        &mut buf[rgb_plane_start..rgb_plane_end]
-      }
-      None => {
-        let rgb_row_bytes = w.checked_mul(3).ok_or(MixedSinkerError::GeometryOverflow {
-          width: w,
-          height: h,
-          channels: 3,
-        })?;
-        if rgb_scratch.len() < rgb_row_bytes {
-          rgb_scratch.resize(rgb_row_bytes, 0);
-        }
-        &mut rgb_scratch[..rgb_row_bytes]
-      }
-    };
+    let rgb_row = rgb_row_buf_or_scratch(
+      rgb.as_deref_mut(),
+      rgb_scratch,
+      one_plane_start,
+      one_plane_end,
+      w,
+      h,
+    )?;
 
     bayer_to_rgb_row(
       row.above(),
@@ -336,31 +319,14 @@ impl<const BITS: u32> PixelSink for MixedSinker<'_, Bayer16<BITS>> {
 
     // 8-bit RGB scratch / output. Same lazy-grow pattern as the
     // 8-bit Bayer impl above.
-    let rgb_row: &mut [u8] = match rgb.as_deref_mut() {
-      Some(buf) => {
-        let rgb_plane_end =
-          one_plane_end
-            .checked_mul(3)
-            .ok_or(MixedSinkerError::GeometryOverflow {
-              width: w,
-              height: h,
-              channels: 3,
-            })?;
-        let rgb_plane_start = one_plane_start * 3;
-        &mut buf[rgb_plane_start..rgb_plane_end]
-      }
-      None => {
-        let rgb_row_bytes = w.checked_mul(3).ok_or(MixedSinkerError::GeometryOverflow {
-          width: w,
-          height: h,
-          channels: 3,
-        })?;
-        if rgb_scratch.len() < rgb_row_bytes {
-          rgb_scratch.resize(rgb_row_bytes, 0);
-        }
-        &mut rgb_scratch[..rgb_row_bytes]
-      }
-    };
+    let rgb_row = rgb_row_buf_or_scratch(
+      rgb.as_deref_mut(),
+      rgb_scratch,
+      one_plane_start,
+      one_plane_end,
+      w,
+      h,
+    )?;
 
     bayer16_to_rgb_row::<BITS>(
       row.above(),

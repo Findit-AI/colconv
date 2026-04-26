@@ -220,7 +220,7 @@ pub(crate) fn nv21_to_rgba_row(
 /// - `y.len() >= width`, `uv_or_vu_half.len() >= width`,
 ///   `out.len() >= width * (if ALPHA { 4 } else { 3 })`.
 #[cfg_attr(not(tarpaulin), inline(always))]
-pub(crate) fn nv12_or_nv21_to_rgb_or_rgba_row_impl<const SWAP_UV: bool, const ALPHA: bool>(
+fn nv12_or_nv21_to_rgb_or_rgba_row_impl<const SWAP_UV: bool, const ALPHA: bool>(
   y: &[u8],
   uv_or_vu_half: &[u8],
   out: &mut [u8],
@@ -353,7 +353,7 @@ pub(crate) fn nv42_to_rgba_row(
 /// - `y.len() >= width`, `uv_or_vu.len() >= 2 * width`,
 ///   `out.len() >= width * (if ALPHA { 4 } else { 3 })`.
 #[cfg_attr(not(tarpaulin), inline(always))]
-pub(crate) fn nv24_or_nv42_to_rgb_or_rgba_row_impl<const SWAP_UV: bool, const ALPHA: bool>(
+fn nv24_or_nv42_to_rgb_or_rgba_row_impl<const SWAP_UV: bool, const ALPHA: bool>(
   y: &[u8],
   uv_or_vu: &[u8],
   out: &mut [u8],
@@ -445,7 +445,7 @@ pub(crate) fn yuv_444_to_rgba_row(
 /// - `y.len() >= width`, `u.len() >= width`, `v.len() >= width`,
 ///   `out.len() >= width * (if ALPHA { 4 } else { 3 })`.
 #[cfg_attr(not(tarpaulin), inline(always))]
-pub(crate) fn yuv_444_to_rgb_or_rgba_row<const ALPHA: bool>(
+fn yuv_444_to_rgb_or_rgba_row<const ALPHA: bool>(
   y: &[u8],
   u: &[u8],
   v: &[u8],
