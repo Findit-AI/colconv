@@ -45,6 +45,7 @@ use crate::{
   row::{
     arch::x86_common::{
       rgb_to_hsv_16_pixels, swap_rb_16_pixels, write_rgb_16, write_rgb_u16_8, write_rgba_16,
+      write_rgba_u16_8,
     },
     scalar,
   },
@@ -509,12 +510,69 @@ pub(crate) unsafe fn yuv_420p_n_to_rgb_u16_row<const BITS: u32>(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
+  unsafe {
+    yuv_420p_n_to_rgb_or_rgba_u16_row::<BITS, false>(
+      y, u_half, v_half, rgb_out, width, matrix, full_range,
+    );
+  }
+}
+
+/// AVX2 sibling of [`yuv_420p_n_to_rgba_row`] for native-depth `u16`
+/// output. Alpha samples are `(1 << BITS) - 1` (opaque maximum at the
+/// input bit depth).
+///
+/// # Safety
+///
+/// Same as [`yuv_420p_n_to_rgb_u16_row`] plus `rgba_out.len() >= 4 * width`.
+#[inline]
+#[target_feature(enable = "avx2")]
+pub(crate) unsafe fn yuv_420p_n_to_rgba_u16_row<const BITS: u32>(
+  y: &[u16],
+  u_half: &[u16],
+  v_half: &[u16],
+  rgba_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  unsafe {
+    yuv_420p_n_to_rgb_or_rgba_u16_row::<BITS, true>(
+      y, u_half, v_half, rgba_out, width, matrix, full_range,
+    );
+  }
+}
+
+/// Shared AVX2 high-bit YUV 4:2:0 → native-depth `u16` kernel.
+/// `ALPHA = false` writes RGB triples via 4× `write_rgb_u16_8` per
+/// 32-pixel block; `ALPHA = true` writes RGBA quads via 4×
+/// `write_rgba_u16_8` with constant alpha `(1 << BITS) - 1`.
+///
+/// # Safety
+///
+/// 1. **AVX2 must be available on the current CPU.**
+/// 2. `width & 1 == 0`.
+/// 3. `y.len() >= width`, `u_half.len() >= width / 2`,
+///    `v_half.len() >= width / 2`,
+///    `out.len() >= width * if ALPHA { 4 } else { 3 }`.
+/// 4. `BITS` ∈ `{9, 10, 12, 14}`.
+#[inline]
+#[target_feature(enable = "avx2")]
+pub(crate) unsafe fn yuv_420p_n_to_rgb_or_rgba_u16_row<const BITS: u32, const ALPHA: bool>(
+  y: &[u16],
+  u_half: &[u16],
+  v_half: &[u16],
+  out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
   const { assert!(BITS == 9 || BITS == 10 || BITS == 12 || BITS == 14) };
+  let bpp: usize = if ALPHA { 4 } else { 3 };
   debug_assert_eq!(width & 1, 0);
   debug_assert!(y.len() >= width);
   debug_assert!(u_half.len() >= width / 2);
   debug_assert!(v_half.len() >= width / 2);
-  debug_assert!(rgb_out.len() >= width * 3);
+  debug_assert!(out.len() >= width * bpp);
 
   let coeffs = scalar::Coefficients::for_matrix(matrix);
   let (y_off, y_scale, c_scale) = scalar::range_params_n::<BITS, BITS>(full_range);
@@ -538,6 +596,7 @@ pub(crate) unsafe fn yuv_420p_n_to_rgb_u16_row<const BITS: u32>(
     let cgv = _mm256_set1_epi32(coeffs.g_v());
     let cbu = _mm256_set1_epi32(coeffs.b_u());
     let cbv = _mm256_set1_epi32(coeffs.b_v());
+    let alpha_u16 = _mm_set1_epi16(out_max);
 
     let mut x = 0usize;
     while x + 32 <= width {
@@ -601,45 +660,82 @@ pub(crate) unsafe fn yuv_420p_n_to_rgb_u16_row<const BITS: u32>(
       // Four 8‑pixel u16 writes per 32‑pixel block. Each extracts a
       // 128‑bit half of an i16x16 channel and hands it to the shared
       // SSE4.1 u16 interleave helper.
-      let dst = rgb_out.as_mut_ptr().add(x * 3);
-      write_rgb_u16_8(
-        _mm256_castsi256_si128(r_lo),
-        _mm256_castsi256_si128(g_lo),
-        _mm256_castsi256_si128(b_lo),
-        dst,
-      );
-      write_rgb_u16_8(
-        _mm256_extracti128_si256::<1>(r_lo),
-        _mm256_extracti128_si256::<1>(g_lo),
-        _mm256_extracti128_si256::<1>(b_lo),
-        dst.add(24),
-      );
-      write_rgb_u16_8(
-        _mm256_castsi256_si128(r_hi),
-        _mm256_castsi256_si128(g_hi),
-        _mm256_castsi256_si128(b_hi),
-        dst.add(48),
-      );
-      write_rgb_u16_8(
-        _mm256_extracti128_si256::<1>(r_hi),
-        _mm256_extracti128_si256::<1>(g_hi),
-        _mm256_extracti128_si256::<1>(b_hi),
-        dst.add(72),
-      );
+      if ALPHA {
+        let dst = out.as_mut_ptr().add(x * 4);
+        write_rgba_u16_8(
+          _mm256_castsi256_si128(r_lo),
+          _mm256_castsi256_si128(g_lo),
+          _mm256_castsi256_si128(b_lo),
+          alpha_u16,
+          dst,
+        );
+        write_rgba_u16_8(
+          _mm256_extracti128_si256::<1>(r_lo),
+          _mm256_extracti128_si256::<1>(g_lo),
+          _mm256_extracti128_si256::<1>(b_lo),
+          alpha_u16,
+          dst.add(32),
+        );
+        write_rgba_u16_8(
+          _mm256_castsi256_si128(r_hi),
+          _mm256_castsi256_si128(g_hi),
+          _mm256_castsi256_si128(b_hi),
+          alpha_u16,
+          dst.add(64),
+        );
+        write_rgba_u16_8(
+          _mm256_extracti128_si256::<1>(r_hi),
+          _mm256_extracti128_si256::<1>(g_hi),
+          _mm256_extracti128_si256::<1>(b_hi),
+          alpha_u16,
+          dst.add(96),
+        );
+      } else {
+        let dst = out.as_mut_ptr().add(x * 3);
+        write_rgb_u16_8(
+          _mm256_castsi256_si128(r_lo),
+          _mm256_castsi256_si128(g_lo),
+          _mm256_castsi256_si128(b_lo),
+          dst,
+        );
+        write_rgb_u16_8(
+          _mm256_extracti128_si256::<1>(r_lo),
+          _mm256_extracti128_si256::<1>(g_lo),
+          _mm256_extracti128_si256::<1>(b_lo),
+          dst.add(24),
+        );
+        write_rgb_u16_8(
+          _mm256_castsi256_si128(r_hi),
+          _mm256_castsi256_si128(g_hi),
+          _mm256_castsi256_si128(b_hi),
+          dst.add(48),
+        );
+        write_rgb_u16_8(
+          _mm256_extracti128_si256::<1>(r_hi),
+          _mm256_extracti128_si256::<1>(g_hi),
+          _mm256_extracti128_si256::<1>(b_hi),
+          dst.add(72),
+        );
+      }
 
       x += 32;
     }
 
     if x < width {
-      scalar::yuv_420p_n_to_rgb_u16_row::<BITS>(
-        &y[x..width],
-        &u_half[x / 2..width / 2],
-        &v_half[x / 2..width / 2],
-        &mut rgb_out[x * 3..width * 3],
-        width - x,
-        matrix,
-        full_range,
-      );
+      let tail_y = &y[x..width];
+      let tail_u = &u_half[x / 2..width / 2];
+      let tail_v = &v_half[x / 2..width / 2];
+      let tail_out = &mut out[x * bpp..width * bpp];
+      let tail_w = width - x;
+      if ALPHA {
+        scalar::yuv_420p_n_to_rgba_u16_row::<BITS>(
+          tail_y, tail_u, tail_v, tail_out, tail_w, matrix, full_range,
+        );
+      } else {
+        scalar::yuv_420p_n_to_rgb_u16_row::<BITS>(
+          tail_y, tail_u, tail_v, tail_out, tail_w, matrix, full_range,
+        );
+      }
     }
   }
 }
@@ -1469,10 +1565,62 @@ pub(crate) unsafe fn p_n_to_rgb_u16_row<const BITS: u32>(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
+  unsafe {
+    p_n_to_rgb_or_rgba_u16_row::<BITS, false>(y, uv_half, rgb_out, width, matrix, full_range);
+  }
+}
+
+/// AVX2 sibling of [`p_n_to_rgba_row`] for native-depth `u16` output.
+/// Alpha samples are `(1 << BITS) - 1` (opaque maximum at the input
+/// bit depth). P016 has its own kernel family — never routed here.
+///
+/// # Safety
+///
+/// Same as [`p_n_to_rgb_u16_row`] plus `rgba_out.len() >= 4 * width`.
+#[inline]
+#[target_feature(enable = "avx2")]
+pub(crate) unsafe fn p_n_to_rgba_u16_row<const BITS: u32>(
+  y: &[u16],
+  uv_half: &[u16],
+  rgba_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  unsafe {
+    p_n_to_rgb_or_rgba_u16_row::<BITS, true>(y, uv_half, rgba_out, width, matrix, full_range);
+  }
+}
+
+/// Shared AVX2 Pn → native-depth `u16` kernel. `ALPHA = false` writes
+/// RGB triples via 4× `write_rgb_u16_8` per 32-pixel block;
+/// `ALPHA = true` writes RGBA quads via 4× `write_rgba_u16_8` with
+/// constant alpha `(1 << BITS) - 1`. P016 has its own kernel family —
+/// never routed here.
+///
+/// # Safety
+///
+/// 1. **AVX2 must be available on the current CPU.**
+/// 2. `width & 1 == 0`.
+/// 3. `y.len() >= width`, `uv_half.len() >= width`,
+///    `out.len() >= width * if ALPHA { 4 } else { 3 }`.
+/// 4. `BITS` ∈ `{10, 12}`.
+#[inline]
+#[target_feature(enable = "avx2")]
+pub(crate) unsafe fn p_n_to_rgb_or_rgba_u16_row<const BITS: u32, const ALPHA: bool>(
+  y: &[u16],
+  uv_half: &[u16],
+  out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  const { assert!(BITS == 10 || BITS == 12) };
+  let bpp: usize = if ALPHA { 4 } else { 3 };
   debug_assert_eq!(width & 1, 0);
   debug_assert!(y.len() >= width);
   debug_assert!(uv_half.len() >= width);
-  debug_assert!(rgb_out.len() >= width * 3);
+  debug_assert!(out.len() >= width * bpp);
 
   let coeffs = scalar::Coefficients::for_matrix(matrix);
   let (y_off, y_scale, c_scale) = scalar::range_params_n::<BITS, BITS>(full_range);
@@ -1497,6 +1645,7 @@ pub(crate) unsafe fn p_n_to_rgb_u16_row<const BITS: u32>(
     let cgv = _mm256_set1_epi32(coeffs.g_v());
     let cbu = _mm256_set1_epi32(coeffs.b_u());
     let cbv = _mm256_set1_epi32(coeffs.b_v());
+    let alpha_u16 = _mm_set1_epi16(out_max);
 
     let mut x = 0usize;
     while x + 32 <= width {
@@ -1550,44 +1699,77 @@ pub(crate) unsafe fn p_n_to_rgb_u16_row<const BITS: u32>(
       let b_lo = clamp_u16_max_x16(_mm256_adds_epi16(y_scaled_lo, b_dup_lo), zero_v, max_v);
       let b_hi = clamp_u16_max_x16(_mm256_adds_epi16(y_scaled_hi, b_dup_hi), zero_v, max_v);
 
-      let dst = rgb_out.as_mut_ptr().add(x * 3);
-      write_rgb_u16_8(
-        _mm256_castsi256_si128(r_lo),
-        _mm256_castsi256_si128(g_lo),
-        _mm256_castsi256_si128(b_lo),
-        dst,
-      );
-      write_rgb_u16_8(
-        _mm256_extracti128_si256::<1>(r_lo),
-        _mm256_extracti128_si256::<1>(g_lo),
-        _mm256_extracti128_si256::<1>(b_lo),
-        dst.add(24),
-      );
-      write_rgb_u16_8(
-        _mm256_castsi256_si128(r_hi),
-        _mm256_castsi256_si128(g_hi),
-        _mm256_castsi256_si128(b_hi),
-        dst.add(48),
-      );
-      write_rgb_u16_8(
-        _mm256_extracti128_si256::<1>(r_hi),
-        _mm256_extracti128_si256::<1>(g_hi),
-        _mm256_extracti128_si256::<1>(b_hi),
-        dst.add(72),
-      );
+      if ALPHA {
+        let dst = out.as_mut_ptr().add(x * 4);
+        write_rgba_u16_8(
+          _mm256_castsi256_si128(r_lo),
+          _mm256_castsi256_si128(g_lo),
+          _mm256_castsi256_si128(b_lo),
+          alpha_u16,
+          dst,
+        );
+        write_rgba_u16_8(
+          _mm256_extracti128_si256::<1>(r_lo),
+          _mm256_extracti128_si256::<1>(g_lo),
+          _mm256_extracti128_si256::<1>(b_lo),
+          alpha_u16,
+          dst.add(32),
+        );
+        write_rgba_u16_8(
+          _mm256_castsi256_si128(r_hi),
+          _mm256_castsi256_si128(g_hi),
+          _mm256_castsi256_si128(b_hi),
+          alpha_u16,
+          dst.add(64),
+        );
+        write_rgba_u16_8(
+          _mm256_extracti128_si256::<1>(r_hi),
+          _mm256_extracti128_si256::<1>(g_hi),
+          _mm256_extracti128_si256::<1>(b_hi),
+          alpha_u16,
+          dst.add(96),
+        );
+      } else {
+        let dst = out.as_mut_ptr().add(x * 3);
+        write_rgb_u16_8(
+          _mm256_castsi256_si128(r_lo),
+          _mm256_castsi256_si128(g_lo),
+          _mm256_castsi256_si128(b_lo),
+          dst,
+        );
+        write_rgb_u16_8(
+          _mm256_extracti128_si256::<1>(r_lo),
+          _mm256_extracti128_si256::<1>(g_lo),
+          _mm256_extracti128_si256::<1>(b_lo),
+          dst.add(24),
+        );
+        write_rgb_u16_8(
+          _mm256_castsi256_si128(r_hi),
+          _mm256_castsi256_si128(g_hi),
+          _mm256_castsi256_si128(b_hi),
+          dst.add(48),
+        );
+        write_rgb_u16_8(
+          _mm256_extracti128_si256::<1>(r_hi),
+          _mm256_extracti128_si256::<1>(g_hi),
+          _mm256_extracti128_si256::<1>(b_hi),
+          dst.add(72),
+        );
+      }
 
       x += 32;
     }
 
     if x < width {
-      scalar::p_n_to_rgb_u16_row::<BITS>(
-        &y[x..width],
-        &uv_half[x..width],
-        &mut rgb_out[x * 3..width * 3],
-        width - x,
-        matrix,
-        full_range,
-      );
+      let tail_y = &y[x..width];
+      let tail_uv = &uv_half[x..width];
+      let tail_out = &mut out[x * bpp..width * bpp];
+      let tail_w = width - x;
+      if ALPHA {
+        scalar::p_n_to_rgba_u16_row::<BITS>(tail_y, tail_uv, tail_out, tail_w, matrix, full_range);
+      } else {
+        scalar::p_n_to_rgb_u16_row::<BITS>(tail_y, tail_uv, tail_out, tail_w, matrix, full_range);
+      }
     }
   }
 }
@@ -2855,17 +3037,72 @@ pub(crate) unsafe fn yuv_420p16_to_rgb_u16_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
+  unsafe {
+    yuv_420p16_to_rgb_or_rgba_u16_row::<false>(
+      y, u_half, v_half, rgb_out, width, matrix, full_range,
+    );
+  }
+}
+
+/// AVX2 sibling of [`yuv_420p16_to_rgba_row`] for native-depth `u16`
+/// output. Alpha is `0xFFFF`.
+///
+/// # Safety
+///
+/// Same as [`yuv_420p16_to_rgb_u16_row`] plus `rgba_out.len() >= 4 * width`.
+#[inline]
+#[target_feature(enable = "avx2")]
+pub(crate) unsafe fn yuv_420p16_to_rgba_u16_row(
+  y: &[u16],
+  u_half: &[u16],
+  v_half: &[u16],
+  rgba_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  unsafe {
+    yuv_420p16_to_rgb_or_rgba_u16_row::<true>(
+      y, u_half, v_half, rgba_out, width, matrix, full_range,
+    );
+  }
+}
+
+/// Shared AVX2 16-bit YUV 4:2:0 → native-depth `u16` kernel.
+/// `ALPHA = false` writes RGB triples; `ALPHA = true` writes RGBA
+/// quads with constant alpha `0xFFFF`.
+///
+/// # Safety
+///
+/// 1. **AVX2 must be available.**
+/// 2. `width & 1 == 0`.
+/// 3. `y.len() >= width`, `u_half.len() >= width / 2`,
+///    `v_half.len() >= width / 2`,
+///    `out.len() >= width * if ALPHA { 4 } else { 3 }`.
+#[inline]
+#[target_feature(enable = "avx2")]
+pub(crate) unsafe fn yuv_420p16_to_rgb_or_rgba_u16_row<const ALPHA: bool>(
+  y: &[u16],
+  u_half: &[u16],
+  v_half: &[u16],
+  out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  let bpp: usize = if ALPHA { 4 } else { 3 };
   debug_assert_eq!(width & 1, 0);
   debug_assert!(y.len() >= width);
   debug_assert!(u_half.len() >= width / 2);
   debug_assert!(v_half.len() >= width / 2);
-  debug_assert!(rgb_out.len() >= width * 3);
+  debug_assert!(out.len() >= width * bpp);
 
   let coeffs = scalar::Coefficients::for_matrix(matrix);
   let (y_off, y_scale, c_scale) = scalar::range_params_n::<16, 16>(full_range);
   const RND: i64 = 1 << 14;
 
   unsafe {
+    let alpha_u16 = _mm_set1_epi16(-1i16);
     let rnd_v = _mm256_set1_epi64x(RND);
     let y_off_v = _mm256_set1_epi32(y_off);
     let y_scale_v = _mm256_set1_epi32(y_scale);
@@ -2952,34 +3189,57 @@ pub(crate) unsafe fn yuv_420p16_to_rgb_u16_row(
         _mm256_add_epi32(y_hi_scaled, b_dup_hi),
       ));
 
-      // Write 16 pixels = 48 u16 via two 8-pixel helper calls.
-      let dst = rgb_out.as_mut_ptr().add(x * 3);
-      write_rgb_u16_8(
-        _mm256_castsi256_si128(r_u16),
-        _mm256_castsi256_si128(g_u16),
-        _mm256_castsi256_si128(b_u16),
-        dst,
-      );
-      write_rgb_u16_8(
-        _mm256_extracti128_si256::<1>(r_u16),
-        _mm256_extracti128_si256::<1>(g_u16),
-        _mm256_extracti128_si256::<1>(b_u16),
-        dst.add(24),
-      );
+      // Write 16 pixels via two 8-pixel helper calls.
+      if ALPHA {
+        let dst = out.as_mut_ptr().add(x * 4);
+        write_rgba_u16_8(
+          _mm256_castsi256_si128(r_u16),
+          _mm256_castsi256_si128(g_u16),
+          _mm256_castsi256_si128(b_u16),
+          alpha_u16,
+          dst,
+        );
+        write_rgba_u16_8(
+          _mm256_extracti128_si256::<1>(r_u16),
+          _mm256_extracti128_si256::<1>(g_u16),
+          _mm256_extracti128_si256::<1>(b_u16),
+          alpha_u16,
+          dst.add(32),
+        );
+      } else {
+        let dst = out.as_mut_ptr().add(x * 3);
+        write_rgb_u16_8(
+          _mm256_castsi256_si128(r_u16),
+          _mm256_castsi256_si128(g_u16),
+          _mm256_castsi256_si128(b_u16),
+          dst,
+        );
+        write_rgb_u16_8(
+          _mm256_extracti128_si256::<1>(r_u16),
+          _mm256_extracti128_si256::<1>(g_u16),
+          _mm256_extracti128_si256::<1>(b_u16),
+          dst.add(24),
+        );
+      }
 
       x += 16;
     }
 
     if x < width {
-      scalar::yuv_420p16_to_rgb_u16_row(
-        &y[x..width],
-        &u_half[x / 2..width / 2],
-        &v_half[x / 2..width / 2],
-        &mut rgb_out[x * 3..width * 3],
-        width - x,
-        matrix,
-        full_range,
-      );
+      let tail_y = &y[x..width];
+      let tail_u = &u_half[x / 2..width / 2];
+      let tail_v = &v_half[x / 2..width / 2];
+      let tail_out = &mut out[x * bpp..width * bpp];
+      let tail_w = width - x;
+      if ALPHA {
+        scalar::yuv_420p16_to_rgba_u16_row(
+          tail_y, tail_u, tail_v, tail_out, tail_w, matrix, full_range,
+        );
+      } else {
+        scalar::yuv_420p16_to_rgb_u16_row(
+          tail_y, tail_u, tail_v, tail_out, tail_w, matrix, full_range,
+        );
+      }
     }
   }
 }
@@ -3157,16 +3417,64 @@ pub(crate) unsafe fn p16_to_rgb_u16_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
+  unsafe {
+    p16_to_rgb_or_rgba_u16_row::<false>(y, uv_half, rgb_out, width, matrix, full_range);
+  }
+}
+
+/// AVX2 sibling of [`p16_to_rgba_row`] for native-depth `u16` output.
+/// Alpha is `0xFFFF`.
+///
+/// # Safety
+///
+/// Same as [`p16_to_rgb_u16_row`] plus `rgba_out.len() >= 4 * width`.
+#[inline]
+#[target_feature(enable = "avx2")]
+pub(crate) unsafe fn p16_to_rgba_u16_row(
+  y: &[u16],
+  uv_half: &[u16],
+  rgba_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  unsafe {
+    p16_to_rgb_or_rgba_u16_row::<true>(y, uv_half, rgba_out, width, matrix, full_range);
+  }
+}
+
+/// Shared AVX2 16-bit P016 → native-depth `u16` kernel.
+/// `ALPHA = false` writes RGB triples; `ALPHA = true` writes RGBA
+/// quads with constant alpha `0xFFFF`.
+///
+/// # Safety
+///
+/// 1. **AVX2 must be available.**
+/// 2. `width & 1 == 0`.
+/// 3. `y.len() >= width`, `uv_half.len() >= width`,
+///    `out.len() >= width * if ALPHA { 4 } else { 3 }`.
+#[inline]
+#[target_feature(enable = "avx2")]
+pub(crate) unsafe fn p16_to_rgb_or_rgba_u16_row<const ALPHA: bool>(
+  y: &[u16],
+  uv_half: &[u16],
+  out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  let bpp: usize = if ALPHA { 4 } else { 3 };
   debug_assert_eq!(width & 1, 0);
   debug_assert!(y.len() >= width);
   debug_assert!(uv_half.len() >= width);
-  debug_assert!(rgb_out.len() >= width * 3);
+  debug_assert!(out.len() >= width * bpp);
 
   let coeffs = scalar::Coefficients::for_matrix(matrix);
   let (y_off, y_scale, c_scale) = scalar::range_params_n::<16, 16>(full_range);
   const RND: i64 = 1 << 14;
 
   unsafe {
+    let alpha_u16 = _mm_set1_epi16(-1i16);
     let rnd_v = _mm256_set1_epi64x(RND);
     let y_off_v = _mm256_set1_epi32(y_off);
     let y_scale_v = _mm256_set1_epi32(y_scale);
@@ -3257,32 +3565,51 @@ pub(crate) unsafe fn p16_to_rgb_u16_row(
         _mm256_add_epi32(y_hi_scaled, b_dup_hi),
       ));
 
-      let dst = rgb_out.as_mut_ptr().add(x * 3);
-      write_rgb_u16_8(
-        _mm256_castsi256_si128(r_u16),
-        _mm256_castsi256_si128(g_u16),
-        _mm256_castsi256_si128(b_u16),
-        dst,
-      );
-      write_rgb_u16_8(
-        _mm256_extracti128_si256::<1>(r_u16),
-        _mm256_extracti128_si256::<1>(g_u16),
-        _mm256_extracti128_si256::<1>(b_u16),
-        dst.add(24),
-      );
+      if ALPHA {
+        let dst = out.as_mut_ptr().add(x * 4);
+        write_rgba_u16_8(
+          _mm256_castsi256_si128(r_u16),
+          _mm256_castsi256_si128(g_u16),
+          _mm256_castsi256_si128(b_u16),
+          alpha_u16,
+          dst,
+        );
+        write_rgba_u16_8(
+          _mm256_extracti128_si256::<1>(r_u16),
+          _mm256_extracti128_si256::<1>(g_u16),
+          _mm256_extracti128_si256::<1>(b_u16),
+          alpha_u16,
+          dst.add(32),
+        );
+      } else {
+        let dst = out.as_mut_ptr().add(x * 3);
+        write_rgb_u16_8(
+          _mm256_castsi256_si128(r_u16),
+          _mm256_castsi256_si128(g_u16),
+          _mm256_castsi256_si128(b_u16),
+          dst,
+        );
+        write_rgb_u16_8(
+          _mm256_extracti128_si256::<1>(r_u16),
+          _mm256_extracti128_si256::<1>(g_u16),
+          _mm256_extracti128_si256::<1>(b_u16),
+          dst.add(24),
+        );
+      }
 
       x += 16;
     }
 
     if x < width {
-      scalar::p16_to_rgb_u16_row(
-        &y[x..width],
-        &uv_half[x..width],
-        &mut rgb_out[x * 3..width * 3],
-        width - x,
-        matrix,
-        full_range,
-      );
+      let tail_y = &y[x..width];
+      let tail_uv = &uv_half[x..width];
+      let tail_out = &mut out[x * bpp..width * bpp];
+      let tail_w = width - x;
+      if ALPHA {
+        scalar::p16_to_rgba_u16_row(tail_y, tail_uv, tail_out, tail_w, matrix, full_range);
+      } else {
+        scalar::p16_to_rgb_u16_row(tail_y, tail_uv, tail_out, tail_w, matrix, full_range);
+      }
     }
   }
 }

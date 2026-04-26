@@ -1119,6 +1119,31 @@ pub(super) fn rgba_plane_row_slice(
   Ok(&mut buf[start..end])
 }
 
+/// `u16` analogue of [`rgba_plane_row_slice`] — slices the RGBA row out
+/// of an attached `u16` RGBA plane buffer. This helper indexes in `u16`
+/// elements, not bytes: like the `u8` variant, RGBA rows use `× 4`
+/// elements per pixel, so the overflow check is the same, but the byte
+/// offsets differ because each element is 2 bytes. Used by the
+/// high-bit-depth 4:2:0 sinkers that fan `u16` RGB out to `u16` RGBA.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(super) fn rgba_u16_plane_row_slice(
+  buf: &mut [u16],
+  one_plane_start: usize,
+  one_plane_end: usize,
+  width: usize,
+  height: usize,
+) -> Result<&mut [u16], MixedSinkerError> {
+  let end = one_plane_end
+    .checked_mul(4)
+    .ok_or(MixedSinkerError::GeometryOverflow {
+      width,
+      height,
+      channels: 4,
+    })?;
+  let start = one_plane_start * 4; // ≤ end, fits.
+  Ok(&mut buf[start..end])
+}
+
 /// Pick an RGB row buffer for the kernel to write into: caller's RGB
 /// plane slice when attached, or the growing scratch buffer otherwise
 /// (HSV-only callers don't allocate an RGB plane). Returns
