@@ -3142,6 +3142,93 @@ mod tests {
     }
   }
 
+  // ---- yuv_420_to_rgba_row equivalence --------------------------------
+  //
+  // Direct backend test for the new RGBA path: bypasses the public
+  // dispatcher so the SSE4.1 `write_rgba_16` shuffle masks are
+  // exercised regardless of what tier the dispatcher would pick on
+  // the current runner. Catches lane-order, shuffle-mask, or alpha
+  // splat corruption that an AVX2- or AVX-512-routed test would
+  // miss.
+
+  fn check_rgba_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+    let y: std::vec::Vec<u8> = (0..width).map(|i| ((i * 37 + 11) & 0xFF) as u8).collect();
+    let u: std::vec::Vec<u8> = (0..width / 2)
+      .map(|i| ((i * 53 + 23) & 0xFF) as u8)
+      .collect();
+    let v: std::vec::Vec<u8> = (0..width / 2)
+      .map(|i| ((i * 71 + 91) & 0xFF) as u8)
+      .collect();
+    let mut rgba_scalar = std::vec![0u8; width * 4];
+    let mut rgba_sse41 = std::vec![0u8; width * 4];
+
+    scalar::yuv_420_to_rgba_row(&y, &u, &v, &mut rgba_scalar, width, matrix, full_range);
+    unsafe {
+      yuv_420_to_rgba_row(&y, &u, &v, &mut rgba_sse41, width, matrix, full_range);
+    }
+
+    if rgba_scalar != rgba_sse41 {
+      let first_diff = rgba_scalar
+        .iter()
+        .zip(rgba_sse41.iter())
+        .position(|(a, b)| a != b)
+        .unwrap();
+      let pixel = first_diff / 4;
+      let channel = ["R", "G", "B", "A"][first_diff % 4];
+      panic!(
+        "SSE4.1 RGBA diverges from scalar at byte {first_diff} (px {pixel} {channel}, width={width}, matrix={matrix:?}, full_range={full_range}): scalar={} sse41={}",
+        rgba_scalar[first_diff], rgba_sse41[first_diff]
+      );
+    }
+  }
+
+  #[test]
+  fn sse41_rgba_matches_scalar_all_matrices_16() {
+    if !std::arch::is_x86_feature_detected!("sse4.1") {
+      return;
+    }
+    for m in [
+      ColorMatrix::Bt601,
+      ColorMatrix::Bt709,
+      ColorMatrix::Bt2020Ncl,
+      ColorMatrix::Smpte240m,
+      ColorMatrix::Fcc,
+      ColorMatrix::YCgCo,
+    ] {
+      for full in [true, false] {
+        check_rgba_equivalence(16, m, full);
+      }
+    }
+  }
+
+  #[test]
+  fn sse41_rgba_matches_scalar_width_32() {
+    if !std::arch::is_x86_feature_detected!("sse4.1") {
+      return;
+    }
+    check_rgba_equivalence(32, ColorMatrix::Bt601, true);
+    check_rgba_equivalence(32, ColorMatrix::Bt709, false);
+    check_rgba_equivalence(32, ColorMatrix::YCgCo, true);
+  }
+
+  #[test]
+  fn sse41_rgba_matches_scalar_width_1920() {
+    if !std::arch::is_x86_feature_detected!("sse4.1") {
+      return;
+    }
+    check_rgba_equivalence(1920, ColorMatrix::Bt709, false);
+  }
+
+  #[test]
+  fn sse41_rgba_matches_scalar_odd_tail_widths() {
+    if !std::arch::is_x86_feature_detected!("sse4.1") {
+      return;
+    }
+    for w in [18usize, 30, 34, 1922] {
+      check_rgba_equivalence(w, ColorMatrix::Bt601, false);
+    }
+  }
+
   // ---- nv12_to_rgb_row equivalence ------------------------------------
 
   fn check_nv12_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {

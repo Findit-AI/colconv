@@ -3419,6 +3419,66 @@ mod tests {
     }
   }
 
+  // ---- yuv_420_to_rgba_row equivalence --------------------------------
+  //
+  // Direct backend test for the new RGBA path: bypasses the public
+  // dispatcher so the wasm `write_rgba_16` swizzle (4-mask + 4
+  // store) is exercised on every wasm32+simd128 target.
+
+  fn check_rgba_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+    let y: std::vec::Vec<u8> = (0..width).map(|i| ((i * 37 + 11) & 0xFF) as u8).collect();
+    let u: std::vec::Vec<u8> = (0..width / 2)
+      .map(|i| ((i * 53 + 23) & 0xFF) as u8)
+      .collect();
+    let v: std::vec::Vec<u8> = (0..width / 2)
+      .map(|i| ((i * 71 + 91) & 0xFF) as u8)
+      .collect();
+    let mut rgba_scalar = std::vec![0u8; width * 4];
+    let mut rgba_wasm = std::vec![0u8; width * 4];
+
+    scalar::yuv_420_to_rgba_row(&y, &u, &v, &mut rgba_scalar, width, matrix, full_range);
+    unsafe {
+      yuv_420_to_rgba_row(&y, &u, &v, &mut rgba_wasm, width, matrix, full_range);
+    }
+
+    if rgba_scalar != rgba_wasm {
+      let first_diff = rgba_scalar
+        .iter()
+        .zip(rgba_wasm.iter())
+        .position(|(a, b)| a != b)
+        .unwrap();
+      let pixel = first_diff / 4;
+      let channel = ["R", "G", "B", "A"][first_diff % 4];
+      panic!(
+        "wasm simd128 RGBA diverges from scalar at byte {first_diff} (px {pixel} {channel}, width={width}, matrix={matrix:?}, full_range={full_range}): scalar={} wasm={}",
+        rgba_scalar[first_diff], rgba_wasm[first_diff]
+      );
+    }
+  }
+
+  #[test]
+  fn simd128_rgba_matches_scalar_all_matrices_16() {
+    for m in [
+      ColorMatrix::Bt601,
+      ColorMatrix::Bt709,
+      ColorMatrix::Bt2020Ncl,
+      ColorMatrix::Smpte240m,
+      ColorMatrix::Fcc,
+      ColorMatrix::YCgCo,
+    ] {
+      for full in [true, false] {
+        check_rgba_equivalence(16, m, full);
+      }
+    }
+  }
+
+  #[test]
+  fn simd128_rgba_matches_scalar_tail_widths() {
+    for w in [18usize, 30, 34, 1922] {
+      check_rgba_equivalence(w, ColorMatrix::Bt601, false);
+    }
+  }
+
   // ---- nv12_to_rgb_row equivalence ------------------------------------
 
   fn check_nv12_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {

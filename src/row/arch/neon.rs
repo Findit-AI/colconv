@@ -3416,6 +3416,84 @@ mod tests {
     }
   }
 
+  // ---- yuv_420_to_rgba_row equivalence --------------------------------
+  //
+  // Direct backend test for the new RGBA path: bypasses the public
+  // dispatcher so the NEON `vst4q_u8` write is exercised regardless
+  // of what tier the dispatcher would pick on the current runner.
+  // Catches lane-order or alpha-splat corruption in `vst4q_u8` that
+  // a dispatcher-routed test on a different host would miss.
+
+  fn check_rgba_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+    let y: std::vec::Vec<u8> = (0..width).map(|i| ((i * 37 + 11) & 0xFF) as u8).collect();
+    let u: std::vec::Vec<u8> = (0..width / 2)
+      .map(|i| ((i * 53 + 23) & 0xFF) as u8)
+      .collect();
+    let v: std::vec::Vec<u8> = (0..width / 2)
+      .map(|i| ((i * 71 + 91) & 0xFF) as u8)
+      .collect();
+    let mut rgba_scalar = std::vec![0u8; width * 4];
+    let mut rgba_neon = std::vec![0u8; width * 4];
+
+    scalar::yuv_420_to_rgba_row(&y, &u, &v, &mut rgba_scalar, width, matrix, full_range);
+    unsafe {
+      yuv_420_to_rgba_row(&y, &u, &v, &mut rgba_neon, width, matrix, full_range);
+    }
+
+    if rgba_scalar != rgba_neon {
+      let first_diff = rgba_scalar
+        .iter()
+        .zip(rgba_neon.iter())
+        .position(|(a, b)| a != b)
+        .unwrap();
+      let pixel = first_diff / 4;
+      let channel = ["R", "G", "B", "A"][first_diff % 4];
+      panic!(
+        "NEON RGBA diverges from scalar at byte {first_diff} (px {pixel} {channel}, width={width}, matrix={matrix:?}, full_range={full_range}): scalar={} neon={}",
+        rgba_scalar[first_diff], rgba_neon[first_diff]
+      );
+    }
+  }
+
+  #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
+  fn neon_rgba_matches_scalar_all_matrices_16() {
+    for m in [
+      ColorMatrix::Bt601,
+      ColorMatrix::Bt709,
+      ColorMatrix::Bt2020Ncl,
+      ColorMatrix::Smpte240m,
+      ColorMatrix::Fcc,
+      ColorMatrix::YCgCo,
+    ] {
+      for full in [true, false] {
+        check_rgba_equivalence(16, m, full);
+      }
+    }
+  }
+
+  #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
+  fn neon_rgba_matches_scalar_width_32() {
+    check_rgba_equivalence(32, ColorMatrix::Bt601, true);
+    check_rgba_equivalence(32, ColorMatrix::Bt709, false);
+    check_rgba_equivalence(32, ColorMatrix::YCgCo, true);
+  }
+
+  #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
+  fn neon_rgba_matches_scalar_width_1920() {
+    check_rgba_equivalence(1920, ColorMatrix::Bt709, false);
+  }
+
+  #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
+  fn neon_rgba_matches_scalar_odd_tail_widths() {
+    for w in [18usize, 30, 34, 1922] {
+      check_rgba_equivalence(w, ColorMatrix::Bt601, false);
+    }
+  }
+
   // ---- nv12_to_rgb_row equivalence ------------------------------------
 
   /// Scalar‑equivalence fixture for NV12. Builds an interleaved UV row
