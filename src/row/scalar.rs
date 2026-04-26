@@ -550,7 +550,13 @@ pub(crate) fn expand_rgb_to_rgba_row(rgb: &[u8], rgba_out: &mut [u8], width: usi
 ///
 /// - `rgb.len() >= 3 * width` (`u16` elements)
 /// - `rgba_out.len() >= 4 * width` (`u16` elements)
+//
+// Scalar prep for Ship 8 Tranche 5: the consumer (MixedSinker Strategy A
+// on the u16 path) lands in the follow-up Tranche 5b PR. `dead_code`
+// allow lets this prep PR ship the foundation without the eventual call
+// site.
 #[cfg(any(feature = "std", feature = "alloc"))]
+#[allow(dead_code)]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn expand_rgb_u16_to_rgba_u16_row<const BITS: u32>(
   rgb: &[u16],
@@ -621,6 +627,12 @@ pub(crate) fn yuv_420p_n_to_rgb_row<const BITS: u32>(
 ///
 /// - `width` must be even.
 /// - `rgba_out.len() >= 4 * width` (other slices: same as RGB variant).
+//
+// Scalar prep for Ship 8 Tranche 5a: the public dispatcher
+// `row::yuv420p10_to_rgba_row` (and its u16 sibling) lands in the
+// follow-up SIMD/dispatcher PR. Until then this thin wrapper has no
+// caller.
+#[allow(dead_code)]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn yuv_420p_n_to_rgba_row<const BITS: u32>(
   y: &[u16],
@@ -785,6 +797,11 @@ pub(crate) fn yuv_420p_n_to_rgb_u16_row<const BITS: u32>(
 ///
 /// - `width` must be even.
 /// - `rgba_out.len() >= 4 * width` (other slices: same as RGB variant).
+//
+// Scalar prep for Ship 8 Tranche 5b: the public dispatcher
+// `row::yuv420p10_to_rgba_u16_row` lands in the follow-up SIMD/dispatcher
+// PR. Until then this thin wrapper has no caller.
+#[allow(dead_code)]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn yuv_420p_n_to_rgba_u16_row<const BITS: u32>(
   y: &[u16],
@@ -1023,6 +1040,8 @@ fn q15_scale64(sample: i32, scale_q15: i32) -> i32 {
 /// `BITS = 16`, just without the AND-mask (no upper-bit-zero
 /// guarantee to enforce at 16 bits).
 ///
+/// Thin wrapper over [`yuv_420p16_to_rgb_or_rgba_row`] with `ALPHA = false`.
+///
 /// # Panics (debug builds)
 ///
 /// - `width` must be even.
@@ -1038,11 +1057,56 @@ pub(crate) fn yuv_420p16_to_rgb_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
+  yuv_420p16_to_rgb_or_rgba_row::<false>(y, u_half, v_half, rgb_out, width, matrix, full_range);
+}
+
+/// Converts one row of **16-bit** YUV 4:2:0 to **8-bit** packed
+/// **RGBA**. Same numerical contract as [`yuv_420p16_to_rgb_row`];
+/// the only differences are the per-pixel stride (4 vs 3) and the
+/// alpha byte (`0xFF`, opaque).
+///
+/// Thin wrapper over [`yuv_420p16_to_rgb_or_rgba_row`] with `ALPHA = true`.
+//
+// Scalar prep for Ship 8 Tranche 5a: the public dispatcher
+// `row::yuv420p16_to_rgba_row` lands in the follow-up SIMD/dispatcher
+// PR. Until then this thin wrapper has no caller.
+#[allow(dead_code)]
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn yuv_420p16_to_rgba_row(
+  y: &[u16],
+  u_half: &[u16],
+  v_half: &[u16],
+  rgba_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  yuv_420p16_to_rgb_or_rgba_row::<true>(y, u_half, v_half, rgba_out, width, matrix, full_range);
+}
+
+/// Shared 16-bit YUV 4:2:0 → 8-bit RGB / RGBA kernel. `ALPHA = false`
+/// emits 3 bpp; `ALPHA = true` emits 4 bpp with constant `0xFF` alpha.
+///
+/// 16-bit input has no AND-mask (every `u16` is a valid sample) and
+/// uses i32 chroma — output-target scaling keeps `u_d * coeff` inside
+/// i32 for u8 output (the i64 chroma family lives in
+/// [`yuv_420p16_to_rgb_or_rgba_u16_row`]).
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn yuv_420p16_to_rgb_or_rgba_row<const ALPHA: bool>(
+  y: &[u16],
+  u_half: &[u16],
+  v_half: &[u16],
+  out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  let bpp: usize = if ALPHA { 4 } else { 3 };
   debug_assert_eq!(width & 1, 0, "YUV 4:2:0 requires even width");
   debug_assert!(y.len() >= width, "y row too short");
   debug_assert!(u_half.len() >= width / 2, "u_half row too short");
   debug_assert!(v_half.len() >= width / 2, "v_half row too short");
-  debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
+  debug_assert!(out.len() >= width * bpp, "out row too short");
 
   let coeffs = Coefficients::for_matrix(matrix);
   let (y_off, y_scale, c_scale) = range_params_n::<16, 8>(full_range);
@@ -1062,14 +1126,20 @@ pub(crate) fn yuv_420p16_to_rgb_row(
     let b_chroma = q15_chroma(coeffs.b_u(), u_d, coeffs.b_v(), v_d);
 
     let y0 = q15_scale(y[x] as i32 - y_off, y_scale);
-    rgb_out[x * 3] = clamp_u8(y0 + r_chroma);
-    rgb_out[x * 3 + 1] = clamp_u8(y0 + g_chroma);
-    rgb_out[x * 3 + 2] = clamp_u8(y0 + b_chroma);
+    out[x * bpp] = clamp_u8(y0 + r_chroma);
+    out[x * bpp + 1] = clamp_u8(y0 + g_chroma);
+    out[x * bpp + 2] = clamp_u8(y0 + b_chroma);
+    if ALPHA {
+      out[x * bpp + 3] = 0xFF;
+    }
 
     let y1 = q15_scale(y[x + 1] as i32 - y_off, y_scale);
-    rgb_out[(x + 1) * 3] = clamp_u8(y1 + r_chroma);
-    rgb_out[(x + 1) * 3 + 1] = clamp_u8(y1 + g_chroma);
-    rgb_out[(x + 1) * 3 + 2] = clamp_u8(y1 + b_chroma);
+    out[(x + 1) * bpp] = clamp_u8(y1 + r_chroma);
+    out[(x + 1) * bpp + 1] = clamp_u8(y1 + g_chroma);
+    out[(x + 1) * bpp + 2] = clamp_u8(y1 + b_chroma);
+    if ALPHA {
+      out[(x + 1) * bpp + 3] = 0xFF;
+    }
 
     x += 2;
   }
@@ -1079,6 +1149,8 @@ pub(crate) fn yuv_420p16_to_rgb_row(
 /// packed RGB — full-range output in `[0, 65535]`. **Runs the
 /// chroma matrix multiply in i64** to accommodate the wider
 /// `coeff × u_d` product at 16 → 16-bit scaling.
+///
+/// Thin wrapper over [`yuv_420p16_to_rgb_or_rgba_u16_row`] with `ALPHA = false`.
 ///
 /// # Panics (debug builds)
 ///
@@ -1094,11 +1166,54 @@ pub(crate) fn yuv_420p16_to_rgb_u16_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
+  yuv_420p16_to_rgb_or_rgba_u16_row::<false>(y, u_half, v_half, rgb_out, width, matrix, full_range);
+}
+
+/// Converts one row of **16-bit** YUV 4:2:0 to **native-depth `u16`**
+/// packed **RGBA** — alpha element is `0xFFFF` (opaque maximum at
+/// 16-bit).
+///
+/// Thin wrapper over [`yuv_420p16_to_rgb_or_rgba_u16_row`] with `ALPHA = true`.
+//
+// Scalar prep for Ship 8 Tranche 5b: the public dispatcher
+// `row::yuv420p16_to_rgba_u16_row` lands in the follow-up SIMD/dispatcher
+// PR. Until then this thin wrapper has no caller.
+#[allow(dead_code)]
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn yuv_420p16_to_rgba_u16_row(
+  y: &[u16],
+  u_half: &[u16],
+  v_half: &[u16],
+  rgba_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  yuv_420p16_to_rgb_or_rgba_u16_row::<true>(y, u_half, v_half, rgba_out, width, matrix, full_range);
+}
+
+/// Shared 16-bit YUV 4:2:0 → native-depth `u16` RGB / RGBA kernel.
+/// `ALPHA = false` emits 3 bpp; `ALPHA = true` emits 4 bpp with
+/// constant `0xFFFF` alpha.
+///
+/// Uses i64 chroma multiply (same rationale as
+/// [`yuv_420p16_to_rgb_u16_row`]).
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn yuv_420p16_to_rgb_or_rgba_u16_row<const ALPHA: bool>(
+  y: &[u16],
+  u_half: &[u16],
+  v_half: &[u16],
+  out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  let bpp: usize = if ALPHA { 4 } else { 3 };
   debug_assert_eq!(width & 1, 0, "YUV 4:2:0 requires even width");
   debug_assert!(y.len() >= width, "y row too short");
   debug_assert!(u_half.len() >= width / 2, "u_half row too short");
   debug_assert!(v_half.len() >= width / 2, "v_half row too short");
-  debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
+  debug_assert!(out.len() >= width * bpp, "out row too short");
 
   let coeffs = Coefficients::for_matrix(matrix);
   let (y_off, y_scale, c_scale) = range_params_n::<16, 16>(full_range);
@@ -1116,14 +1231,20 @@ pub(crate) fn yuv_420p16_to_rgb_u16_row(
     let b_chroma = q15_chroma64(coeffs.b_u(), u_d, coeffs.b_v(), v_d);
 
     let y0 = q15_scale64(y[x] as i32 - y_off, y_scale);
-    rgb_out[x * 3] = (y0 + r_chroma).clamp(0, out_max) as u16;
-    rgb_out[x * 3 + 1] = (y0 + g_chroma).clamp(0, out_max) as u16;
-    rgb_out[x * 3 + 2] = (y0 + b_chroma).clamp(0, out_max) as u16;
+    out[x * bpp] = (y0 + r_chroma).clamp(0, out_max) as u16;
+    out[x * bpp + 1] = (y0 + g_chroma).clamp(0, out_max) as u16;
+    out[x * bpp + 2] = (y0 + b_chroma).clamp(0, out_max) as u16;
+    if ALPHA {
+      out[x * bpp + 3] = 0xFFFF;
+    }
 
     let y1 = q15_scale64(y[x + 1] as i32 - y_off, y_scale);
-    rgb_out[(x + 1) * 3] = (y1 + r_chroma).clamp(0, out_max) as u16;
-    rgb_out[(x + 1) * 3 + 1] = (y1 + g_chroma).clamp(0, out_max) as u16;
-    rgb_out[(x + 1) * 3 + 2] = (y1 + b_chroma).clamp(0, out_max) as u16;
+    out[(x + 1) * bpp] = (y1 + r_chroma).clamp(0, out_max) as u16;
+    out[(x + 1) * bpp + 1] = (y1 + g_chroma).clamp(0, out_max) as u16;
+    out[(x + 1) * bpp + 2] = (y1 + b_chroma).clamp(0, out_max) as u16;
+    if ALPHA {
+      out[(x + 1) * bpp + 3] = 0xFFFF;
+    }
 
     x += 2;
   }
@@ -1219,6 +1340,8 @@ pub(crate) fn yuv_444p16_to_rgb_u16_row(
 /// - `width` must be even.
 /// - `y.len() >= width`, `uv_half.len() >= width`,
 ///   `rgb_out.len() >= 3 * width`.
+///
+/// Thin wrapper over [`p16_to_rgb_or_rgba_row`] with `ALPHA = false`.
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn p16_to_rgb_row(
   y: &[u16],
@@ -1228,10 +1351,47 @@ pub(crate) fn p16_to_rgb_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
+  p16_to_rgb_or_rgba_row::<false>(y, uv_half, rgb_out, width, matrix, full_range);
+}
+
+/// Converts one row of **P016** to **8-bit** packed **RGBA**. Same
+/// numerical contract as [`p16_to_rgb_row`] except for the per-pixel
+/// stride (4 vs 3) and the alpha byte (`0xFF`, opaque).
+///
+/// Thin wrapper over [`p16_to_rgb_or_rgba_row`] with `ALPHA = true`.
+//
+// Scalar prep for Ship 8 Tranche 5a: the public dispatcher
+// `row::p016_to_rgba_row` lands in the follow-up SIMD/dispatcher PR.
+// Until then this thin wrapper has no caller.
+#[allow(dead_code)]
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn p16_to_rgba_row(
+  y: &[u16],
+  uv_half: &[u16],
+  rgba_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  p16_to_rgb_or_rgba_row::<true>(y, uv_half, rgba_out, width, matrix, full_range);
+}
+
+/// Shared P016 → 8-bit RGB / RGBA kernel. `ALPHA = false` emits 3 bpp;
+/// `ALPHA = true` emits 4 bpp with constant `0xFF` alpha.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn p16_to_rgb_or_rgba_row<const ALPHA: bool>(
+  y: &[u16],
+  uv_half: &[u16],
+  out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  let bpp: usize = if ALPHA { 4 } else { 3 };
   debug_assert_eq!(width & 1, 0, "semi-planar 4:2:0 requires even width");
   debug_assert!(y.len() >= width, "y row too short");
   debug_assert!(uv_half.len() >= width, "uv row too short");
-  debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
+  debug_assert!(out.len() >= width * bpp, "out row too short");
 
   let coeffs = Coefficients::for_matrix(matrix);
   let (y_off, y_scale, c_scale) = range_params_n::<16, 8>(full_range);
@@ -1250,14 +1410,20 @@ pub(crate) fn p16_to_rgb_row(
     let b_chroma = q15_chroma(coeffs.b_u(), u_d, coeffs.b_v(), v_d);
 
     let y0 = q15_scale(y[x] as i32 - y_off, y_scale);
-    rgb_out[x * 3] = clamp_u8(y0 + r_chroma);
-    rgb_out[x * 3 + 1] = clamp_u8(y0 + g_chroma);
-    rgb_out[x * 3 + 2] = clamp_u8(y0 + b_chroma);
+    out[x * bpp] = clamp_u8(y0 + r_chroma);
+    out[x * bpp + 1] = clamp_u8(y0 + g_chroma);
+    out[x * bpp + 2] = clamp_u8(y0 + b_chroma);
+    if ALPHA {
+      out[x * bpp + 3] = 0xFF;
+    }
 
     let y1 = q15_scale(y[x + 1] as i32 - y_off, y_scale);
-    rgb_out[(x + 1) * 3] = clamp_u8(y1 + r_chroma);
-    rgb_out[(x + 1) * 3 + 1] = clamp_u8(y1 + g_chroma);
-    rgb_out[(x + 1) * 3 + 2] = clamp_u8(y1 + b_chroma);
+    out[(x + 1) * bpp] = clamp_u8(y1 + r_chroma);
+    out[(x + 1) * bpp + 1] = clamp_u8(y1 + g_chroma);
+    out[(x + 1) * bpp + 2] = clamp_u8(y1 + b_chroma);
+    if ALPHA {
+      out[(x + 1) * bpp + 3] = 0xFF;
+    }
 
     x += 2;
   }
@@ -1266,6 +1432,8 @@ pub(crate) fn p16_to_rgb_row(
 /// Converts one row of **P016** to **native-depth `u16`** packed
 /// RGB — full-range output in `[0, 65535]`. Chroma matrix multiply
 /// runs in i64 (same reasoning as [`yuv_420p16_to_rgb_u16_row`]).
+///
+/// Thin wrapper over [`p16_to_rgb_or_rgba_u16_row`] with `ALPHA = false`.
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn p16_to_rgb_u16_row(
   y: &[u16],
@@ -1275,10 +1443,49 @@ pub(crate) fn p16_to_rgb_u16_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
+  p16_to_rgb_or_rgba_u16_row::<false>(y, uv_half, rgb_out, width, matrix, full_range);
+}
+
+/// Converts one row of **P016** to **native-depth `u16`** packed
+/// **RGBA** — alpha element is `0xFFFF` (opaque maximum at 16-bit).
+///
+/// Thin wrapper over [`p16_to_rgb_or_rgba_u16_row`] with `ALPHA = true`.
+//
+// Scalar prep for Ship 8 Tranche 5b: the public dispatcher
+// `row::p016_to_rgba_u16_row` lands in the follow-up SIMD/dispatcher
+// PR. Until then this thin wrapper has no caller.
+#[allow(dead_code)]
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn p16_to_rgba_u16_row(
+  y: &[u16],
+  uv_half: &[u16],
+  rgba_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  p16_to_rgb_or_rgba_u16_row::<true>(y, uv_half, rgba_out, width, matrix, full_range);
+}
+
+/// Shared P016 → native-depth `u16` RGB / RGBA kernel. `ALPHA = false`
+/// emits 3 bpp; `ALPHA = true` emits 4 bpp with constant `0xFFFF`
+/// alpha.
+///
+/// Uses i64 chroma multiply (same rationale as [`yuv_420p16_to_rgb_or_rgba_u16_row`]).
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn p16_to_rgb_or_rgba_u16_row<const ALPHA: bool>(
+  y: &[u16],
+  uv_half: &[u16],
+  out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  let bpp: usize = if ALPHA { 4 } else { 3 };
   debug_assert_eq!(width & 1, 0, "semi-planar 4:2:0 requires even width");
   debug_assert!(y.len() >= width, "y row too short");
   debug_assert!(uv_half.len() >= width, "uv row too short");
-  debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
+  debug_assert!(out.len() >= width * bpp, "out row too short");
 
   let coeffs = Coefficients::for_matrix(matrix);
   let (y_off, y_scale, c_scale) = range_params_n::<16, 16>(full_range);
@@ -1298,14 +1505,20 @@ pub(crate) fn p16_to_rgb_u16_row(
     let b_chroma = q15_chroma64(coeffs.b_u(), u_d, coeffs.b_v(), v_d);
 
     let y0 = q15_scale64(y[x] as i32 - y_off, y_scale);
-    rgb_out[x * 3] = (y0 + r_chroma).clamp(0, out_max) as u16;
-    rgb_out[x * 3 + 1] = (y0 + g_chroma).clamp(0, out_max) as u16;
-    rgb_out[x * 3 + 2] = (y0 + b_chroma).clamp(0, out_max) as u16;
+    out[x * bpp] = (y0 + r_chroma).clamp(0, out_max) as u16;
+    out[x * bpp + 1] = (y0 + g_chroma).clamp(0, out_max) as u16;
+    out[x * bpp + 2] = (y0 + b_chroma).clamp(0, out_max) as u16;
+    if ALPHA {
+      out[x * bpp + 3] = 0xFFFF;
+    }
 
     let y1 = q15_scale64(y[x + 1] as i32 - y_off, y_scale);
-    rgb_out[(x + 1) * 3] = (y1 + r_chroma).clamp(0, out_max) as u16;
-    rgb_out[(x + 1) * 3 + 1] = (y1 + g_chroma).clamp(0, out_max) as u16;
-    rgb_out[(x + 1) * 3 + 2] = (y1 + b_chroma).clamp(0, out_max) as u16;
+    out[(x + 1) * bpp] = (y1 + r_chroma).clamp(0, out_max) as u16;
+    out[(x + 1) * bpp + 1] = (y1 + g_chroma).clamp(0, out_max) as u16;
+    out[(x + 1) * bpp + 2] = (y1 + b_chroma).clamp(0, out_max) as u16;
+    if ALPHA {
+      out[(x + 1) * bpp + 3] = 0xFFFF;
+    }
 
     x += 2;
   }
@@ -1351,6 +1564,12 @@ pub(crate) fn p_n_to_rgb_row<const BITS: u32>(
 /// (4 vs 3) and the alpha byte (`0xFF`, opaque).
 ///
 /// Thin wrapper over [`p_n_to_rgb_or_rgba_row`] with `ALPHA = true`.
+//
+// Scalar prep for Ship 8 Tranche 5a: the public dispatcher
+// `row::p010_to_rgba_row` (and P012/P016 siblings) lands in the
+// follow-up SIMD/dispatcher PR. Until then this thin wrapper has no
+// caller.
+#[allow(dead_code)]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn p_n_to_rgba_row<const BITS: u32>(
   y: &[u16],
@@ -1477,6 +1696,12 @@ pub(crate) fn p_n_to_rgb_u16_row<const BITS: u32>(
 /// maximum at the input bit depth).
 ///
 /// Thin wrapper over [`p_n_to_rgb_or_rgba_u16_row`] with `ALPHA = true`.
+//
+// Scalar prep for Ship 8 Tranche 5b: the public dispatcher
+// `row::p010_to_rgba_u16_row` (and P012/P016 siblings) lands in the
+// follow-up SIMD/dispatcher PR. Until then this thin wrapper has no
+// caller.
+#[allow(dead_code)]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn p_n_to_rgba_u16_row<const BITS: u32>(
   y: &[u16],
