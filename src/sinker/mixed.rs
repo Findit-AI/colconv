@@ -152,12 +152,12 @@ pub enum MixedSinkerError {
     actual: usize,
   },
 
-  /// `u16` RGBA buffer attached via [`MixedSinker::with_rgba_u16`] /
-  /// [`MixedSinker::set_rgba_u16`] is shorter than `width × height × 4`
-  /// `u16` elements. Only high‑bit‑depth source impls write into this
-  /// buffer; the fourth `u16` per pixel is alpha — opaque
-  /// (`(1 << BITS) - 1`) by default when the source has no alpha
-  /// plane.
+  /// `u16` RGBA buffer attached via `with_rgba_u16` / `set_rgba_u16`
+  /// (per-format impl, not yet shipped on any sink) is shorter than
+  /// `width × height × 4` `u16` elements. Only high‑bit‑depth source
+  /// impls write into this buffer; the fourth `u16` per pixel is
+  /// alpha — opaque (`(1 << BITS) - 1`) by default when the source
+  /// has no alpha plane.
   #[error("MixedSinker rgba_u16 buffer too short: expected >= {expected} elements, got {actual}")]
   RgbaU16BufferTooShort {
     /// Minimum `u16` elements required (`width × height × 4`).
