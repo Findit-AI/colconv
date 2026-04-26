@@ -632,7 +632,6 @@ pub(crate) fn yuv_420p_n_to_rgb_row<const BITS: u32>(
 // `row::yuv420p10_to_rgba_row` (and its u16 sibling) lands in the
 // follow-up SIMD/dispatcher PR. Until then this thin wrapper has no
 // caller.
-#[allow(dead_code)]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn yuv_420p_n_to_rgba_row<const BITS: u32>(
   y: &[u16],
@@ -801,7 +800,6 @@ pub(crate) fn yuv_420p_n_to_rgb_u16_row<const BITS: u32>(
 // Scalar prep for Ship 8 Tranche 5b: the public dispatcher
 // `row::yuv420p10_to_rgba_u16_row` lands in the follow-up SIMD/dispatcher
 // PR. Until then this thin wrapper has no caller.
-#[allow(dead_code)]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn yuv_420p_n_to_rgba_u16_row<const BITS: u32>(
   y: &[u16],
@@ -1070,7 +1068,6 @@ pub(crate) fn yuv_420p16_to_rgb_row(
 // Scalar prep for Ship 8 Tranche 5a: the public dispatcher
 // `row::yuv420p16_to_rgba_row` lands in the follow-up SIMD/dispatcher
 // PR. Until then this thin wrapper has no caller.
-#[allow(dead_code)]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn yuv_420p16_to_rgba_row(
   y: &[u16],
@@ -1178,7 +1175,6 @@ pub(crate) fn yuv_420p16_to_rgb_u16_row(
 // Scalar prep for Ship 8 Tranche 5b: the public dispatcher
 // `row::yuv420p16_to_rgba_u16_row` lands in the follow-up SIMD/dispatcher
 // PR. Until then this thin wrapper has no caller.
-#[allow(dead_code)]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn yuv_420p16_to_rgba_u16_row(
   y: &[u16],
@@ -1363,7 +1359,6 @@ pub(crate) fn p16_to_rgb_row(
 // Scalar prep for Ship 8 Tranche 5a: the public dispatcher
 // `row::p016_to_rgba_row` lands in the follow-up SIMD/dispatcher PR.
 // Until then this thin wrapper has no caller.
-#[allow(dead_code)]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn p16_to_rgba_row(
   y: &[u16],
@@ -1454,7 +1449,6 @@ pub(crate) fn p16_to_rgb_u16_row(
 // Scalar prep for Ship 8 Tranche 5b: the public dispatcher
 // `row::p016_to_rgba_u16_row` lands in the follow-up SIMD/dispatcher
 // PR. Until then this thin wrapper has no caller.
-#[allow(dead_code)]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn p16_to_rgba_u16_row(
   y: &[u16],
@@ -1570,7 +1564,6 @@ pub(crate) fn p_n_to_rgb_row<const BITS: u32>(
 // follow-up SIMD/dispatcher PR. Until then this thin wrapper has no
 // caller. P016 has its own kernel family
 // ([`p16_to_rgb_or_rgba_row`]) — never routed here.
-#[allow(dead_code)]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn p_n_to_rgba_row<const BITS: u32>(
   y: &[u16],
@@ -1704,7 +1697,6 @@ pub(crate) fn p_n_to_rgb_u16_row<const BITS: u32>(
 // the follow-up SIMD/dispatcher PR. Until then this thin wrapper has
 // no caller. P016 has its own u16 kernel family
 // ([`p16_to_rgb_or_rgba_u16_row`]) — never routed here.
-#[allow(dead_code)]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn p_n_to_rgba_u16_row<const BITS: u32>(
   y: &[u16],
