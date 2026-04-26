@@ -1548,7 +1548,9 @@ unsafe fn nv24_or_nv42_to_rgb_row_impl<const SWAP_UV: bool>(
 ///
 /// # Safety
 ///
-/// Same contract as [`yuv_444_to_rgb_or_rgba_row`]:
+/// Same contract as [`yuv_444_to_rgb_or_rgba_row`] with
+/// `ALPHA = false` (so `out.len() >= width * 3` specializes to
+/// `rgb_out.len() >= 3 * width`):
 ///
 /// 1. **NEON must be available on the current CPU.**
 /// 2. `y.len() >= width`, `u.len() >= width`, `v.len() >= width`.
