@@ -1526,6 +1526,18 @@ unsafe fn deinterleave_uv_u16_avx2(ptr: *const u16) -> (__m256i, __m256i) {
 /// AVX2 NV12 → packed RGB. Thin wrapper over
 /// [`nv12_or_nv21_to_rgb_or_rgba_row_impl`] with
 /// `SWAP_UV = false, ALPHA = false`.
+///
+/// # Safety
+///
+/// Same contract as [`nv12_or_nv21_to_rgb_or_rgba_row_impl`]:
+///
+/// 1. **AVX2 must be available on the current CPU.** Direct callers
+///    are responsible for verifying this; the dispatcher in
+///    [`crate::row::nv12_to_rgb_row`] checks it.
+/// 2. `width & 1 == 0` (4:2:0 requires even width).
+/// 3. `y.len() >= width`.
+/// 4. `uv_half.len() >= width` (interleaved UV bytes, 2 per chroma pair).
+/// 5. `rgb_out.len() >= 3 * width`.
 #[inline]
 #[target_feature(enable = "avx2")]
 pub(crate) unsafe fn nv12_to_rgb_row(
@@ -1546,6 +1558,12 @@ pub(crate) unsafe fn nv12_to_rgb_row(
 /// AVX2 NV21 → packed RGB. Thin wrapper over
 /// [`nv12_or_nv21_to_rgb_or_rgba_row_impl`] with
 /// `SWAP_UV = true, ALPHA = false`.
+///
+/// # Safety
+///
+/// Same contract as [`nv12_to_rgb_row`]; `vu_half` carries the same
+/// number of bytes (`>= width`) but in V-then-U order per chroma
+/// pair.
 #[inline]
 #[target_feature(enable = "avx2")]
 pub(crate) unsafe fn nv21_to_rgb_row(
@@ -1566,6 +1584,12 @@ pub(crate) unsafe fn nv21_to_rgb_row(
 /// AVX2 NV12 → packed RGBA. Same contract as [`nv12_to_rgb_row`]
 /// but writes 4 bytes per pixel via [`write_rgba_32`].
 /// `rgba_out.len() >= 4 * width`.
+///
+/// # Safety
+///
+/// Same as [`nv12_to_rgb_row`] except the output slice must be
+/// `>= 4 * width` bytes (one extra byte per pixel for the opaque
+/// alpha).
 #[inline]
 #[target_feature(enable = "avx2")]
 pub(crate) unsafe fn nv12_to_rgba_row(
@@ -1586,6 +1610,11 @@ pub(crate) unsafe fn nv12_to_rgba_row(
 /// AVX2 NV21 → packed RGBA. Same contract as [`nv21_to_rgb_row`]
 /// but writes 4 bytes per pixel via [`write_rgba_32`].
 /// `rgba_out.len() >= 4 * width`.
+///
+/// # Safety
+///
+/// Same as [`nv21_to_rgb_row`] except the output slice must be
+/// `>= 4 * width` bytes.
 #[inline]
 #[target_feature(enable = "avx2")]
 pub(crate) unsafe fn nv21_to_rgba_row(

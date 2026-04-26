@@ -1081,6 +1081,18 @@ pub(crate) unsafe fn p_n_to_rgb_u16_row<const BITS: u32>(
 /// NEON NV12 → packed RGB (UV-ordered chroma). Thin wrapper over
 /// [`nv12_or_nv21_to_rgb_or_rgba_row_impl`] with
 /// `SWAP_UV = false, ALPHA = false`.
+///
+/// # Safety
+///
+/// Same contract as [`nv12_or_nv21_to_rgb_or_rgba_row_impl`]:
+///
+/// 1. **NEON must be available on the current CPU.** Direct callers
+///    are responsible for verifying this; the dispatcher in
+///    [`crate::row::nv12_to_rgb_row`] checks it.
+/// 2. `width & 1 == 0` (4:2:0 requires even width).
+/// 3. `y.len() >= width`.
+/// 4. `uv_half.len() >= width` (interleaved UV bytes, 2 per chroma pair).
+/// 5. `rgb_out.len() >= 3 * width`.
 #[inline]
 #[target_feature(enable = "neon")]
 pub(crate) unsafe fn nv12_to_rgb_row(
@@ -1102,6 +1114,12 @@ pub(crate) unsafe fn nv12_to_rgb_row(
 /// NEON NV21 → packed RGB (VU-ordered chroma). Thin wrapper over
 /// [`nv12_or_nv21_to_rgb_or_rgba_row_impl`] with
 /// `SWAP_UV = true, ALPHA = false`.
+///
+/// # Safety
+///
+/// Same contract as [`nv12_to_rgb_row`]; `vu_half` carries the same
+/// number of bytes (`>= width`) but in V-then-U order per chroma
+/// pair.
 #[inline]
 #[target_feature(enable = "neon")]
 pub(crate) unsafe fn nv21_to_rgb_row(
@@ -1123,6 +1141,12 @@ pub(crate) unsafe fn nv21_to_rgb_row(
 /// NEON NV12 → packed RGBA (R, G, B, `0xFF` per pixel). Same
 /// contract as [`nv12_to_rgb_row`] but writes 4 bytes per pixel via
 /// `vst4q_u8`. `rgba_out.len() >= 4 * width`.
+///
+/// # Safety
+///
+/// Same as [`nv12_to_rgb_row`] except the output slice must be
+/// `>= 4 * width` bytes (one extra byte per pixel for the opaque
+/// alpha).
 #[inline]
 #[target_feature(enable = "neon")]
 pub(crate) unsafe fn nv12_to_rgba_row(
@@ -1144,6 +1168,11 @@ pub(crate) unsafe fn nv12_to_rgba_row(
 /// NEON NV21 → packed RGBA (R, G, B, `0xFF` per pixel). Same
 /// contract as [`nv21_to_rgb_row`] but writes 4 bytes per pixel via
 /// `vst4q_u8`. `rgba_out.len() >= 4 * width`.
+///
+/// # Safety
+///
+/// Same as [`nv21_to_rgb_row`] except the output slice must be
+/// `>= 4 * width` bytes.
 #[inline]
 #[target_feature(enable = "neon")]
 pub(crate) unsafe fn nv21_to_rgba_row(
@@ -4108,7 +4137,22 @@ mod tests {
   }
 
   // ---- rgb_to_hsv_row equivalence ------------------------------------
+  //
+  // The NEON HSV kernel uses `vmaxq_f32` / `vminq_f32` / `vdivq_f32`
+  // (true f32 ops). Miri's interpreter does not currently implement
+  // these aarch64 NEON f32 intrinsics — under
+  // `cargo miri test --target aarch64-unknown-linux-gnu` the calls
+  // raise `unsupported operation: can't call foreign function
+  // "llvm.aarch64.neon.fmax.v4f32"`. The previous
+  // `#[cfg_attr(miri, ignore = ...)]` annotations didn't suffice in
+  // CI (Miri tried to evaluate them anyway). Compiling the helper
+  // and the tests *out* under `cfg(miri)` removes the f32
+  // intrinsics from the binary entirely so Miri can't trip on them.
+  // The other backends (wasm / x86) are tested by their respective
+  // arch modules; correctness of the NEON HSV path is still covered
+  // by host-arch CI runs that don't go through Miri.
 
+  #[cfg(not(miri))]
   fn check_hsv_equivalence(rgb: &[u8], width: usize) {
     let mut h_scalar = std::vec![0u8; width];
     let mut s_scalar = std::vec![0u8; width];
@@ -4160,21 +4204,21 @@ mod tests {
   }
 
   #[test]
-  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
+  #[cfg(not(miri))]
   fn hsv_neon_matches_scalar_pseudo_random_16() {
     let rgb = pseudo_random_bgr(16);
     check_hsv_equivalence(&rgb, 16);
   }
 
   #[test]
-  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
+  #[cfg(not(miri))]
   fn hsv_neon_matches_scalar_pseudo_random_1920() {
     let rgb = pseudo_random_bgr(1920);
     check_hsv_equivalence(&rgb, 1920);
   }
 
   #[test]
-  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
+  #[cfg(not(miri))]
   fn hsv_neon_matches_scalar_tail_widths() {
     // Widths that force a non‑trivial scalar tail (non‑multiple of 16).
     for w in [1usize, 7, 15, 17, 31, 1921] {
@@ -4184,7 +4228,7 @@ mod tests {
   }
 
   #[test]
-  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
+  #[cfg(not(miri))]
   fn hsv_neon_matches_scalar_primaries_and_edges() {
     // Primary colors, grays, near‑saturation — exercise each hue branch
     // and the v==0, delta==0, h<0 wrap paths.
