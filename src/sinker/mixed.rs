@@ -998,40 +998,20 @@ impl<'a, F: SourceFormat> MixedSinker<'a, F> {
   // compile error, not a silent stale‑state bug. Future high‑bit‑depth
   // markers (12‑bit, 14‑bit, P010) will add their own impl blocks.
 
-  /// Attaches a packed 32-bit RGBA output buffer.
-  ///
-  /// The fourth byte per pixel is alpha. For sources that **don't**
-  /// carry an alpha plane (every YUV format shipped today), every
-  /// alpha byte is filled with `0xFF` (opaque). Future YUVA source
-  /// impls will copy alpha through from the source plane.
-  ///
-  /// Returns `Err(RgbaBufferTooShort)` if
-  /// `buf.len() < width × height × 4`, or `Err(GeometryOverflow)` on
-  /// 32‑bit targets when the product overflows.
-  #[cfg_attr(not(tarpaulin), inline(always))]
-  pub fn with_rgba(mut self, buf: &'a mut [u8]) -> Result<Self, MixedSinkerError> {
-    self.set_rgba(buf)?;
-    Ok(self)
-  }
-
-  /// In-place variant of [`with_rgba`](Self::with_rgba).
-  #[cfg_attr(not(tarpaulin), inline(always))]
-  pub fn set_rgba(&mut self, buf: &'a mut [u8]) -> Result<&mut Self, MixedSinkerError> {
-    let expected = self.frame_bytes(4)?;
-    if buf.len() < expected {
-      return Err(MixedSinkerError::RgbaBufferTooShort {
-        expected,
-        actual: buf.len(),
-      });
-    }
-    self.rgba = Some(buf);
-    Ok(self)
-  }
+  // NOTE: `with_rgba` / `set_rgba` are **not** declared here either —
+  // same rationale as `with_rgb_u16` above. The Ship 8 RGBA path is
+  // currently wired only on [`MixedSinker<Yuv420p>`]; attaching an
+  // RGBA buffer to a sink whose `PixelSink::process` doesn't write
+  // it would silently leave the caller buffer untouched while
+  // `produces_rgba()` returned `true`. Each format that writes RGBA
+  // gets its own format‑specific impl block exposing the accessors.
+  // Future formats (NV12 / NV21 / Yuv422p / Yuv444p / P010 / etc.)
+  // add their own impl blocks as RGBA support lands.
 
   // NOTE: `with_rgba_u16` / `set_rgba_u16` are **not** declared here
-  // for the same reason as `with_rgb_u16` — they live on the
-  // format‑specific impl blocks for high‑bit‑depth sources so the
-  // buffer can only be attached to sinks that actually write it.
+  // for the same reason — they live on the format‑specific impl
+  // blocks for high‑bit‑depth sources that actually write
+  // native‑depth RGBA.
 
   /// Attaches a single-plane luma output buffer.
   /// Returns `Err(LumaBufferTooShort)` if `buf.len() < width × height`,
@@ -1106,6 +1086,55 @@ impl<'a, F: SourceFormat> MixedSinker<'a, F> {
 }
 
 // ---- Yuv420p impl --------------------------------------------------------
+
+impl<'a> MixedSinker<'a, Yuv420p> {
+  /// Attaches a packed 32‑bit RGBA output buffer.
+  ///
+  /// Only available on sinker types whose `PixelSink` impl writes
+  /// RGBA — calling `with_rgba` on a sink that doesn't (e.g.
+  /// [`MixedSinker<Nv12>`] today) is a compile error rather than a
+  /// silent no‑op that would leave the caller's buffer stale while
+  /// [`Self::produces_rgba`] returned `true`. The compile-time
+  /// scoping is load-bearing: if a future format adds RGBA, it must
+  /// add its own impl block here, which both wires the new path and
+  /// prevents accidental cross-format leakage.
+  ///
+  /// The fourth byte per pixel is alpha. [`Yuv420p`] has no alpha
+  /// plane, so every alpha byte is filled with `0xFF` (opaque).
+  /// Future YUVA source impls will copy alpha through from the
+  /// source plane.
+  ///
+  /// Returns `Err(RgbaBufferTooShort)` if
+  /// `buf.len() < width × height × 4`, or `Err(GeometryOverflow)` on
+  /// 32‑bit targets when the product overflows.
+  ///
+  /// ```compile_fail
+  /// // Attaching RGBA to a sink that doesn't write it is rejected
+  /// // at compile time:
+  /// use colconv::{sinker::MixedSinker, yuv::Nv12};
+  /// let mut buf = vec![0u8; 16 * 8 * 4];
+  /// let _ = MixedSinker::<Nv12>::new(16, 8).with_rgba(&mut buf);
+  /// ```
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn with_rgba(mut self, buf: &'a mut [u8]) -> Result<Self, MixedSinkerError> {
+    self.set_rgba(buf)?;
+    Ok(self)
+  }
+
+  /// In-place variant of [`with_rgba`](Self::with_rgba).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn set_rgba(&mut self, buf: &'a mut [u8]) -> Result<&mut Self, MixedSinkerError> {
+    let expected = self.frame_bytes(4)?;
+    if buf.len() < expected {
+      return Err(MixedSinkerError::RgbaBufferTooShort {
+        expected,
+        actual: buf.len(),
+      });
+    }
+    self.rgba = Some(buf);
+    Ok(self)
+  }
+}
 
 impl PixelSink for MixedSinker<'_, Yuv420p> {
   type Input<'r> = Yuv420pRow<'r>;
