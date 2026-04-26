@@ -34,6 +34,8 @@
 pub(crate) mod arch;
 pub(crate) mod scalar;
 
+pub(crate) use scalar::expand_rgb_to_rgba_row;
+
 use crate::ColorMatrix;
 
 /// Converts one row of 4:2:0 YUV to packed RGB.
@@ -711,6 +713,154 @@ pub fn nv42_to_rgb_row(
   }
 
   scalar::nv42_to_rgb_row(y, vu, rgb_out, width, matrix, full_range);
+}
+
+/// Converts one row of NV24 (semi‑planar 4:4:4, UV-ordered) to packed
+/// **RGBA** (8-bit). Same numerical contract as [`nv24_to_rgb_row`];
+/// alpha defaults to `0xFF` (opaque).
+///
+/// `rgba_out.len() >= 4 * width`. `use_simd = false` forces scalar.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn nv24_to_rgba_row(
+  y: &[u8],
+  uv: &[u8],
+  rgba_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  use_simd: bool,
+) {
+  let rgba_min = rgba_row_bytes(width);
+  let uv_min = match width.checked_mul(2) {
+    Some(n) => n,
+    None => panic!("width ({width}) × 2 overflows usize"),
+  };
+  assert!(y.len() >= width, "y row too short");
+  assert!(uv.len() >= uv_min, "uv row too short");
+  assert!(rgba_out.len() >= rgba_min, "rgba_out row too short");
+
+  if use_simd {
+    cfg_select! {
+      target_arch = "aarch64" => {
+        if neon_available() {
+          // SAFETY: `neon_available()` verified NEON is present.
+          unsafe {
+            arch::neon::nv24_to_rgba_row(y, uv, rgba_out, width, matrix, full_range);
+          }
+          return;
+        }
+      },
+      target_arch = "x86_64" => {
+        if avx512_available() {
+          // SAFETY: AVX‑512BW verified.
+          unsafe {
+            arch::x86_avx512::nv24_to_rgba_row(y, uv, rgba_out, width, matrix, full_range);
+          }
+          return;
+        }
+        if avx2_available() {
+          // SAFETY: AVX2 verified.
+          unsafe {
+            arch::x86_avx2::nv24_to_rgba_row(y, uv, rgba_out, width, matrix, full_range);
+          }
+          return;
+        }
+        if sse41_available() {
+          // SAFETY: SSE4.1 verified.
+          unsafe {
+            arch::x86_sse41::nv24_to_rgba_row(y, uv, rgba_out, width, matrix, full_range);
+          }
+          return;
+        }
+      },
+      target_arch = "wasm32" => {
+        if simd128_available() {
+          // SAFETY: simd128 verified at compile time.
+          unsafe {
+            arch::wasm_simd128::nv24_to_rgba_row(y, uv, rgba_out, width, matrix, full_range);
+          }
+          return;
+        }
+      },
+      _ => {}
+    }
+  }
+
+  scalar::nv24_to_rgba_row(y, uv, rgba_out, width, matrix, full_range);
+}
+
+/// Converts one row of NV42 (semi‑planar 4:4:4, VU-ordered) to packed
+/// **RGBA** (8-bit). Same as [`nv24_to_rgba_row`] but with swapped
+/// chroma byte order.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn nv42_to_rgba_row(
+  y: &[u8],
+  vu: &[u8],
+  rgba_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  use_simd: bool,
+) {
+  let rgba_min = rgba_row_bytes(width);
+  let vu_min = match width.checked_mul(2) {
+    Some(n) => n,
+    None => panic!("width ({width}) × 2 overflows usize"),
+  };
+  assert!(y.len() >= width, "y row too short");
+  assert!(vu.len() >= vu_min, "vu row too short");
+  assert!(rgba_out.len() >= rgba_min, "rgba_out row too short");
+
+  if use_simd {
+    cfg_select! {
+      target_arch = "aarch64" => {
+        if neon_available() {
+          // SAFETY: NEON verified.
+          unsafe {
+            arch::neon::nv42_to_rgba_row(y, vu, rgba_out, width, matrix, full_range);
+          }
+          return;
+        }
+      },
+      target_arch = "x86_64" => {
+        if avx512_available() {
+          // SAFETY: AVX‑512BW verified.
+          unsafe {
+            arch::x86_avx512::nv42_to_rgba_row(y, vu, rgba_out, width, matrix, full_range);
+          }
+          return;
+        }
+        if avx2_available() {
+          // SAFETY: AVX2 verified.
+          unsafe {
+            arch::x86_avx2::nv42_to_rgba_row(y, vu, rgba_out, width, matrix, full_range);
+          }
+          return;
+        }
+        if sse41_available() {
+          // SAFETY: SSE4.1 verified.
+          unsafe {
+            arch::x86_sse41::nv42_to_rgba_row(y, vu, rgba_out, width, matrix, full_range);
+          }
+          return;
+        }
+      },
+      target_arch = "wasm32" => {
+        if simd128_available() {
+          // SAFETY: simd128 verified at compile time.
+          unsafe {
+            arch::wasm_simd128::nv42_to_rgba_row(y, vu, rgba_out, width, matrix, full_range);
+          }
+          return;
+        }
+      },
+      _ => {}
+    }
+  }
+
+  scalar::nv42_to_rgba_row(y, vu, rgba_out, width, matrix, full_range);
 }
 
 /// Converts one row of YUV 4:4:4 planar to packed RGB. Dispatches

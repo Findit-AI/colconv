@@ -282,7 +282,8 @@ pub(crate) fn nv12_or_nv21_to_rgb_or_rgba_row_impl<const SWAP_UV: bool, const AL
 }
 
 /// NV24 (semi-planar 4:4:4, UV-ordered) → packed RGB. Thin wrapper
-/// over [`nv24_or_nv42_to_rgb_row_impl`] with `SWAP_UV = false`.
+/// over [`nv24_or_nv42_to_rgb_or_rgba_row_impl`] with
+/// `SWAP_UV = false, ALPHA = false`.
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn nv24_to_rgb_row(
   y: &[u8],
@@ -292,11 +293,12 @@ pub(crate) fn nv24_to_rgb_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  nv24_or_nv42_to_rgb_row_impl::<false>(y, uv, rgb_out, width, matrix, full_range);
+  nv24_or_nv42_to_rgb_or_rgba_row_impl::<false, false>(y, uv, rgb_out, width, matrix, full_range);
 }
 
 /// NV42 (semi-planar 4:4:4, VU-ordered) → packed RGB. Thin wrapper
-/// over [`nv24_or_nv42_to_rgb_row_impl`] with `SWAP_UV = true`.
+/// over [`nv24_or_nv42_to_rgb_or_rgba_row_impl`] with
+/// `SWAP_UV = true, ALPHA = false`.
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn nv42_to_rgb_row(
   y: &[u8],
@@ -306,31 +308,63 @@ pub(crate) fn nv42_to_rgb_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  nv24_or_nv42_to_rgb_row_impl::<true>(y, vu, rgb_out, width, matrix, full_range);
+  nv24_or_nv42_to_rgb_or_rgba_row_impl::<true, false>(y, vu, rgb_out, width, matrix, full_range);
 }
 
-/// Shared scalar kernel for NV24 (SWAP_UV=false) and NV42
-/// (SWAP_UV=true). Identical math and numerical contract to
-/// [`yuv_420_to_rgb_row`]; the difference from NV12/NV21 is
-/// 4:4:4 — one UV pair per Y pixel, no chroma upsampling.
-/// No width parity constraint.
+/// NV24 → packed `R, G, B, A` quadruplets with constant `A = 0xFF`.
+/// First three bytes per pixel are byte-identical to
+/// [`nv24_to_rgb_row`]. `rgba_out.len() >= 4 * width`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn nv24_to_rgba_row(
+  y: &[u8],
+  uv: &[u8],
+  rgba_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  nv24_or_nv42_to_rgb_or_rgba_row_impl::<false, true>(y, uv, rgba_out, width, matrix, full_range);
+}
+
+/// NV42 → packed `R, G, B, A` quadruplets with constant `A = 0xFF`.
+/// First three bytes per pixel are byte-identical to
+/// [`nv42_to_rgb_row`]. `rgba_out.len() >= 4 * width`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn nv42_to_rgba_row(
+  y: &[u8],
+  vu: &[u8],
+  rgba_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  nv24_or_nv42_to_rgb_or_rgba_row_impl::<true, true>(y, vu, rgba_out, width, matrix, full_range);
+}
+
+/// Shared scalar kernel for NV24 (`SWAP_UV = false`) / NV42
+/// (`SWAP_UV = true`) at 3 bpp (`ALPHA = false`) or 4 bpp + opaque
+/// alpha (`ALPHA = true`). Identical math to [`yuv_444_to_rgb_row`]
+/// (4:4:4 — one UV pair per Y pixel, no chroma upsampling); only
+/// the per-pixel store stride differs. Both `const` generics drive
+/// compile-time monomorphization.
 ///
 /// # Panics (debug builds)
 ///
 /// - `y.len() >= width`, `uv_or_vu.len() >= 2 * width`,
-///   `rgb_out.len() >= 3 * width`.
+///   `out.len() >= width * (if ALPHA { 4 } else { 3 })`.
 #[cfg_attr(not(tarpaulin), inline(always))]
-fn nv24_or_nv42_to_rgb_row_impl<const SWAP_UV: bool>(
+pub(crate) fn nv24_or_nv42_to_rgb_or_rgba_row_impl<const SWAP_UV: bool, const ALPHA: bool>(
   y: &[u8],
   uv_or_vu: &[u8],
-  rgb_out: &mut [u8],
+  out: &mut [u8],
   width: usize,
   matrix: ColorMatrix,
   full_range: bool,
 ) {
   debug_assert!(y.len() >= width, "y row too short");
   debug_assert!(uv_or_vu.len() >= 2 * width, "chroma row too short");
-  debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
+  let bpp: usize = if ALPHA { 4 } else { 3 };
+  debug_assert!(out.len() >= width * bpp, "out row too short for {bpp}bpp");
 
   let coeffs = Coefficients::for_matrix(matrix);
   let (y_off, y_scale, c_scale) = range_params(full_range);
@@ -351,9 +385,12 @@ fn nv24_or_nv42_to_rgb_row_impl<const SWAP_UV: bool>(
     let b_chroma = (coeffs.b_u() * u_d + coeffs.b_v() * v_d + RND) >> 15;
 
     let y0 = ((y[x] as i32 - y_off) * y_scale + RND) >> 15;
-    rgb_out[x * 3] = clamp_u8(y0 + r_chroma);
-    rgb_out[x * 3 + 1] = clamp_u8(y0 + g_chroma);
-    rgb_out[x * 3 + 2] = clamp_u8(y0 + b_chroma);
+    out[x * bpp] = clamp_u8(y0 + r_chroma);
+    out[x * bpp + 1] = clamp_u8(y0 + g_chroma);
+    out[x * bpp + 2] = clamp_u8(y0 + b_chroma);
+    if ALPHA {
+      out[x * bpp + 3] = 0xFF;
+    }
   }
 }
 
@@ -449,6 +486,39 @@ pub(crate) fn yuv_444_to_rgb_or_rgba_row<const ALPHA: bool>(
 #[cfg_attr(not(tarpaulin), inline(always))]
 fn clamp_u8(v: i32) -> u8 {
   v.clamp(0, 255) as u8
+}
+
+// ---- RGB → RGBA expand (Strategy A combined-buffer optimization) ------
+
+/// Reads packed `R, G, B` triples and writes packed `R, G, B, A`
+/// quadruplets with `A = 0xFF` (opaque). Used by `MixedSinker` impls
+/// when callers attach **both** `with_rgb` and `with_rgba`: instead
+/// of running the YUV→RGB math twice (once per output format), we
+/// run the RGB kernel into the user's RGB buffer and then expand
+/// here to derive the RGBA buffer with a single per-byte pass.
+///
+/// The 3W read is L1-hot from the just-completed RGB write, so the
+/// effective memory traffic is roughly 3W RGB write + 4W RGBA write
+/// = 7W per row — same as the existing native-RGBA path, but with
+/// only one pass through the YUV→RGB math instead of two. See
+/// `docs/color-conversion-functions.md` § Ship 8 for the full
+/// design discussion (Strategy A vs the alternative B "combined
+/// kernel writes both per pixel" deferred to a future PR).
+///
+/// # Panics (debug builds)
+///
+/// - `rgb.len() >= 3 * width`
+/// - `rgba_out.len() >= 4 * width`
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn expand_rgb_to_rgba_row(rgb: &[u8], rgba_out: &mut [u8], width: usize) {
+  debug_assert!(rgb.len() >= width * 3, "rgb row too short");
+  debug_assert!(rgba_out.len() >= width * 4, "rgba_out row too short");
+  for x in 0..width {
+    rgba_out[x * 4] = rgb[x * 3];
+    rgba_out[x * 4 + 1] = rgb[x * 3 + 1];
+    rgba_out[x * 4 + 2] = rgb[x * 3 + 2];
+    rgba_out[x * 4 + 3] = 0xFF;
+  }
 }
 
 // ---- High-bit-depth YUV 4:2:0 → RGB (BITS ∈ {10, 12, 14}) -------------
@@ -2004,6 +2074,48 @@ fn clamp_u16_round(v: f32, max: f32) -> u16 {
 #[cfg(all(test, feature = "std"))]
 mod tests {
   use super::*;
+
+  // ---- expand_rgb_to_rgba_row -----------------------------------------
+
+  #[test]
+  fn expand_rgb_to_rgba_row_pads_alpha_and_preserves_rgb() {
+    // Each source pixel's R/G/B must land in the matching slot, with
+    // alpha forced to 0xFF — Strategy A's correctness depends on this.
+    let rgb: std::vec::Vec<u8> = (0..16 * 3).map(|i| i as u8).collect();
+    let mut rgba = std::vec![0u8; 16 * 4];
+    expand_rgb_to_rgba_row(&rgb, &mut rgba, 16);
+    for x in 0..16 {
+      assert_eq!(rgba[x * 4], rgb[x * 3], "R at px {x}");
+      assert_eq!(rgba[x * 4 + 1], rgb[x * 3 + 1], "G at px {x}");
+      assert_eq!(rgba[x * 4 + 2], rgb[x * 3 + 2], "B at px {x}");
+      assert_eq!(rgba[x * 4 + 3], 0xFF, "A at px {x}");
+    }
+  }
+
+  #[test]
+  fn expand_rgb_to_rgba_row_only_writes_first_width_pixels() {
+    // Caller may pass over-sized RGBA buffers; we must not stomp on
+    // the trailing region. Pre-fill 0xAA, expand into the head, and
+    // verify the tail still reads 0xAA.
+    let rgb: std::vec::Vec<u8> = (0..8 * 3).map(|i| (i + 1) as u8).collect();
+    let mut rgba = std::vec![0xAAu8; 16 * 4];
+    expand_rgb_to_rgba_row(&rgb, &mut rgba, 8);
+    for x in 0..8 {
+      assert_eq!(rgba[x * 4], rgb[x * 3]);
+      assert_eq!(rgba[x * 4 + 3], 0xFF);
+    }
+    for &b in &rgba[8 * 4..] {
+      assert_eq!(b, 0xAA, "tail must be untouched");
+    }
+  }
+
+  #[test]
+  fn expand_rgb_to_rgba_row_zero_width_is_noop() {
+    let rgb: std::vec::Vec<u8> = std::vec::Vec::new();
+    let mut rgba = std::vec![0u8; 0];
+    expand_rgb_to_rgba_row(&rgb, &mut rgba, 0);
+    assert!(rgba.is_empty());
+  }
 
   // ---- yuv_420_to_rgb_row ----------------------------------------------
 

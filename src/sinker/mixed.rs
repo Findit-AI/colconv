@@ -62,17 +62,18 @@ use crate::{
   HsvBuffers, PixelSink, SourceFormat,
   raw::{Bayer, Bayer16, BayerRow, BayerRow16, BayerSink, BayerSink16},
   row::{
-    bayer_to_rgb_row, bayer16_to_rgb_row, bayer16_to_rgb_u16_row, nv12_to_rgb_row,
-    nv12_to_rgba_row, nv21_to_rgb_row, nv21_to_rgba_row, nv24_to_rgb_row, nv42_to_rgb_row,
-    p010_to_rgb_row, p010_to_rgb_u16_row, p012_to_rgb_row, p012_to_rgb_u16_row, p016_to_rgb_row,
-    p016_to_rgb_u16_row, p410_to_rgb_row, p410_to_rgb_u16_row, p412_to_rgb_row,
-    p412_to_rgb_u16_row, p416_to_rgb_row, p416_to_rgb_u16_row, rgb_to_hsv_row, yuv_420_to_rgb_row,
-    yuv_420_to_rgba_row, yuv_444_to_rgb_row, yuv_444_to_rgba_row, yuv420p9_to_rgb_row,
-    yuv420p9_to_rgb_u16_row, yuv420p10_to_rgb_row, yuv420p10_to_rgb_u16_row, yuv420p12_to_rgb_row,
-    yuv420p12_to_rgb_u16_row, yuv420p14_to_rgb_row, yuv420p14_to_rgb_u16_row, yuv420p16_to_rgb_row,
-    yuv420p16_to_rgb_u16_row, yuv444p9_to_rgb_row, yuv444p9_to_rgb_u16_row, yuv444p10_to_rgb_row,
-    yuv444p10_to_rgb_u16_row, yuv444p12_to_rgb_row, yuv444p12_to_rgb_u16_row, yuv444p14_to_rgb_row,
-    yuv444p14_to_rgb_u16_row, yuv444p16_to_rgb_row, yuv444p16_to_rgb_u16_row,
+    bayer_to_rgb_row, bayer16_to_rgb_row, bayer16_to_rgb_u16_row, expand_rgb_to_rgba_row,
+    nv12_to_rgb_row, nv12_to_rgba_row, nv21_to_rgb_row, nv21_to_rgba_row, nv24_to_rgb_row,
+    nv24_to_rgba_row, nv42_to_rgb_row, nv42_to_rgba_row, p010_to_rgb_row, p010_to_rgb_u16_row,
+    p012_to_rgb_row, p012_to_rgb_u16_row, p016_to_rgb_row, p016_to_rgb_u16_row, p410_to_rgb_row,
+    p410_to_rgb_u16_row, p412_to_rgb_row, p412_to_rgb_u16_row, p416_to_rgb_row,
+    p416_to_rgb_u16_row, rgb_to_hsv_row, yuv_420_to_rgb_row, yuv_420_to_rgba_row,
+    yuv_444_to_rgb_row, yuv_444_to_rgba_row, yuv420p9_to_rgb_row, yuv420p9_to_rgb_u16_row,
+    yuv420p10_to_rgb_row, yuv420p10_to_rgb_u16_row, yuv420p12_to_rgb_row, yuv420p12_to_rgb_u16_row,
+    yuv420p14_to_rgb_row, yuv420p14_to_rgb_u16_row, yuv420p16_to_rgb_row, yuv420p16_to_rgb_u16_row,
+    yuv444p9_to_rgb_row, yuv444p9_to_rgb_u16_row, yuv444p10_to_rgb_row, yuv444p10_to_rgb_u16_row,
+    yuv444p12_to_rgb_row, yuv444p12_to_rgb_u16_row, yuv444p14_to_rgb_row, yuv444p14_to_rgb_u16_row,
+    yuv444p16_to_rgb_row, yuv444p16_to_rgb_u16_row,
   },
   yuv::{
     Nv12, Nv12Row, Nv12Sink, Nv16, Nv16Row, Nv16Sink, Nv21, Nv21Row, Nv21Sink, Nv24, Nv24Row,
@@ -1110,12 +1111,12 @@ impl<'a> MixedSinker<'a, Yuv420p> {
   ///
   /// ```compile_fail
   /// // Attaching RGBA to a sink that doesn't write it is rejected
-  /// // at compile time. Nv24 (4:4:4 semi‑planar) has not yet been
+  /// // at compile time. Yuv440p (4:4:0 planar) has not yet been
   /// // wired for RGBA; once that lands the negative example here
   /// // moves to the next not‑yet‑wired format.
-  /// use colconv::{sinker::MixedSinker, yuv::Nv24};
+  /// use colconv::{sinker::MixedSinker, yuv::Yuv440p};
   /// let mut buf = vec![0u8; 16 * 8 * 4];
-  /// let _ = MixedSinker::<Nv24>::new(16, 8).with_rgba(&mut buf);
+  /// let _ = MixedSinker::<Yuv440p>::new(16, 8).with_rgba(&mut buf);
   /// ```
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub fn with_rgba(mut self, buf: &'a mut [u8]) -> Result<Self, MixedSinkerError> {
@@ -1229,12 +1230,20 @@ impl PixelSink for MixedSinker<'_, Yuv420p> {
       luma[one_plane_start..one_plane_end].copy_from_slice(&row.y()[..w]);
     }
 
-    // Native RGBA: independent kernel run, separate from RGB. Avoids
-    // the compose-and-expand cost — the const-generic
-    // `yuv_420_to_rgba_row` writes 4 bytes per pixel directly.
-    // Default alpha = 0xFF (opaque); future YUVA source impls will
-    // copy alpha through from the source plane.
-    if let Some(buf) = rgba.as_deref_mut() {
+    // Output mode resolution (Strategy A):
+    // - RGBA-only: run dedicated `yuv_420_to_rgba_row` (4 bpp store).
+    // - RGB / HSV (with or without RGBA): run RGB kernel once, then if
+    //   RGBA is also requested, fan it out via `expand_rgb_to_rgba_row`
+    //   (memory-bound copy + 0xFF alpha pad). Saves the second YUV→RGB
+    //   per-pixel math when both buffers are attached.
+    // - None of the above: nothing to do beyond luma above.
+    let want_rgb = rgb.is_some();
+    let want_rgba = rgba.is_some();
+    let want_hsv = hsv.is_some();
+    let need_rgb_kernel = want_rgb || want_hsv;
+
+    if want_rgba && !need_rgb_kernel {
+      let rgba_buf = rgba.as_deref_mut().unwrap();
       let rgba_plane_end =
         one_plane_end
           .checked_mul(4)
@@ -1243,22 +1252,21 @@ impl PixelSink for MixedSinker<'_, Yuv420p> {
             height: h,
             channels: 4,
           })?;
-      let rgba_plane_start = one_plane_start * 4; // ≤ rgba_plane_end.
+      let rgba_plane_start = one_plane_start * 4;
       yuv_420_to_rgba_row(
         row.y(),
         row.u_half(),
         row.v_half(),
-        &mut buf[rgba_plane_start..rgba_plane_end],
+        &mut rgba_buf[rgba_plane_start..rgba_plane_end],
         w,
         row.matrix(),
         row.full_range(),
         use_simd,
       );
+      return Ok(());
     }
 
-    let want_rgb = rgb.is_some();
-    let want_hsv = hsv.is_some();
-    if !want_rgb && !want_hsv {
+    if !need_rgb_kernel {
       return Ok(());
     }
 
@@ -1324,6 +1332,20 @@ impl PixelSink for MixedSinker<'_, Yuv420p> {
         use_simd,
       );
     }
+
+    if let Some(buf) = rgba.as_deref_mut() {
+      let rgba_plane_end =
+        one_plane_end
+          .checked_mul(4)
+          .ok_or(MixedSinkerError::GeometryOverflow {
+            width: w,
+            height: h,
+            channels: 4,
+          })?;
+      let rgba_plane_start = one_plane_start * 4;
+      expand_rgb_to_rgba_row(rgb_row, &mut buf[rgba_plane_start..rgba_plane_end], w);
+    }
+
     Ok(())
   }
 }
@@ -1437,11 +1459,16 @@ impl PixelSink for MixedSinker<'_, Yuv422p> {
       luma[one_plane_start..one_plane_end].copy_from_slice(&row.y()[..w]);
     }
 
-    // Native RGBA: independent kernel run, separate from RGB. Default
-    // alpha = 0xFF since Yuv422p has no alpha plane. Reuses the
-    // Yuv420p RGBA dispatcher — 4:2:2's per-row contract is
-    // identical (half-width chroma, one pair per Y pair).
-    if let Some(buf) = rgba.as_deref_mut() {
+    // Strategy A output mode resolution — see Yuv420p impl above.
+    // Reuses Yuv420p dispatchers (RGB and RGBA) since 4:2:2's per-row
+    // contract is identical (half-width chroma, one pair per Y pair).
+    let want_rgb = rgb.is_some();
+    let want_rgba = rgba.is_some();
+    let want_hsv = hsv.is_some();
+    let need_rgb_kernel = want_rgb || want_hsv;
+
+    if want_rgba && !need_rgb_kernel {
+      let rgba_buf = rgba.as_deref_mut().unwrap();
       let rgba_plane_end =
         one_plane_end
           .checked_mul(4)
@@ -1455,17 +1482,16 @@ impl PixelSink for MixedSinker<'_, Yuv422p> {
         row.y(),
         row.u_half(),
         row.v_half(),
-        &mut buf[rgba_plane_start..rgba_plane_end],
+        &mut rgba_buf[rgba_plane_start..rgba_plane_end],
         w,
         row.matrix(),
         row.full_range(),
         use_simd,
       );
+      return Ok(());
     }
 
-    let want_rgb = rgb.is_some();
-    let want_hsv = hsv.is_some();
-    if !want_rgb && !want_hsv {
+    if !need_rgb_kernel {
       return Ok(());
     }
 
@@ -1518,6 +1544,20 @@ impl PixelSink for MixedSinker<'_, Yuv422p> {
         use_simd,
       );
     }
+
+    if let Some(buf) = rgba.as_deref_mut() {
+      let rgba_plane_end =
+        one_plane_end
+          .checked_mul(4)
+          .ok_or(MixedSinkerError::GeometryOverflow {
+            width: w,
+            height: h,
+            channels: 4,
+          })?;
+      let rgba_plane_start = one_plane_start * 4;
+      expand_rgb_to_rgba_row(rgb_row, &mut buf[rgba_plane_start..rgba_plane_end], w);
+    }
+
     Ok(())
   }
 }
@@ -1623,9 +1663,14 @@ impl PixelSink for MixedSinker<'_, Yuv444p> {
       luma[one_plane_start..one_plane_end].copy_from_slice(&row.y()[..w]);
     }
 
-    // Native RGBA: independent kernel run, separate from RGB. Default
-    // alpha = 0xFF since Yuv444p has no alpha plane.
-    if let Some(buf) = rgba.as_deref_mut() {
+    // Strategy A output mode resolution — see Yuv420p impl above.
+    let want_rgb = rgb.is_some();
+    let want_rgba = rgba.is_some();
+    let want_hsv = hsv.is_some();
+    let need_rgb_kernel = want_rgb || want_hsv;
+
+    if want_rgba && !need_rgb_kernel {
+      let rgba_buf = rgba.as_deref_mut().unwrap();
       let rgba_plane_end =
         one_plane_end
           .checked_mul(4)
@@ -1639,17 +1684,16 @@ impl PixelSink for MixedSinker<'_, Yuv444p> {
         row.y(),
         row.u(),
         row.v(),
-        &mut buf[rgba_plane_start..rgba_plane_end],
+        &mut rgba_buf[rgba_plane_start..rgba_plane_end],
         w,
         row.matrix(),
         row.full_range(),
         use_simd,
       );
+      return Ok(());
     }
 
-    let want_rgb = rgb.is_some();
-    let want_hsv = hsv.is_some();
-    if !want_rgb && !want_hsv {
+    if !need_rgb_kernel {
       return Ok(());
     }
 
@@ -1700,6 +1744,20 @@ impl PixelSink for MixedSinker<'_, Yuv444p> {
         use_simd,
       );
     }
+
+    if let Some(buf) = rgba.as_deref_mut() {
+      let rgba_plane_end =
+        one_plane_end
+          .checked_mul(4)
+          .ok_or(MixedSinkerError::GeometryOverflow {
+            width: w,
+            height: h,
+            channels: 4,
+          })?;
+      let rgba_plane_start = one_plane_start * 4;
+      expand_rgb_to_rgba_row(rgb_row, &mut buf[rgba_plane_start..rgba_plane_end], w);
+    }
+
     Ok(())
   }
 }
@@ -1817,9 +1875,14 @@ impl PixelSink for MixedSinker<'_, Nv12> {
       luma[one_plane_start..one_plane_end].copy_from_slice(&row.y()[..w]);
     }
 
-    // Native RGBA: independent kernel run, separate from RGB. Default
-    // alpha = 0xFF since NV12 has no alpha plane.
-    if let Some(buf) = rgba.as_deref_mut() {
+    // Strategy A output mode resolution — see Yuv420p impl above.
+    let want_rgb = rgb.is_some();
+    let want_rgba = rgba.is_some();
+    let want_hsv = hsv.is_some();
+    let need_rgb_kernel = want_rgb || want_hsv;
+
+    if want_rgba && !need_rgb_kernel {
+      let rgba_buf = rgba.as_deref_mut().unwrap();
       let rgba_plane_end =
         one_plane_end
           .checked_mul(4)
@@ -1832,17 +1895,16 @@ impl PixelSink for MixedSinker<'_, Nv12> {
       nv12_to_rgba_row(
         row.y(),
         row.uv_half(),
-        &mut buf[rgba_plane_start..rgba_plane_end],
+        &mut rgba_buf[rgba_plane_start..rgba_plane_end],
         w,
         row.matrix(),
         row.full_range(),
         use_simd,
       );
+      return Ok(());
     }
 
-    let want_rgb = rgb.is_some();
-    let want_hsv = hsv.is_some();
-    if !want_rgb && !want_hsv {
+    if !need_rgb_kernel {
       return Ok(());
     }
 
@@ -1894,6 +1956,20 @@ impl PixelSink for MixedSinker<'_, Nv12> {
         use_simd,
       );
     }
+
+    if let Some(buf) = rgba.as_deref_mut() {
+      let rgba_plane_end =
+        one_plane_end
+          .checked_mul(4)
+          .ok_or(MixedSinkerError::GeometryOverflow {
+            width: w,
+            height: h,
+            channels: 4,
+          })?;
+      let rgba_plane_start = one_plane_start * 4;
+      expand_rgb_to_rgba_row(rgb_row, &mut buf[rgba_plane_start..rgba_plane_end], w);
+    }
+
     Ok(())
   }
 }
@@ -2002,10 +2078,16 @@ impl PixelSink for MixedSinker<'_, Nv16> {
       luma[one_plane_start..one_plane_end].copy_from_slice(&row.y()[..w]);
     }
 
-    // Native RGBA: independent kernel run, separate from RGB. Default
-    // alpha = 0xFF since NV16 has no alpha plane. Reuses the NV12
-    // RGBA dispatcher — 4:2:2's row contract is identical.
-    if let Some(buf) = rgba.as_deref_mut() {
+    // Strategy A output mode resolution — see Yuv420p impl above.
+    // Reuses NV12 dispatchers (RGB and RGBA) since 4:2:2's row
+    // contract is identical.
+    let want_rgb = rgb.is_some();
+    let want_rgba = rgba.is_some();
+    let want_hsv = hsv.is_some();
+    let need_rgb_kernel = want_rgb || want_hsv;
+
+    if want_rgba && !need_rgb_kernel {
+      let rgba_buf = rgba.as_deref_mut().unwrap();
       let rgba_plane_end =
         one_plane_end
           .checked_mul(4)
@@ -2018,17 +2100,16 @@ impl PixelSink for MixedSinker<'_, Nv16> {
       nv12_to_rgba_row(
         row.y(),
         row.uv(),
-        &mut buf[rgba_plane_start..rgba_plane_end],
+        &mut rgba_buf[rgba_plane_start..rgba_plane_end],
         w,
         row.matrix(),
         row.full_range(),
         use_simd,
       );
+      return Ok(());
     }
 
-    let want_rgb = rgb.is_some();
-    let want_hsv = hsv.is_some();
-    if !want_rgb && !want_hsv {
+    if !need_rgb_kernel {
       return Ok(());
     }
 
@@ -2079,6 +2160,20 @@ impl PixelSink for MixedSinker<'_, Nv16> {
         use_simd,
       );
     }
+
+    if let Some(buf) = rgba.as_deref_mut() {
+      let rgba_plane_end =
+        one_plane_end
+          .checked_mul(4)
+          .ok_or(MixedSinkerError::GeometryOverflow {
+            width: w,
+            height: h,
+            channels: 4,
+          })?;
+      let rgba_plane_start = one_plane_start * 4;
+      expand_rgb_to_rgba_row(rgb_row, &mut buf[rgba_plane_start..rgba_plane_end], w);
+    }
+
     Ok(())
   }
 }
@@ -2185,9 +2280,14 @@ impl PixelSink for MixedSinker<'_, Nv21> {
       luma[one_plane_start..one_plane_end].copy_from_slice(&row.y()[..w]);
     }
 
-    // Native RGBA: independent kernel run, separate from RGB. Default
-    // alpha = 0xFF since NV21 has no alpha plane.
-    if let Some(buf) = rgba.as_deref_mut() {
+    // Strategy A output mode resolution — see Yuv420p impl above.
+    let want_rgb = rgb.is_some();
+    let want_rgba = rgba.is_some();
+    let want_hsv = hsv.is_some();
+    let need_rgb_kernel = want_rgb || want_hsv;
+
+    if want_rgba && !need_rgb_kernel {
+      let rgba_buf = rgba.as_deref_mut().unwrap();
       let rgba_plane_end =
         one_plane_end
           .checked_mul(4)
@@ -2200,17 +2300,16 @@ impl PixelSink for MixedSinker<'_, Nv21> {
       nv21_to_rgba_row(
         row.y(),
         row.vu_half(),
-        &mut buf[rgba_plane_start..rgba_plane_end],
+        &mut rgba_buf[rgba_plane_start..rgba_plane_end],
         w,
         row.matrix(),
         row.full_range(),
         use_simd,
       );
+      return Ok(());
     }
 
-    let want_rgb = rgb.is_some();
-    let want_hsv = hsv.is_some();
-    if !want_rgb && !want_hsv {
+    if !need_rgb_kernel {
       return Ok(());
     }
 
@@ -2262,6 +2361,20 @@ impl PixelSink for MixedSinker<'_, Nv21> {
         use_simd,
       );
     }
+
+    if let Some(buf) = rgba.as_deref_mut() {
+      let rgba_plane_end =
+        one_plane_end
+          .checked_mul(4)
+          .ok_or(MixedSinkerError::GeometryOverflow {
+            width: w,
+            height: h,
+            channels: 4,
+          })?;
+      let rgba_plane_start = one_plane_start * 4;
+      expand_rgb_to_rgba_row(rgb_row, &mut buf[rgba_plane_start..rgba_plane_end], w);
+    }
+
     Ok(())
   }
 }
@@ -2272,6 +2385,38 @@ impl PixelSink for MixedSinker<'_, Nv21> {
 // row), one UV pair per Y pixel. No width parity constraint. Kernel
 // is its own family (`nv24_to_rgb_row`) since chroma is no longer
 // duplicated across columns.
+
+impl<'a> MixedSinker<'a, Nv24> {
+  /// Attaches a packed 32‑bit RGBA output buffer.
+  ///
+  /// Only available on sinker types whose `PixelSink` impl writes
+  /// RGBA — see [`MixedSinker::<Yuv420p>::with_rgba`] for the same
+  /// rationale and constraints. Nv24 has no alpha plane, so every
+  /// alpha byte is filled with `0xFF` (opaque).
+  ///
+  /// Returns `Err(RgbaBufferTooShort)` if
+  /// `buf.len() < width × height × 4`, or `Err(GeometryOverflow)` on
+  /// 32‑bit targets when the product overflows.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn with_rgba(mut self, buf: &'a mut [u8]) -> Result<Self, MixedSinkerError> {
+    self.set_rgba(buf)?;
+    Ok(self)
+  }
+
+  /// In-place variant of [`with_rgba`](Self::with_rgba).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn set_rgba(&mut self, buf: &'a mut [u8]) -> Result<&mut Self, MixedSinkerError> {
+    let expected = self.frame_bytes(4)?;
+    if buf.len() < expected {
+      return Err(MixedSinkerError::RgbaBufferTooShort {
+        expected,
+        actual: buf.len(),
+      });
+    }
+    self.rgba = Some(buf);
+    Ok(self)
+  }
+}
 
 impl Nv24Sink for MixedSinker<'_, Nv24> {}
 
@@ -2322,6 +2467,7 @@ impl PixelSink for MixedSinker<'_, Nv24> {
 
     let Self {
       rgb,
+      rgba,
       luma,
       hsv,
       rgb_scratch,
@@ -2336,8 +2482,37 @@ impl PixelSink for MixedSinker<'_, Nv24> {
     }
 
     let want_rgb = rgb.is_some();
+    let want_rgba = rgba.is_some();
     let want_hsv = hsv.is_some();
-    if !want_rgb && !want_hsv {
+    let need_rgb_kernel = want_rgb || want_hsv;
+
+    // Standalone RGBA path: the caller wants only RGBA (no RGB / HSV),
+    // so run the dedicated RGBA kernel directly into the output buffer.
+    // Avoids both the scratch allocation and the expand-pad pass.
+    if want_rgba && !need_rgb_kernel {
+      let rgba_buf = rgba.as_deref_mut().unwrap();
+      let rgba_plane_end =
+        one_plane_end
+          .checked_mul(4)
+          .ok_or(MixedSinkerError::GeometryOverflow {
+            width: w,
+            height: h,
+            channels: 4,
+          })?;
+      let rgba_plane_start = one_plane_start * 4;
+      nv24_to_rgba_row(
+        row.y(),
+        row.uv(),
+        &mut rgba_buf[rgba_plane_start..rgba_plane_end],
+        w,
+        row.matrix(),
+        row.full_range(),
+        use_simd,
+      );
+      return Ok(());
+    }
+
+    if !need_rgb_kernel {
       return Ok(());
     }
 
@@ -2387,6 +2562,23 @@ impl PixelSink for MixedSinker<'_, Nv24> {
         use_simd,
       );
     }
+
+    // Strategy A: when both RGB-side and RGBA outputs are requested,
+    // derive RGBA from the just-computed RGB row (memory-bound copy +
+    // 0xFF alpha pad) instead of running a second YUV→RGB kernel.
+    if let Some(buf) = rgba.as_deref_mut() {
+      let rgba_plane_end =
+        one_plane_end
+          .checked_mul(4)
+          .ok_or(MixedSinkerError::GeometryOverflow {
+            width: w,
+            height: h,
+            channels: 4,
+          })?;
+      let rgba_plane_start = one_plane_start * 4;
+      expand_rgb_to_rgba_row(rgb_row, &mut buf[rgba_plane_start..rgba_plane_end], w);
+    }
+
     Ok(())
   }
 }
@@ -2395,6 +2587,33 @@ impl PixelSink for MixedSinker<'_, Nv24> {
 //
 // Structurally identical to the Nv24 impl — the row primitive hides
 // the V/U byte-order difference.
+
+impl<'a> MixedSinker<'a, Nv42> {
+  /// Attaches a packed 32‑bit RGBA output buffer.
+  ///
+  /// See [`MixedSinker::<Nv24>::with_rgba`] for the same rationale and
+  /// constraints; Nv42 differs only in chroma byte order (V before U).
+  /// Returns `Err(RgbaBufferTooShort)` if `buf.len() < width × height × 4`.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn with_rgba(mut self, buf: &'a mut [u8]) -> Result<Self, MixedSinkerError> {
+    self.set_rgba(buf)?;
+    Ok(self)
+  }
+
+  /// In-place variant of [`with_rgba`](Self::with_rgba).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn set_rgba(&mut self, buf: &'a mut [u8]) -> Result<&mut Self, MixedSinkerError> {
+    let expected = self.frame_bytes(4)?;
+    if buf.len() < expected {
+      return Err(MixedSinkerError::RgbaBufferTooShort {
+        expected,
+        actual: buf.len(),
+      });
+    }
+    self.rgba = Some(buf);
+    Ok(self)
+  }
+}
 
 impl Nv42Sink for MixedSinker<'_, Nv42> {}
 
@@ -2442,6 +2661,7 @@ impl PixelSink for MixedSinker<'_, Nv42> {
 
     let Self {
       rgb,
+      rgba,
       luma,
       hsv,
       rgb_scratch,
@@ -2456,8 +2676,34 @@ impl PixelSink for MixedSinker<'_, Nv42> {
     }
 
     let want_rgb = rgb.is_some();
+    let want_rgba = rgba.is_some();
     let want_hsv = hsv.is_some();
-    if !want_rgb && !want_hsv {
+    let need_rgb_kernel = want_rgb || want_hsv;
+
+    if want_rgba && !need_rgb_kernel {
+      let rgba_buf = rgba.as_deref_mut().unwrap();
+      let rgba_plane_end =
+        one_plane_end
+          .checked_mul(4)
+          .ok_or(MixedSinkerError::GeometryOverflow {
+            width: w,
+            height: h,
+            channels: 4,
+          })?;
+      let rgba_plane_start = one_plane_start * 4;
+      nv42_to_rgba_row(
+        row.y(),
+        row.vu(),
+        &mut rgba_buf[rgba_plane_start..rgba_plane_end],
+        w,
+        row.matrix(),
+        row.full_range(),
+        use_simd,
+      );
+      return Ok(());
+    }
+
+    if !need_rgb_kernel {
       return Ok(());
     }
 
@@ -2507,6 +2753,20 @@ impl PixelSink for MixedSinker<'_, Nv42> {
         use_simd,
       );
     }
+
+    if let Some(buf) = rgba.as_deref_mut() {
+      let rgba_plane_end =
+        one_plane_end
+          .checked_mul(4)
+          .ok_or(MixedSinkerError::GeometryOverflow {
+            width: w,
+            height: h,
+            channels: 4,
+          })?;
+      let rgba_plane_start = one_plane_start * 4;
+      expand_rgb_to_rgba_row(rgb_row, &mut buf[rgba_plane_start..rgba_plane_end], w);
+    }
+
     Ok(())
   }
 }
@@ -9874,6 +10134,386 @@ mod tests {
         actual: 31,
       }
     );
+  }
+
+  // ---- Nv24/Nv42 RGBA (Ship 8 PR 4b) tests --------------------------------
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn nv24_rgba_only_converts_gray_to_gray_with_opaque_alpha() {
+    let (yp, uvp) = solid_nv24_frame(16, 8, 128, 128, 128);
+    let src = Nv24Frame::new(&yp, &uvp, 16, 8, 16, 32);
+
+    let mut rgba = std::vec![0u8; 16 * 8 * 4];
+    let mut sink = MixedSinker::<Nv24>::new(16, 8)
+      .with_rgba(&mut rgba)
+      .unwrap();
+    nv24_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+    for px in rgba.chunks(4) {
+      assert!(px[0].abs_diff(128) <= 1, "R");
+      assert_eq!(px[0], px[1], "RGB monochromatic");
+      assert_eq!(px[1], px[2], "RGB monochromatic");
+      assert_eq!(px[3], 0xFF, "alpha must default to opaque");
+    }
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn nv24_with_rgb_and_with_rgba_produce_byte_identical_rgb_bytes() {
+    // Strategy A invariant: when both RGB and RGBA are attached, the
+    // RGBA bytes must be byte-for-byte identical to the RGB row +
+    // 0xFF alpha. This is the cross-format guarantee that holds even
+    // after we replaced the dual-kernel path with the
+    // expand_rgb_to_rgba_row fan-out.
+    let w = 32u32;
+    let h = 16u32;
+    let ws = w as usize;
+    let hs = h as usize;
+    let (yp, uvp) = solid_nv24_frame(w, h, 180, 60, 200);
+    let src = Nv24Frame::new(&yp, &uvp, w, h, w, 2 * w);
+
+    let mut rgb = std::vec![0u8; ws * hs * 3];
+    let mut rgba = std::vec![0u8; ws * hs * 4];
+    let mut sink = MixedSinker::<Nv24>::new(ws, hs)
+      .with_rgb(&mut rgb)
+      .unwrap()
+      .with_rgba(&mut rgba)
+      .unwrap();
+    nv24_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+    for i in 0..(ws * hs) {
+      assert_eq!(rgba[i * 4], rgb[i * 3], "R differs at pixel {i}");
+      assert_eq!(rgba[i * 4 + 1], rgb[i * 3 + 1], "G differs at pixel {i}");
+      assert_eq!(rgba[i * 4 + 2], rgb[i * 3 + 2], "B differs at pixel {i}");
+      assert_eq!(rgba[i * 4 + 3], 0xFF, "A not opaque at pixel {i}");
+    }
+  }
+
+  #[test]
+  fn nv24_rgba_buffer_too_short_returns_err() {
+    let mut rgba_short = std::vec![0u8; 16 * 8 * 4 - 1];
+    let result = MixedSinker::<Nv24>::new(16, 8).with_rgba(&mut rgba_short);
+    let Err(err) = result else {
+      panic!("expected RgbaBufferTooShort error");
+    };
+    assert!(matches!(
+      err,
+      MixedSinkerError::RgbaBufferTooShort {
+        expected: 512,
+        actual: 511,
+      }
+    ));
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn nv24_rgba_simd_matches_scalar_with_random_yuv() {
+    // Width 1922 forces both the SIMD main loop AND scalar tail across
+    // every backend block size (16/32/64).
+    let w = 1922usize;
+    let h = 4usize;
+    let mut yp = std::vec![0u8; w * h];
+    let mut uvp = std::vec![0u8; 2 * w * h];
+    pseudo_random_u8(&mut yp, 0xC001_C0DE);
+    pseudo_random_u8(&mut uvp, 0xCAFE_F00D);
+    let src = Nv24Frame::new(&yp, &uvp, w as u32, h as u32, w as u32, (2 * w) as u32);
+
+    for &matrix in &[
+      ColorMatrix::Bt601,
+      ColorMatrix::Bt709,
+      ColorMatrix::Bt2020Ncl,
+      ColorMatrix::YCgCo,
+    ] {
+      for &full_range in &[true, false] {
+        let mut rgba_simd = std::vec![0u8; w * h * 4];
+        let mut rgba_scalar = std::vec![0u8; w * h * 4];
+
+        let mut s_simd = MixedSinker::<Nv24>::new(w, h)
+          .with_rgba(&mut rgba_simd)
+          .unwrap();
+        nv24_to(&src, full_range, matrix, &mut s_simd).unwrap();
+
+        let mut s_scalar = MixedSinker::<Nv24>::new(w, h)
+          .with_rgba(&mut rgba_scalar)
+          .unwrap();
+        s_scalar.set_simd(false);
+        nv24_to(&src, full_range, matrix, &mut s_scalar).unwrap();
+
+        assert_eq!(
+          rgba_simd, rgba_scalar,
+          "Nv24 RGBA SIMD ≠ scalar (matrix={matrix:?}, full_range={full_range})"
+        );
+      }
+    }
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn nv42_rgba_only_converts_gray_to_gray_with_opaque_alpha() {
+    let (yp, vup) = solid_nv42_frame(16, 8, 128, 128, 128);
+    let src = Nv42Frame::new(&yp, &vup, 16, 8, 16, 32);
+
+    let mut rgba = std::vec![0u8; 16 * 8 * 4];
+    let mut sink = MixedSinker::<Nv42>::new(16, 8)
+      .with_rgba(&mut rgba)
+      .unwrap();
+    nv42_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+    for px in rgba.chunks(4) {
+      assert!(px[0].abs_diff(128) <= 1);
+      assert_eq!(px[0], px[1]);
+      assert_eq!(px[1], px[2]);
+      assert_eq!(px[3], 0xFF);
+    }
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn nv42_with_rgb_and_with_rgba_produce_byte_identical_rgb_bytes() {
+    let w = 32u32;
+    let h = 16u32;
+    let ws = w as usize;
+    let hs = h as usize;
+    let (yp, vup) = solid_nv42_frame(w, h, 180, 60, 200);
+    let src = Nv42Frame::new(&yp, &vup, w, h, w, 2 * w);
+
+    let mut rgb = std::vec![0u8; ws * hs * 3];
+    let mut rgba = std::vec![0u8; ws * hs * 4];
+    let mut sink = MixedSinker::<Nv42>::new(ws, hs)
+      .with_rgb(&mut rgb)
+      .unwrap()
+      .with_rgba(&mut rgba)
+      .unwrap();
+    nv42_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+    for i in 0..(ws * hs) {
+      assert_eq!(rgba[i * 4], rgb[i * 3]);
+      assert_eq!(rgba[i * 4 + 1], rgb[i * 3 + 1]);
+      assert_eq!(rgba[i * 4 + 2], rgb[i * 3 + 2]);
+      assert_eq!(rgba[i * 4 + 3], 0xFF);
+    }
+  }
+
+  #[test]
+  fn nv42_rgba_buffer_too_short_returns_err() {
+    let mut rgba_short = std::vec![0u8; 16 * 8 * 4 - 1];
+    let result = MixedSinker::<Nv42>::new(16, 8).with_rgba(&mut rgba_short);
+    let Err(err) = result else {
+      panic!("expected RgbaBufferTooShort error");
+    };
+    assert!(matches!(
+      err,
+      MixedSinkerError::RgbaBufferTooShort {
+        expected: 512,
+        actual: 511,
+      }
+    ));
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn nv42_rgba_simd_matches_scalar_with_random_yuv() {
+    let w = 1922usize;
+    let h = 4usize;
+    let mut yp = std::vec![0u8; w * h];
+    let mut vup = std::vec![0u8; 2 * w * h];
+    pseudo_random_u8(&mut yp, 0xC001_C0DE);
+    pseudo_random_u8(&mut vup, 0xCAFE_F00D);
+    let src = Nv42Frame::new(&yp, &vup, w as u32, h as u32, w as u32, (2 * w) as u32);
+
+    for &matrix in &[
+      ColorMatrix::Bt601,
+      ColorMatrix::Bt709,
+      ColorMatrix::Bt2020Ncl,
+      ColorMatrix::YCgCo,
+    ] {
+      for &full_range in &[true, false] {
+        let mut rgba_simd = std::vec![0u8; w * h * 4];
+        let mut rgba_scalar = std::vec![0u8; w * h * 4];
+
+        let mut s_simd = MixedSinker::<Nv42>::new(w, h)
+          .with_rgba(&mut rgba_simd)
+          .unwrap();
+        nv42_to(&src, full_range, matrix, &mut s_simd).unwrap();
+
+        let mut s_scalar = MixedSinker::<Nv42>::new(w, h)
+          .with_rgba(&mut rgba_scalar)
+          .unwrap();
+        s_scalar.set_simd(false);
+        nv42_to(&src, full_range, matrix, &mut s_scalar).unwrap();
+
+        assert_eq!(
+          rgba_simd, rgba_scalar,
+          "Nv42 RGBA SIMD ≠ scalar (matrix={matrix:?}, full_range={full_range})"
+        );
+      }
+    }
+  }
+
+  // Cross-format Strategy A invariant: when both RGB+RGBA are
+  // attached, all 8 wired families derive RGBA from the RGB row via
+  // expand_rgb_to_rgba_row. This test runs all 8 process methods with
+  // the same gray input and asserts every RGBA sample equals the RGB
+  // sample with alpha = 0xFF — proving the fan-out shape never
+  // diverges from the kernel output.
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn strategy_a_rgb_and_rgba_byte_identical_for_all_wired_families() {
+    let w: u32 = 32;
+    let h: u32 = 8;
+    let ws = w as usize;
+    let hs = h as usize;
+
+    let assert_match = |rgb: &[u8], rgba: &[u8], who: &str| {
+      for i in 0..(ws * hs) {
+        assert_eq!(rgba[i * 4], rgb[i * 3], "{who}: R differs at px {i}");
+        assert_eq!(
+          rgba[i * 4 + 1],
+          rgb[i * 3 + 1],
+          "{who}: G differs at px {i}"
+        );
+        assert_eq!(
+          rgba[i * 4 + 2],
+          rgb[i * 3 + 2],
+          "{who}: B differs at px {i}"
+        );
+        assert_eq!(rgba[i * 4 + 3], 0xFF, "{who}: alpha not opaque at px {i}");
+      }
+    };
+
+    {
+      let (yp, up, vp) = solid_yuv420p_frame(w, h, 200, 128, 128);
+      let src = Yuv420pFrame::new(&yp, &up, &vp, w, h, w, w / 2, w / 2);
+      let mut rgb = std::vec![0u8; ws * hs * 3];
+      let mut rgba = std::vec![0u8; ws * hs * 4];
+      let mut sink = MixedSinker::<Yuv420p>::new(ws, hs)
+        .with_rgb(&mut rgb)
+        .unwrap()
+        .with_rgba(&mut rgba)
+        .unwrap();
+      yuv420p_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+      assert_match(&rgb, &rgba, "Yuv420p");
+    }
+
+    {
+      let (yp, up, vp) = solid_yuv422p_frame(w, h, 200, 128, 128);
+      let src = Yuv422pFrame::new(&yp, &up, &vp, w, h, w, w / 2, w / 2);
+      let mut rgb = std::vec![0u8; ws * hs * 3];
+      let mut rgba = std::vec![0u8; ws * hs * 4];
+      let mut sink = MixedSinker::<Yuv422p>::new(ws, hs)
+        .with_rgb(&mut rgb)
+        .unwrap()
+        .with_rgba(&mut rgba)
+        .unwrap();
+      yuv422p_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+      assert_match(&rgb, &rgba, "Yuv422p");
+    }
+
+    {
+      let (yp, up, vp) = solid_yuv444p_frame(w, h, 200, 128, 128);
+      let src = Yuv444pFrame::new(&yp, &up, &vp, w, h, w, w, w);
+      let mut rgb = std::vec![0u8; ws * hs * 3];
+      let mut rgba = std::vec![0u8; ws * hs * 4];
+      let mut sink = MixedSinker::<Yuv444p>::new(ws, hs)
+        .with_rgb(&mut rgb)
+        .unwrap()
+        .with_rgba(&mut rgba)
+        .unwrap();
+      yuv444p_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+      assert_match(&rgb, &rgba, "Yuv444p");
+    }
+
+    {
+      let (yp, uvp) = solid_nv12_frame(w, h, 200, 128, 128);
+      let src = Nv12Frame::new(&yp, &uvp, w, h, w, w);
+      let mut rgb = std::vec![0u8; ws * hs * 3];
+      let mut rgba = std::vec![0u8; ws * hs * 4];
+      let mut sink = MixedSinker::<Nv12>::new(ws, hs)
+        .with_rgb(&mut rgb)
+        .unwrap()
+        .with_rgba(&mut rgba)
+        .unwrap();
+      nv12_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+      assert_match(&rgb, &rgba, "Nv12");
+    }
+
+    {
+      let (yp, vup) = solid_nv21_frame(w, h, 200, 128, 128);
+      let src = Nv21Frame::new(&yp, &vup, w, h, w, w);
+      let mut rgb = std::vec![0u8; ws * hs * 3];
+      let mut rgba = std::vec![0u8; ws * hs * 4];
+      let mut sink = MixedSinker::<Nv21>::new(ws, hs)
+        .with_rgb(&mut rgb)
+        .unwrap()
+        .with_rgba(&mut rgba)
+        .unwrap();
+      nv21_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+      assert_match(&rgb, &rgba, "Nv21");
+    }
+
+    {
+      let (yp, uvp) = solid_nv16_frame(w, h, 200, 128, 128);
+      let src = Nv16Frame::new(&yp, &uvp, w, h, w, w);
+      let mut rgb = std::vec![0u8; ws * hs * 3];
+      let mut rgba = std::vec![0u8; ws * hs * 4];
+      let mut sink = MixedSinker::<Nv16>::new(ws, hs)
+        .with_rgb(&mut rgb)
+        .unwrap()
+        .with_rgba(&mut rgba)
+        .unwrap();
+      nv16_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+      assert_match(&rgb, &rgba, "Nv16");
+    }
+
+    {
+      let (yp, uvp) = solid_nv24_frame(w, h, 200, 128, 128);
+      let src = Nv24Frame::new(&yp, &uvp, w, h, w, 2 * w);
+      let mut rgb = std::vec![0u8; ws * hs * 3];
+      let mut rgba = std::vec![0u8; ws * hs * 4];
+      let mut sink = MixedSinker::<Nv24>::new(ws, hs)
+        .with_rgb(&mut rgb)
+        .unwrap()
+        .with_rgba(&mut rgba)
+        .unwrap();
+      nv24_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+      assert_match(&rgb, &rgba, "Nv24");
+    }
+
+    {
+      let (yp, vup) = solid_nv42_frame(w, h, 200, 128, 128);
+      let src = Nv42Frame::new(&yp, &vup, w, h, w, 2 * w);
+      let mut rgb = std::vec![0u8; ws * hs * 3];
+      let mut rgba = std::vec![0u8; ws * hs * 4];
+      let mut sink = MixedSinker::<Nv42>::new(ws, hs)
+        .with_rgb(&mut rgb)
+        .unwrap()
+        .with_rgba(&mut rgba)
+        .unwrap();
+      nv42_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+      assert_match(&rgb, &rgba, "Nv42");
+    }
   }
 
   // ---- Yuv420p10 --------------------------------------------------------

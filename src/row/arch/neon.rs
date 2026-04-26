@@ -1349,11 +1349,19 @@ pub(crate) unsafe fn nv12_or_nv21_to_rgb_or_rgba_row_impl<
 }
 
 /// NEON NV24 → packed RGB (UV-ordered, 4:4:4). Thin wrapper over
-/// [`nv24_or_nv42_to_rgb_row_impl`] with `SWAP_UV = false`.
+/// [`nv24_or_nv42_to_rgb_or_rgba_row_impl`] with
+/// `SWAP_UV = false, ALPHA = false`.
 ///
 /// # Safety
 ///
-/// Same as [`nv24_or_nv42_to_rgb_row_impl`].
+/// Same contract as [`nv24_or_nv42_to_rgb_or_rgba_row_impl`] with
+/// `ALPHA = false` (so `out.len() >= width * 3` specializes to
+/// `rgb_out.len() >= 3 * width`):
+///
+/// 1. **NEON must be available on the current CPU.**
+/// 2. `y.len() >= width`.
+/// 3. `uv.len() >= 2 * width`.
+/// 4. `rgb_out.len() >= 3 * width`.
 #[inline]
 #[target_feature(enable = "neon")]
 pub(crate) unsafe fn nv24_to_rgb_row(
@@ -1366,16 +1374,18 @@ pub(crate) unsafe fn nv24_to_rgb_row(
 ) {
   // SAFETY: caller obligations forwarded to the shared impl.
   unsafe {
-    nv24_or_nv42_to_rgb_row_impl::<false>(y, uv, rgb_out, width, matrix, full_range);
+    nv24_or_nv42_to_rgb_or_rgba_row_impl::<false, false>(y, uv, rgb_out, width, matrix, full_range);
   }
 }
 
 /// NEON NV42 → packed RGB (VU-ordered, 4:4:4). Thin wrapper over
-/// [`nv24_or_nv42_to_rgb_row_impl`] with `SWAP_UV = true`.
+/// [`nv24_or_nv42_to_rgb_or_rgba_row_impl`] with
+/// `SWAP_UV = true, ALPHA = false`.
 ///
 /// # Safety
 ///
-/// Same as [`nv24_or_nv42_to_rgb_row_impl`].
+/// Same contract as [`nv24_to_rgb_row`]; `vu` carries the same
+/// `2 * width` bytes but in V-then-U order per chroma pair.
 #[inline]
 #[target_feature(enable = "neon")]
 pub(crate) unsafe fn nv42_to_rgb_row(
@@ -1388,40 +1398,96 @@ pub(crate) unsafe fn nv42_to_rgb_row(
 ) {
   // SAFETY: caller obligations forwarded to the shared impl.
   unsafe {
-    nv24_or_nv42_to_rgb_row_impl::<true>(y, vu, rgb_out, width, matrix, full_range);
+    nv24_or_nv42_to_rgb_or_rgba_row_impl::<true, false>(y, vu, rgb_out, width, matrix, full_range);
   }
 }
 
-/// Shared NEON NV24/NV42 kernel (4:4:4 semi-planar). Unlike
-/// [`nv12_or_nv21_to_rgb_row_impl`], chroma is not subsampled — one
-/// UV pair per Y pixel, so the chroma-duplication step (`vzip*`)
-/// disappears: compute 16 chroma values per 16 Y pixels directly.
+/// NEON NV24 → packed RGBA (R, G, B, `0xFF` per pixel). Same
+/// contract as [`nv24_to_rgb_row`] but writes 4 bytes per pixel via
+/// `vst4q_u8`. `rgba_out.len() >= 4 * width`.
+///
+/// # Safety
+///
+/// Same as [`nv24_to_rgb_row`] except the output slice must be
+/// `>= 4 * width` bytes.
+#[inline]
+#[target_feature(enable = "neon")]
+pub(crate) unsafe fn nv24_to_rgba_row(
+  y: &[u8],
+  uv: &[u8],
+  rgba_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  // SAFETY: caller obligations forwarded to the shared impl.
+  unsafe {
+    nv24_or_nv42_to_rgb_or_rgba_row_impl::<false, true>(y, uv, rgba_out, width, matrix, full_range);
+  }
+}
+
+/// NEON NV42 → packed RGBA (R, G, B, `0xFF` per pixel). Same
+/// contract as [`nv42_to_rgb_row`] but writes 4 bytes per pixel via
+/// `vst4q_u8`. `rgba_out.len() >= 4 * width`.
+///
+/// # Safety
+///
+/// Same as [`nv42_to_rgb_row`] except the output slice must be
+/// `>= 4 * width` bytes.
+#[inline]
+#[target_feature(enable = "neon")]
+pub(crate) unsafe fn nv42_to_rgba_row(
+  y: &[u8],
+  vu: &[u8],
+  rgba_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  // SAFETY: caller obligations forwarded to the shared impl.
+  unsafe {
+    nv24_or_nv42_to_rgb_or_rgba_row_impl::<true, true>(y, vu, rgba_out, width, matrix, full_range);
+  }
+}
+
+/// Shared NEON NV24/NV42 kernel (4:4:4 semi-planar) at 3 bpp (RGB)
+/// or 4 bpp + opaque alpha (RGBA). Unlike
+/// [`nv12_or_nv21_to_rgb_or_rgba_row_impl`], chroma is not
+/// subsampled — one UV pair per Y pixel, so the chroma-duplication
+/// step (`vzip*`) disappears: compute 16 chroma values per 16 Y
+/// pixels directly.
 ///
 /// `SWAP_UV = false` selects NV24 (even byte = U, odd = V);
-/// `SWAP_UV = true` selects NV42 (even = V, odd = U).
+/// `SWAP_UV = true` selects NV42 (even = V, odd = U). `ALPHA = true`
+/// writes via `vst4q_u8` with constant `0xFF` alpha; `ALPHA = false`
+/// writes via `vst3q_u8`. Both const generics drive compile-time
+/// monomorphization.
 ///
 /// # Safety
 ///
 /// 1. **NEON must be available on the current CPU.**
 /// 2. `y.len() >= width`.
-/// 3. `uv_or_vu.len() >= 2 * width` (one UV pair per Y pixel =
-///    `2 * width` bytes).
-/// 4. `rgb_out.len() >= 3 * width`.
+/// 3. `uv_or_vu.len() >= 2 * width` (one UV pair per Y pixel).
+/// 4. `out.len() >= width * (if ALPHA { 4 } else { 3 })`.
 ///
 /// No width parity constraint (4:4:4).
 #[inline]
 #[target_feature(enable = "neon")]
-unsafe fn nv24_or_nv42_to_rgb_row_impl<const SWAP_UV: bool>(
+pub(crate) unsafe fn nv24_or_nv42_to_rgb_or_rgba_row_impl<
+  const SWAP_UV: bool,
+  const ALPHA: bool,
+>(
   y: &[u8],
   uv_or_vu: &[u8],
-  rgb_out: &mut [u8],
+  out: &mut [u8],
   width: usize,
   matrix: ColorMatrix,
   full_range: bool,
 ) {
   debug_assert!(y.len() >= width);
   debug_assert!(uv_or_vu.len() >= 2 * width);
-  debug_assert!(rgb_out.len() >= width * 3);
+  let bpp: usize = if ALPHA { 4 } else { 3 };
+  debug_assert!(out.len() >= width * bpp);
 
   let coeffs = scalar::Coefficients::for_matrix(matrix);
   let (y_off, y_scale, c_scale) = scalar::range_params(full_range);
@@ -1442,6 +1508,7 @@ unsafe fn nv24_or_nv42_to_rgb_row_impl<const SWAP_UV: bool>(
     let cgv = vdupq_n_s32(coeffs.g_v());
     let cbu = vdupq_n_s32(coeffs.b_u());
     let cbv = vdupq_n_s32(coeffs.b_v());
+    let alpha_u8 = vdupq_n_u8(0xFF);
 
     let mut x = 0usize;
     while x + 16 <= width {
@@ -1510,32 +1577,36 @@ unsafe fn nv24_or_nv42_to_rgb_row_impl<const SWAP_UV: bool>(
         vqmovun_s16(vqaddq_s16(y_scaled_hi, r_chroma_hi)),
       );
 
-      let rgb = uint8x16x3_t(r_u8, g_u8, b_u8);
-      vst3q_u8(rgb_out.as_mut_ptr().add(x * 3), rgb);
+      if ALPHA {
+        let rgba = uint8x16x4_t(r_u8, g_u8, b_u8, alpha_u8);
+        vst4q_u8(out.as_mut_ptr().add(x * 4), rgba);
+      } else {
+        let rgb = uint8x16x3_t(r_u8, g_u8, b_u8);
+        vst3q_u8(out.as_mut_ptr().add(x * 3), rgb);
+      }
 
       x += 16;
     }
 
     // Scalar tail for 0..15 leftover pixels.
     if x < width {
-      if SWAP_UV {
-        scalar::nv42_to_rgb_row(
-          &y[x..width],
-          &uv_or_vu[x * 2..width * 2],
-          &mut rgb_out[x * 3..width * 3],
-          width - x,
-          matrix,
-          full_range,
-        );
-      } else {
-        scalar::nv24_to_rgb_row(
-          &y[x..width],
-          &uv_or_vu[x * 2..width * 2],
-          &mut rgb_out[x * 3..width * 3],
-          width - x,
-          matrix,
-          full_range,
-        );
+      let tail_y = &y[x..width];
+      let tail_uv = &uv_or_vu[x * 2..width * 2];
+      let tail_w = width - x;
+      let tail_out = &mut out[x * bpp..width * bpp];
+      match (SWAP_UV, ALPHA) {
+        (false, false) => {
+          scalar::nv24_to_rgb_row(tail_y, tail_uv, tail_out, tail_w, matrix, full_range)
+        }
+        (true, false) => {
+          scalar::nv42_to_rgb_row(tail_y, tail_uv, tail_out, tail_w, matrix, full_range)
+        }
+        (false, true) => {
+          scalar::nv24_to_rgba_row(tail_y, tail_uv, tail_out, tail_w, matrix, full_range)
+        }
+        (true, true) => {
+          scalar::nv42_to_rgba_row(tail_y, tail_uv, tail_out, tail_w, matrix, full_range)
+        }
       }
     }
   }
@@ -4147,6 +4218,114 @@ mod tests {
     for w in [16usize, 17, 33, 64, 1920] {
       check_nv42_matches_nv24_with_swapped_uv(w, ColorMatrix::Bt709, false);
       check_nv42_matches_nv24_with_swapped_uv(w, ColorMatrix::YCgCo, true);
+    }
+  }
+
+  // ---- nv24_to_rgba_row / nv42_to_rgba_row equivalence ----------------
+
+  fn check_nv24_rgba_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+    let y: std::vec::Vec<u8> = (0..width).map(|i| ((i * 37 + 11) & 0xFF) as u8).collect();
+    let uv: std::vec::Vec<u8> = (0..width)
+      .flat_map(|i| [((i * 53 + 23) & 0xFF) as u8, ((i * 71 + 91) & 0xFF) as u8])
+      .collect();
+    let mut rgba_scalar = std::vec![0u8; width * 4];
+    let mut rgba_neon = std::vec![0u8; width * 4];
+
+    scalar::nv24_to_rgba_row(&y, &uv, &mut rgba_scalar, width, matrix, full_range);
+    unsafe {
+      nv24_to_rgba_row(&y, &uv, &mut rgba_neon, width, matrix, full_range);
+    }
+
+    if rgba_scalar != rgba_neon {
+      let first_diff = rgba_scalar
+        .iter()
+        .zip(rgba_neon.iter())
+        .position(|(a, b)| a != b)
+        .unwrap();
+      let pixel = first_diff / 4;
+      let channel = ["R", "G", "B", "A"][first_diff % 4];
+      panic!(
+        "NEON NV24 RGBA diverges from scalar at byte {first_diff} (px {pixel} {channel}, width={width}, matrix={matrix:?}, full_range={full_range}): scalar={} neon={}",
+        rgba_scalar[first_diff], rgba_neon[first_diff]
+      );
+    }
+  }
+
+  fn check_nv42_rgba_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+    let y: std::vec::Vec<u8> = (0..width).map(|i| ((i * 37 + 11) & 0xFF) as u8).collect();
+    let vu: std::vec::Vec<u8> = (0..width)
+      .flat_map(|i| [((i * 53 + 23) & 0xFF) as u8, ((i * 71 + 91) & 0xFF) as u8])
+      .collect();
+    let mut rgba_scalar = std::vec![0u8; width * 4];
+    let mut rgba_neon = std::vec![0u8; width * 4];
+
+    scalar::nv42_to_rgba_row(&y, &vu, &mut rgba_scalar, width, matrix, full_range);
+    unsafe {
+      nv42_to_rgba_row(&y, &vu, &mut rgba_neon, width, matrix, full_range);
+    }
+
+    if rgba_scalar != rgba_neon {
+      let first_diff = rgba_scalar
+        .iter()
+        .zip(rgba_neon.iter())
+        .position(|(a, b)| a != b)
+        .unwrap();
+      let pixel = first_diff / 4;
+      let channel = ["R", "G", "B", "A"][first_diff % 4];
+      panic!(
+        "NEON NV42 RGBA diverges from scalar at byte {first_diff} (px {pixel} {channel}, width={width}, matrix={matrix:?}, full_range={full_range}): scalar={} neon={}",
+        rgba_scalar[first_diff], rgba_neon[first_diff]
+      );
+    }
+  }
+
+  #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
+  fn nv24_neon_rgba_matches_scalar_all_matrices_16() {
+    for m in [
+      ColorMatrix::Bt601,
+      ColorMatrix::Bt709,
+      ColorMatrix::Bt2020Ncl,
+      ColorMatrix::Smpte240m,
+      ColorMatrix::Fcc,
+      ColorMatrix::YCgCo,
+    ] {
+      for full in [true, false] {
+        check_nv24_rgba_equivalence(16, m, full);
+      }
+    }
+  }
+
+  #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
+  fn nv24_neon_rgba_matches_scalar_widths() {
+    for w in [1usize, 3, 15, 17, 32, 33, 1920, 1921] {
+      check_nv24_rgba_equivalence(w, ColorMatrix::Bt709, false);
+    }
+  }
+
+  #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
+  fn nv42_neon_rgba_matches_scalar_all_matrices_16() {
+    for m in [
+      ColorMatrix::Bt601,
+      ColorMatrix::Bt709,
+      ColorMatrix::Bt2020Ncl,
+      ColorMatrix::Smpte240m,
+      ColorMatrix::Fcc,
+      ColorMatrix::YCgCo,
+    ] {
+      for full in [true, false] {
+        check_nv42_rgba_equivalence(16, m, full);
+      }
+    }
+  }
+
+  #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
+  fn nv42_neon_rgba_matches_scalar_widths() {
+    for w in [1usize, 3, 15, 17, 32, 33, 1920, 1921] {
+      check_nv42_rgba_equivalence(w, ColorMatrix::Bt709, false);
     }
   }
 
