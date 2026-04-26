@@ -1565,10 +1565,11 @@ pub(crate) fn p_n_to_rgb_row<const BITS: u32>(
 ///
 /// Thin wrapper over [`p_n_to_rgb_or_rgba_row`] with `ALPHA = true`.
 //
-// Scalar prep for Ship 8 Tranche 5a: the public dispatcher
-// `row::p010_to_rgba_row` (and P012/P016 siblings) lands in the
+// Scalar prep for Ship 8 Tranche 5a: the public dispatchers
+// `row::p010_to_rgba_row` and `row::p012_to_rgba_row` land in the
 // follow-up SIMD/dispatcher PR. Until then this thin wrapper has no
-// caller.
+// caller. P016 has its own kernel family
+// ([`p16_to_rgb_or_rgba_row`]) — never routed here.
 #[allow(dead_code)]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn p_n_to_rgba_row<const BITS: u32>(
@@ -1602,12 +1603,13 @@ pub(crate) fn p_n_to_rgb_or_rgba_row<const BITS: u32, const ALPHA: bool>(
 ) {
   // High-bit-packed Pn kernels are only defined for BITS in {10, 12}.
   // Outside that set, `16 - BITS` could under/overflow and the Q15
-  // coefficient table has no corresponding entry. Caught here before
-  // the SIMD dispatcher hands control to unsafe code.
-  debug_assert!(
-    BITS == 10 || BITS == 12,
-    "p_n_to_rgb_or_rgba_row only supports BITS in {{10, 12}}"
-  );
+  // coefficient table has no corresponding entry. P016 (BITS=16) has
+  // its own dedicated kernel family with i64 chroma multiply — using
+  // this i32 path at BITS=16 would silently overflow on high chroma
+  // values. The compile-time assertion fails monomorphization for any
+  // BITS outside {10, 12}, eliminating that release-build corruption
+  // trap.
+  const { assert!(BITS == 10 || BITS == 12) };
   let bpp: usize = if ALPHA { 4 } else { 3 };
   debug_assert_eq!(width & 1, 0, "semi-planar high-bit requires even width");
   debug_assert!(y.len() >= width, "y row too short");
@@ -1697,10 +1699,11 @@ pub(crate) fn p_n_to_rgb_u16_row<const BITS: u32>(
 ///
 /// Thin wrapper over [`p_n_to_rgb_or_rgba_u16_row`] with `ALPHA = true`.
 //
-// Scalar prep for Ship 8 Tranche 5b: the public dispatcher
-// `row::p010_to_rgba_u16_row` (and P012/P016 siblings) lands in the
-// follow-up SIMD/dispatcher PR. Until then this thin wrapper has no
-// caller.
+// Scalar prep for Ship 8 Tranche 5b: the public dispatchers
+// `row::p010_to_rgba_u16_row` and `row::p012_to_rgba_u16_row` land in
+// the follow-up SIMD/dispatcher PR. Until then this thin wrapper has
+// no caller. P016 has its own u16 kernel family
+// ([`p16_to_rgb_or_rgba_u16_row`]) — never routed here.
 #[allow(dead_code)]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn p_n_to_rgba_u16_row<const BITS: u32>(
@@ -1732,12 +1735,12 @@ pub(crate) fn p_n_to_rgb_or_rgba_u16_row<const BITS: u32, const ALPHA: bool>(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  // See `p_n_to_rgb_or_rgba_row` for the BITS range rationale. Duplicated
-  // here so either entry point catches misuse on its own.
-  debug_assert!(
-    BITS == 10 || BITS == 12,
-    "p_n_to_rgb_or_rgba_u16_row only supports BITS in {{10, 12}}"
-  );
+  // See `p_n_to_rgb_or_rgba_row` for the BITS range rationale. The
+  // P016 u16 path lives in [`p16_to_rgb_or_rgba_u16_row`] (i64 chroma
+  // multiply); this i32 path would overflow before clamp at 16-bit
+  // chroma. Compile-time assertion eliminates the release-build
+  // corruption trap.
+  const { assert!(BITS == 10 || BITS == 12) };
   let bpp: usize = if ALPHA { 4 } else { 3 };
   debug_assert_eq!(width & 1, 0, "semi-planar high-bit requires even width");
   debug_assert!(y.len() >= width, "y row too short");
