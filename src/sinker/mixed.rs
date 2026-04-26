@@ -7599,6 +7599,86 @@ mod tests {
     miri,
     ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
   )]
+  fn yuv_420_to_rgba_simd_matches_scalar_with_random_yuv() {
+    // The earlier `rgba_with_simd_false_matches_with_simd_true` test
+    // uses solid Y/U/V, so every pixel collapses to the same RGBA
+    // quad and the new RGBA shuffle masks could permute / duplicate
+    // lanes within a SIMD block undetected. This test uses
+    // **pseudo-random per-pixel Y/U/V** so a bad shuffle in any of
+    // `write_rgba_16` (SSE4.1 / AVX2 / AVX-512 / wasm), `vst4q_u8`
+    // (NEON), or the scalar-tail handoff produces a measurable
+    // diff against the scalar reference. Width 1922 forces both
+    // the SIMD main loop AND a scalar tail across every backend
+    // block size (16 / 32 / 64). All four `ColorMatrix` variants
+    // exercise different `(r_u, r_v, g_u, g_v, b_u, b_v)`
+    // coefficient sets, and both ranges exercise the `y_off` /
+    // `y_scale` / `c_scale` parameter shape.
+    let w = 1922usize;
+    let h = 4usize;
+    let mut yp = std::vec![0u8; w * h];
+    let mut up = std::vec![0u8; (w / 2) * (h / 2)];
+    let mut vp = std::vec![0u8; (w / 2) * (h / 2)];
+    pseudo_random_u8(&mut yp, 0xC001_C0DE);
+    pseudo_random_u8(&mut up, 0xCAFE_F00D);
+    pseudo_random_u8(&mut vp, 0xDEAD_BEEF);
+    let src = Yuv420pFrame::new(
+      &yp,
+      &up,
+      &vp,
+      w as u32,
+      h as u32,
+      w as u32,
+      (w / 2) as u32,
+      (w / 2) as u32,
+    );
+
+    for &matrix in &[
+      ColorMatrix::Bt601,
+      ColorMatrix::Bt709,
+      ColorMatrix::Bt2020Ncl,
+      ColorMatrix::YCgCo,
+    ] {
+      for &full_range in &[true, false] {
+        let mut rgba_simd = std::vec![0u8; w * h * 4];
+        let mut rgba_scalar = std::vec![0u8; w * h * 4];
+
+        let mut s_simd = MixedSinker::<Yuv420p>::new(w, h)
+          .with_rgba(&mut rgba_simd)
+          .unwrap();
+        yuv420p_to(&src, full_range, matrix, &mut s_simd).unwrap();
+
+        let mut s_scalar = MixedSinker::<Yuv420p>::new(w, h)
+          .with_rgba(&mut rgba_scalar)
+          .unwrap();
+        s_scalar.set_simd(false);
+        yuv420p_to(&src, full_range, matrix, &mut s_scalar).unwrap();
+
+        // Locate the first divergence to make backend-bug
+        // diagnosis tractable instead of dumping ~30 KB of bytes.
+        if rgba_simd != rgba_scalar {
+          let mismatch = rgba_simd
+            .iter()
+            .zip(rgba_scalar.iter())
+            .position(|(a, b)| a != b)
+            .unwrap();
+          let pixel = mismatch / 4;
+          let channel = ["R", "G", "B", "A"][mismatch % 4];
+          panic!(
+            "RGBA SIMD ≠ scalar at byte {mismatch} (px {pixel} {channel}) \
+             for matrix={matrix:?} full_range={full_range}: \
+             simd={} scalar={}",
+            rgba_simd[mismatch], rgba_scalar[mismatch]
+          );
+        }
+      }
+    }
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
   fn rgb_with_hsv_uses_user_buffer_not_scratch() {
     // When caller provides RGB, the scratch should remain empty (Vec len 0).
     let (yp, up, vp) = solid_yuv420p_frame(16, 8, 100, 128, 128);
@@ -10795,6 +10875,14 @@ mod tests {
     for b in buf {
       state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
       *b = ((state >> 8) as u16) & mask;
+    }
+  }
+
+  fn pseudo_random_u8(buf: &mut [u8], seed: u32) {
+    let mut state = seed;
+    for b in buf {
+      state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+      *b = (state >> 16) as u8;
     }
   }
 
