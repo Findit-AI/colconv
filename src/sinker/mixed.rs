@@ -507,7 +507,8 @@ pub struct MixedSinker<'a, F: SourceFormat> {
 /// - CCM target = ACEScg / ACES AP1 → use [`Self::AcesAp1`]
 /// - CCM target = SDTV (rare for RAW) → use [`Self::Bt601`]
 /// - CCM target = something else, or you've measured your own
-///   weights → use [`Self::Custom`]
+///   weights → use [`Self::Custom`] (constructed via
+///   [`Self::try_custom`] or [`Self::custom`])
 ///
 /// Picking the wrong set still produces a **valid** luma plane,
 /// but its numeric values won't match what a downstream
@@ -547,17 +548,202 @@ pub enum LumaCoefficients {
   /// term is rounded down by 1 LSB so the triple sums to 256
   /// without biasing the `>> 8` divisor.)
   AcesAp1,
-  /// Caller-supplied coefficients. Each is a non-negative `f32`;
-  /// they should sum to `~1.0` (the constructor doesn't enforce
-  /// this — out-of-spec sums produce a brightness-scaled luma
-  /// plane). Resolves to Q8 by `(coef * 256 + 0.5) as u32`.
-  Custom {
-    /// Red weight.
-    r: f32,
-    /// Green weight.
-    g: f32,
-    /// Blue weight.
-    b: f32,
+  /// Caller-supplied coefficients. Use [`Self::try_custom`] or
+  /// [`Self::custom`] to construct — the inner
+  /// [`CustomLumaCoefficients`] keeps fields private so every
+  /// `Custom` value is guaranteed finite, non-negative, and
+  /// magnitude-bounded.
+  Custom(CustomLumaCoefficients),
+}
+
+/// Validated red / green / blue luma weights, accessible only through
+/// [`LumaCoefficients::Custom`] (or [`Self::try_new`] /
+/// [`Self::new`]).
+///
+/// Each weight is a finite, non-negative `f32` ≤
+/// [`Self::MAX_COEFFICIENT`]. The bound is much tighter than
+/// [`crate::raw::WhiteBalance::MAX_GAIN`] (`1e6`) because the luma
+/// kernel multiplies these into a `u32` accumulator — see
+/// [`Self::MAX_COEFFICIENT`] for the overflow analysis.
+///
+/// The struct intentionally has no public fields. Use
+/// [`Self::r`] / [`Self::g`] / [`Self::b`] to read components.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CustomLumaCoefficients {
+  r: f32,
+  g: f32,
+  b: f32,
+}
+
+impl CustomLumaCoefficients {
+  /// Maximum permitted per-channel weight. `10.0` is far above any
+  /// realistic published luma coefficient (the standard sets all
+  /// individual weights are ≤ `1.0`) and far below the value at
+  /// which the per-pixel `u32` accumulator could overflow:
+  /// `(coef * 256 + 0.5) as u32 ≤ 10 * 256 + 1 = 2_561`, so the
+  /// largest per-row term is `2_561 * 255 = 653_055`, and the
+  /// three-channel sum + bias `3 * 653_055 + 128 = 1_959_293` —
+  /// six orders of magnitude below `u32::MAX`.
+  ///
+  /// `1e6` (the
+  /// [`crate::raw::WhiteBalance::MAX_GAIN`] bound) **would not be
+  /// safe here** — `1e6 * 256 = 256_000_000`, and `256_000_000 *
+  /// 255 ≈ 6.5e10` overflows `u32`.
+  pub const MAX_COEFFICIENT: f32 = 10.0;
+
+  /// Constructs a [`CustomLumaCoefficients`] from explicit R / G / B
+  /// weights, validating that each is **finite, non-negative, and
+  /// ≤ [`Self::MAX_COEFFICIENT`]**.
+  ///
+  /// Returns [`LumaCoefficientsError`] for the first failing
+  /// channel. A weight of `0` is permitted (the channel doesn't
+  /// contribute to luma — degenerate but well-defined).
+  ///
+  /// The weights are *not* required to sum to `1.0`; sums far from
+  /// `1.0` produce a brightness-scaled luma plane (the doc on
+  /// [`LumaCoefficients`] flags this), which is sometimes
+  /// intentional (matte / key extraction). Only NaN / ±∞ /
+  /// negative / out-of-range weights are rejected because those
+  /// would silently corrupt the luma plane via the `f32 → u32`
+  /// saturating cast or overflow the accumulator.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn try_new(r: f32, g: f32, b: f32) -> Result<Self, LumaCoefficientsError> {
+    if !r.is_finite() {
+      return Err(LumaCoefficientsError::NonFinite {
+        channel: LumaChannel::R,
+        value: r,
+      });
+    }
+    if !g.is_finite() {
+      return Err(LumaCoefficientsError::NonFinite {
+        channel: LumaChannel::G,
+        value: g,
+      });
+    }
+    if !b.is_finite() {
+      return Err(LumaCoefficientsError::NonFinite {
+        channel: LumaChannel::B,
+        value: b,
+      });
+    }
+    if r < 0.0 {
+      return Err(LumaCoefficientsError::Negative {
+        channel: LumaChannel::R,
+        value: r,
+      });
+    }
+    if g < 0.0 {
+      return Err(LumaCoefficientsError::Negative {
+        channel: LumaChannel::G,
+        value: g,
+      });
+    }
+    if b < 0.0 {
+      return Err(LumaCoefficientsError::Negative {
+        channel: LumaChannel::B,
+        value: b,
+      });
+    }
+    if r > Self::MAX_COEFFICIENT {
+      return Err(LumaCoefficientsError::OutOfBounds {
+        channel: LumaChannel::R,
+        value: r,
+        max: Self::MAX_COEFFICIENT,
+      });
+    }
+    if g > Self::MAX_COEFFICIENT {
+      return Err(LumaCoefficientsError::OutOfBounds {
+        channel: LumaChannel::G,
+        value: g,
+        max: Self::MAX_COEFFICIENT,
+      });
+    }
+    if b > Self::MAX_COEFFICIENT {
+      return Err(LumaCoefficientsError::OutOfBounds {
+        channel: LumaChannel::B,
+        value: b,
+        max: Self::MAX_COEFFICIENT,
+      });
+    }
+    Ok(Self { r, g, b })
+  }
+
+  /// Constructs a [`CustomLumaCoefficients`], panicking on invalid
+  /// input. Prefer [`Self::try_new`] for caller-supplied values.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn new(r: f32, g: f32, b: f32) -> Self {
+    match Self::try_new(r, g, b) {
+      Ok(c) => c,
+      Err(_) => panic!("invalid CustomLumaCoefficients (non-finite, negative, or out of range)"),
+    }
+  }
+
+  /// Red weight.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn r(&self) -> f32 {
+    self.r
+  }
+
+  /// Green weight.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn g(&self) -> f32 {
+    self.g
+  }
+
+  /// Blue weight.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn b(&self) -> f32 {
+    self.b
+  }
+}
+
+/// Identifies which luma weight failed validation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant)]
+#[non_exhaustive]
+pub enum LumaChannel {
+  /// Red weight.
+  R,
+  /// Green weight.
+  G,
+  /// Blue weight.
+  B,
+}
+
+/// Errors returned by [`CustomLumaCoefficients::try_new`] (and the
+/// convenience [`LumaCoefficients::try_custom`]).
+#[derive(Debug, Clone, Copy, PartialEq, IsVariant, Error)]
+#[non_exhaustive]
+pub enum LumaCoefficientsError {
+  /// A weight is non-finite (NaN, +∞, or -∞).
+  #[error("CustomLumaCoefficients.{channel:?} is non-finite (got {value})")]
+  NonFinite {
+    /// Which channel failed validation.
+    channel: LumaChannel,
+    /// The offending weight value.
+    value: f32,
+  },
+  /// A weight is negative. Zero is allowed (zeroes the channel).
+  #[error("CustomLumaCoefficients.{channel:?} is negative (got {value})")]
+  Negative {
+    /// Which channel failed validation.
+    channel: LumaChannel,
+    /// The offending weight value.
+    value: f32,
+  },
+  /// A weight exceeds [`CustomLumaCoefficients::MAX_COEFFICIENT`]
+  /// (`10.0`). The bound is far above any realistic luma weight
+  /// but closes the door on values that would saturate the
+  /// `f32 → u32` cast in [`LumaCoefficients::to_q8`] or overflow
+  /// the per-row `u32` accumulator.
+  #[error("CustomLumaCoefficients.{channel:?} = {value} exceeds the magnitude bound ({max})")]
+  OutOfBounds {
+    /// Which channel failed validation.
+    channel: LumaChannel,
+    /// The offending weight value.
+    value: f32,
+    /// The bound that was exceeded
+    /// ([`CustomLumaCoefficients::MAX_COEFFICIENT`]).
+    max: f32,
   },
 }
 
@@ -581,12 +767,34 @@ impl LumaCoefficients {
       // -error coefficient). Resulting (R, G, B) error vs. the
       // published weights is `(+0.0012, -0.0022, +0.0010)`.
       Self::AcesAp1 => (70, 172, 14),
-      Self::Custom { r, g, b } => (
-        (r * 256.0 + 0.5) as u32,
-        (g * 256.0 + 0.5) as u32,
-        (b * 256.0 + 0.5) as u32,
+      // Custom values are guaranteed finite + non-negative +
+      // ≤ `MAX_COEFFICIENT` (= 10.0) by `CustomLumaCoefficients::
+      // try_new`, so the `as u32` cast cannot saturate to
+      // `u32::MAX` and the downstream accumulator cannot overflow.
+      Self::Custom(c) => (
+        (c.r * 256.0 + 0.5) as u32,
+        (c.g * 256.0 + 0.5) as u32,
+        (c.b * 256.0 + 0.5) as u32,
       ),
     }
+  }
+
+  /// Constructs [`Self::Custom`] from explicit R / G / B weights,
+  /// validating each via [`CustomLumaCoefficients::try_new`].
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn try_custom(r: f32, g: f32, b: f32) -> Result<Self, LumaCoefficientsError> {
+    match CustomLumaCoefficients::try_new(r, g, b) {
+      Ok(c) => Ok(Self::Custom(c)),
+      Err(e) => Err(e),
+    }
+  }
+
+  /// Constructs [`Self::Custom`] from explicit R / G / B weights,
+  /// panicking on invalid input. Prefer [`Self::try_custom`] for
+  /// caller-supplied values.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn custom(r: f32, g: f32, b: f32) -> Self {
+    Self::Custom(CustomLumaCoefficients::new(r, g, b))
   }
 }
 
@@ -11088,11 +11296,8 @@ mod tests {
   fn bayer_with_luma_coefficients_custom_round_trips_to_q8() {
     // Custom weights `(1.0, 0.0, 0.0)` → Q8 `(256, 0, 0)`. Solid red
     // 255 then reduces to `(256 * 255 + 128) >> 8 = 255` (clamped).
-    let red = bayer8_solid_red_luma(LumaCoefficients::Custom {
-      r: 1.0,
-      g: 0.0,
-      b: 0.0,
-    });
+    let custom = LumaCoefficients::try_custom(1.0, 0.0, 0.0).unwrap();
+    let red = bayer8_solid_red_luma(custom);
     assert_eq!(red, 255, "Custom (1.0, 0.0, 0.0) on red 255 → 255");
   }
 
@@ -11241,6 +11446,169 @@ mod tests {
     ] {
       let (cr, cg, cb) = preset.to_q8();
       assert_eq!(cr + cg + cb, 256, "{preset:?} Q8 weights don't sum to 256");
+    }
+  }
+
+  // ---- CustomLumaCoefficients validation tests ----------------------------
+  //
+  // The kernel multiplies these weights into a `u32` accumulator
+  // after a saturating `f32 → u32` cast. Without validation, NaN
+  // / negative / ±∞ / very-large finite weights would silently
+  // corrupt every Bayer luma plane (NaN → 0, +∞ → u32::MAX,
+  // negative → 0, large finite → debug-panic on multiply or
+  // wrapping in release). `try_new` rejects all four classes
+  // upfront so the kernel can stay branchless.
+
+  #[test]
+  fn custom_luma_coefficients_accepts_valid_weights() {
+    // Standard BT.709 weights pass through cleanly.
+    let c = CustomLumaCoefficients::try_new(0.2126, 0.7152, 0.0722).unwrap();
+    assert_eq!(c.r(), 0.2126);
+    assert_eq!(c.g(), 0.7152);
+    assert_eq!(c.b(), 0.0722);
+
+    // Zeroes are allowed (zero a channel out — degenerate but valid).
+    let z = CustomLumaCoefficients::try_new(0.0, 1.0, 0.0).unwrap();
+    assert_eq!(z.r(), 0.0);
+
+    // Boundary: exactly `MAX_COEFFICIENT` is allowed (`<=`, not `<`).
+    let edge =
+      CustomLumaCoefficients::try_new(CustomLumaCoefficients::MAX_COEFFICIENT, 0.0, 0.0).unwrap();
+    assert_eq!(edge.r(), CustomLumaCoefficients::MAX_COEFFICIENT);
+  }
+
+  #[test]
+  fn custom_luma_coefficients_rejects_nan() {
+    for (channel, r, g, b) in [
+      (LumaChannel::R, f32::NAN, 1.0, 0.0),
+      (LumaChannel::G, 0.0, f32::NAN, 0.0),
+      (LumaChannel::B, 0.5, 0.5, f32::NAN),
+    ] {
+      let err = CustomLumaCoefficients::try_new(r, g, b).unwrap_err();
+      assert!(
+        matches!(err, LumaCoefficientsError::NonFinite { channel: ch, .. } if ch == channel),
+        "expected NonFinite for {channel:?}, got {err:?}"
+      );
+    }
+  }
+
+  #[test]
+  fn custom_luma_coefficients_rejects_infinity() {
+    // Both +∞ and -∞ caught by `is_finite`. The earlier
+    // `as u32` saturating cast would turn +∞ into `u32::MAX`,
+    // overflowing `cr * 255` in debug builds.
+    for inf in [f32::INFINITY, f32::NEG_INFINITY] {
+      let err_r = CustomLumaCoefficients::try_new(inf, 0.0, 0.0).unwrap_err();
+      let err_g = CustomLumaCoefficients::try_new(0.0, inf, 0.0).unwrap_err();
+      let err_b = CustomLumaCoefficients::try_new(0.0, 0.0, inf).unwrap_err();
+      for (err, channel) in [
+        (err_r, LumaChannel::R),
+        (err_g, LumaChannel::G),
+        (err_b, LumaChannel::B),
+      ] {
+        assert!(
+          matches!(err, LumaCoefficientsError::NonFinite { channel: ch, .. } if ch == channel),
+          "expected NonFinite for {channel:?} with inf={inf}, got {err:?}"
+        );
+      }
+    }
+  }
+
+  #[test]
+  fn custom_luma_coefficients_rejects_negative() {
+    for (channel, r, g, b) in [
+      (LumaChannel::R, -0.001, 1.0, 0.0),
+      (LumaChannel::G, 0.0, -1.0, 0.0),
+      (LumaChannel::B, 0.5, 0.5, -42.0),
+    ] {
+      let err = CustomLumaCoefficients::try_new(r, g, b).unwrap_err();
+      assert!(
+        matches!(err, LumaCoefficientsError::Negative { channel: ch, .. } if ch == channel),
+        "expected Negative for {channel:?}, got {err:?}"
+      );
+    }
+  }
+
+  #[test]
+  fn custom_luma_coefficients_rejects_oversized() {
+    let over = CustomLumaCoefficients::MAX_COEFFICIENT + 1.0;
+    for (channel, r, g, b) in [
+      (LumaChannel::R, over, 0.0, 0.0),
+      (LumaChannel::G, 0.0, over, 0.0),
+      (LumaChannel::B, 0.0, 0.0, over),
+    ] {
+      let err = CustomLumaCoefficients::try_new(r, g, b).unwrap_err();
+      assert!(
+        matches!(
+          err,
+          LumaCoefficientsError::OutOfBounds { channel: ch, .. } if ch == channel
+        ),
+        "expected OutOfBounds for {channel:?}, got {err:?}"
+      );
+    }
+
+    // Pathological value that previously caused saturation:
+    // `1e9_f32 * 256.0 ≈ 2.56e11` saturates `as u32` to
+    // `u32::MAX`, then `cr * 255` overflows.
+    let err = CustomLumaCoefficients::try_new(1.0e9, 0.0, 0.0).unwrap_err();
+    assert!(matches!(err, LumaCoefficientsError::OutOfBounds { .. }));
+  }
+
+  #[test]
+  fn luma_coefficients_try_custom_routes_through_validation() {
+    // Convenience constructor surfaces the same errors as
+    // `CustomLumaCoefficients::try_new` and yields the wrapped
+    // variant on success.
+    let ok = LumaCoefficients::try_custom(0.5, 0.4, 0.1).unwrap();
+    assert!(ok.is_custom());
+
+    let err = LumaCoefficients::try_custom(f32::NAN, 0.0, 0.0).unwrap_err();
+    assert!(matches!(err, LumaCoefficientsError::NonFinite { .. }));
+  }
+
+  #[test]
+  #[should_panic(expected = "invalid CustomLumaCoefficients")]
+  fn custom_luma_coefficients_new_panics_on_invalid() {
+    // The `::new` and `LumaCoefficients::custom` panicking
+    // constructors are intended for compile-time-known weights;
+    // hostile input must blow up loudly, not silently corrupt
+    // downstream luma.
+    let _ = CustomLumaCoefficients::new(f32::NAN, 0.0, 0.0);
+  }
+
+  #[test]
+  fn custom_luma_coefficients_at_max_does_not_overflow_kernel() {
+    // End-to-end proof that `MAX_COEFFICIENT` is conservative:
+    // even worst-case (all three channels at max, all pixels at
+    // 255) the per-row accumulator stays well under `u32::MAX`,
+    // and the final `>> 8 / .min(255)` clamps cleanly to 255.
+    use crate::{
+      frame::BayerFrame,
+      raw::{BayerDemosaic, BayerPattern, ColorCorrectionMatrix, WhiteBalance, bayer_to},
+    };
+    let (w, h) = (8u32, 6u32);
+    let raw = std::vec![255u8; (w * h) as usize];
+    let frame = BayerFrame::try_new(&raw, w, h, w).unwrap();
+    let mut luma = std::vec![0u8; (w * h) as usize];
+    let max = CustomLumaCoefficients::MAX_COEFFICIENT;
+    let mut sinker = MixedSinker::<Bayer>::new(w as usize, h as usize)
+      .with_luma(&mut luma)
+      .unwrap()
+      .with_luma_coefficients(LumaCoefficients::try_custom(max, max, max).unwrap());
+    bayer_to(
+      &frame,
+      BayerPattern::Rggb,
+      BayerDemosaic::Bilinear,
+      WhiteBalance::neutral(),
+      ColorCorrectionMatrix::identity(),
+      &mut sinker,
+    )
+    .unwrap();
+    for &y in &luma {
+      assert_eq!(
+        y, 255,
+        "max-weight saturated luma should clamp to 255, got {y}"
+      );
     }
   }
 }

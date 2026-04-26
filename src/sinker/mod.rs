@@ -15,4 +15,6 @@
 pub mod mixed;
 
 #[cfg(any(feature = "std", feature = "alloc"))]
-pub use mixed::{LumaCoefficients, MixedSinker};
+pub use mixed::{
+  CustomLumaCoefficients, LumaChannel, LumaCoefficients, LumaCoefficientsError, MixedSinker,
+};

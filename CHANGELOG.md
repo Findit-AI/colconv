@@ -91,8 +91,8 @@ scheduled as a dedicated follow-up PR (`feat/bayer-simd`).
   path (mirrors the YUV impls).
 - **Luma colorimetry is caller-configurable** via the new
   `LumaCoefficients` enum (`Bt709` / `Bt2020` / `Bt601` / `DciP3` /
-  `AcesAp1` / `Custom { r, g, b: f32 }`, `#[non_exhaustive]`). YUV
-  source impls memcpy luma directly off the Y plane and are
+  `AcesAp1` / `Custom(CustomLumaCoefficients)`, `#[non_exhaustive]`).
+  YUV source impls memcpy luma directly off the Y plane and are
   unaffected; Bayer impls *derive* luma from the demosaiced RGB and
   therefore need to know which gamut weights to apply. Choose the
   preset matching the gamut your `ColorCorrectionMatrix` targets:
@@ -105,13 +105,22 @@ scheduled as a dedicated follow-up PR (`feat/bayer-simd`).
   Default is `Bt709` to match the implicit weights every YUV → RGB →
   luma pipeline uses. API:
   `MixedSinker::<Bayer>::new(w, h).with_luma_coefficients(LumaCoefficients::Bt2020)`.
-  `Custom` weights are not normalized — caller is responsible for
-  picking values that sum to ~1.0 (otherwise the luma plane is
-  brightness-scaled). All five published presets resolve to Q8
-  triples summing to exactly 256, so the kernel's `>> 8` divisor is
-  exact (the published ACES AP1 weights round naïvely to `(70, 173,
-  14) = 257`; `cg` is shaved by 1 LSB to make the triple sum to 256
-  with the smallest perceptual error).
+  `Custom` wraps the validated `CustomLumaCoefficients` newtype
+  (private fields, mirrors the `WhiteBalance` / `ColorCorrectionMatrix`
+  pattern): construct via `LumaCoefficients::try_custom(r, g, b)` /
+  `CustomLumaCoefficients::try_new(r, g, b)` which return
+  `Result<_, LumaCoefficientsError>` after rejecting NaN / ±∞ /
+  negative / `> MAX_COEFFICIENT (10.0)` inputs. The bound is much
+  tighter than `WhiteBalance::MAX_GAIN (1e6)` because the luma
+  kernel multiplies into a `u32` accumulator (not `f32` as in
+  WB/CCM) — `1e6` would overflow the per-row sum, `10.0` keeps it
+  six orders of magnitude clear of `u32::MAX`. Custom weights are
+  not normalized to sum to 1.0 — caller is responsible (otherwise
+  the luma plane is brightness-scaled). All five published presets
+  resolve to Q8 triples summing to exactly 256 so the kernel's
+  `>> 8` divisor is exact (the published ACES AP1 weights round
+  naïvely to `(70, 173, 14) = 257`; `cg` is shaved by 1 LSB to
+  make the triple sum to 256 with the smallest perceptual error).
 
 ### Tests
 
@@ -132,11 +141,18 @@ scheduled as a dedicated follow-up PR (`feat/bayer-simd`).
   solid-red rows produce distinct luma values for each preset (54
   / 67 / 77 / 59 / 70 for BT.709 / BT.2020 / BT.601 / DCI-P3 /
   ACES AP1 — guards against silent collapse to one preset);
-  `Custom { r: 1.0, g: 0.0, b: 0.0 }` round-trips the red channel
-  back to 255; default is `Bt709`; uniform gray is invariant
-  across all presets (regression-pin for the original
+  `try_custom(1.0, 0.0, 0.0)` round-trips the red channel back to
+  255; default is `Bt709`; uniform gray is invariant across all
+  presets (regression-pin for the original
   `*_with_luma_uniform_byte` semantics); preset Q8 triples each
   sum to exactly 256.
+- 8 `CustomLumaCoefficients` validation tests: accepts standard
+  weights / zeroes / `MAX_COEFFICIENT` boundary; rejects NaN /
+  ±∞ / negative / `MAX_COEFFICIENT + 1.0` / `1e9` per channel
+  with the matching `LumaCoefficientsError` variant; `try_custom`
+  routes errors through; `::new` panics loudly on hostile input;
+  end-to-end "all three channels at MAX_COEFFICIENT, all pixels
+  255" stays inside the `u32` accumulator and clamps to 255.
 
 ## Ship 7 — u16 semi-planar 4:2:2 / 4:4:4 (P210 / P212 / P216 / P410 / P412 / P416)
 
