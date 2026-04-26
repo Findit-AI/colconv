@@ -1,5 +1,159 @@
 # UNRELEASED
 
+## Tier 14 (in progress) — Bayer demosaic + WB + CCM
+
+New RAW source family for camera-RAW pipelines (RED R3D, Blackmagic
+BRAW, Nikon NRAW, FFmpeg `bayer_*`). `colconv` covers demosaic
+onwards: vendor SDKs decode the camera bitstream into a Bayer plane,
+`colconv` runs bilinear demosaic + per-channel white balance + 3×3
+color-correction in a single per-row kernel.
+
+### New types (all in `colconv::raw`)
+
+- `BayerPattern` — `enum { Bggr, Rggb, Grbg, Gbrg }`,
+  `#[non_exhaustive]`, `IsVariant`-derived.
+- `BayerDemosaic` — `enum { Bilinear }`, `#[non_exhaustive]`,
+  `Default = Bilinear`. Future variants (Malvar-He-Cutler, etc.)
+  will land without a breaking change.
+- `WhiteBalance { r, g, b: f32 }` — per-channel gain newtype with
+  `::try_new` (validating: rejects NaN / ±∞ / negative via
+  [`WhiteBalanceError`]), panicking `::new`, `::neutral`,
+  accessors, `Default = neutral()`. `WbChannel` enum names which
+  channel failed validation.
+- `ColorCorrectionMatrix` — 3×3 newtype with `::try_new`
+  (validating: rejects any non-finite element via
+  [`ColorCorrectionMatrixError`]; negative entries are allowed
+  because real CCMs subtract crosstalk), panicking `::new`,
+  `::identity`, `as_array`, `Default = identity()`.
+
+### New frame types (in `colconv::frame`)
+
+- `BayerFrame<'a>` — single `&[u8]` plane. Odd widths and heights
+  are accepted (cropped Bayer planes are real workflow output; the
+  walker / kernel handle partial 2×2 tiles via edge clamping).
+- `BayerFrame16<'a, const BITS: u32>` — `&[u16]` **low-packed** at
+  `BITS` ∈ {10, 12, 14, 16} (active samples in the low `BITS` bits,
+  valid range `[0, (1 << BITS) - 1]`). Matches the planar
+  `Yuv420p10/12/14/16` convention in packing; diverges in
+  validation: `BayerFrame16::try_new` validates **every active
+  sample's range** as part of construction (returning
+  `BayerFrame16Error::SampleOutOfRange` for out-of-range data),
+  not just geometry. RAW pipelines often surface trusted-but-
+  mispacked input from sensor SDKs, and the demosaic kernel has no
+  well-defined behavior on out-of-range samples; mandatory
+  validation makes the `bayer16_to` walker fully fallible — no
+  data-dependent panic surface. Aliases: `Bayer10Frame` /
+  `Bayer12Frame` / `Bayer14Frame` / `Bayer16Frame`. Odd dimensions
+  accepted.
+- `BayerFrameError` / `BayerFrame16Error` — structured error enums,
+  `#[non_exhaustive]`, `IsVariant`-derived.
+
+### New walkers / kernels
+
+- `raw::bayer_to(src, pattern, demosaic, wb, ccm, sink)` and
+  `raw::bayer16_to::<BITS, _>(...)` walkers — zero per-row and
+  per-frame allocation. Walker fuses `M = CCM · diag(wb)` once at
+  entry; row scratch is the source plane itself (`above` / `mid` /
+  `below` row borrows with **mirror-by-2** boundary handling at
+  top / bottom edges — `row 0 → above = row 1`, `row h-1 → below =
+  row h-2`; replicate fallback only when `height < 2`). Same
+  contract surfaces through `BayerRow::above()` / `below()` so
+  custom sinks see the mirror borrows directly.
+- Public dispatchers: `row::bayer_to_rgb_row`,
+  `row::bayer16_to_rgb_row<BITS>`,
+  `row::bayer16_to_rgb_u16_row<BITS>`. Each runs release-mode
+  preflight (`above` / `below` length match `mid`, `rgb_out >=
+  3 * width` via `checked_mul`, `BITS` const-asserted), matching
+  the `yuv_*_to_rgb_row` boundary contract so future unsafe SIMD
+  kernels inherit a hardened entry point. `use_simd` is currently
+  a no-op — per-arch SIMD ships in a follow-up PR.
+- Sink subtraits: `BayerSink`, `BayerSink16<BITS>`. Source markers:
+  `Bayer`, `Bayer16<BITS>` plus `Bayer10` / `Bayer12` / `Bayer14` /
+  `Bayer16Bit` aliases.
+
+### SIMD coverage
+
+| Kernel                                  | NEON | SSE4.1 | AVX2 | AVX-512 | wasm simd128 |
+| --------------------------------------- | :--: | :----: | :--: | :-----: | :----------: |
+| `bayer_to_rgb_row` (8-bit)              |  ⏳  |   ⏳   |  ⏳  |    ⏳   |      ⏳      |
+| `bayer16_to_rgb_row<BITS>` (→u8)        |  ⏳  |   ⏳   |  ⏳  |    ⏳   |      ⏳      |
+| `bayer16_to_rgb_u16_row<BITS>` (→u16)   |  ⏳  |   ⏳   |  ⏳  |    ⏳   |      ⏳      |
+
+Scalar reference path lands first; per-arch SIMD backends are
+scheduled as a dedicated follow-up PR (`feat/bayer-simd`).
+
+### MixedSinker integration
+
+- `MixedSinker<Bayer>` and `MixedSinker<Bayer16<BITS>>` impls — both
+  expose `with_rgb` / `with_luma` / `with_hsv`; the `Bayer16<BITS>`
+  variant additionally exposes `with_rgb_u16` for native-depth RGB
+  output. RGB scratch buffer is grown lazily for the HSV-without-RGB
+  path (mirrors the YUV impls).
+- **Luma colorimetry is caller-configurable** via the new
+  `LumaCoefficients` enum (`Bt709` / `Bt2020` / `Bt601` / `DciP3` /
+  `AcesAp1` / `Custom(CustomLumaCoefficients)`, `#[non_exhaustive]`).
+  YUV source impls memcpy luma directly off the Y plane and are
+  unaffected; Bayer impls *derive* luma from the demosaiced RGB and
+  therefore need to know which gamut weights to apply. Choose the
+  preset matching the gamut your `ColorCorrectionMatrix` targets:
+  passing a Rec.2020 CCM and using BT.709 luma weights produces a
+  valid-shaped but numerically wrong luma plane for non-grayscale
+  content (downstream scene-cut detectors, brightness thresholders
+  and perceptual-diff tools see the wrong values; uniform gray is
+  invariant — every preset agrees on gray, which is what made the
+  hard-coded BT.709 path go undetected by uniform-gray tests).
+  Default is `Bt709` to match the implicit weights every YUV → RGB →
+  luma pipeline uses. API:
+  `MixedSinker::<Bayer>::new(w, h).with_luma_coefficients(LumaCoefficients::Bt2020)`.
+  `Custom` wraps the validated `CustomLumaCoefficients` newtype
+  (private fields, mirrors the `WhiteBalance` / `ColorCorrectionMatrix`
+  pattern): construct via `LumaCoefficients::try_custom(r, g, b)` /
+  `CustomLumaCoefficients::try_new(r, g, b)` which return
+  `Result<_, LumaCoefficientsError>` after rejecting NaN / ±∞ /
+  negative / `> MAX_COEFFICIENT (10.0)` inputs. The bound is much
+  tighter than `WhiteBalance::MAX_GAIN (1e6)` because the luma
+  kernel multiplies into a `u32` accumulator (not `f32` as in
+  WB/CCM) — `1e6` would overflow the per-row sum, `10.0` keeps it
+  six orders of magnitude clear of `u32::MAX`. Custom weights are
+  not normalized to sum to 1.0 — caller is responsible (otherwise
+  the luma plane is brightness-scaled). All five published presets
+  resolve to Q8 triples summing to exactly 256 so the kernel's
+  `>> 8` divisor is exact (the published ACES AP1 weights round
+  naïvely to `(70, 173, 14) = 257`; `cg` is shaved by 1 LSB to
+  make the triple sum to 256 with the smallest perceptual error).
+
+### Tests
+
+- Frame-validation tests (8-bit + high-bit-depth, including
+  `BayerFrame16::try_new` rejecting samples whose value exceeds
+  `(1 << BITS) - 1` under the low-packed convention; both above-
+  max and the common MSB-aligned packing-mismatch case).
+- 5 type-helper tests (WB / CCM defaults, fuse arithmetic).
+- 11 end-to-end walker + kernel tests (8-bit + 12-bit, solid R / G
+  / B channels, uniform-byte invariant, pattern swap RGGB↔BGGR,
+  walker row-count). Solid-channel assertions cover the **full
+  frame** including borders — boundary handling uses mirror-by-2
+  (`row -1 → row 1`, `row h → row h-2`, same on columns) which
+  preserves CFA parity, so a constant-channel Bayer mosaic stays
+  constant everywhere instead of bleeding wrong-color samples into
+  the missing-channel averages at edges.
+- 6 luma-coefficient tests covering both Bayer and Bayer16 paths:
+  solid-red rows produce distinct luma values for each preset (54
+  / 67 / 77 / 59 / 70 for BT.709 / BT.2020 / BT.601 / DCI-P3 /
+  ACES AP1 — guards against silent collapse to one preset);
+  `try_custom(1.0, 0.0, 0.0)` round-trips the red channel back to
+  255; default is `Bt709`; uniform gray is invariant across all
+  presets (regression-pin for the original
+  `*_with_luma_uniform_byte` semantics); preset Q8 triples each
+  sum to exactly 256.
+- 8 `CustomLumaCoefficients` validation tests: accepts standard
+  weights / zeroes / `MAX_COEFFICIENT` boundary; rejects NaN /
+  ±∞ / negative / `MAX_COEFFICIENT + 1.0` / `1e9` per channel
+  with the matching `LumaCoefficientsError` variant; `try_custom`
+  routes errors through; `::new` panics loudly on hostile input;
+  end-to-end "all three channels at MAX_COEFFICIENT, all pixels
+  255" stays inside the `u32` accumulator and clamps to 255.
+
 ## Ship 7 — u16 semi-planar 4:2:2 / 4:4:4 (P210 / P212 / P216 / P410 / P412 / P416)
 
 Six new high-bit-packed semi-planar formats from the FFmpeg HW-decode

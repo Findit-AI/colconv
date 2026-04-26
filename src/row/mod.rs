@@ -2734,6 +2734,64 @@ fn rgb_row_elems(width: usize) -> usize {
   }
 }
 
+/// Maximum permitted magnitude of any element of a fused color
+/// transform handed to a Bayer row dispatcher.
+///
+/// Set to `WhiteBalance::MAX_GAIN × ColorCorrectionMatrix::MAX_COEFFICIENT_ABS
+/// = 1e6 × 1e6 = 1e12`, which is the largest absolute value any
+/// fused entry can take when the upstream WB / CCM were
+/// validated through [`crate::raw::WhiteBalance::try_new`] /
+/// [`crate::raw::ColorCorrectionMatrix::try_new`]. The overflow
+/// analysis (see those constructor docs) shows that with `|m[i][j]|
+/// ≤ 1e12` and 16-bit samples, the largest per-channel sum stays
+/// `~21` orders of magnitude under `f32::MAX`. So bounding here
+/// at 1e12 closes the door on direct-row-API callers passing
+/// extreme finite matrices that would silently overflow during
+/// the matmul.
+pub(crate) const MAX_FUSED_TRANSFORM_ABS: f32 = 1.0e12;
+
+/// Asserts every element of a 3×3 fused color transform is
+/// **finite and within the magnitude bound**
+/// ([`MAX_FUSED_TRANSFORM_ABS`]).
+///
+/// Used by the Bayer row dispatchers in release builds before
+/// invoking the kernel — once SIMD backends land they will rely on
+/// this guarantee for branchless f32 arithmetic. A single Inf or
+/// NaN would otherwise propagate through every pixel of the row
+/// (Inf clamps to saturated white, NaN casts to 0, both producing
+/// silently-wrong frames); finite-but-extreme entries (e.g. mixed
+/// `±f32::MAX` from a direct row-API caller) likewise produce
+/// `Inf + -Inf == NaN` during the matmul.
+///
+/// Validating WB / CCM upstream via
+/// [`crate::raw::WhiteBalance::try_new`] /
+/// [`crate::raw::ColorCorrectionMatrix::try_new`] catches the
+/// common case; this is the kernel-boundary backstop for direct
+/// row-API callers and the dispatcher-level guarantee that
+/// matches what validated upstream inputs can produce.
+#[cfg_attr(not(tarpaulin), inline(always))]
+fn assert_color_transform_well_formed(m: &[[f32; 3]; 3]) {
+  let mut row = 0;
+  while row < 3 {
+    let mut col = 0;
+    while col < 3 {
+      let v = m[row][col];
+      assert!(
+        v.is_finite(),
+        "color transform m[{row}][{col}] is non-finite (NaN or ±∞)"
+      );
+      assert!(
+        v.abs() <= MAX_FUSED_TRANSFORM_ABS,
+        "color transform m[{row}][{col}] = {v} exceeds magnitude bound \
+         (|coeff| ≤ {MAX_FUSED_TRANSFORM_ABS}); validated WB × CCM cannot \
+         produce values past this bound"
+      );
+      col += 1;
+    }
+    row += 1;
+  }
+}
+
 /// Element count of one full-width interleaved-UV row (`width × 2`)
 /// for semi-planar 4:4:4 sources (`P410` / `P412` / `P416`). One
 /// `(U, V)` pair per pixel = `2 * width` `u16` elements per row.
@@ -2843,6 +2901,158 @@ const fn avx512_available() -> bool {
 #[cfg_attr(not(tarpaulin), inline(always))]
 const fn simd128_available() -> bool {
   !cfg!(colconv_force_scalar) && cfg!(target_feature = "simd128")
+}
+
+/// Converts one row of an 8-bit Bayer plane to packed RGB.
+///
+/// Dispatches to the best available backend for the current target.
+/// See [`scalar::bayer_to_rgb_row`] for the full semantic specification
+/// (bilinear demosaic geometry, edge handling, output layout).
+///
+/// `above` / `mid` / `below` are row-aligned slices into the source
+/// Bayer plane via the **mirror-by-2** boundary contract: at the
+/// top edge the caller supplies `above = mid_row(1)`, at the bottom
+/// edge `below = mid_row(h - 2)`; replicate fallback only when
+/// `height < 2`. See [`crate::raw::BayerRow::above`] for the full
+/// rationale (CFA-parity preservation across boundaries).
+/// `above` / `mid` / `below` must all be the same length — that
+/// length is the row's pixel width.
+///
+/// `m` is the precomputed `CCM · diag(wb)` 3×3 transform. Every
+/// element must be finite (not NaN, not ±∞); the dispatcher
+/// asserts this at the boundary so future unsafe SIMD kernels can
+/// trust the contract.
+///
+/// `rgb_out` must have at least `3 * mid.len()` bytes.
+///
+/// **`use_simd` is currently a no-op.** All Bayer paths run the
+/// scalar reference today; per-arch SIMD backends (NEON / SSE4.1 /
+/// AVX2 / AVX-512 / wasm simd128) ship in a follow-up. The
+/// parameter is wired through `MixedSinker` and the public
+/// dispatchers now so callers don't have to touch their call sites
+/// when SIMD lands.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn bayer_to_rgb_row(
+  above: &[u8],
+  mid: &[u8],
+  below: &[u8],
+  row_parity: u32,
+  pattern: crate::raw::BayerPattern,
+  demosaic: crate::raw::BayerDemosaic,
+  m: &[[f32; 3]; 3],
+  rgb_out: &mut [u8],
+  _use_simd: bool,
+) {
+  // Release-mode preflight: future unsafe SIMD backends will rely on
+  // these invariants for bounds-free pointer arithmetic, so we
+  // validate here rather than only via `debug_assert!` inside the
+  // scalar kernel. Same pattern as `yuv_420_to_rgb_row`.
+  let width = mid.len();
+  assert_eq!(above.len(), width, "above row length must match mid");
+  assert_eq!(below.len(), width, "below row length must match mid");
+  let rgb_min = rgb_row_bytes(width);
+  assert!(rgb_out.len() >= rgb_min, "rgb_out row too short");
+  assert_color_transform_well_formed(m);
+
+  scalar::bayer_to_rgb_row(above, mid, below, row_parity, pattern, demosaic, m, rgb_out);
+}
+
+/// Converts one row of a 10/12/14/16-bit **low-packed** Bayer
+/// plane to packed `u8` RGB.
+///
+/// `BITS` ∈ {10, 12, 14, 16}; samples are low-packed `u16` (active
+/// values in the low `BITS` bits, range `[0, (1 << BITS) - 1]`).
+/// Direct row-API callers are responsible for upholding the
+/// low-packed contract; samples whose value exceeds
+/// `(1 << BITS) - 1` produce defined-but-saturated output (no
+/// panic, no UB). The walker
+/// [`crate::raw::bayer16_to`] never sees out-of-range input
+/// because [`crate::frame::BayerFrame16::try_new`] validates every
+/// active sample at frame-construction time.
+///
+/// `m` is the unscaled `CCM · diag(wb)` — the kernel bakes the
+/// input→u8 rescale (`255 / ((1 << BITS) - 1)`) at output time.
+/// `above` / `mid` / `below` must all be the same length;
+/// `rgb_out` must have at least `3 * mid.len()` bytes.
+///
+/// **`use_simd` is currently a no-op** (see
+/// [`bayer_to_rgb_row`] for the deferred-SIMD note).
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn bayer16_to_rgb_row<const BITS: u32>(
+  above: &[u16],
+  mid: &[u16],
+  below: &[u16],
+  row_parity: u32,
+  pattern: crate::raw::BayerPattern,
+  demosaic: crate::raw::BayerDemosaic,
+  m: &[[f32; 3]; 3],
+  rgb_out: &mut [u8],
+  _use_simd: bool,
+) {
+  const {
+    assert!(
+      BITS == 10 || BITS == 12 || BITS == 14 || BITS == 16,
+      "bayer16_to_rgb_row: BITS must be 10, 12, 14, or 16"
+    )
+  };
+  let width = mid.len();
+  assert_eq!(above.len(), width, "above row length must match mid");
+  assert_eq!(below.len(), width, "below row length must match mid");
+  let rgb_min = rgb_row_bytes(width);
+  assert!(rgb_out.len() >= rgb_min, "rgb_out row too short");
+  assert_color_transform_well_formed(m);
+
+  scalar::bayer16_to_rgb_row::<BITS>(above, mid, below, row_parity, pattern, demosaic, m, rgb_out);
+}
+
+/// Converts one row of a 10/12/14/16-bit **low-packed** Bayer
+/// plane to packed `u16` RGB (also low-packed at `BITS`).
+///
+/// `BITS` ∈ {10, 12, 14, 16}. Input and output share the same
+/// low-packed range `[0, (1 << BITS) - 1]` per channel — no
+/// rescale, just clamp. `above` / `mid` / `below` must all be the
+/// same length; `rgb_out` must have at least `3 * mid.len()` `u16`
+/// elements.
+///
+/// Direct row-API callers are responsible for upholding the
+/// low-packed contract — see [`bayer16_to_rgb_row`] for the
+/// full rationale on the safe path
+/// ([`crate::frame::BayerFrame16::try_new`] + [`crate::raw::bayer16_to`])
+/// vs. the direct row API.
+///
+/// **`use_simd` is currently a no-op** (see
+/// [`bayer_to_rgb_row`] for the deferred-SIMD note).
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn bayer16_to_rgb_u16_row<const BITS: u32>(
+  above: &[u16],
+  mid: &[u16],
+  below: &[u16],
+  row_parity: u32,
+  pattern: crate::raw::BayerPattern,
+  demosaic: crate::raw::BayerDemosaic,
+  m: &[[f32; 3]; 3],
+  rgb_out: &mut [u16],
+  _use_simd: bool,
+) {
+  const {
+    assert!(
+      BITS == 10 || BITS == 12 || BITS == 14 || BITS == 16,
+      "bayer16_to_rgb_u16_row: BITS must be 10, 12, 14, or 16"
+    )
+  };
+  let width = mid.len();
+  assert_eq!(above.len(), width, "above row length must match mid");
+  assert_eq!(below.len(), width, "below row length must match mid");
+  let rgb_min = rgb_row_elems(width);
+  assert!(rgb_out.len() >= rgb_min, "rgb_out row too short");
+  assert_color_transform_well_formed(m);
+
+  scalar::bayer16_to_rgb_u16_row::<BITS>(
+    above, mid, below, row_parity, pattern, demosaic, m, rgb_out,
+  );
 }
 
 #[cfg(all(test, feature = "std"))]
@@ -2986,6 +3196,337 @@ mod overflow_tests {
       ColorMatrix::Bt601,
       true,
       false,
+    );
+  }
+}
+
+#[cfg(all(test, feature = "std"))]
+mod bayer_dispatcher_tests {
+  //! Boundary-contract tests for the public Bayer row dispatchers.
+  //! Walker / kernel correctness lives in `crate::raw::bayer*` and
+  //! `crate::row::scalar`; these tests target the dispatcher's own
+  //! preflight (notably the new `assert_color_transform_well_formed`
+  //! check and the existing length / `BITS` / `rgb_out` checks)
+  //! since that surface is what unsafe SIMD backends will rely on.
+  use super::*;
+  use crate::raw::{BayerDemosaic, BayerPattern};
+
+  fn ident() -> [[f32; 3]; 3] {
+    [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+  }
+
+  #[test]
+  #[should_panic(expected = "non-finite")]
+  fn bayer_dispatcher_rejects_nan_in_m() {
+    let above = [0u8; 4];
+    let mid = [0u8; 4];
+    let below = [0u8; 4];
+    let mut rgb = [0u8; 12];
+    let mut m = ident();
+    m[1][1] = f32::NAN;
+    bayer_to_rgb_row(
+      &above,
+      &mid,
+      &below,
+      0,
+      BayerPattern::Rggb,
+      BayerDemosaic::Bilinear,
+      &m,
+      &mut rgb,
+      false,
+    );
+  }
+
+  #[test]
+  #[should_panic(expected = "non-finite")]
+  fn bayer_dispatcher_rejects_infinity_in_m() {
+    let above = [0u8; 4];
+    let mid = [0u8; 4];
+    let below = [0u8; 4];
+    let mut rgb = [0u8; 12];
+    let mut m = ident();
+    m[0][2] = f32::INFINITY;
+    bayer_to_rgb_row(
+      &above,
+      &mid,
+      &below,
+      0,
+      BayerPattern::Rggb,
+      BayerDemosaic::Bilinear,
+      &m,
+      &mut rgb,
+      false,
+    );
+  }
+
+  #[test]
+  #[should_panic(expected = "non-finite")]
+  fn bayer16_u8_dispatcher_rejects_neg_infinity_in_m() {
+    let above = [0u16; 4];
+    let mid = [0u16; 4];
+    let below = [0u16; 4];
+    let mut rgb = [0u8; 12];
+    let mut m = ident();
+    m[2][1] = f32::NEG_INFINITY;
+    bayer16_to_rgb_row::<12>(
+      &above,
+      &mid,
+      &below,
+      0,
+      BayerPattern::Rggb,
+      BayerDemosaic::Bilinear,
+      &m,
+      &mut rgb,
+      false,
+    );
+  }
+
+  #[test]
+  #[should_panic(expected = "non-finite")]
+  fn bayer16_u16_dispatcher_rejects_nan_in_m() {
+    let above = [0u16; 4];
+    let mid = [0u16; 4];
+    let below = [0u16; 4];
+    let mut rgb = [0u16; 12];
+    let mut m = ident();
+    m[2][2] = f32::NAN;
+    bayer16_to_rgb_u16_row::<10>(
+      &above,
+      &mid,
+      &below,
+      0,
+      BayerPattern::Rggb,
+      BayerDemosaic::Bilinear,
+      &m,
+      &mut rgb,
+      false,
+    );
+  }
+
+  #[test]
+  fn bayer_dispatcher_accepts_finite_m() {
+    // Sanity: the assertion doesn't fire for ordinary finite
+    // matrices. Realistic inputs (CCM with negative crosstalk,
+    // WB > 1) all qualify.
+    let above = [10u8; 4];
+    let mid = [20u8; 4];
+    let below = [30u8; 4];
+    let mut rgb = [0u8; 12];
+    let m: [[f32; 3]; 3] = [[1.5, -0.3, -0.2], [-0.1, 1.2, -0.1], [-0.05, -0.15, 1.2]];
+    bayer_to_rgb_row(
+      &above,
+      &mid,
+      &below,
+      0,
+      BayerPattern::Rggb,
+      BayerDemosaic::Bilinear,
+      &m,
+      &mut rgb,
+      false,
+    );
+  }
+
+  /// Codex regression (round 8): a direct row-API caller that
+  /// bypasses [`crate::raw::WhiteBalance::try_new`] /
+  /// [`crate::raw::ColorCorrectionMatrix::try_new`] cannot inject
+  /// finite-but-extreme matrices that would overflow during the
+  /// per-pixel matmul. The dispatcher's
+  /// `assert_color_transform_well_formed` enforces the same
+  /// magnitude bound (1e12) that validated WB × CCM can produce.
+  #[test]
+  #[should_panic(expected = "exceeds magnitude bound")]
+  fn bayer_dispatcher_rejects_finite_extreme_m() {
+    let above = [0u8; 4];
+    let mid = [0u8; 4];
+    let below = [0u8; 4];
+    let mut rgb = [0u8; 12];
+    let mut m = [[1.0f32, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    m[1][1] = f32::MAX; // finite but past the bound
+    bayer_to_rgb_row(
+      &above,
+      &mid,
+      &below,
+      0,
+      BayerPattern::Rggb,
+      BayerDemosaic::Bilinear,
+      &m,
+      &mut rgb,
+      false,
+    );
+  }
+
+  /// Same regression for the Bayer16→u8 dispatcher.
+  #[test]
+  #[should_panic(expected = "exceeds magnitude bound")]
+  fn bayer16_u8_dispatcher_rejects_finite_extreme_m() {
+    let above = [0u16; 4];
+    let mid = [0u16; 4];
+    let below = [0u16; 4];
+    let mut rgb = [0u8; 12];
+    let mut m = [[1.0f32, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    m[2][0] = -f32::MAX;
+    bayer16_to_rgb_row::<12>(
+      &above,
+      &mid,
+      &below,
+      0,
+      BayerPattern::Rggb,
+      BayerDemosaic::Bilinear,
+      &m,
+      &mut rgb,
+      false,
+    );
+  }
+
+  /// Same regression for the Bayer16→u16 dispatcher.
+  #[test]
+  #[should_panic(expected = "exceeds magnitude bound")]
+  fn bayer16_u16_dispatcher_rejects_finite_extreme_m() {
+    let above = [0u16; 4];
+    let mid = [0u16; 4];
+    let below = [0u16; 4];
+    let mut rgb = [0u16; 12];
+    let mut m = [[1.0f32, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    m[0][0] = 1e20; // finite but past the 1e12 bound
+    bayer16_to_rgb_u16_row::<10>(
+      &above,
+      &mid,
+      &below,
+      0,
+      BayerPattern::Rggb,
+      BayerDemosaic::Bilinear,
+      &m,
+      &mut rgb,
+      false,
+    );
+  }
+
+  /// At-bound element passes (boundary inclusive, matches the
+  /// constructor bounds).
+  #[test]
+  fn bayer_dispatcher_accepts_at_bound_m() {
+    let above = [0u8; 4];
+    let mid = [0u8; 4];
+    let below = [0u8; 4];
+    let mut rgb = [0u8; 12];
+    let m = [
+      [super::MAX_FUSED_TRANSFORM_ABS, 0.0, 0.0],
+      [0.0, 1.0, 0.0],
+      [0.0, 0.0, 1.0],
+    ];
+    bayer_to_rgb_row(
+      &above,
+      &mid,
+      &below,
+      0,
+      BayerPattern::Rggb,
+      BayerDemosaic::Bilinear,
+      &m,
+      &mut rgb,
+      false,
+    );
+  }
+
+  // ---- Direct Bayer16 row-API contract behavior --------------------------
+  //
+  // The walker path (`bayer16_to`) cannot reach the kernel with
+  // out-of-range samples because `BayerFrame16::try_new` validates
+  // every active sample at construction. The direct row API
+  // (`bayer16_to_rgb_row`, `bayer16_to_rgb_u16_row`) takes raw
+  // `&[u16]` slices and trusts the low-packed contract — out-of-
+  // range samples are documented as "defined-but-saturated output,
+  // no panic, no UB." These regressions pin that behavior so a
+  // future change can't silently flip it (e.g., to a panic or to
+  // masking) without updating the documented contract first.
+
+  /// 12-bit dispatcher with MSB-aligned `0x8000` input
+  /// (the classic packing-mismatch bug, where the caller forgot
+  /// to right-shift before feeding the row API). Out-of-range
+  /// per the low-packed contract; the kernel saturates the matmul
+  /// output to `255` rather than panicking. Walker users get
+  /// `Err(SampleOutOfRange)` from `try_new` instead.
+  #[test]
+  fn bayer16_u8_dispatcher_saturates_on_msb_aligned_input() {
+    let above = [0x8000u16; 4];
+    let mid = [0x8000u16; 4];
+    let below = [0x8000u16; 4];
+    let mut rgb = [0u8; 12];
+    let m = ident();
+    bayer16_to_rgb_row::<12>(
+      &above,
+      &mid,
+      &below,
+      0,
+      BayerPattern::Rggb,
+      BayerDemosaic::Bilinear,
+      &m,
+      &mut rgb,
+      false,
+    );
+    // 0x8000 = 32768 ≫ max_in (4095). All output channels clamp
+    // to 255. No panic, no UB — defined behavior.
+    assert!(
+      rgb.iter().all(|&c| c == 255),
+      "MSB-aligned 12-bit input expected to saturate to 255 across all channels; got {rgb:?}"
+    );
+  }
+
+  /// Same regression for the u16 dispatcher: MSB-aligned 10-bit
+  /// input saturates to the low-packed max (1023) rather than
+  /// panicking.
+  #[test]
+  fn bayer16_u16_dispatcher_saturates_on_msb_aligned_input() {
+    let above = [0xFFC0u16; 4]; // MSB-aligned 10-bit "white" (1023 << 6)
+    let mid = [0xFFC0u16; 4];
+    let below = [0xFFC0u16; 4];
+    let mut rgb = [0u16; 12];
+    let m = ident();
+    bayer16_to_rgb_u16_row::<10>(
+      &above,
+      &mid,
+      &below,
+      0,
+      BayerPattern::Rggb,
+      BayerDemosaic::Bilinear,
+      &m,
+      &mut rgb,
+      false,
+    );
+    // 0xFFC0 ≫ low-packed-10 max (1023). Output saturates to
+    // 1023 (the u16 path's max_out). No panic.
+    assert!(
+      rgb.iter().all(|&c| c == 1023),
+      "MSB-aligned 10-bit input expected to saturate to 1023 across all channels; got {rgb:?}"
+    );
+  }
+
+  /// In-range Bayer16 input still works correctly through the
+  /// direct row API (this protects the rest of the contract while
+  /// the saturation tests pin the out-of-range behavior).
+  #[test]
+  fn bayer16_u8_dispatcher_in_range_input_correct() {
+    let above = [4095u16; 4]; // 12-bit white, in range
+    let mid = [4095u16; 4];
+    let below = [4095u16; 4];
+    let mut rgb = [0u8; 12];
+    let m = ident();
+    bayer16_to_rgb_row::<12>(
+      &above,
+      &mid,
+      &below,
+      0,
+      BayerPattern::Rggb,
+      BayerDemosaic::Bilinear,
+      &m,
+      &mut rgb,
+      false,
+    );
+    // Solid white (4095) at every site → output 255 on every
+    // channel. Same final value as the saturated case, but the
+    // path is correct (not a clamp).
+    assert!(
+      rgb.iter().all(|&c| c == 255),
+      "in-range 12-bit white expected to map to 255; got {rgb:?}"
     );
   }
 }
