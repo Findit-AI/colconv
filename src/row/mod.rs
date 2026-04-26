@@ -41,6 +41,8 @@ pub(crate) mod scalar;
 // be unused, which is a hard error under `cargo clippy -- -D warnings`.
 #[cfg(any(feature = "std", feature = "alloc"))]
 pub(crate) use scalar::expand_rgb_to_rgba_row;
+#[cfg(any(feature = "std", feature = "alloc"))]
+pub(crate) use scalar::expand_rgb_u16_to_rgba_u16_row;
 
 use crate::ColorMatrix;
 

@@ -31,12 +31,12 @@ impl<'a> MixedSinker<'a, Yuv420p> {
   ///
   /// ```compile_fail
   /// // Attaching RGBA to a sink that doesn't write it is rejected
-  /// // at compile time. Yuv420p10 (10‑bit 4:2:0 planar) has not yet
-  /// // been wired for RGBA — Tranche 5 covers it; once that lands the
+  /// // at compile time. Yuv422p10 (10‑bit 4:2:2 planar) has not yet
+  /// // been wired for RGBA — once a future tranche lands it the
   /// // negative example here moves to the next not‑yet‑wired format.
-  /// use colconv::{sinker::MixedSinker, yuv::Yuv420p10};
+  /// use colconv::{sinker::MixedSinker, yuv::Yuv422p10};
   /// let mut buf = vec![0u8; 16 * 8 * 4];
-  /// let _ = MixedSinker::<Yuv420p10>::new(16, 8).with_rgba(&mut buf);
+  /// let _ = MixedSinker::<Yuv422p10>::new(16, 8).with_rgba(&mut buf);
   /// ```
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub fn with_rgba(mut self, buf: &'a mut [u8]) -> Result<Self, MixedSinkerError> {
