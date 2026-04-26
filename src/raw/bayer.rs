@@ -529,7 +529,7 @@ mod tests {
     // 4×4 plane where every row's first byte is the row index. So
     // mid_row(r)[0] == r, and mirror-by-2 should produce
     // above_first = [1, 0, 1, 2] and below_first = [1, 2, 3, 2].
-    let raw: std::vec::Vec<u8> = (0..16u8).map(|i| (i / 4) as u8).collect();
+    let raw: std::vec::Vec<u8> = (0..16u8).map(|i| i / 4).collect();
     let frame = BayerFrame::try_new(&raw, 4, 4, 4).unwrap();
     let mut sink = EdgeCapture {
       above_first: std::vec::Vec::new(),
