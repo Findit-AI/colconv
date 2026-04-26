@@ -2032,9 +2032,8 @@ unsafe fn nv24_or_nv42_to_rgb_row_impl<const SWAP_UV: bool>(
   }
 }
 
-/// AVX2 YUV 4:4:4 planar → packed RGB. 32 Y pixels + 32 U + 32 V
-/// per iteration. Same arithmetic as [`nv24_to_rgb_row`] with U / V
-/// loaded directly from separate planes (no deinterleave step).
+/// AVX2 YUV 4:4:4 planar → packed RGB. Thin wrapper over
+/// [`yuv_444_to_rgb_or_rgba_row`] with `ALPHA = false`.
 ///
 /// # Safety
 ///
@@ -2052,10 +2051,64 @@ pub(crate) unsafe fn yuv_444_to_rgb_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
+  // SAFETY: caller-checked AVX2 availability + slice bounds — see
+  // [`yuv_444_to_rgb_or_rgba_row`] safety contract.
+  unsafe {
+    yuv_444_to_rgb_or_rgba_row::<false>(y, u, v, rgb_out, width, matrix, full_range);
+  }
+}
+
+/// AVX2 YUV 4:4:4 planar → packed **RGBA** (8-bit). Same contract
+/// as [`yuv_444_to_rgb_row`] but writes 4 bytes per pixel via
+/// [`write_rgba_32`] (R, G, B, `0xFF`).
+///
+/// # Safety
+///
+/// Same as [`yuv_444_to_rgb_row`] except the output slice must be
+/// `>= 4 * width` bytes.
+#[inline]
+#[target_feature(enable = "avx2")]
+pub(crate) unsafe fn yuv_444_to_rgba_row(
+  y: &[u8],
+  u: &[u8],
+  v: &[u8],
+  rgba_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  // SAFETY: caller-checked AVX2 availability + slice bounds — see
+  // [`yuv_444_to_rgb_or_rgba_row`] safety contract.
+  unsafe {
+    yuv_444_to_rgb_or_rgba_row::<true>(y, u, v, rgba_out, width, matrix, full_range);
+  }
+}
+
+/// Shared AVX2 YUV 4:4:4 kernel for [`yuv_444_to_rgb_row`]
+/// (`ALPHA = false`, [`write_rgb_32`]) and [`yuv_444_to_rgba_row`]
+/// (`ALPHA = true`, [`write_rgba_32`] with constant `0xFF` alpha).
+///
+/// # Safety
+///
+/// 1. **AVX2 must be available on the current CPU.**
+/// 2. `y.len() >= width`, `u.len() >= width`, `v.len() >= width`.
+/// 3. `out.len() >= width * (if ALPHA { 4 } else { 3 })`.
+#[inline]
+#[target_feature(enable = "avx2")]
+pub(crate) unsafe fn yuv_444_to_rgb_or_rgba_row<const ALPHA: bool>(
+  y: &[u8],
+  u: &[u8],
+  v: &[u8],
+  out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
   debug_assert!(y.len() >= width);
   debug_assert!(u.len() >= width);
   debug_assert!(v.len() >= width);
-  debug_assert!(rgb_out.len() >= width * 3);
+  let bpp: usize = if ALPHA { 4 } else { 3 };
+  debug_assert!(out.len() >= width * bpp);
 
   let coeffs = scalar::Coefficients::for_matrix(matrix);
   let (y_off, y_scale, c_scale) = scalar::range_params(full_range);
@@ -2073,6 +2126,7 @@ pub(crate) unsafe fn yuv_444_to_rgb_row(
     let cgv = _mm256_set1_epi32(coeffs.g_v());
     let cbu = _mm256_set1_epi32(coeffs.b_u());
     let cbv = _mm256_set1_epi32(coeffs.b_v());
+    let alpha_u8 = _mm256_set1_epi8(-1); // 0xFF as i8
 
     let mut x = 0usize;
     while x + 32 <= width {
@@ -2158,21 +2212,26 @@ pub(crate) unsafe fn yuv_444_to_rgb_row(
       let g_u8 = narrow_u8x32(g_lo, g_hi);
       let r_u8 = narrow_u8x32(r_lo, r_hi);
 
-      write_rgb_32(r_u8, g_u8, b_u8, rgb_out.as_mut_ptr().add(x * 3));
+      if ALPHA {
+        write_rgba_32(r_u8, g_u8, b_u8, alpha_u8, out.as_mut_ptr().add(x * 4));
+      } else {
+        write_rgb_32(r_u8, g_u8, b_u8, out.as_mut_ptr().add(x * 3));
+      }
 
       x += 32;
     }
 
     if x < width {
-      scalar::yuv_444_to_rgb_row(
-        &y[x..width],
-        &u[x..width],
-        &v[x..width],
-        &mut rgb_out[x * 3..width * 3],
-        width - x,
-        matrix,
-        full_range,
-      );
+      let tail_y = &y[x..width];
+      let tail_u = &u[x..width];
+      let tail_v = &v[x..width];
+      let tail_w = width - x;
+      let tail_out = &mut out[x * bpp..width * bpp];
+      if ALPHA {
+        scalar::yuv_444_to_rgba_row(tail_y, tail_u, tail_v, tail_out, tail_w, matrix, full_range);
+      } else {
+        scalar::yuv_444_to_rgb_row(tail_y, tail_u, tail_v, tail_out, tail_w, matrix, full_range);
+      }
     }
   }
 }
@@ -4050,6 +4109,64 @@ mod tests {
     // SSE4.1 tail; odd widths validate the 4:4:4 no-parity contract.
     for w in [31usize, 32, 33, 63, 64, 65, 1920, 1921] {
       check_yuv_444_equivalence(w, ColorMatrix::Bt709, false);
+    }
+  }
+
+  // ---- yuv_444_to_rgba_row equivalence --------------------------------
+
+  fn check_yuv_444_rgba_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+    let y: std::vec::Vec<u8> = (0..width).map(|i| ((i * 37 + 11) & 0xFF) as u8).collect();
+    let u: std::vec::Vec<u8> = (0..width).map(|i| ((i * 53 + 23) & 0xFF) as u8).collect();
+    let v: std::vec::Vec<u8> = (0..width).map(|i| ((i * 71 + 91) & 0xFF) as u8).collect();
+    let mut rgba_scalar = std::vec![0u8; width * 4];
+    let mut rgba_avx2 = std::vec![0u8; width * 4];
+
+    scalar::yuv_444_to_rgba_row(&y, &u, &v, &mut rgba_scalar, width, matrix, full_range);
+    unsafe {
+      yuv_444_to_rgba_row(&y, &u, &v, &mut rgba_avx2, width, matrix, full_range);
+    }
+
+    if rgba_scalar != rgba_avx2 {
+      let first_diff = rgba_scalar
+        .iter()
+        .zip(rgba_avx2.iter())
+        .position(|(a, b)| a != b)
+        .unwrap();
+      let pixel = first_diff / 4;
+      let channel = ["R", "G", "B", "A"][first_diff % 4];
+      panic!(
+        "AVX2 yuv_444 RGBA diverges from scalar at byte {first_diff} (px {pixel} {channel}, width={width}, matrix={matrix:?}, full_range={full_range}): scalar={} avx2={}",
+        rgba_scalar[first_diff], rgba_avx2[first_diff]
+      );
+    }
+  }
+
+  #[test]
+  fn avx2_yuv_444_rgba_matches_scalar_all_matrices_32() {
+    if !std::arch::is_x86_feature_detected!("avx2") {
+      return;
+    }
+    for m in [
+      ColorMatrix::Bt601,
+      ColorMatrix::Bt709,
+      ColorMatrix::Bt2020Ncl,
+      ColorMatrix::Smpte240m,
+      ColorMatrix::Fcc,
+      ColorMatrix::YCgCo,
+    ] {
+      for full in [true, false] {
+        check_yuv_444_rgba_equivalence(32, m, full);
+      }
+    }
+  }
+
+  #[test]
+  fn avx2_yuv_444_rgba_matches_scalar_widths() {
+    if !std::arch::is_x86_feature_detected!("avx2") {
+      return;
+    }
+    for w in [31usize, 32, 33, 63, 64, 65, 1920, 1921] {
+      check_yuv_444_rgba_equivalence(w, ColorMatrix::Bt709, false);
     }
   }
 

@@ -357,10 +357,12 @@ fn nv24_or_nv42_to_rgb_row_impl<const SWAP_UV: bool>(
   }
 }
 
-/// YUV 4:4:4 planar → packed RGB. One UV pair per Y pixel, U/V from
-/// separate planes. Same arithmetic as
-/// [`nv24_to_rgb_row`] (4:4:4 semi-planar) but without the
-/// deinterleave step — U and V come pre-separated.
+/// YUV 4:4:4 planar → packed RGB. Thin wrapper over
+/// [`yuv_444_to_rgb_or_rgba_row`] with `ALPHA = false`.
+///
+/// One UV pair per Y pixel, U/V from separate planes. Same
+/// arithmetic as [`nv24_to_rgb_row`] (4:4:4 semi-planar) but
+/// without the deinterleave step — U and V come pre-separated.
 ///
 /// # Panics (debug builds)
 ///
@@ -376,10 +378,50 @@ pub(crate) fn yuv_444_to_rgb_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
+  yuv_444_to_rgb_or_rgba_row::<false>(y, u, v, rgb_out, width, matrix, full_range);
+}
+
+/// YUV 4:4:4 planar → packed `R, G, B, A` quadruplets with constant
+/// `A = 0xFF`. First three bytes per pixel are byte-identical to
+/// [`yuv_444_to_rgb_row`]. `rgba_out.len() >= 4 * width`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn yuv_444_to_rgba_row(
+  y: &[u8],
+  u: &[u8],
+  v: &[u8],
+  rgba_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  yuv_444_to_rgb_or_rgba_row::<true>(y, u, v, rgba_out, width, matrix, full_range);
+}
+
+/// Shared scalar kernel for [`yuv_444_to_rgb_row`] (`ALPHA = false`,
+/// 3 bpp) and [`yuv_444_to_rgba_row`] (`ALPHA = true`, 4 bpp + opaque
+/// alpha). Math is identical; only the per-pixel store stride
+/// differs. `const` generic monomorphizes per call site, so the
+/// `if ALPHA` branches are eliminated.
+///
+/// # Panics (debug builds)
+///
+/// - `y.len() >= width`, `u.len() >= width`, `v.len() >= width`,
+///   `out.len() >= width * (if ALPHA { 4 } else { 3 })`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn yuv_444_to_rgb_or_rgba_row<const ALPHA: bool>(
+  y: &[u8],
+  u: &[u8],
+  v: &[u8],
+  out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
   debug_assert!(y.len() >= width, "y row too short");
   debug_assert!(u.len() >= width, "u row too short");
   debug_assert!(v.len() >= width, "v row too short");
-  debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
+  let bpp: usize = if ALPHA { 4 } else { 3 };
+  debug_assert!(out.len() >= width * bpp, "out row too short for {bpp}bpp");
 
   let coeffs = Coefficients::for_matrix(matrix);
   let (y_off, y_scale, c_scale) = range_params(full_range);
@@ -395,9 +437,12 @@ pub(crate) fn yuv_444_to_rgb_row(
     let b_chroma = (coeffs.b_u() * u_d + coeffs.b_v() * v_d + RND) >> 15;
 
     let y0 = ((y[x] as i32 - y_off) * y_scale + RND) >> 15;
-    rgb_out[x * 3] = clamp_u8(y0 + r_chroma);
-    rgb_out[x * 3 + 1] = clamp_u8(y0 + g_chroma);
-    rgb_out[x * 3 + 2] = clamp_u8(y0 + b_chroma);
+    out[x * bpp] = clamp_u8(y0 + r_chroma);
+    out[x * bpp + 1] = clamp_u8(y0 + g_chroma);
+    out[x * bpp + 2] = clamp_u8(y0 + b_chroma);
+    if ALPHA {
+      out[x * bpp + 3] = 0xFF;
+    }
   }
 }
 
