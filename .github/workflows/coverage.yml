@@ -156,7 +156,7 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Download ${{ matrix.label }} report
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v8
         with:
           name: coverage-${{ matrix.label }}
           path: coverage/

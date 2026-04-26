@@ -139,7 +139,8 @@ pub(crate) fn yuv_420_to_rgb_or_rgba_row<const ALPHA: bool>(
 }
 
 /// NV12 (semi‑planar 4:2:0, UV-ordered) → packed RGB. Thin wrapper
-/// over [`nv12_or_nv21_to_rgb_row_impl`] with `SWAP_UV = false`.
+/// over [`nv12_or_nv21_to_rgb_or_rgba_row_impl`] with
+/// `SWAP_UV = false, ALPHA = false`.
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn nv12_to_rgb_row(
   y: &[u8],
@@ -149,11 +150,14 @@ pub(crate) fn nv12_to_rgb_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  nv12_or_nv21_to_rgb_row_impl::<false>(y, uv_half, rgb_out, width, matrix, full_range);
+  nv12_or_nv21_to_rgb_or_rgba_row_impl::<false, false>(
+    y, uv_half, rgb_out, width, matrix, full_range,
+  );
 }
 
 /// NV21 (semi‑planar 4:2:0, VU-ordered) → packed RGB. Thin wrapper
-/// over [`nv12_or_nv21_to_rgb_row_impl`] with `SWAP_UV = true`.
+/// over [`nv12_or_nv21_to_rgb_or_rgba_row_impl`] with
+/// `SWAP_UV = true, ALPHA = false`.
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn nv21_to_rgb_row(
   y: &[u8],
@@ -163,26 +167,63 @@ pub(crate) fn nv21_to_rgb_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  nv12_or_nv21_to_rgb_row_impl::<true>(y, vu_half, rgb_out, width, matrix, full_range);
+  nv12_or_nv21_to_rgb_or_rgba_row_impl::<true, false>(
+    y, vu_half, rgb_out, width, matrix, full_range,
+  );
 }
 
-/// Shared scalar kernel for NV12 (SWAP_UV=false) and NV21
-/// (SWAP_UV=true). Identical math and numerical contract to
-/// [`yuv_420_to_rgb_row`]; the only difference is chroma byte order
-/// in the interleaved plane. `const` generic drives compile-time
-/// monomorphization — each wrapper is inlined with the branch
-/// eliminated.
+/// NV12 → packed `R, G, B, A` quadruplets with constant `A = 0xFF`.
+/// First three bytes per pixel are byte-identical to
+/// [`nv12_to_rgb_row`]. `rgba_out.len() >= 4 * width`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn nv12_to_rgba_row(
+  y: &[u8],
+  uv_half: &[u8],
+  rgba_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  nv12_or_nv21_to_rgb_or_rgba_row_impl::<false, true>(
+    y, uv_half, rgba_out, width, matrix, full_range,
+  );
+}
+
+/// NV21 → packed `R, G, B, A` quadruplets with constant `A = 0xFF`.
+/// First three bytes per pixel are byte-identical to
+/// [`nv21_to_rgb_row`]. `rgba_out.len() >= 4 * width`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn nv21_to_rgba_row(
+  y: &[u8],
+  vu_half: &[u8],
+  rgba_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  nv12_or_nv21_to_rgb_or_rgba_row_impl::<true, true>(
+    y, vu_half, rgba_out, width, matrix, full_range,
+  );
+}
+
+/// Shared scalar kernel for NV12 (`SWAP_UV = false`) / NV21
+/// (`SWAP_UV = true`) at 3 bpp (`ALPHA = false`) or 4 bpp + opaque
+/// alpha (`ALPHA = true`). Identical math to [`yuv_420_to_rgb_row`];
+/// the only differences are chroma byte order in the interleaved
+/// plane and the per-pixel store stride. Both `const` generics drive
+/// compile-time monomorphization — each wrapper is inlined with both
+/// branches eliminated.
 ///
 /// # Panics (debug builds)
 ///
 /// - `width` must be even (4:2:0 pairs pixel columns).
 /// - `y.len() >= width`, `uv_or_vu_half.len() >= width`,
-///   `rgb_out.len() >= 3 * width`.
+///   `out.len() >= width * (if ALPHA { 4 } else { 3 })`.
 #[cfg_attr(not(tarpaulin), inline(always))]
-fn nv12_or_nv21_to_rgb_row_impl<const SWAP_UV: bool>(
+pub(crate) fn nv12_or_nv21_to_rgb_or_rgba_row_impl<const SWAP_UV: bool, const ALPHA: bool>(
   y: &[u8],
   uv_or_vu_half: &[u8],
-  rgb_out: &mut [u8],
+  out: &mut [u8],
   width: usize,
   matrix: ColorMatrix,
   full_range: bool,
@@ -190,7 +231,8 @@ fn nv12_or_nv21_to_rgb_row_impl<const SWAP_UV: bool>(
   debug_assert_eq!(width & 1, 0, "NV12/NV21 require even width");
   debug_assert!(y.len() >= width, "y row too short");
   debug_assert!(uv_or_vu_half.len() >= width, "chroma row too short");
-  debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
+  let bpp: usize = if ALPHA { 4 } else { 3 };
+  debug_assert!(out.len() >= width * bpp, "out row too short for {bpp}bpp");
 
   let coeffs = Coefficients::for_matrix(matrix);
   let (y_off, y_scale, c_scale) = range_params(full_range);
@@ -214,14 +256,26 @@ fn nv12_or_nv21_to_rgb_row_impl<const SWAP_UV: bool>(
     let b_chroma = (coeffs.b_u() * u_d + coeffs.b_v() * v_d + RND) >> 15;
 
     let y0 = ((y[x] as i32 - y_off) * y_scale + RND) >> 15;
-    rgb_out[x * 3] = clamp_u8(y0 + r_chroma);
-    rgb_out[x * 3 + 1] = clamp_u8(y0 + g_chroma);
-    rgb_out[x * 3 + 2] = clamp_u8(y0 + b_chroma);
+    let r0 = clamp_u8(y0 + r_chroma);
+    let g0 = clamp_u8(y0 + g_chroma);
+    let b0 = clamp_u8(y0 + b_chroma);
+    out[x * bpp] = r0;
+    out[x * bpp + 1] = g0;
+    out[x * bpp + 2] = b0;
+    if ALPHA {
+      out[x * bpp + 3] = 0xFF;
+    }
 
     let y1 = ((y[x + 1] as i32 - y_off) * y_scale + RND) >> 15;
-    rgb_out[(x + 1) * 3] = clamp_u8(y1 + r_chroma);
-    rgb_out[(x + 1) * 3 + 1] = clamp_u8(y1 + g_chroma);
-    rgb_out[(x + 1) * 3 + 2] = clamp_u8(y1 + b_chroma);
+    let r1 = clamp_u8(y1 + r_chroma);
+    let g1 = clamp_u8(y1 + g_chroma);
+    let b1 = clamp_u8(y1 + b_chroma);
+    out[(x + 1) * bpp] = r1;
+    out[(x + 1) * bpp + 1] = g1;
+    out[(x + 1) * bpp + 2] = b1;
+    if ALPHA {
+      out[(x + 1) * bpp + 3] = 0xFF;
+    }
 
     x += 2;
   }

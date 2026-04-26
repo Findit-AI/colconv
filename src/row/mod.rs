@@ -406,6 +406,150 @@ pub fn nv21_to_rgb_row(
   scalar::nv21_to_rgb_row(y, vu_half, rgb_out, width, matrix, full_range);
 }
 
+/// Converts one row of NV12 (semi‑planar 4:2:0) to packed **RGBA**
+/// (8-bit). Same numerical contract as [`nv12_to_rgb_row`]; the only
+/// differences are the per-pixel stride (4 vs 3) and the alpha byte
+/// (`0xFF`, opaque, for every pixel — sources without an alpha plane
+/// produce opaque output).
+///
+/// `rgba_out.len() >= 4 * width`. `use_simd = false` forces scalar.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn nv12_to_rgba_row(
+  y: &[u8],
+  uv_half: &[u8],
+  rgba_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  use_simd: bool,
+) {
+  // Runtime asserts at the dispatcher boundary — see
+  // [`yuv_420_to_rgba_row`] for rationale, including the checked
+  // `width × 4` multiplication via [`rgba_row_bytes`].
+  assert_eq!(width & 1, 0, "NV12 requires even width");
+  let rgba_min = rgba_row_bytes(width);
+  assert!(y.len() >= width, "y row too short");
+  assert!(uv_half.len() >= width, "uv_half row too short");
+  assert!(rgba_out.len() >= rgba_min, "rgba_out row too short");
+
+  if use_simd {
+    cfg_select! {
+      target_arch = "aarch64" => {
+        if neon_available() {
+          // SAFETY: `neon_available()` verified NEON is present.
+          unsafe {
+            arch::neon::nv12_to_rgba_row(y, uv_half, rgba_out, width, matrix, full_range);
+          }
+          return;
+        }
+      },
+      target_arch = "x86_64" => {
+        if avx512_available() {
+          // SAFETY: AVX‑512BW verified.
+          unsafe {
+            arch::x86_avx512::nv12_to_rgba_row(y, uv_half, rgba_out, width, matrix, full_range);
+          }
+          return;
+        }
+        if avx2_available() {
+          // SAFETY: AVX2 verified.
+          unsafe {
+            arch::x86_avx2::nv12_to_rgba_row(y, uv_half, rgba_out, width, matrix, full_range);
+          }
+          return;
+        }
+        if sse41_available() {
+          // SAFETY: SSE4.1 verified.
+          unsafe {
+            arch::x86_sse41::nv12_to_rgba_row(y, uv_half, rgba_out, width, matrix, full_range);
+          }
+          return;
+        }
+      },
+      target_arch = "wasm32" => {
+        if simd128_available() {
+          // SAFETY: simd128 verified at compile time.
+          unsafe {
+            arch::wasm_simd128::nv12_to_rgba_row(y, uv_half, rgba_out, width, matrix, full_range);
+          }
+          return;
+        }
+      },
+      _ => {}
+    }
+  }
+
+  scalar::nv12_to_rgba_row(y, uv_half, rgba_out, width, matrix, full_range);
+}
+
+/// Converts one row of NV21 (semi‑planar 4:2:0, VU-ordered) to
+/// packed **RGBA** (8-bit). Same numerical contract as
+/// [`nv21_to_rgb_row`]; alpha defaults to `0xFF` (opaque).
+///
+/// `rgba_out.len() >= 4 * width`. `use_simd = false` forces scalar.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn nv21_to_rgba_row(
+  y: &[u8],
+  vu_half: &[u8],
+  rgba_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  use_simd: bool,
+) {
+  assert_eq!(width & 1, 0, "NV21 requires even width");
+  let rgba_min = rgba_row_bytes(width);
+  assert!(y.len() >= width, "y row too short");
+  assert!(vu_half.len() >= width, "vu_half row too short");
+  assert!(rgba_out.len() >= rgba_min, "rgba_out row too short");
+
+  if use_simd {
+    cfg_select! {
+      target_arch = "aarch64" => {
+        if neon_available() {
+          unsafe {
+            arch::neon::nv21_to_rgba_row(y, vu_half, rgba_out, width, matrix, full_range);
+          }
+          return;
+        }
+      },
+      target_arch = "x86_64" => {
+        if avx512_available() {
+          unsafe {
+            arch::x86_avx512::nv21_to_rgba_row(y, vu_half, rgba_out, width, matrix, full_range);
+          }
+          return;
+        }
+        if avx2_available() {
+          unsafe {
+            arch::x86_avx2::nv21_to_rgba_row(y, vu_half, rgba_out, width, matrix, full_range);
+          }
+          return;
+        }
+        if sse41_available() {
+          unsafe {
+            arch::x86_sse41::nv21_to_rgba_row(y, vu_half, rgba_out, width, matrix, full_range);
+          }
+          return;
+        }
+      },
+      target_arch = "wasm32" => {
+        if simd128_available() {
+          unsafe {
+            arch::wasm_simd128::nv21_to_rgba_row(y, vu_half, rgba_out, width, matrix, full_range);
+          }
+          return;
+        }
+      },
+      _ => {}
+    }
+  }
+
+  scalar::nv21_to_rgba_row(y, vu_half, rgba_out, width, matrix, full_range);
+}
+
 /// Converts one row of NV24 (semi‑planar 4:4:4, UV‑ordered) to packed
 /// RGB. Dispatches to the best available SIMD backend for the current
 /// target (NEON / SSE4.1 / AVX2 / AVX-512 / wasm simd128), falling
