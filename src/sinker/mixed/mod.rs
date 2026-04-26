@@ -1097,10 +1097,9 @@ pub(super) fn check_dimensions_match(
 /// `Err(GeometryOverflow)` if `one_plane_end × 4` wraps `usize` (only
 /// reachable on 32-bit targets at extreme dimensions).
 ///
-/// Centralises the duplicated bounds-check pattern that every
+/// Centralises the duplicated overflow/bounds-check pattern that every
 /// `MixedSinker<F>::process` impl runs in both the standalone-RGBA
-/// branch and the Strategy-A expand branch (Copilot review #4 on PR
-/// #20).
+/// branch and the Strategy-A expand branch.
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(super) fn rgba_plane_row_slice(
   buf: &mut [u8],
