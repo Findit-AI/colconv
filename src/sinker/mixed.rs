@@ -66,12 +66,13 @@ use crate::{
     nv24_to_rgb_row, nv42_to_rgb_row, p010_to_rgb_row, p010_to_rgb_u16_row, p012_to_rgb_row,
     p012_to_rgb_u16_row, p016_to_rgb_row, p016_to_rgb_u16_row, p410_to_rgb_row,
     p410_to_rgb_u16_row, p412_to_rgb_row, p412_to_rgb_u16_row, p416_to_rgb_row,
-    p416_to_rgb_u16_row, rgb_to_hsv_row, yuv_420_to_rgb_row, yuv_444_to_rgb_row,
-    yuv420p9_to_rgb_row, yuv420p9_to_rgb_u16_row, yuv420p10_to_rgb_row, yuv420p10_to_rgb_u16_row,
-    yuv420p12_to_rgb_row, yuv420p12_to_rgb_u16_row, yuv420p14_to_rgb_row, yuv420p14_to_rgb_u16_row,
-    yuv420p16_to_rgb_row, yuv420p16_to_rgb_u16_row, yuv444p9_to_rgb_row, yuv444p9_to_rgb_u16_row,
-    yuv444p10_to_rgb_row, yuv444p10_to_rgb_u16_row, yuv444p12_to_rgb_row, yuv444p12_to_rgb_u16_row,
-    yuv444p14_to_rgb_row, yuv444p14_to_rgb_u16_row, yuv444p16_to_rgb_row, yuv444p16_to_rgb_u16_row,
+    p416_to_rgb_u16_row, rgb_to_hsv_row, yuv_420_to_rgb_row, yuv_420_to_rgba_row,
+    yuv_444_to_rgb_row, yuv420p9_to_rgb_row, yuv420p9_to_rgb_u16_row, yuv420p10_to_rgb_row,
+    yuv420p10_to_rgb_u16_row, yuv420p12_to_rgb_row, yuv420p12_to_rgb_u16_row, yuv420p14_to_rgb_row,
+    yuv420p14_to_rgb_u16_row, yuv420p16_to_rgb_row, yuv420p16_to_rgb_u16_row, yuv444p9_to_rgb_row,
+    yuv444p9_to_rgb_u16_row, yuv444p10_to_rgb_row, yuv444p10_to_rgb_u16_row, yuv444p12_to_rgb_row,
+    yuv444p12_to_rgb_u16_row, yuv444p14_to_rgb_row, yuv444p14_to_rgb_u16_row, yuv444p16_to_rgb_row,
+    yuv444p16_to_rgb_u16_row,
   },
   yuv::{
     Nv12, Nv12Row, Nv12Sink, Nv16, Nv16Row, Nv16Sink, Nv21, Nv21Row, Nv21Sink, Nv24, Nv24Row,
@@ -134,6 +135,32 @@ pub enum MixedSinkerError {
   #[error("MixedSinker rgb_u16 buffer too short: expected >= {expected} elements, got {actual}")]
   RgbU16BufferTooShort {
     /// Minimum `u16` elements required (`width × height × 3`).
+    expected: usize,
+    /// `u16` elements supplied.
+    actual: usize,
+  },
+
+  /// RGBA buffer attached via [`MixedSinker::with_rgba`] /
+  /// [`MixedSinker::set_rgba`] is shorter than `width × height × 4`.
+  /// The fourth byte per pixel is alpha — opaque (`0xFF`) by default
+  /// when the source has no alpha plane.
+  #[error("MixedSinker rgba buffer too short: expected >= {expected} bytes, got {actual}")]
+  RgbaBufferTooShort {
+    /// Minimum bytes required (`width × height × 4`).
+    expected: usize,
+    /// Bytes supplied.
+    actual: usize,
+  },
+
+  /// `u16` RGBA buffer attached via `with_rgba_u16` / `set_rgba_u16`
+  /// (per-format impl, not yet shipped on any sink) is shorter than
+  /// `width × height × 4` `u16` elements. Only high‑bit‑depth source
+  /// impls write into this buffer; the fourth `u16` per pixel is
+  /// alpha — opaque (`(1 << BITS) - 1`) by default when the source
+  /// has no alpha plane.
+  #[error("MixedSinker rgba_u16 buffer too short: expected >= {expected} elements, got {actual}")]
+  RgbaU16BufferTooShort {
+    /// Minimum `u16` elements required (`width × height × 4`).
     expected: usize,
     /// `u16` elements supplied.
     actual: usize,
@@ -473,6 +500,8 @@ pub enum RowSlice {
 pub struct MixedSinker<'a, F: SourceFormat> {
   rgb: Option<&'a mut [u8]>,
   rgb_u16: Option<&'a mut [u16]>,
+  rgba: Option<&'a mut [u8]>,
+  rgba_u16: Option<&'a mut [u16]>,
   luma: Option<&'a mut [u8]>,
   hsv: Option<HsvBuffers<'a>>,
   width: usize,
@@ -818,6 +847,8 @@ impl<F: SourceFormat> MixedSinker<'_, F> {
     Self {
       rgb: None,
       rgb_u16: None,
+      rgba: None,
+      rgba_u16: None,
       luma: None,
       hsv: None,
       width,
@@ -848,6 +879,24 @@ impl<F: SourceFormat> MixedSinker<'_, F> {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn produces_rgb_u16(&self) -> bool {
     self.rgb_u16.is_some()
+  }
+
+  /// Returns `true` iff the sinker will write 8‑bit RGBA. The
+  /// fourth byte per pixel is alpha — opaque (`0xFF`) by default
+  /// when the source has no alpha plane.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn produces_rgba(&self) -> bool {
+    self.rgba.is_some()
+  }
+
+  /// Returns `true` iff the sinker will write `u16` RGBA at the
+  /// source's native bit depth. The fourth `u16` per pixel is alpha
+  /// — opaque (`(1 << BITS) - 1`) by default when the source has no
+  /// alpha plane. Only high‑bit‑depth source impls honor this
+  /// buffer.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn produces_rgba_u16(&self) -> bool {
+    self.rgba_u16.is_some()
   }
 
   /// Returns `true` iff the sinker will write luma.
@@ -949,6 +998,21 @@ impl<'a, F: SourceFormat> MixedSinker<'a, F> {
   // compile error, not a silent stale‑state bug. Future high‑bit‑depth
   // markers (12‑bit, 14‑bit, P010) will add their own impl blocks.
 
+  // NOTE: `with_rgba` / `set_rgba` are **not** declared here either —
+  // same rationale as `with_rgb_u16` above. The Ship 8 RGBA path is
+  // currently wired only on [`MixedSinker<Yuv420p>`]; attaching an
+  // RGBA buffer to a sink whose `PixelSink::process` doesn't write
+  // it would silently leave the caller buffer untouched while
+  // `produces_rgba()` returned `true`. Each format that writes RGBA
+  // gets its own format‑specific impl block exposing the accessors.
+  // Future formats (NV12 / NV21 / Yuv422p / Yuv444p / P010 / etc.)
+  // add their own impl blocks as RGBA support lands.
+
+  // NOTE: `with_rgba_u16` / `set_rgba_u16` are **not** declared here
+  // for the same reason — they live on the format‑specific impl
+  // blocks for high‑bit‑depth sources that actually write
+  // native‑depth RGBA.
+
   /// Attaches a single-plane luma output buffer.
   /// Returns `Err(LumaBufferTooShort)` if `buf.len() < width × height`,
   /// or `Err(GeometryOverflow)` on 32‑bit overflow.
@@ -1023,6 +1087,55 @@ impl<'a, F: SourceFormat> MixedSinker<'a, F> {
 
 // ---- Yuv420p impl --------------------------------------------------------
 
+impl<'a> MixedSinker<'a, Yuv420p> {
+  /// Attaches a packed 32‑bit RGBA output buffer.
+  ///
+  /// Only available on sinker types whose `PixelSink` impl writes
+  /// RGBA — calling `with_rgba` on a sink that doesn't (e.g.
+  /// [`MixedSinker<Nv12>`] today) is a compile error rather than a
+  /// silent no‑op that would leave the caller's buffer stale while
+  /// [`Self::produces_rgba`] returned `true`. The compile-time
+  /// scoping is load-bearing: if a future format adds RGBA, it must
+  /// add its own impl block here, which both wires the new path and
+  /// prevents accidental cross-format leakage.
+  ///
+  /// The fourth byte per pixel is alpha. [`Yuv420p`] has no alpha
+  /// plane, so every alpha byte is filled with `0xFF` (opaque).
+  /// Future YUVA source impls will copy alpha through from the
+  /// source plane.
+  ///
+  /// Returns `Err(RgbaBufferTooShort)` if
+  /// `buf.len() < width × height × 4`, or `Err(GeometryOverflow)` on
+  /// 32‑bit targets when the product overflows.
+  ///
+  /// ```compile_fail
+  /// // Attaching RGBA to a sink that doesn't write it is rejected
+  /// // at compile time:
+  /// use colconv::{sinker::MixedSinker, yuv::Nv12};
+  /// let mut buf = vec![0u8; 16 * 8 * 4];
+  /// let _ = MixedSinker::<Nv12>::new(16, 8).with_rgba(&mut buf);
+  /// ```
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn with_rgba(mut self, buf: &'a mut [u8]) -> Result<Self, MixedSinkerError> {
+    self.set_rgba(buf)?;
+    Ok(self)
+  }
+
+  /// In-place variant of [`with_rgba`](Self::with_rgba).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn set_rgba(&mut self, buf: &'a mut [u8]) -> Result<&mut Self, MixedSinkerError> {
+    let expected = self.frame_bytes(4)?;
+    if buf.len() < expected {
+      return Err(MixedSinkerError::RgbaBufferTooShort {
+        expected,
+        actual: buf.len(),
+      });
+    }
+    self.rgba = Some(buf);
+    Ok(self)
+  }
+}
+
 impl PixelSink for MixedSinker<'_, Yuv420p> {
   type Input<'r> = Yuv420pRow<'r>;
   type Error = MixedSinkerError;
@@ -1094,6 +1207,7 @@ impl PixelSink for MixedSinker<'_, Yuv420p> {
     // collide with the `rgb` read-after-write chain below.
     let Self {
       rgb,
+      rgba,
       luma,
       hsv,
       rgb_scratch,
@@ -1111,6 +1225,33 @@ impl PixelSink for MixedSinker<'_, Yuv420p> {
     // Luma — YUV420p luma *is* the Y plane. Just copy.
     if let Some(luma) = luma.as_deref_mut() {
       luma[one_plane_start..one_plane_end].copy_from_slice(&row.y()[..w]);
+    }
+
+    // Native RGBA: independent kernel run, separate from RGB. Avoids
+    // the compose-and-expand cost — the const-generic
+    // `yuv_420_to_rgba_row` writes 4 bytes per pixel directly.
+    // Default alpha = 0xFF (opaque); future YUVA source impls will
+    // copy alpha through from the source plane.
+    if let Some(buf) = rgba.as_deref_mut() {
+      let rgba_plane_end =
+        one_plane_end
+          .checked_mul(4)
+          .ok_or(MixedSinkerError::GeometryOverflow {
+            width: w,
+            height: h,
+            channels: 4,
+          })?;
+      let rgba_plane_start = one_plane_start * 4; // ≤ rgba_plane_end.
+      yuv_420_to_rgba_row(
+        row.y(),
+        row.u_half(),
+        row.v_half(),
+        &mut buf[rgba_plane_start..rgba_plane_end],
+        w,
+        row.matrix(),
+        row.full_range(),
+        use_simd,
+      );
     }
 
     let want_rgb = rgb.is_some();
@@ -7298,6 +7439,241 @@ mod tests {
     assert!(v.iter().all(|&b| b.abs_diff(200) <= 1));
   }
 
+  // ---- RGBA (Ship 8) tests ------------------------------------------------
+  //
+  // Yuv420p is the template format for the const-generic-ALPHA
+  // refactor — proves the kernel writes 4 bytes per pixel correctly,
+  // alpha defaults to 0xFF (sources with no alpha plane), the RGB
+  // bytes match what `with_rgb` would have written, and SIMD ≡
+  // scalar bit-for-bit. Future formats inherit the pattern.
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn rgba_only_converts_gray_to_gray_with_opaque_alpha() {
+    let (yp, up, vp) = solid_yuv420p_frame(16, 8, 128, 128, 128);
+    let src = Yuv420pFrame::new(&yp, &up, &vp, 16, 8, 16, 8, 8);
+
+    let mut rgba = std::vec![0u8; 16 * 8 * 4];
+    let mut sink = MixedSinker::<Yuv420p>::new(16, 8)
+      .with_rgba(&mut rgba)
+      .unwrap();
+    yuv420p_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+    for px in rgba.chunks(4) {
+      assert!(px[0].abs_diff(128) <= 1, "R");
+      assert_eq!(px[0], px[1], "RGB monochromatic");
+      assert_eq!(px[1], px[2], "RGB monochromatic");
+      assert_eq!(px[3], 0xFF, "alpha must default to opaque");
+    }
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn rgba_alpha_is_opaque_for_arbitrary_color() {
+    // Non-gray content. The RGB three bytes will vary by pixel; alpha
+    // must stay 0xFF because Yuv420p has no alpha plane.
+    let (yp, up, vp) = solid_yuv420p_frame(16, 8, 180, 60, 200);
+    let src = Yuv420pFrame::new(&yp, &up, &vp, 16, 8, 16, 8, 8);
+
+    let mut rgba = std::vec![0u8; 16 * 8 * 4];
+    let mut sink = MixedSinker::<Yuv420p>::new(16, 8)
+      .with_rgba(&mut rgba)
+      .unwrap();
+    yuv420p_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+    for (i, px) in rgba.chunks(4).enumerate() {
+      assert_eq!(px[3], 0xFF, "alpha must be opaque (px {i})");
+    }
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn with_rgb_and_with_rgba_produce_byte_identical_rgb_bytes() {
+    // Cross-format invariant: alpha is the *only* difference between
+    // the two output buffers. RGBA bytes 0..3 of each pixel must
+    // equal the corresponding RGB pixel exactly.
+    let w = 32usize;
+    let h = 16usize;
+    let (yp, up, vp) = solid_yuv420p_frame(w as u32, h as u32, 180, 60, 200);
+    let src = Yuv420pFrame::new(
+      &yp,
+      &up,
+      &vp,
+      w as u32,
+      h as u32,
+      w as u32,
+      (w / 2) as u32,
+      (w / 2) as u32,
+    );
+
+    let mut rgb = std::vec![0u8; w * h * 3];
+    let mut rgba = std::vec![0u8; w * h * 4];
+    let mut sink = MixedSinker::<Yuv420p>::new(w, h)
+      .with_rgb(&mut rgb)
+      .unwrap()
+      .with_rgba(&mut rgba)
+      .unwrap();
+    yuv420p_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+    for i in 0..(w * h) {
+      assert_eq!(rgba[i * 4], rgb[i * 3], "R differs at pixel {i}");
+      assert_eq!(rgba[i * 4 + 1], rgb[i * 3 + 1], "G differs at pixel {i}");
+      assert_eq!(rgba[i * 4 + 2], rgb[i * 3 + 2], "B differs at pixel {i}");
+      assert_eq!(rgba[i * 4 + 3], 0xFF, "A not opaque at pixel {i}");
+    }
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn rgba_with_simd_false_matches_with_simd_true() {
+    // SIMD ≡ scalar parity for the RGBA path. Widths chosen to force
+    // both the SIMD main loop and the scalar tail across every
+    // backend block size (16 / 32 / 64). 4:2:0 requires even width,
+    // so the tail is exercised via `block + 2/4/6` rather than odd
+    // widths.
+    for &w in &[16usize, 18, 32, 34, 64, 66, 128, 130] {
+      let h = 8usize;
+      let (yp, up, vp) = solid_yuv420p_frame(w as u32, h as u32, 180, 60, 200);
+      let src = Yuv420pFrame::new(
+        &yp,
+        &up,
+        &vp,
+        w as u32,
+        h as u32,
+        w as u32,
+        (w / 2) as u32,
+        (w / 2) as u32,
+      );
+
+      let mut rgba_simd = std::vec![0u8; w * h * 4];
+      let mut rgba_scalar = std::vec![0u8; w * h * 4];
+
+      let mut sink_simd = MixedSinker::<Yuv420p>::new(w, h)
+        .with_rgba(&mut rgba_simd)
+        .unwrap();
+      yuv420p_to(&src, true, ColorMatrix::Bt601, &mut sink_simd).unwrap();
+
+      let mut sink_scalar = MixedSinker::<Yuv420p>::new(w, h)
+        .with_rgba(&mut rgba_scalar)
+        .unwrap();
+      sink_scalar.set_simd(false);
+      yuv420p_to(&src, true, ColorMatrix::Bt601, &mut sink_scalar).unwrap();
+
+      assert_eq!(
+        rgba_simd, rgba_scalar,
+        "SIMD vs scalar diverged at width {w}"
+      );
+    }
+  }
+
+  #[test]
+  fn rgba_buffer_too_short_returns_err() {
+    let mut rgba_short = std::vec![0u8; 16 * 8 * 4 - 1];
+    let result = MixedSinker::<Yuv420p>::new(16, 8).with_rgba(&mut rgba_short);
+    let Err(err) = result else {
+      panic!("expected RgbaBufferTooShort error");
+    };
+    assert!(matches!(
+      err,
+      MixedSinkerError::RgbaBufferTooShort {
+        expected: 512,
+        actual: 511,
+      }
+    ));
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn yuv_420_to_rgba_simd_matches_scalar_with_random_yuv() {
+    // The earlier `rgba_with_simd_false_matches_with_simd_true` test
+    // uses solid Y/U/V, so every pixel collapses to the same RGBA
+    // quad and the new RGBA shuffle masks could permute / duplicate
+    // lanes within a SIMD block undetected. This test uses
+    // **pseudo-random per-pixel Y/U/V** so a bad shuffle in any of
+    // `write_rgba_16` (SSE4.1 / AVX2 / AVX-512 / wasm), `vst4q_u8`
+    // (NEON), or the scalar-tail handoff produces a measurable
+    // diff against the scalar reference. Width 1922 forces both
+    // the SIMD main loop AND a scalar tail across every backend
+    // block size (16 / 32 / 64). All four `ColorMatrix` variants
+    // exercise different `(r_u, r_v, g_u, g_v, b_u, b_v)`
+    // coefficient sets, and both ranges exercise the `y_off` /
+    // `y_scale` / `c_scale` parameter shape.
+    let w = 1922usize;
+    let h = 4usize;
+    let mut yp = std::vec![0u8; w * h];
+    let mut up = std::vec![0u8; (w / 2) * (h / 2)];
+    let mut vp = std::vec![0u8; (w / 2) * (h / 2)];
+    pseudo_random_u8(&mut yp, 0xC001_C0DE);
+    pseudo_random_u8(&mut up, 0xCAFE_F00D);
+    pseudo_random_u8(&mut vp, 0xDEAD_BEEF);
+    let src = Yuv420pFrame::new(
+      &yp,
+      &up,
+      &vp,
+      w as u32,
+      h as u32,
+      w as u32,
+      (w / 2) as u32,
+      (w / 2) as u32,
+    );
+
+    for &matrix in &[
+      ColorMatrix::Bt601,
+      ColorMatrix::Bt709,
+      ColorMatrix::Bt2020Ncl,
+      ColorMatrix::YCgCo,
+    ] {
+      for &full_range in &[true, false] {
+        let mut rgba_simd = std::vec![0u8; w * h * 4];
+        let mut rgba_scalar = std::vec![0u8; w * h * 4];
+
+        let mut s_simd = MixedSinker::<Yuv420p>::new(w, h)
+          .with_rgba(&mut rgba_simd)
+          .unwrap();
+        yuv420p_to(&src, full_range, matrix, &mut s_simd).unwrap();
+
+        let mut s_scalar = MixedSinker::<Yuv420p>::new(w, h)
+          .with_rgba(&mut rgba_scalar)
+          .unwrap();
+        s_scalar.set_simd(false);
+        yuv420p_to(&src, full_range, matrix, &mut s_scalar).unwrap();
+
+        // Locate the first divergence to make backend-bug
+        // diagnosis tractable instead of dumping ~30 KB of bytes.
+        if rgba_simd != rgba_scalar {
+          let mismatch = rgba_simd
+            .iter()
+            .zip(rgba_scalar.iter())
+            .position(|(a, b)| a != b)
+            .unwrap();
+          let pixel = mismatch / 4;
+          let channel = ["R", "G", "B", "A"][mismatch % 4];
+          panic!(
+            "RGBA SIMD ≠ scalar at byte {mismatch} (px {pixel} {channel}) \
+             for matrix={matrix:?} full_range={full_range}: \
+             simd={} scalar={}",
+            rgba_simd[mismatch], rgba_scalar[mismatch]
+          );
+        }
+      }
+    }
+  }
+
   #[test]
   #[cfg_attr(
     miri,
@@ -10499,6 +10875,14 @@ mod tests {
     for b in buf {
       state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
       *b = ((state >> 8) as u16) & mask;
+    }
+  }
+
+  fn pseudo_random_u8(buf: &mut [u8], seed: u32) {
+    let mut state = seed;
+    for b in buf {
+      state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+      *b = (state >> 16) as u8;
     }
   }
 

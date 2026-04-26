@@ -40,7 +40,9 @@ use core::arch::x86_64::*;
 use crate::{
   ColorMatrix,
   row::{
-    arch::x86_common::{rgb_to_hsv_16_pixels, swap_rb_16_pixels, write_rgb_16, write_rgb_u16_8},
+    arch::x86_common::{
+      rgb_to_hsv_16_pixels, swap_rb_16_pixels, write_rgb_16, write_rgb_u16_8, write_rgba_16,
+    },
     scalar,
   },
 };
@@ -80,11 +82,71 @@ pub(crate) unsafe fn yuv_420_to_rgb_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
+  // SAFETY: caller-checked SSE4.1 availability + slice bounds — see
+  // [`yuv_420_to_rgb_or_rgba_row`] safety contract.
+  unsafe {
+    yuv_420_to_rgb_or_rgba_row::<false>(y, u_half, v_half, rgb_out, width, matrix, full_range);
+  }
+}
+
+/// SSE4.1 YUV 4:2:0 → packed **RGBA** (8-bit). Same contract as
+/// [`yuv_420_to_rgb_row`] but writes 4 bytes per pixel (R, G, B,
+/// `0xFF`).
+///
+/// # Safety
+///
+/// 1. SSE4.1 must be available on the current CPU.
+/// 2. `width & 1 == 0`.
+/// 3. `y.len() >= width`, `u_half.len() >= width / 2`,
+///    `v_half.len() >= width / 2`, `rgba_out.len() >= 4 * width`.
+#[inline]
+#[target_feature(enable = "sse4.1")]
+pub(crate) unsafe fn yuv_420_to_rgba_row(
+  y: &[u8],
+  u_half: &[u8],
+  v_half: &[u8],
+  rgba_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  // SAFETY: caller-checked SSE4.1 availability + slice bounds — see
+  // [`yuv_420_to_rgb_or_rgba_row`] safety contract.
+  unsafe {
+    yuv_420_to_rgb_or_rgba_row::<true>(y, u_half, v_half, rgba_out, width, matrix, full_range);
+  }
+}
+
+/// Shared SSE4.1 kernel for [`yuv_420_to_rgb_row`] (`ALPHA = false`,
+/// [`write_rgb_16`]) and [`yuv_420_to_rgba_row`] (`ALPHA = true`,
+/// [`write_rgba_16`] with constant `0xFF` alpha). Math is
+/// byte-identical to `scalar::yuv_420_to_rgb_or_rgba_row::<ALPHA>`;
+/// only the per-block store helper differs. `const` generic
+/// monomorphizes per call site, so the `if ALPHA` branches are
+/// eliminated.
+///
+/// # Safety
+///
+/// Same as [`yuv_420_to_rgb_row`] / [`yuv_420_to_rgba_row`]; the
+/// `out` slice must be `>= width * (if ALPHA { 4 } else { 3 })`
+/// bytes long.
+#[inline]
+#[target_feature(enable = "sse4.1")]
+pub(crate) unsafe fn yuv_420_to_rgb_or_rgba_row<const ALPHA: bool>(
+  y: &[u8],
+  u_half: &[u8],
+  v_half: &[u8],
+  out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
   debug_assert_eq!(width & 1, 0, "YUV 4:2:0 requires even width");
   debug_assert!(y.len() >= width);
   debug_assert!(u_half.len() >= width / 2);
   debug_assert!(v_half.len() >= width / 2);
-  debug_assert!(rgb_out.len() >= width * 3);
+  let bpp: usize = if ALPHA { 4 } else { 3 };
+  debug_assert!(out.len() >= width * bpp);
 
   let coeffs = scalar::Coefficients::for_matrix(matrix);
   let (y_off, y_scale, c_scale) = scalar::range_params(full_range);
@@ -106,6 +168,9 @@ pub(crate) unsafe fn yuv_420_to_rgb_row(
     let cgv = _mm_set1_epi32(coeffs.g_v());
     let cbu = _mm_set1_epi32(coeffs.b_u());
     let cbv = _mm_set1_epi32(coeffs.b_v());
+    // Constant opaque-alpha vector for the RGBA path; DCE'd when
+    // ALPHA = false.
+    let alpha_u8 = _mm_set1_epi8(-1); // 0xFF as i8
 
     let mut x = 0usize;
     while x + 16 <= width {
@@ -166,19 +231,24 @@ pub(crate) unsafe fn yuv_420_to_rgb_row(
       let g_u8 = _mm_packus_epi16(g_lo, g_hi);
       let r_u8 = _mm_packus_epi16(r_lo, r_hi);
 
-      // 3‑way interleave → packed RGB (48 bytes).
-      write_rgb_16(r_u8, g_u8, b_u8, rgb_out.as_mut_ptr().add(x * 3));
+      if ALPHA {
+        // 4‑way interleave → packed RGBA (64 bytes).
+        write_rgba_16(r_u8, g_u8, b_u8, alpha_u8, out.as_mut_ptr().add(x * 4));
+      } else {
+        // 3‑way interleave → packed RGB (48 bytes).
+        write_rgb_16(r_u8, g_u8, b_u8, out.as_mut_ptr().add(x * 3));
+      }
 
       x += 16;
     }
 
     // Scalar tail for the 0..14 leftover pixels.
     if x < width {
-      scalar::yuv_420_to_rgb_row(
+      scalar::yuv_420_to_rgb_or_rgba_row::<ALPHA>(
         &y[x..width],
         &u_half[x / 2..width / 2],
         &v_half[x / 2..width / 2],
-        &mut rgb_out[x * 3..width * 3],
+        &mut out[x * bpp..width * bpp],
         width - x,
         matrix,
         full_range,
@@ -3069,6 +3139,93 @@ mod tests {
     // Widths that leave a non‑trivial scalar tail (non‑multiple of 16).
     for w in [18usize, 30, 34, 1922] {
       check_equivalence(w, ColorMatrix::Bt601, false);
+    }
+  }
+
+  // ---- yuv_420_to_rgba_row equivalence --------------------------------
+  //
+  // Direct backend test for the new RGBA path: bypasses the public
+  // dispatcher so the SSE4.1 `write_rgba_16` shuffle masks are
+  // exercised regardless of what tier the dispatcher would pick on
+  // the current runner. Catches lane-order, shuffle-mask, or alpha
+  // splat corruption that an AVX2- or AVX-512-routed test would
+  // miss.
+
+  fn check_rgba_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+    let y: std::vec::Vec<u8> = (0..width).map(|i| ((i * 37 + 11) & 0xFF) as u8).collect();
+    let u: std::vec::Vec<u8> = (0..width / 2)
+      .map(|i| ((i * 53 + 23) & 0xFF) as u8)
+      .collect();
+    let v: std::vec::Vec<u8> = (0..width / 2)
+      .map(|i| ((i * 71 + 91) & 0xFF) as u8)
+      .collect();
+    let mut rgba_scalar = std::vec![0u8; width * 4];
+    let mut rgba_sse41 = std::vec![0u8; width * 4];
+
+    scalar::yuv_420_to_rgba_row(&y, &u, &v, &mut rgba_scalar, width, matrix, full_range);
+    unsafe {
+      yuv_420_to_rgba_row(&y, &u, &v, &mut rgba_sse41, width, matrix, full_range);
+    }
+
+    if rgba_scalar != rgba_sse41 {
+      let first_diff = rgba_scalar
+        .iter()
+        .zip(rgba_sse41.iter())
+        .position(|(a, b)| a != b)
+        .unwrap();
+      let pixel = first_diff / 4;
+      let channel = ["R", "G", "B", "A"][first_diff % 4];
+      panic!(
+        "SSE4.1 RGBA diverges from scalar at byte {first_diff} (px {pixel} {channel}, width={width}, matrix={matrix:?}, full_range={full_range}): scalar={} sse41={}",
+        rgba_scalar[first_diff], rgba_sse41[first_diff]
+      );
+    }
+  }
+
+  #[test]
+  fn sse41_rgba_matches_scalar_all_matrices_16() {
+    if !std::arch::is_x86_feature_detected!("sse4.1") {
+      return;
+    }
+    for m in [
+      ColorMatrix::Bt601,
+      ColorMatrix::Bt709,
+      ColorMatrix::Bt2020Ncl,
+      ColorMatrix::Smpte240m,
+      ColorMatrix::Fcc,
+      ColorMatrix::YCgCo,
+    ] {
+      for full in [true, false] {
+        check_rgba_equivalence(16, m, full);
+      }
+    }
+  }
+
+  #[test]
+  fn sse41_rgba_matches_scalar_width_32() {
+    if !std::arch::is_x86_feature_detected!("sse4.1") {
+      return;
+    }
+    check_rgba_equivalence(32, ColorMatrix::Bt601, true);
+    check_rgba_equivalence(32, ColorMatrix::Bt709, false);
+    check_rgba_equivalence(32, ColorMatrix::YCgCo, true);
+  }
+
+  #[test]
+  fn sse41_rgba_matches_scalar_width_1920() {
+    if !std::arch::is_x86_feature_detected!("sse4.1") {
+      return;
+    }
+    check_rgba_equivalence(1920, ColorMatrix::Bt709, false);
+  }
+
+  #[test]
+  fn sse41_rgba_matches_scalar_odd_tail_widths() {
+    if !std::arch::is_x86_feature_detected!("sse4.1") {
+      return;
+    }
+    for w in [18usize, 30, 34, 1922] {
+      check_rgba_equivalence(w, ColorMatrix::Bt601, false);
     }
   }
 

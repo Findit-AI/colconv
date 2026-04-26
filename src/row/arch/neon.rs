@@ -70,11 +70,70 @@ pub(crate) unsafe fn yuv_420_to_rgb_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
+  // SAFETY: caller-checked NEON availability + slice bounds — see
+  // [`yuv_420_to_rgb_or_rgba_row`] safety contract.
+  unsafe {
+    yuv_420_to_rgb_or_rgba_row::<false>(y, u_half, v_half, rgb_out, width, matrix, full_range);
+  }
+}
+
+/// NEON YUV 4:2:0 → packed **RGBA** (8-bit). Same contract as
+/// [`yuv_420_to_rgb_row`] but writes 4 bytes per pixel (R, G, B,
+/// `0xFF`).
+///
+/// # Safety
+///
+/// 1. NEON must be available on the current CPU.
+/// 2. `width & 1 == 0`.
+/// 3. `y.len() >= width`, `u_half.len() >= width / 2`,
+///    `v_half.len() >= width / 2`, `rgba_out.len() >= 4 * width`.
+#[inline]
+#[target_feature(enable = "neon")]
+pub(crate) unsafe fn yuv_420_to_rgba_row(
+  y: &[u8],
+  u_half: &[u8],
+  v_half: &[u8],
+  rgba_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  // SAFETY: caller-checked NEON availability + slice bounds — see
+  // [`yuv_420_to_rgb_or_rgba_row`] safety contract.
+  unsafe {
+    yuv_420_to_rgb_or_rgba_row::<true>(y, u_half, v_half, rgba_out, width, matrix, full_range);
+  }
+}
+
+/// Shared NEON kernel for [`yuv_420_to_rgb_row`] (`ALPHA = false`,
+/// `vst3q_u8`) and [`yuv_420_to_rgba_row`] (`ALPHA = true`,
+/// `vst4q_u8` with constant `0xFF` alpha). Math is byte-identical to
+/// `scalar::yuv_420_to_rgb_or_rgba_row::<ALPHA>`; only the per-block
+/// store intrinsic differs. `const` generic monomorphizes per call
+/// site, so the `if ALPHA` branches are eliminated.
+///
+/// # Safety
+///
+/// Same as [`yuv_420_to_rgb_row`] / [`yuv_420_to_rgba_row`]; the
+/// `out` slice must be `>= width * (if ALPHA { 4 } else { 3 })`
+/// bytes long.
+#[inline]
+#[target_feature(enable = "neon")]
+pub(crate) unsafe fn yuv_420_to_rgb_or_rgba_row<const ALPHA: bool>(
+  y: &[u8],
+  u_half: &[u8],
+  v_half: &[u8],
+  out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
   debug_assert_eq!(width & 1, 0, "YUV 4:2:0 requires even width");
   debug_assert!(y.len() >= width);
   debug_assert!(u_half.len() >= width / 2);
   debug_assert!(v_half.len() >= width / 2);
-  debug_assert!(rgb_out.len() >= width * 3);
+  let bpp: usize = if ALPHA { 4 } else { 3 };
+  debug_assert!(out.len() >= width * bpp);
 
   let coeffs = scalar::Coefficients::for_matrix(matrix);
   let (y_off, y_scale, c_scale) = scalar::range_params(full_range);
@@ -97,6 +156,10 @@ pub(crate) unsafe fn yuv_420_to_rgb_row(
     let cgv = vdupq_n_s32(coeffs.g_v());
     let cbu = vdupq_n_s32(coeffs.b_u());
     let cbv = vdupq_n_s32(coeffs.b_v());
+    // Constant opaque-alpha vector for the RGBA path. Materializing
+    // it outside the loop costs one `vdupq_n_u8` regardless of
+    // ALPHA; the compiler DCE's it when ALPHA = false.
+    let alpha_u8 = vdupq_n_u8(0xFF);
 
     let mut x = 0usize;
     while x + 16 <= width {
@@ -158,9 +221,16 @@ pub(crate) unsafe fn yuv_420_to_rgb_row(
         vqmovun_s16(vqaddq_s16(y_scaled_hi, r_dup_hi)),
       );
 
-      // vst3q_u8 writes 48 bytes as interleaved R, G, B triples.
-      let rgb = uint8x16x3_t(r_u8, g_u8, b_u8);
-      vst3q_u8(rgb_out.as_mut_ptr().add(x * 3), rgb);
+      if ALPHA {
+        // vst4q_u8 writes 64 bytes as interleaved R, G, B, A
+        // quadruplets — native AArch64 4-channel store.
+        let rgba = uint8x16x4_t(r_u8, g_u8, b_u8, alpha_u8);
+        vst4q_u8(out.as_mut_ptr().add(x * 4), rgba);
+      } else {
+        // vst3q_u8 writes 48 bytes as interleaved R, G, B triples.
+        let rgb = uint8x16x3_t(r_u8, g_u8, b_u8);
+        vst3q_u8(out.as_mut_ptr().add(x * 3), rgb);
+      }
 
       x += 16;
     }
@@ -168,11 +238,11 @@ pub(crate) unsafe fn yuv_420_to_rgb_row(
     // Scalar tail for the 0..14 leftover pixels (always even, 4:2:0
     // requires even width so x/2 and width/2 are well‑defined).
     if x < width {
-      scalar::yuv_420_to_rgb_row(
+      scalar::yuv_420_to_rgb_or_rgba_row::<ALPHA>(
         &y[x..width],
         &u_half[x / 2..width / 2],
         &v_half[x / 2..width / 2],
-        &mut rgb_out[x * 3..width * 3],
+        &mut out[x * bpp..width * bpp],
         width - x,
         matrix,
         full_range,
@@ -3343,6 +3413,84 @@ mod tests {
     // Widths that leave a non‑trivial scalar tail (non‑multiple of 16).
     for w in [18usize, 30, 34, 1922] {
       check_equivalence(w, ColorMatrix::Bt601, false);
+    }
+  }
+
+  // ---- yuv_420_to_rgba_row equivalence --------------------------------
+  //
+  // Direct backend test for the new RGBA path: bypasses the public
+  // dispatcher so the NEON `vst4q_u8` write is exercised regardless
+  // of what tier the dispatcher would pick on the current runner.
+  // Catches lane-order or alpha-splat corruption in `vst4q_u8` that
+  // a dispatcher-routed test on a different host would miss.
+
+  fn check_rgba_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+    let y: std::vec::Vec<u8> = (0..width).map(|i| ((i * 37 + 11) & 0xFF) as u8).collect();
+    let u: std::vec::Vec<u8> = (0..width / 2)
+      .map(|i| ((i * 53 + 23) & 0xFF) as u8)
+      .collect();
+    let v: std::vec::Vec<u8> = (0..width / 2)
+      .map(|i| ((i * 71 + 91) & 0xFF) as u8)
+      .collect();
+    let mut rgba_scalar = std::vec![0u8; width * 4];
+    let mut rgba_neon = std::vec![0u8; width * 4];
+
+    scalar::yuv_420_to_rgba_row(&y, &u, &v, &mut rgba_scalar, width, matrix, full_range);
+    unsafe {
+      yuv_420_to_rgba_row(&y, &u, &v, &mut rgba_neon, width, matrix, full_range);
+    }
+
+    if rgba_scalar != rgba_neon {
+      let first_diff = rgba_scalar
+        .iter()
+        .zip(rgba_neon.iter())
+        .position(|(a, b)| a != b)
+        .unwrap();
+      let pixel = first_diff / 4;
+      let channel = ["R", "G", "B", "A"][first_diff % 4];
+      panic!(
+        "NEON RGBA diverges from scalar at byte {first_diff} (px {pixel} {channel}, width={width}, matrix={matrix:?}, full_range={full_range}): scalar={} neon={}",
+        rgba_scalar[first_diff], rgba_neon[first_diff]
+      );
+    }
+  }
+
+  #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
+  fn neon_rgba_matches_scalar_all_matrices_16() {
+    for m in [
+      ColorMatrix::Bt601,
+      ColorMatrix::Bt709,
+      ColorMatrix::Bt2020Ncl,
+      ColorMatrix::Smpte240m,
+      ColorMatrix::Fcc,
+      ColorMatrix::YCgCo,
+    ] {
+      for full in [true, false] {
+        check_rgba_equivalence(16, m, full);
+      }
+    }
+  }
+
+  #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
+  fn neon_rgba_matches_scalar_width_32() {
+    check_rgba_equivalence(32, ColorMatrix::Bt601, true);
+    check_rgba_equivalence(32, ColorMatrix::Bt709, false);
+    check_rgba_equivalence(32, ColorMatrix::YCgCo, true);
+  }
+
+  #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
+  fn neon_rgba_matches_scalar_width_1920() {
+    check_rgba_equivalence(1920, ColorMatrix::Bt709, false);
+  }
+
+  #[test]
+  #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
+  fn neon_rgba_matches_scalar_odd_tail_widths() {
+    for w in [18usize, 30, 34, 1922] {
+      check_rgba_equivalence(w, ColorMatrix::Bt601, false);
     }
   }
 

@@ -79,6 +79,92 @@ pub(super) unsafe fn write_rgb_16(r: __m128i, g: __m128i, b: __m128i, ptr: *mut 
   }
 }
 
+/// Writes 16 pixels of packed RGBA (64 bytes) from four u8x16 channel
+/// vectors. Mirrors [`write_rgb_16`] for the 4-channel output path.
+///
+/// The 4-byte stride aligns cleanly with the 16-byte register width:
+/// each output block holds exactly 4 RGBA quads (16 bytes), with R,
+/// G, B, A interleaved at positions `(0, 1, 2, 3)`, `(4, 5, 6, 7)`,
+/// etc. The shuffle masks are simpler than the 3-channel pattern
+/// because a single source byte goes to a single output byte (no
+/// channel "split across blocks" boundary).
+///
+/// Conceptually:
+/// - Block 0 (bytes 0..16): R0,G0,B0,A0, R1,G1,B1,A1, R2,G2,B2,A2,
+///   R3,G3,B3,A3
+/// - Block 1 (bytes 16..32): pixels 4..7
+/// - Block 2 (bytes 32..48): pixels 8..11
+/// - Block 3 (bytes 48..64): pixels 12..15
+///
+/// Each block is the OR of four `_mm_shuffle_epi8` gathers — one per
+/// channel — with `0x80` (`-1` as i8) zeroing lanes that another
+/// channel's shuffle will fill.
+///
+/// # Safety
+///
+/// - `ptr` must point to at least 64 writable bytes.
+/// - The calling function must have SSSE3 available (via
+///   `#[target_feature(enable = "ssse3")]` or a superset).
+#[inline(always)]
+pub(super) unsafe fn write_rgba_16(r: __m128i, g: __m128i, b: __m128i, a: __m128i, ptr: *mut u8) {
+  unsafe {
+    // Block 0 (bytes 0..16): pixels 0..3, source bytes 0..3 from
+    // each channel placed at output positions
+    // (0, 1, 2, 3) for pixel 0, (4, 5, 6, 7) for pixel 1, etc.
+    let r0 = _mm_setr_epi8(0, -1, -1, -1, 1, -1, -1, -1, 2, -1, -1, -1, 3, -1, -1, -1);
+    let g0 = _mm_setr_epi8(-1, 0, -1, -1, -1, 1, -1, -1, -1, 2, -1, -1, -1, 3, -1, -1);
+    let b0 = _mm_setr_epi8(-1, -1, 0, -1, -1, -1, 1, -1, -1, -1, 2, -1, -1, -1, 3, -1);
+    let a0 = _mm_setr_epi8(-1, -1, -1, 0, -1, -1, -1, 1, -1, -1, -1, 2, -1, -1, -1, 3);
+    let out0 = _mm_or_si128(
+      _mm_or_si128(_mm_shuffle_epi8(r, r0), _mm_shuffle_epi8(g, g0)),
+      _mm_or_si128(_mm_shuffle_epi8(b, b0), _mm_shuffle_epi8(a, a0)),
+    );
+
+    // Block 1 (bytes 16..32): pixels 4..7, source bytes 4..7.
+    let r1 = _mm_setr_epi8(4, -1, -1, -1, 5, -1, -1, -1, 6, -1, -1, -1, 7, -1, -1, -1);
+    let g1 = _mm_setr_epi8(-1, 4, -1, -1, -1, 5, -1, -1, -1, 6, -1, -1, -1, 7, -1, -1);
+    let b1 = _mm_setr_epi8(-1, -1, 4, -1, -1, -1, 5, -1, -1, -1, 6, -1, -1, -1, 7, -1);
+    let a1 = _mm_setr_epi8(-1, -1, -1, 4, -1, -1, -1, 5, -1, -1, -1, 6, -1, -1, -1, 7);
+    let out1 = _mm_or_si128(
+      _mm_or_si128(_mm_shuffle_epi8(r, r1), _mm_shuffle_epi8(g, g1)),
+      _mm_or_si128(_mm_shuffle_epi8(b, b1), _mm_shuffle_epi8(a, a1)),
+    );
+
+    // Block 2 (bytes 32..48): pixels 8..11, source bytes 8..11.
+    let r2 = _mm_setr_epi8(8, -1, -1, -1, 9, -1, -1, -1, 10, -1, -1, -1, 11, -1, -1, -1);
+    let g2 = _mm_setr_epi8(-1, 8, -1, -1, -1, 9, -1, -1, -1, 10, -1, -1, -1, 11, -1, -1);
+    let b2 = _mm_setr_epi8(-1, -1, 8, -1, -1, -1, 9, -1, -1, -1, 10, -1, -1, -1, 11, -1);
+    let a2 = _mm_setr_epi8(-1, -1, -1, 8, -1, -1, -1, 9, -1, -1, -1, 10, -1, -1, -1, 11);
+    let out2 = _mm_or_si128(
+      _mm_or_si128(_mm_shuffle_epi8(r, r2), _mm_shuffle_epi8(g, g2)),
+      _mm_or_si128(_mm_shuffle_epi8(b, b2), _mm_shuffle_epi8(a, a2)),
+    );
+
+    // Block 3 (bytes 48..64): pixels 12..15, source bytes 12..15.
+    let r3 = _mm_setr_epi8(
+      12, -1, -1, -1, 13, -1, -1, -1, 14, -1, -1, -1, 15, -1, -1, -1,
+    );
+    let g3 = _mm_setr_epi8(
+      -1, 12, -1, -1, -1, 13, -1, -1, -1, 14, -1, -1, -1, 15, -1, -1,
+    );
+    let b3 = _mm_setr_epi8(
+      -1, -1, 12, -1, -1, -1, 13, -1, -1, -1, 14, -1, -1, -1, 15, -1,
+    );
+    let a3 = _mm_setr_epi8(
+      -1, -1, -1, 12, -1, -1, -1, 13, -1, -1, -1, 14, -1, -1, -1, 15,
+    );
+    let out3 = _mm_or_si128(
+      _mm_or_si128(_mm_shuffle_epi8(r, r3), _mm_shuffle_epi8(g, g3)),
+      _mm_or_si128(_mm_shuffle_epi8(b, b3), _mm_shuffle_epi8(a, a3)),
+    );
+
+    _mm_storeu_si128(ptr.cast(), out0);
+    _mm_storeu_si128(ptr.add(16).cast(), out1);
+    _mm_storeu_si128(ptr.add(32).cast(), out2);
+    _mm_storeu_si128(ptr.add(48).cast(), out3);
+  }
+}
+
 /// Writes 8 pixels of packed **`u16`** RGB (48 bytes = 24 `u16`)
 /// from three `u16x8` channel vectors. Drives the SSE4.1 / AVX2 /
 /// AVX‑512 high‑bit‑depth kernels' u16 output path.

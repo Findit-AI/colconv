@@ -36,11 +36,56 @@ pub(crate) fn yuv_420_to_rgb_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
+  yuv_420_to_rgb_or_rgba_row::<false>(y, u_half, v_half, rgb_out, width, matrix, full_range);
+}
+
+/// Same as [`yuv_420_to_rgb_row`] but writes packed `R, G, B, A`
+/// quadruplets, with `A = 0xFF` (opaque) for every pixel. The first
+/// three bytes per pixel are byte-identical to what
+/// [`yuv_420_to_rgb_row`] would write — only the per-pixel stride
+/// (4 vs 3) and the alpha byte differ. `rgba_out.len() >= 4 * width`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn yuv_420_to_rgba_row(
+  y: &[u8],
+  u_half: &[u8],
+  v_half: &[u8],
+  rgba_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  yuv_420_to_rgb_or_rgba_row::<true>(y, u_half, v_half, rgba_out, width, matrix, full_range);
+}
+
+/// Shared scalar kernel for [`yuv_420_to_rgb_row`] (`ALPHA = false`,
+/// 3 bytes / pixel) and [`yuv_420_to_rgba_row`] (`ALPHA = true`,
+/// 4 bytes / pixel — 4th is opaque `0xFF`). The math is identical;
+/// only the per-pixel store differs. `const` generic drives
+/// compile-time monomorphization — each public wrapper is inlined
+/// with the branch eliminated.
+///
+/// # Panics (debug builds)
+///
+/// - `width` must be even.
+/// - `y.len() >= width`, `u_half.len() >= width / 2`,
+///   `v_half.len() >= width / 2`,
+///   `out.len() >= width * (if ALPHA { 4 } else { 3 })`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn yuv_420_to_rgb_or_rgba_row<const ALPHA: bool>(
+  y: &[u8],
+  u_half: &[u8],
+  v_half: &[u8],
+  out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
   debug_assert_eq!(width & 1, 0, "YUV 4:2:0 requires even width");
   debug_assert!(y.len() >= width, "y row too short");
   debug_assert!(u_half.len() >= width / 2, "u_half row too short");
   debug_assert!(v_half.len() >= width / 2, "v_half row too short");
-  debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
+  let bpp: usize = if ALPHA { 4 } else { 3 };
+  debug_assert!(out.len() >= width * bpp, "out row too short for {bpp}bpp");
 
   let coeffs = Coefficients::for_matrix(matrix);
   let (y_off, y_scale, c_scale) = range_params(full_range);
@@ -67,15 +112,27 @@ pub(crate) fn yuv_420_to_rgb_row(
 
     // Pixel x.
     let y0 = ((y[x] as i32 - y_off) * y_scale + RND) >> 15;
-    rgb_out[x * 3] = clamp_u8(y0 + r_chroma);
-    rgb_out[x * 3 + 1] = clamp_u8(y0 + g_chroma);
-    rgb_out[x * 3 + 2] = clamp_u8(y0 + b_chroma);
+    let r0 = clamp_u8(y0 + r_chroma);
+    let g0 = clamp_u8(y0 + g_chroma);
+    let b0 = clamp_u8(y0 + b_chroma);
+    out[x * bpp] = r0;
+    out[x * bpp + 1] = g0;
+    out[x * bpp + 2] = b0;
+    if ALPHA {
+      out[x * bpp + 3] = 0xFF;
+    }
 
     // Pixel x+1 shares chroma.
     let y1 = ((y[x + 1] as i32 - y_off) * y_scale + RND) >> 15;
-    rgb_out[(x + 1) * 3] = clamp_u8(y1 + r_chroma);
-    rgb_out[(x + 1) * 3 + 1] = clamp_u8(y1 + g_chroma);
-    rgb_out[(x + 1) * 3 + 2] = clamp_u8(y1 + b_chroma);
+    let r1 = clamp_u8(y1 + r_chroma);
+    let g1 = clamp_u8(y1 + g_chroma);
+    let b1 = clamp_u8(y1 + b_chroma);
+    out[(x + 1) * bpp] = r1;
+    out[(x + 1) * bpp + 1] = g1;
+    out[(x + 1) * bpp + 2] = b1;
+    if ALPHA {
+      out[(x + 1) * bpp + 3] = 0xFF;
+    }
 
     x += 2;
   }

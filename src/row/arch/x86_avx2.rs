@@ -43,7 +43,9 @@ use core::arch::x86_64::*;
 use crate::{
   ColorMatrix,
   row::{
-    arch::x86_common::{rgb_to_hsv_16_pixels, swap_rb_16_pixels, write_rgb_16, write_rgb_u16_8},
+    arch::x86_common::{
+      rgb_to_hsv_16_pixels, swap_rb_16_pixels, write_rgb_16, write_rgb_u16_8, write_rgba_16,
+    },
     scalar,
   },
 };
@@ -83,11 +85,68 @@ pub(crate) unsafe fn yuv_420_to_rgb_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
+  // SAFETY: caller-checked AVX2 availability + slice bounds — see
+  // [`yuv_420_to_rgb_or_rgba_row`] safety contract.
+  unsafe {
+    yuv_420_to_rgb_or_rgba_row::<false>(y, u_half, v_half, rgb_out, width, matrix, full_range);
+  }
+}
+
+/// AVX2 YUV 4:2:0 → packed **RGBA** (8-bit). Same contract as
+/// [`yuv_420_to_rgb_row`] but writes 4 bytes per pixel (R, G, B,
+/// `0xFF`).
+///
+/// # Safety
+///
+/// 1. AVX2 must be available on the current CPU.
+/// 2. `width & 1 == 0`.
+/// 3. `y.len() >= width`, `u_half.len() >= width / 2`,
+///    `v_half.len() >= width / 2`, `rgba_out.len() >= 4 * width`.
+#[inline]
+#[target_feature(enable = "avx2")]
+pub(crate) unsafe fn yuv_420_to_rgba_row(
+  y: &[u8],
+  u_half: &[u8],
+  v_half: &[u8],
+  rgba_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  // SAFETY: caller-checked AVX2 availability + slice bounds — see
+  // [`yuv_420_to_rgb_or_rgba_row`] safety contract.
+  unsafe {
+    yuv_420_to_rgb_or_rgba_row::<true>(y, u_half, v_half, rgba_out, width, matrix, full_range);
+  }
+}
+
+/// Shared AVX2 kernel for [`yuv_420_to_rgb_row`] (`ALPHA = false`,
+/// [`write_rgb_32`]) and [`yuv_420_to_rgba_row`] (`ALPHA = true`,
+/// [`write_rgba_32`] with constant `0xFF` alpha). Math is
+/// byte-identical to `scalar::yuv_420_to_rgb_or_rgba_row::<ALPHA>`.
+///
+/// # Safety
+///
+/// Same as [`yuv_420_to_rgb_row`] / [`yuv_420_to_rgba_row`]; the
+/// `out` slice must be `>= width * (if ALPHA { 4 } else { 3 })`
+/// bytes long.
+#[inline]
+#[target_feature(enable = "avx2")]
+pub(crate) unsafe fn yuv_420_to_rgb_or_rgba_row<const ALPHA: bool>(
+  y: &[u8],
+  u_half: &[u8],
+  v_half: &[u8],
+  out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
   debug_assert_eq!(width & 1, 0, "YUV 4:2:0 requires even width");
   debug_assert!(y.len() >= width);
   debug_assert!(u_half.len() >= width / 2);
   debug_assert!(v_half.len() >= width / 2);
-  debug_assert!(rgb_out.len() >= width * 3);
+  let bpp: usize = if ALPHA { 4 } else { 3 };
+  debug_assert!(out.len() >= width * bpp);
 
   let coeffs = scalar::Coefficients::for_matrix(matrix);
   let (y_off, y_scale, c_scale) = scalar::range_params(full_range);
@@ -109,6 +168,9 @@ pub(crate) unsafe fn yuv_420_to_rgb_row(
     let cgv = _mm256_set1_epi32(coeffs.g_v());
     let cbu = _mm256_set1_epi32(coeffs.b_u());
     let cbv = _mm256_set1_epi32(coeffs.b_v());
+    // Constant opaque-alpha vector for the RGBA path; DCE'd when
+    // ALPHA = false.
+    let alpha_u8 = _mm256_set1_epi8(-1); // 0xFF as i8
 
     let mut x = 0usize;
     while x + 32 <= width {
@@ -178,8 +240,13 @@ pub(crate) unsafe fn yuv_420_to_rgb_row(
       let g_u8 = narrow_u8x32(g_lo, g_hi);
       let r_u8 = narrow_u8x32(r_lo, r_hi);
 
-      // 3‑way interleave → packed RGB (96 bytes = 3 × 32).
-      write_rgb_32(r_u8, g_u8, b_u8, rgb_out.as_mut_ptr().add(x * 3));
+      if ALPHA {
+        // 4‑way interleave → packed RGBA (128 bytes = 4 × 32).
+        write_rgba_32(r_u8, g_u8, b_u8, alpha_u8, out.as_mut_ptr().add(x * 4));
+      } else {
+        // 3‑way interleave → packed RGB (96 bytes = 3 × 32).
+        write_rgb_32(r_u8, g_u8, b_u8, out.as_mut_ptr().add(x * 3));
+      }
 
       x += 32;
     }
@@ -187,11 +254,11 @@ pub(crate) unsafe fn yuv_420_to_rgb_row(
     // Scalar tail for the 0..30 leftover pixels (always even; 4:2:0
     // requires even width so x/2 and width/2 are well‑defined).
     if x < width {
-      scalar::yuv_420_to_rgb_row(
+      scalar::yuv_420_to_rgb_or_rgba_row::<ALPHA>(
         &y[x..width],
         &u_half[x / 2..width / 2],
         &v_half[x / 2..width / 2],
-        &mut rgb_out[x * 3..width * 3],
+        &mut out[x * bpp..width * bpp],
         width - x,
         matrix,
         full_range,
@@ -2162,6 +2229,31 @@ unsafe fn write_rgb_32(r: __m256i, g: __m256i, b: __m256i, ptr: *mut u8) {
   }
 }
 
+/// Writes 32 pixels of packed RGBA (128 bytes) by interleaving four
+/// u8x32 R/G/B/A channel vectors. Processed as two 16‑pixel halves
+/// via the shared
+/// [`write_rgba_16`](super::x86_common::write_rgba_16) helper.
+///
+/// # Safety
+///
+/// `ptr` must point to at least 128 writable bytes.
+#[inline(always)]
+unsafe fn write_rgba_32(r: __m256i, g: __m256i, b: __m256i, a: __m256i, ptr: *mut u8) {
+  unsafe {
+    let r_lo = _mm256_castsi256_si128(r);
+    let r_hi = _mm256_extracti128_si256::<1>(r);
+    let g_lo = _mm256_castsi256_si128(g);
+    let g_hi = _mm256_extracti128_si256::<1>(g);
+    let b_lo = _mm256_castsi256_si128(b);
+    let b_hi = _mm256_extracti128_si256::<1>(b);
+    let a_lo = _mm256_castsi256_si128(a);
+    let a_hi = _mm256_extracti128_si256::<1>(a);
+
+    write_rgba_16(r_lo, g_lo, b_lo, a_lo, ptr);
+    write_rgba_16(r_hi, g_hi, b_hi, a_hi, ptr.add(64));
+  }
+}
+
 // ===== 16-bit YUV → RGB ==================================================
 
 /// `(Y_u16x16 - y_off) * y_scale + RND >> 15` for full u16 Y samples.
@@ -3568,6 +3660,92 @@ mod tests {
     // Widths that leave a non‑trivial scalar tail (non‑multiple of 32).
     for w in [34usize, 46, 62, 1922] {
       check_equivalence(w, ColorMatrix::Bt601, false);
+    }
+  }
+
+  // ---- yuv_420_to_rgba_row equivalence --------------------------------
+  //
+  // Direct backend test for the new RGBA path: bypasses the public
+  // dispatcher so the AVX2 `write_rgba_32` path (two halves through
+  // `write_rgba_16`) is exercised regardless of what tier the
+  // dispatcher would pick on the current runner.
+
+  fn check_rgba_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+    let y: std::vec::Vec<u8> = (0..width).map(|i| ((i * 37 + 11) & 0xFF) as u8).collect();
+    let u: std::vec::Vec<u8> = (0..width / 2)
+      .map(|i| ((i * 53 + 23) & 0xFF) as u8)
+      .collect();
+    let v: std::vec::Vec<u8> = (0..width / 2)
+      .map(|i| ((i * 71 + 91) & 0xFF) as u8)
+      .collect();
+    let mut rgba_scalar = std::vec![0u8; width * 4];
+    let mut rgba_avx2 = std::vec![0u8; width * 4];
+
+    scalar::yuv_420_to_rgba_row(&y, &u, &v, &mut rgba_scalar, width, matrix, full_range);
+    unsafe {
+      yuv_420_to_rgba_row(&y, &u, &v, &mut rgba_avx2, width, matrix, full_range);
+    }
+
+    if rgba_scalar != rgba_avx2 {
+      let first_diff = rgba_scalar
+        .iter()
+        .zip(rgba_avx2.iter())
+        .position(|(a, b)| a != b)
+        .unwrap();
+      let pixel = first_diff / 4;
+      let channel = ["R", "G", "B", "A"][first_diff % 4];
+      panic!(
+        "AVX2 RGBA diverges from scalar at byte {first_diff} (px {pixel} {channel}, width={width}, matrix={matrix:?}, full_range={full_range}): scalar={} avx2={}",
+        rgba_scalar[first_diff], rgba_avx2[first_diff]
+      );
+    }
+  }
+
+  #[test]
+  fn avx2_rgba_matches_scalar_all_matrices_32() {
+    if !std::arch::is_x86_feature_detected!("avx2") {
+      return;
+    }
+    for m in [
+      ColorMatrix::Bt601,
+      ColorMatrix::Bt709,
+      ColorMatrix::Bt2020Ncl,
+      ColorMatrix::Smpte240m,
+      ColorMatrix::Fcc,
+      ColorMatrix::YCgCo,
+    ] {
+      for full in [true, false] {
+        check_rgba_equivalence(32, m, full);
+      }
+    }
+  }
+
+  #[test]
+  fn avx2_rgba_matches_scalar_width_64() {
+    if !std::arch::is_x86_feature_detected!("avx2") {
+      return;
+    }
+    check_rgba_equivalence(64, ColorMatrix::Bt601, true);
+    check_rgba_equivalence(64, ColorMatrix::Bt709, false);
+    check_rgba_equivalence(64, ColorMatrix::YCgCo, true);
+  }
+
+  #[test]
+  fn avx2_rgba_matches_scalar_width_1920() {
+    if !std::arch::is_x86_feature_detected!("avx2") {
+      return;
+    }
+    check_rgba_equivalence(1920, ColorMatrix::Bt709, false);
+  }
+
+  #[test]
+  fn avx2_rgba_matches_scalar_odd_tail_widths() {
+    if !std::arch::is_x86_feature_detected!("avx2") {
+      return;
+    }
+    // Widths that leave a non‑trivial scalar tail (non‑multiple of 32).
+    for w in [34usize, 46, 62, 1922] {
+      check_rgba_equivalence(w, ColorMatrix::Bt601, false);
     }
   }
 
