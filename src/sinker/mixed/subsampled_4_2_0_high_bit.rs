@@ -1,12 +1,9 @@
 //! High-bit-depth 4:2:0 `MixedSinker` impls: Yuv420p9/10/12/14/16 + P010/P012/P016.
 
-#![allow(unused_imports)]
-
 use super::{
-  HsvBuffers, HsvPlane, LumaChannel, LumaCoefficients, MixedSinker, MixedSinkerError, RowSlice,
-  check_dimensions_match, rgb_row_buf_or_scratch, rgb_row_to_luma_row, rgba_plane_row_slice,
+  MixedSinker, MixedSinkerError, RowSlice, check_dimensions_match, rgb_row_buf_or_scratch,
 };
-use crate::{ColorMatrix, PixelSink, SourceFormat, raw::*, row::*, yuv::*};
+use crate::{PixelSink, row::*, yuv::*};
 
 // ---- Yuv420p9 impl -----------------------------------------------------
 //

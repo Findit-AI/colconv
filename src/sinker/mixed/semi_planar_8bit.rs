@@ -1,12 +1,10 @@
 //! 8-bit semi-planar YUV `MixedSinker` impls: Nv12 / Nv16 / Nv21 / Nv24 / Nv42.
 
-#![allow(unused_imports)]
-
 use super::{
-  HsvBuffers, HsvPlane, LumaChannel, LumaCoefficients, MixedSinker, MixedSinkerError, RowSlice,
-  check_dimensions_match, rgb_row_buf_or_scratch, rgb_row_to_luma_row, rgba_plane_row_slice,
+  MixedSinker, MixedSinkerError, RowSlice, check_dimensions_match, rgb_row_buf_or_scratch,
+  rgba_plane_row_slice,
 };
-use crate::{ColorMatrix, PixelSink, SourceFormat, raw::*, row::*, yuv::*};
+use crate::{PixelSink, row::*, yuv::*};
 
 // ---- Nv12 impl ----------------------------------------------------------
 

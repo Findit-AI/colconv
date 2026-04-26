@@ -1,12 +1,10 @@
 //! Bayer / Bayer16 RAW `MixedSinker` impls.
 
-#![allow(unused_imports)]
-
 use super::{
-  HsvBuffers, HsvPlane, LumaChannel, LumaCoefficients, MixedSinker, MixedSinkerError, RowSlice,
-  check_dimensions_match, rgb_row_buf_or_scratch, rgb_row_to_luma_row, rgba_plane_row_slice,
+  LumaCoefficients, MixedSinker, MixedSinkerError, RowSlice, check_dimensions_match,
+  rgb_row_buf_or_scratch, rgb_row_to_luma_row,
 };
-use crate::{ColorMatrix, PixelSink, SourceFormat, raw::*, row::*, yuv::*};
+use crate::{PixelSink, raw::*, row::*};
 
 // ---- Bayer (8-bit) impl --------------------------------------------------
 
