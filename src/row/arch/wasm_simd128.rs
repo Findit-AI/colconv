@@ -74,11 +74,69 @@ pub(crate) unsafe fn yuv_420_to_rgb_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
+  // SAFETY: caller-checked simd128 availability + slice bounds —
+  // see [`yuv_420_to_rgb_or_rgba_row`] safety contract.
+  unsafe {
+    yuv_420_to_rgb_or_rgba_row::<false>(y, u_half, v_half, rgb_out, width, matrix, full_range);
+  }
+}
+
+/// WASM simd128 YUV 4:2:0 → packed **RGBA** (8-bit). Same contract
+/// as [`yuv_420_to_rgb_row`] but writes 4 bytes per pixel (R, G, B,
+/// `0xFF`).
+///
+/// # Safety
+///
+/// 1. simd128 must be enabled at compile time.
+/// 2. `width & 1 == 0`.
+/// 3. `y.len() >= width`, `u_half.len() >= width / 2`,
+///    `v_half.len() >= width / 2`, `rgba_out.len() >= 4 * width`.
+#[inline]
+#[target_feature(enable = "simd128")]
+pub(crate) unsafe fn yuv_420_to_rgba_row(
+  y: &[u8],
+  u_half: &[u8],
+  v_half: &[u8],
+  rgba_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  // SAFETY: caller-checked simd128 availability + slice bounds —
+  // see [`yuv_420_to_rgb_or_rgba_row`] safety contract.
+  unsafe {
+    yuv_420_to_rgb_or_rgba_row::<true>(y, u_half, v_half, rgba_out, width, matrix, full_range);
+  }
+}
+
+/// Shared WASM simd128 kernel for [`yuv_420_to_rgb_row`]
+/// (`ALPHA = false`, [`write_rgb_16`]) and [`yuv_420_to_rgba_row`]
+/// (`ALPHA = true`, [`write_rgba_16`] with constant `0xFF` alpha).
+/// Math is byte-identical to
+/// `scalar::yuv_420_to_rgb_or_rgba_row::<ALPHA>`.
+///
+/// # Safety
+///
+/// Same as [`yuv_420_to_rgb_row`] / [`yuv_420_to_rgba_row`]; the
+/// `out` slice must be `>= width * (if ALPHA { 4 } else { 3 })`
+/// bytes long.
+#[inline]
+#[target_feature(enable = "simd128")]
+pub(crate) unsafe fn yuv_420_to_rgb_or_rgba_row<const ALPHA: bool>(
+  y: &[u8],
+  u_half: &[u8],
+  v_half: &[u8],
+  out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
   debug_assert_eq!(width & 1, 0, "YUV 4:2:0 requires even width");
   debug_assert!(y.len() >= width);
   debug_assert!(u_half.len() >= width / 2);
   debug_assert!(v_half.len() >= width / 2);
-  debug_assert!(rgb_out.len() >= width * 3);
+  let bpp: usize = if ALPHA { 4 } else { 3 };
+  debug_assert!(out.len() >= width * bpp);
 
   let coeffs = scalar::Coefficients::for_matrix(matrix);
   let (y_off, y_scale, c_scale) = scalar::range_params(full_range);
@@ -100,6 +158,9 @@ pub(crate) unsafe fn yuv_420_to_rgb_row(
     let cgv = i32x4_splat(coeffs.g_v());
     let cbu = i32x4_splat(coeffs.b_u());
     let cbv = i32x4_splat(coeffs.b_v());
+    // Constant opaque-alpha vector for the RGBA path; DCE'd when
+    // ALPHA = false.
+    let alpha_u8 = u8x16_splat(0xFF);
 
     let mut x = 0usize;
     while x + 16 <= width {
@@ -160,19 +221,24 @@ pub(crate) unsafe fn yuv_420_to_rgb_row(
       let g_u8 = u8x16_narrow_i16x8(g_lo, g_hi);
       let r_u8 = u8x16_narrow_i16x8(r_lo, r_hi);
 
-      // 3‑way interleave → packed RGB (48 bytes).
-      write_rgb_16(r_u8, g_u8, b_u8, rgb_out.as_mut_ptr().add(x * 3));
+      if ALPHA {
+        // 4‑way interleave → packed RGBA (64 bytes).
+        write_rgba_16(r_u8, g_u8, b_u8, alpha_u8, out.as_mut_ptr().add(x * 4));
+      } else {
+        // 3‑way interleave → packed RGB (48 bytes).
+        write_rgb_16(r_u8, g_u8, b_u8, out.as_mut_ptr().add(x * 3));
+      }
 
       x += 16;
     }
 
     // Scalar tail for the 0..14 leftover pixels.
     if x < width {
-      scalar::yuv_420_to_rgb_row(
+      scalar::yuv_420_to_rgb_or_rgba_row::<ALPHA>(
         &y[x..width],
         &u_half[x / 2..width / 2],
         &v_half[x / 2..width / 2],
-        &mut rgb_out[x * 3..width * 3],
+        &mut out[x * bpp..width * bpp],
         width - x,
         matrix,
         full_range,
@@ -1955,6 +2021,75 @@ unsafe fn write_rgb_16(r: v128, g: v128, b: v128, ptr: *mut u8) {
     v128_store(ptr.cast(), out0);
     v128_store(ptr.add(16).cast(), out1);
     v128_store(ptr.add(32).cast(), out2);
+  }
+}
+
+/// Writes 16 pixels of packed RGBA (64 bytes) from four u8x16 channel
+/// vectors. Mirror of [`write_rgb_16`] for the 4-channel output path.
+///
+/// The 4-byte stride aligns cleanly with the 16-byte register width:
+/// each output block holds exactly 4 RGBA quads (16 bytes), with R,
+/// G, B, A interleaved at positions `(0, 1, 2, 3)`, `(4, 5, 6, 7)`,
+/// etc. `u8x16_swizzle` indices ≥ 16 zero the lane.
+///
+/// # Safety
+///
+/// `ptr` must point to at least 64 writable bytes.
+#[inline(always)]
+unsafe fn write_rgba_16(r: v128, g: v128, b: v128, a: v128, ptr: *mut u8) {
+  unsafe {
+    // Block 0 (bytes 0..16): pixels 0..3, source bytes 0..3.
+    let r0 = i8x16(0, -1, -1, -1, 1, -1, -1, -1, 2, -1, -1, -1, 3, -1, -1, -1);
+    let g0 = i8x16(-1, 0, -1, -1, -1, 1, -1, -1, -1, 2, -1, -1, -1, 3, -1, -1);
+    let b0 = i8x16(-1, -1, 0, -1, -1, -1, 1, -1, -1, -1, 2, -1, -1, -1, 3, -1);
+    let a0 = i8x16(-1, -1, -1, 0, -1, -1, -1, 1, -1, -1, -1, 2, -1, -1, -1, 3);
+    let out0 = v128_or(
+      v128_or(u8x16_swizzle(r, r0), u8x16_swizzle(g, g0)),
+      v128_or(u8x16_swizzle(b, b0), u8x16_swizzle(a, a0)),
+    );
+
+    // Block 1 (bytes 16..32): pixels 4..7, source bytes 4..7.
+    let r1 = i8x16(4, -1, -1, -1, 5, -1, -1, -1, 6, -1, -1, -1, 7, -1, -1, -1);
+    let g1 = i8x16(-1, 4, -1, -1, -1, 5, -1, -1, -1, 6, -1, -1, -1, 7, -1, -1);
+    let b1 = i8x16(-1, -1, 4, -1, -1, -1, 5, -1, -1, -1, 6, -1, -1, -1, 7, -1);
+    let a1 = i8x16(-1, -1, -1, 4, -1, -1, -1, 5, -1, -1, -1, 6, -1, -1, -1, 7);
+    let out1 = v128_or(
+      v128_or(u8x16_swizzle(r, r1), u8x16_swizzle(g, g1)),
+      v128_or(u8x16_swizzle(b, b1), u8x16_swizzle(a, a1)),
+    );
+
+    // Block 2 (bytes 32..48): pixels 8..11, source bytes 8..11.
+    let r2 = i8x16(8, -1, -1, -1, 9, -1, -1, -1, 10, -1, -1, -1, 11, -1, -1, -1);
+    let g2 = i8x16(-1, 8, -1, -1, -1, 9, -1, -1, -1, 10, -1, -1, -1, 11, -1, -1);
+    let b2 = i8x16(-1, -1, 8, -1, -1, -1, 9, -1, -1, -1, 10, -1, -1, -1, 11, -1);
+    let a2 = i8x16(-1, -1, -1, 8, -1, -1, -1, 9, -1, -1, -1, 10, -1, -1, -1, 11);
+    let out2 = v128_or(
+      v128_or(u8x16_swizzle(r, r2), u8x16_swizzle(g, g2)),
+      v128_or(u8x16_swizzle(b, b2), u8x16_swizzle(a, a2)),
+    );
+
+    // Block 3 (bytes 48..64): pixels 12..15, source bytes 12..15.
+    let r3 = i8x16(
+      12, -1, -1, -1, 13, -1, -1, -1, 14, -1, -1, -1, 15, -1, -1, -1,
+    );
+    let g3 = i8x16(
+      -1, 12, -1, -1, -1, 13, -1, -1, -1, 14, -1, -1, -1, 15, -1, -1,
+    );
+    let b3 = i8x16(
+      -1, -1, 12, -1, -1, -1, 13, -1, -1, -1, 14, -1, -1, -1, 15, -1,
+    );
+    let a3 = i8x16(
+      -1, -1, -1, 12, -1, -1, -1, 13, -1, -1, -1, 14, -1, -1, -1, 15,
+    );
+    let out3 = v128_or(
+      v128_or(u8x16_swizzle(r, r3), u8x16_swizzle(g, g3)),
+      v128_or(u8x16_swizzle(b, b3), u8x16_swizzle(a, a3)),
+    );
+
+    v128_store(ptr.cast(), out0);
+    v128_store(ptr.add(16).cast(), out1);
+    v128_store(ptr.add(32).cast(), out2);
+    v128_store(ptr.add(48).cast(), out3);
   }
 }
 

@@ -57,7 +57,9 @@ use core::arch::x86_64::*;
 use crate::{
   ColorMatrix,
   row::{
-    arch::x86_common::{rgb_to_hsv_16_pixels, swap_rb_16_pixels, write_rgb_16, write_rgb_u16_8},
+    arch::x86_common::{
+      rgb_to_hsv_16_pixels, swap_rb_16_pixels, write_rgb_16, write_rgb_u16_8, write_rgba_16,
+    },
     scalar,
   },
 };
@@ -97,11 +99,68 @@ pub(crate) unsafe fn yuv_420_to_rgb_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
+  // SAFETY: caller-checked AVX-512BW availability + slice bounds —
+  // see [`yuv_420_to_rgb_or_rgba_row`] safety contract.
+  unsafe {
+    yuv_420_to_rgb_or_rgba_row::<false>(y, u_half, v_half, rgb_out, width, matrix, full_range);
+  }
+}
+
+/// AVX‑512 YUV 4:2:0 → packed **RGBA** (8-bit). Same contract as
+/// [`yuv_420_to_rgb_row`] but writes 4 bytes per pixel (R, G, B,
+/// `0xFF`).
+///
+/// # Safety
+///
+/// 1. AVX‑512F + AVX‑512BW must be available on the current CPU.
+/// 2. `width & 1 == 0`.
+/// 3. `y.len() >= width`, `u_half.len() >= width / 2`,
+///    `v_half.len() >= width / 2`, `rgba_out.len() >= 4 * width`.
+#[inline]
+#[target_feature(enable = "avx512f,avx512bw")]
+pub(crate) unsafe fn yuv_420_to_rgba_row(
+  y: &[u8],
+  u_half: &[u8],
+  v_half: &[u8],
+  rgba_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  // SAFETY: caller-checked AVX-512BW availability + slice bounds —
+  // see [`yuv_420_to_rgb_or_rgba_row`] safety contract.
+  unsafe {
+    yuv_420_to_rgb_or_rgba_row::<true>(y, u_half, v_half, rgba_out, width, matrix, full_range);
+  }
+}
+
+/// Shared AVX‑512 kernel for [`yuv_420_to_rgb_row`] (`ALPHA = false`,
+/// [`write_rgb_64`]) and [`yuv_420_to_rgba_row`] (`ALPHA = true`,
+/// [`write_rgba_64`] with constant `0xFF` alpha). Math is
+/// byte-identical to `scalar::yuv_420_to_rgb_or_rgba_row::<ALPHA>`.
+///
+/// # Safety
+///
+/// Same as [`yuv_420_to_rgb_row`] / [`yuv_420_to_rgba_row`]; the
+/// `out` slice must be `>= width * (if ALPHA { 4 } else { 3 })`
+/// bytes long.
+#[inline]
+#[target_feature(enable = "avx512f,avx512bw")]
+pub(crate) unsafe fn yuv_420_to_rgb_or_rgba_row<const ALPHA: bool>(
+  y: &[u8],
+  u_half: &[u8],
+  v_half: &[u8],
+  out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
   debug_assert_eq!(width & 1, 0, "YUV 4:2:0 requires even width");
   debug_assert!(y.len() >= width);
   debug_assert!(u_half.len() >= width / 2);
   debug_assert!(v_half.len() >= width / 2);
-  debug_assert!(rgb_out.len() >= width * 3);
+  let bpp: usize = if ALPHA { 4 } else { 3 };
+  debug_assert!(out.len() >= width * bpp);
 
   let coeffs = scalar::Coefficients::for_matrix(matrix);
   let (y_off, y_scale, c_scale) = scalar::range_params(full_range);
@@ -123,6 +182,9 @@ pub(crate) unsafe fn yuv_420_to_rgb_row(
     let cgv = _mm512_set1_epi32(coeffs.g_v());
     let cbu = _mm512_set1_epi32(coeffs.b_u());
     let cbv = _mm512_set1_epi32(coeffs.b_v());
+    // Constant opaque-alpha vector for the RGBA path; DCE'd when
+    // ALPHA = false.
+    let alpha_u8 = _mm512_set1_epi8(-1); // 0xFF as i8
 
     // Lane‑fixup permute indices, computed once per call.
     let pack_fixup = _mm512_setr_epi64(0, 2, 4, 6, 1, 3, 5, 7);
@@ -193,8 +255,13 @@ pub(crate) unsafe fn yuv_420_to_rgb_row(
       let g_u8 = narrow_u8x64(g_lo, g_hi, pack_fixup);
       let r_u8 = narrow_u8x64(r_lo, r_hi, pack_fixup);
 
-      // 3‑way interleave → packed RGB (192 bytes = 4 × 48).
-      write_rgb_64(r_u8, g_u8, b_u8, rgb_out.as_mut_ptr().add(x * 3));
+      if ALPHA {
+        // 4‑way interleave → packed RGBA (256 bytes = 4 × 64).
+        write_rgba_64(r_u8, g_u8, b_u8, alpha_u8, out.as_mut_ptr().add(x * 4));
+      } else {
+        // 3‑way interleave → packed RGB (192 bytes = 4 × 48).
+        write_rgb_64(r_u8, g_u8, b_u8, out.as_mut_ptr().add(x * 3));
+      }
 
       x += 64;
     }
@@ -202,11 +269,11 @@ pub(crate) unsafe fn yuv_420_to_rgb_row(
     // Scalar tail for the 0..62 leftover pixels (always even; 4:2:0
     // requires even width so x/2 and width/2 are well‑defined).
     if x < width {
-      scalar::yuv_420_to_rgb_row(
+      scalar::yuv_420_to_rgb_or_rgba_row::<ALPHA>(
         &y[x..width],
         &u_half[x / 2..width / 2],
         &v_half[x / 2..width / 2],
-        &mut rgb_out[x * 3..width * 3],
+        &mut out[x * bpp..width * bpp],
         width - x,
         matrix,
         full_range,
@@ -2227,6 +2294,40 @@ unsafe fn write_rgb_64(r: __m512i, g: __m512i, b: __m512i, ptr: *mut u8) {
     write_rgb_16(r1, g1, b1, ptr.add(48));
     write_rgb_16(r2, g2, b2, ptr.add(96));
     write_rgb_16(r3, g3, b3, ptr.add(144));
+  }
+}
+
+/// Writes 64 pixels of packed RGBA (256 bytes) by splitting the
+/// u8x64 channel vectors into four 128‑bit quarters and calling the
+/// shared [`write_rgba_16`] helper four times.
+///
+/// # Safety
+///
+/// `ptr` must point to at least 256 writable bytes.
+#[inline(always)]
+unsafe fn write_rgba_64(r: __m512i, g: __m512i, b: __m512i, a: __m512i, ptr: *mut u8) {
+  unsafe {
+    let r0: __m128i = _mm512_castsi512_si128(r);
+    let r1: __m128i = _mm512_extracti32x4_epi32::<1>(r);
+    let r2: __m128i = _mm512_extracti32x4_epi32::<2>(r);
+    let r3: __m128i = _mm512_extracti32x4_epi32::<3>(r);
+    let g0: __m128i = _mm512_castsi512_si128(g);
+    let g1: __m128i = _mm512_extracti32x4_epi32::<1>(g);
+    let g2: __m128i = _mm512_extracti32x4_epi32::<2>(g);
+    let g3: __m128i = _mm512_extracti32x4_epi32::<3>(g);
+    let b0: __m128i = _mm512_castsi512_si128(b);
+    let b1: __m128i = _mm512_extracti32x4_epi32::<1>(b);
+    let b2: __m128i = _mm512_extracti32x4_epi32::<2>(b);
+    let b3: __m128i = _mm512_extracti32x4_epi32::<3>(b);
+    let a0: __m128i = _mm512_castsi512_si128(a);
+    let a1: __m128i = _mm512_extracti32x4_epi32::<1>(a);
+    let a2: __m128i = _mm512_extracti32x4_epi32::<2>(a);
+    let a3: __m128i = _mm512_extracti32x4_epi32::<3>(a);
+
+    write_rgba_16(r0, g0, b0, a0, ptr);
+    write_rgba_16(r1, g1, b1, a1, ptr.add(64));
+    write_rgba_16(r2, g2, b2, a2, ptr.add(128));
+    write_rgba_16(r3, g3, b3, a3, ptr.add(192));
   }
 }
 

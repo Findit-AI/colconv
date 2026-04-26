@@ -152,6 +152,98 @@ pub fn yuv_420_to_rgb_row(
   scalar::yuv_420_to_rgb_row(y, u_half, v_half, rgb_out, width, matrix, full_range);
 }
 
+/// Converts one row of 4:2:0 YUV to packed **RGBA** (8-bit).
+///
+/// Same numerical contract as [`yuv_420_to_rgb_row`]; the only
+/// differences are the per-pixel stride (4 vs 3) and the alpha byte
+/// (`0xFF`, opaque, for every pixel — sources without an alpha plane
+/// produce opaque output). The first three bytes per pixel are
+/// byte-identical to what [`yuv_420_to_rgb_row`] would write.
+///
+/// `rgba_out.len() >= 4 * width`. `use_simd = false` forces the
+/// scalar reference path.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn yuv_420_to_rgba_row(
+  y: &[u8],
+  u_half: &[u8],
+  v_half: &[u8],
+  rgba_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  use_simd: bool,
+) {
+  // Runtime asserts at the dispatcher boundary — see
+  // [`yuv_420_to_rgb_row`] for rationale, including the checked
+  // `width × 4` multiplication via [`rgba_row_bytes`].
+  assert_eq!(width & 1, 0, "YUV 4:2:0 requires even width");
+  let rgba_min = rgba_row_bytes(width);
+  assert!(y.len() >= width, "y row too short");
+  assert!(u_half.len() >= width / 2, "u_half row too short");
+  assert!(v_half.len() >= width / 2, "v_half row too short");
+  assert!(rgba_out.len() >= rgba_min, "rgba_out row too short");
+
+  if use_simd {
+    cfg_select! {
+      target_arch = "aarch64" => {
+        if neon_available() {
+          // SAFETY: `neon_available()` verified NEON is present.
+          unsafe {
+            arch::neon::yuv_420_to_rgba_row(y, u_half, v_half, rgba_out, width, matrix, full_range);
+          }
+          return;
+        }
+      },
+      target_arch = "x86_64" => {
+        if avx512_available() {
+          // SAFETY: `avx512_available()` verified AVX‑512BW is present.
+          unsafe {
+            arch::x86_avx512::yuv_420_to_rgba_row(
+              y, u_half, v_half, rgba_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+        if avx2_available() {
+          // SAFETY: `avx2_available()` verified AVX2 is present.
+          unsafe {
+            arch::x86_avx2::yuv_420_to_rgba_row(
+              y, u_half, v_half, rgba_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+        if sse41_available() {
+          // SAFETY: `sse41_available()` verified SSE4.1 is present.
+          unsafe {
+            arch::x86_sse41::yuv_420_to_rgba_row(
+              y, u_half, v_half, rgba_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+      },
+      target_arch = "wasm32" => {
+        if simd128_available() {
+          // SAFETY: simd128 compile‑time availability verified.
+          unsafe {
+            arch::wasm_simd128::yuv_420_to_rgba_row(
+              y, u_half, v_half, rgba_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+      },
+      _ => {
+        // Targets without a SIMD backend fall through to scalar.
+      }
+    }
+  }
+
+  scalar::yuv_420_to_rgba_row(y, u_half, v_half, rgba_out, width, matrix, full_range);
+}
+
 /// Converts one row of NV12 (semi‑planar 4:2:0) to packed RGB.
 ///
 /// Same numerical contract as [`yuv_420_to_rgb_row`]; the only
@@ -2716,6 +2808,17 @@ fn rgb_row_bytes(width: usize) -> usize {
   match width.checked_mul(3) {
     Some(n) => n,
     None => panic!("width ({width}) × 3 overflows usize"),
+  }
+}
+
+/// Byte length of one packed‑RGBA row (`width × 4`) with overflow
+/// checking. Same purpose as [`rgb_row_bytes`] for the 4-channel
+/// path used by the RGBA dispatchers.
+#[cfg_attr(not(tarpaulin), inline(always))]
+fn rgba_row_bytes(width: usize) -> usize {
+  match width.checked_mul(4) {
+    Some(n) => n,
+    None => panic!("width ({width}) × 4 overflows usize"),
   }
 }
 

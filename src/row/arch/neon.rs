@@ -70,11 +70,70 @@ pub(crate) unsafe fn yuv_420_to_rgb_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
+  // SAFETY: caller-checked NEON availability + slice bounds — see
+  // [`yuv_420_to_rgb_or_rgba_row`] safety contract.
+  unsafe {
+    yuv_420_to_rgb_or_rgba_row::<false>(y, u_half, v_half, rgb_out, width, matrix, full_range);
+  }
+}
+
+/// NEON YUV 4:2:0 → packed **RGBA** (8-bit). Same contract as
+/// [`yuv_420_to_rgb_row`] but writes 4 bytes per pixel (R, G, B,
+/// `0xFF`).
+///
+/// # Safety
+///
+/// 1. NEON must be available on the current CPU.
+/// 2. `width & 1 == 0`.
+/// 3. `y.len() >= width`, `u_half.len() >= width / 2`,
+///    `v_half.len() >= width / 2`, `rgba_out.len() >= 4 * width`.
+#[inline]
+#[target_feature(enable = "neon")]
+pub(crate) unsafe fn yuv_420_to_rgba_row(
+  y: &[u8],
+  u_half: &[u8],
+  v_half: &[u8],
+  rgba_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  // SAFETY: caller-checked NEON availability + slice bounds — see
+  // [`yuv_420_to_rgb_or_rgba_row`] safety contract.
+  unsafe {
+    yuv_420_to_rgb_or_rgba_row::<true>(y, u_half, v_half, rgba_out, width, matrix, full_range);
+  }
+}
+
+/// Shared NEON kernel for [`yuv_420_to_rgb_row`] (`ALPHA = false`,
+/// `vst3q_u8`) and [`yuv_420_to_rgba_row`] (`ALPHA = true`,
+/// `vst4q_u8` with constant `0xFF` alpha). Math is byte-identical to
+/// `scalar::yuv_420_to_rgb_or_rgba_row::<ALPHA>`; only the per-block
+/// store intrinsic differs. `const` generic monomorphizes per call
+/// site, so the `if ALPHA` branches are eliminated.
+///
+/// # Safety
+///
+/// Same as [`yuv_420_to_rgb_row`] / [`yuv_420_to_rgba_row`]; the
+/// `out` slice must be `>= width * (if ALPHA { 4 } else { 3 })`
+/// bytes long.
+#[inline]
+#[target_feature(enable = "neon")]
+pub(crate) unsafe fn yuv_420_to_rgb_or_rgba_row<const ALPHA: bool>(
+  y: &[u8],
+  u_half: &[u8],
+  v_half: &[u8],
+  out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
   debug_assert_eq!(width & 1, 0, "YUV 4:2:0 requires even width");
   debug_assert!(y.len() >= width);
   debug_assert!(u_half.len() >= width / 2);
   debug_assert!(v_half.len() >= width / 2);
-  debug_assert!(rgb_out.len() >= width * 3);
+  let bpp: usize = if ALPHA { 4 } else { 3 };
+  debug_assert!(out.len() >= width * bpp);
 
   let coeffs = scalar::Coefficients::for_matrix(matrix);
   let (y_off, y_scale, c_scale) = scalar::range_params(full_range);
@@ -97,6 +156,10 @@ pub(crate) unsafe fn yuv_420_to_rgb_row(
     let cgv = vdupq_n_s32(coeffs.g_v());
     let cbu = vdupq_n_s32(coeffs.b_u());
     let cbv = vdupq_n_s32(coeffs.b_v());
+    // Constant opaque-alpha vector for the RGBA path. Materializing
+    // it outside the loop costs one `vdupq_n_u8` regardless of
+    // ALPHA; the compiler DCE's it when ALPHA = false.
+    let alpha_u8 = vdupq_n_u8(0xFF);
 
     let mut x = 0usize;
     while x + 16 <= width {
@@ -158,9 +221,16 @@ pub(crate) unsafe fn yuv_420_to_rgb_row(
         vqmovun_s16(vqaddq_s16(y_scaled_hi, r_dup_hi)),
       );
 
-      // vst3q_u8 writes 48 bytes as interleaved R, G, B triples.
-      let rgb = uint8x16x3_t(r_u8, g_u8, b_u8);
-      vst3q_u8(rgb_out.as_mut_ptr().add(x * 3), rgb);
+      if ALPHA {
+        // vst4q_u8 writes 64 bytes as interleaved R, G, B, A
+        // quadruplets — native AArch64 4-channel store.
+        let rgba = uint8x16x4_t(r_u8, g_u8, b_u8, alpha_u8);
+        vst4q_u8(out.as_mut_ptr().add(x * 4), rgba);
+      } else {
+        // vst3q_u8 writes 48 bytes as interleaved R, G, B triples.
+        let rgb = uint8x16x3_t(r_u8, g_u8, b_u8);
+        vst3q_u8(out.as_mut_ptr().add(x * 3), rgb);
+      }
 
       x += 16;
     }
@@ -168,11 +238,11 @@ pub(crate) unsafe fn yuv_420_to_rgb_row(
     // Scalar tail for the 0..14 leftover pixels (always even, 4:2:0
     // requires even width so x/2 and width/2 are well‑defined).
     if x < width {
-      scalar::yuv_420_to_rgb_row(
+      scalar::yuv_420_to_rgb_or_rgba_row::<ALPHA>(
         &y[x..width],
         &u_half[x / 2..width / 2],
         &v_half[x / 2..width / 2],
-        &mut rgb_out[x * 3..width * 3],
+        &mut out[x * bpp..width * bpp],
         width - x,
         matrix,
         full_range,
