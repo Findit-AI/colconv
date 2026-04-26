@@ -1214,10 +1214,7 @@ pub(crate) unsafe fn nv21_to_rgba_row(
 /// `vld2_u8`, `vst3q_u8` / `vst4q_u8`).
 #[inline]
 #[target_feature(enable = "neon")]
-unsafe fn nv12_or_nv21_to_rgb_or_rgba_row_impl<
-  const SWAP_UV: bool,
-  const ALPHA: bool,
->(
+unsafe fn nv12_or_nv21_to_rgb_or_rgba_row_impl<const SWAP_UV: bool, const ALPHA: bool>(
   y: &[u8],
   uv_or_vu_half: &[u8],
   out: &mut [u8],
@@ -1473,10 +1470,7 @@ pub(crate) unsafe fn nv42_to_rgba_row(
 /// No width parity constraint (4:4:4).
 #[inline]
 #[target_feature(enable = "neon")]
-unsafe fn nv24_or_nv42_to_rgb_or_rgba_row_impl<
-  const SWAP_UV: bool,
-  const ALPHA: bool,
->(
+unsafe fn nv24_or_nv42_to_rgb_or_rgba_row_impl<const SWAP_UV: bool, const ALPHA: bool>(
   y: &[u8],
   uv_or_vu: &[u8],
   out: &mut [u8],

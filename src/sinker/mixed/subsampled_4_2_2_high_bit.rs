@@ -4,7 +4,7 @@
 
 use super::{
   HsvBuffers, HsvPlane, LumaChannel, LumaCoefficients, MixedSinker, MixedSinkerError, RowSlice,
-  check_dimensions_match, rgb_row_buf_or_scratch, rgba_plane_row_slice, rgb_row_to_luma_row,
+  check_dimensions_match, rgb_row_buf_or_scratch, rgb_row_to_luma_row, rgba_plane_row_slice,
 };
 use crate::{ColorMatrix, PixelSink, SourceFormat, raw::*, row::*, yuv::*};
 
