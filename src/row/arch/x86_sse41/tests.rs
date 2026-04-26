@@ -1707,6 +1707,9 @@ fn check_p16_u8_sse41_rgba_equivalence(width: usize, matrix: ColorMatrix, full_r
 
 #[test]
 fn sse41_yuv420p_n_rgba_matches_scalar_all_bits() {
+  if !std::arch::is_x86_feature_detected!("sse4.1") {
+    return;
+  }
   for m in [
     ColorMatrix::Bt601,
     ColorMatrix::Bt709,
@@ -1726,6 +1729,9 @@ fn sse41_yuv420p_n_rgba_matches_scalar_all_bits() {
 
 #[test]
 fn sse41_yuv420p_n_rgba_matches_scalar_tail_and_1920() {
+  if !std::arch::is_x86_feature_detected!("sse4.1") {
+    return;
+  }
   for w in [18usize, 30, 34, 1920, 1922] {
     check_planar_u8_sse41_rgba_equivalence_n::<9>(w, ColorMatrix::Bt601, false);
     check_planar_u8_sse41_rgba_equivalence_n::<10>(w, ColorMatrix::Bt709, true);
@@ -1736,6 +1742,9 @@ fn sse41_yuv420p_n_rgba_matches_scalar_tail_and_1920() {
 
 #[test]
 fn sse41_pn_rgba_matches_scalar_all_bits() {
+  if !std::arch::is_x86_feature_detected!("sse4.1") {
+    return;
+  }
   for m in [
     ColorMatrix::Bt601,
     ColorMatrix::Bt709,
@@ -1753,6 +1762,9 @@ fn sse41_pn_rgba_matches_scalar_all_bits() {
 
 #[test]
 fn sse41_pn_rgba_matches_scalar_tail_and_1920() {
+  if !std::arch::is_x86_feature_detected!("sse4.1") {
+    return;
+  }
   for w in [18usize, 30, 34, 1920, 1922] {
     check_pn_u8_sse41_rgba_equivalence_n::<10>(w, ColorMatrix::Bt601, false);
     check_pn_u8_sse41_rgba_equivalence_n::<12>(w, ColorMatrix::Bt709, true);
@@ -1761,6 +1773,9 @@ fn sse41_pn_rgba_matches_scalar_tail_and_1920() {
 
 #[test]
 fn sse41_yuv420p16_rgba_matches_scalar_all_matrices() {
+  if !std::arch::is_x86_feature_detected!("sse4.1") {
+    return;
+  }
   for m in [
     ColorMatrix::Bt601,
     ColorMatrix::Bt709,
@@ -1780,6 +1795,9 @@ fn sse41_yuv420p16_rgba_matches_scalar_all_matrices() {
 
 #[test]
 fn sse41_p016_rgba_matches_scalar_all_matrices() {
+  if !std::arch::is_x86_feature_detected!("sse4.1") {
+    return;
+  }
   for m in [
     ColorMatrix::Bt601,
     ColorMatrix::Bt709,

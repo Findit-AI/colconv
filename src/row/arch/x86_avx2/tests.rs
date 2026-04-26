@@ -1671,6 +1671,9 @@ fn check_p16_u8_avx2_rgba_equivalence(width: usize, matrix: ColorMatrix, full_ra
 
 #[test]
 fn avx2_yuv420p_n_rgba_matches_scalar_all_bits() {
+  if !std::arch::is_x86_feature_detected!("avx2") {
+    return;
+  }
   for m in [
     ColorMatrix::Bt601,
     ColorMatrix::Bt709,
@@ -1690,6 +1693,9 @@ fn avx2_yuv420p_n_rgba_matches_scalar_all_bits() {
 
 #[test]
 fn avx2_yuv420p_n_rgba_matches_scalar_tail_and_1920() {
+  if !std::arch::is_x86_feature_detected!("avx2") {
+    return;
+  }
   for w in [34usize, 48, 62, 1920, 1922] {
     check_planar_u8_avx2_rgba_equivalence_n::<9>(w, ColorMatrix::Bt601, false);
     check_planar_u8_avx2_rgba_equivalence_n::<10>(w, ColorMatrix::Bt709, true);
@@ -1700,6 +1706,9 @@ fn avx2_yuv420p_n_rgba_matches_scalar_tail_and_1920() {
 
 #[test]
 fn avx2_pn_rgba_matches_scalar_all_bits() {
+  if !std::arch::is_x86_feature_detected!("avx2") {
+    return;
+  }
   for m in [
     ColorMatrix::Bt601,
     ColorMatrix::Bt709,
@@ -1717,6 +1726,9 @@ fn avx2_pn_rgba_matches_scalar_all_bits() {
 
 #[test]
 fn avx2_pn_rgba_matches_scalar_tail_and_1920() {
+  if !std::arch::is_x86_feature_detected!("avx2") {
+    return;
+  }
   for w in [34usize, 48, 62, 1920, 1922] {
     check_pn_u8_avx2_rgba_equivalence_n::<10>(w, ColorMatrix::Bt601, false);
     check_pn_u8_avx2_rgba_equivalence_n::<12>(w, ColorMatrix::Bt709, true);
@@ -1725,6 +1737,9 @@ fn avx2_pn_rgba_matches_scalar_tail_and_1920() {
 
 #[test]
 fn avx2_yuv420p16_rgba_matches_scalar_all_matrices() {
+  if !std::arch::is_x86_feature_detected!("avx2") {
+    return;
+  }
   for m in [
     ColorMatrix::Bt601,
     ColorMatrix::Bt709,
@@ -1744,6 +1759,9 @@ fn avx2_yuv420p16_rgba_matches_scalar_all_matrices() {
 
 #[test]
 fn avx2_p016_rgba_matches_scalar_all_matrices() {
+  if !std::arch::is_x86_feature_detected!("avx2") {
+    return;
+  }
   for m in [
     ColorMatrix::Bt601,
     ColorMatrix::Bt709,
