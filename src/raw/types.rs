@@ -201,7 +201,7 @@ impl WhiteBalance {
   pub const fn new(r: f32, g: f32, b: f32) -> Self {
     match Self::try_new(r, g, b) {
       Ok(wb) => wb,
-      Err(_) => panic!("invalid WhiteBalance gains (non-finite or negative)"),
+      Err(_) => panic!("invalid WhiteBalance gains (non-finite, negative, or > MAX_GAIN)"),
     }
   }
 
@@ -334,7 +334,9 @@ impl ColorCorrectionMatrix {
   pub const fn new(m: [[f32; 3]; 3]) -> Self {
     match Self::try_new(m) {
       Ok(ccm) => ccm,
-      Err(_) => panic!("invalid ColorCorrectionMatrix element (non-finite)"),
+      Err(_) => panic!(
+        "invalid ColorCorrectionMatrix element (non-finite or |value| > MAX_COEFFICIENT_ABS)"
+      ),
     }
   }
 
