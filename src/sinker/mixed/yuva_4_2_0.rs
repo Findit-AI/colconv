@@ -292,7 +292,7 @@ impl PixelSink for MixedSinker<'_, Yuva420p9> {
   }
 
   fn process(&mut self, row: Yuva420p9Row<'_>) -> Result<(), Self::Error> {
-    yuva420p_high_bit_process::<9, _, _, _>(
+    yuva420p_high_bit_process::<9, _, _, _, _>(
       self,
       row.row(),
       row.y(),
@@ -393,7 +393,7 @@ impl PixelSink for MixedSinker<'_, Yuva420p10> {
   }
 
   fn process(&mut self, row: Yuva420p10Row<'_>) -> Result<(), Self::Error> {
-    yuva420p_high_bit_process::<10, _, _, _>(
+    yuva420p_high_bit_process::<10, _, _, _, _>(
       self,
       row.row(),
       row.y(),
@@ -494,7 +494,7 @@ impl PixelSink for MixedSinker<'_, Yuva420p16> {
   }
 
   fn process(&mut self, row: Yuva420p16Row<'_>) -> Result<(), Self::Error> {
-    yuva420p_high_bit_process::<16, _, _, _>(
+    yuva420p_high_bit_process::<16, _, _, _, _>(
       self,
       row.row(),
       row.y(),
@@ -532,11 +532,12 @@ impl PixelSink for MixedSinker<'_, Yuva420p16> {
 #[cfg_attr(not(tarpaulin), inline(always))]
 fn yuva420p_high_bit_process<
   const BITS: u32,
+  F: crate::SourceFormat,
   RgbRowFn: Fn(&[u16], &[u16], &[u16], &mut [u8], usize, crate::ColorMatrix, bool, bool),
   RgbU16RowFn: Fn(&[u16], &[u16], &[u16], &mut [u16], usize, crate::ColorMatrix, bool, bool),
   RgbaRowFn: Fn(&[u16], &[u16], &[u16], &[u16], &mut [u8], usize, crate::ColorMatrix, bool, bool),
 >(
-  sinker: &mut MixedSinker<'_, impl crate::SourceFormat>,
+  sinker: &mut MixedSinker<'_, F>,
   idx: usize,
   y_row: &[u16],
   u_half_row: &[u16],

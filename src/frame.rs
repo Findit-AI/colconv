@@ -4595,7 +4595,7 @@ pub enum Yuva420pFrameError {
     /// Actual bytes supplied.
     actual: usize,
   },
-  /// U plane is shorter than `u_stride * (height / 2)` bytes.
+  /// U plane is shorter than `u_stride * height.div_ceil(2)` bytes.
   #[error("U plane has {actual} bytes but at least {expected} are required")]
   UPlaneTooShort {
     /// Minimum bytes required.
@@ -4603,7 +4603,7 @@ pub enum Yuva420pFrameError {
     /// Actual bytes supplied.
     actual: usize,
   },
-  /// V plane is shorter than `v_stride * (height / 2)` bytes.
+  /// V plane is shorter than `v_stride * height.div_ceil(2)` bytes.
   #[error("V plane has {actual} bytes but at least {expected} are required")]
   VPlaneTooShort {
     /// Minimum bytes required.
