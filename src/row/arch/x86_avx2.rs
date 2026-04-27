@@ -749,8 +749,8 @@ fn clamp_u16_max_x16(v: __m256i, zero_v: __m256i, max_v: __m256i) -> __m256i {
   unsafe { _mm256_min_epi16(_mm256_max_epi16(v, zero_v), max_v) }
 }
 
-/// AVX2 YUV 4:4:4 planar 10/12/14-bit → packed **u8** RGB.
-/// Const-generic over `BITS ∈ {10, 12, 14}`. Block size 32 pixels.
+/// AVX2 YUV 4:4:4 planar 9/10/12/14-bit → packed **u8** RGB.
+/// Const-generic over `BITS ∈ {9, 10, 12, 14}`. Block size 32 pixels.
 ///
 /// Thin wrapper over [`yuv_444p_n_to_rgb_or_rgba_row`] with `ALPHA = false`.
 ///
@@ -776,7 +776,7 @@ pub(crate) unsafe fn yuv_444p_n_to_rgb_row<const BITS: u32>(
   }
 }
 
-/// AVX2 YUV 4:4:4 planar 10/12/14-bit → packed **8-bit RGBA**
+/// AVX2 YUV 4:4:4 planar 9/10/12/14-bit → packed **8-bit RGBA**
 /// (`R, G, B, 0xFF`). Same numerical contract as
 /// [`yuv_444p_n_to_rgb_row`].
 ///
@@ -959,8 +959,8 @@ pub(crate) unsafe fn yuv_444p_n_to_rgb_or_rgba_row<const BITS: u32, const ALPHA:
   }
 }
 
-/// AVX2 YUV 4:4:4 planar 10/12/14-bit → **native-depth u16** RGB.
-/// Const-generic over `BITS ∈ {10, 12, 14}`. 32 pixels per iter.
+/// AVX2 YUV 4:4:4 planar 9/10/12/14-bit → **native-depth u16** RGB.
+/// Const-generic over `BITS ∈ {9, 10, 12, 14}`. 32 pixels per iter.
 ///
 /// # Safety
 ///

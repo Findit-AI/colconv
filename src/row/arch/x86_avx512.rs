@@ -819,8 +819,8 @@ unsafe fn write_quarter_rgba(
   }
 }
 
-/// AVX-512 YUV 4:4:4 planar 10/12/14-bit → packed **u8** RGB.
-/// Const-generic over `BITS ∈ {10, 12, 14}`. Block size 64 pixels.
+/// AVX-512 YUV 4:4:4 planar 9/10/12/14-bit → packed **u8** RGB.
+/// Const-generic over `BITS ∈ {9, 10, 12, 14}`. Block size 64 pixels.
 ///
 /// Thin wrapper over [`yuv_444p_n_to_rgb_or_rgba_row`] with `ALPHA = false`.
 ///
@@ -846,7 +846,7 @@ pub(crate) unsafe fn yuv_444p_n_to_rgb_row<const BITS: u32>(
   }
 }
 
-/// AVX-512 YUV 4:4:4 planar 10/12/14-bit → packed **8-bit RGBA**
+/// AVX-512 YUV 4:4:4 planar 9/10/12/14-bit → packed **8-bit RGBA**
 /// (`R, G, B, 0xFF`). Same numerical contract as
 /// [`yuv_444p_n_to_rgb_row`].
 ///
@@ -1043,8 +1043,8 @@ pub(crate) unsafe fn yuv_444p_n_to_rgb_or_rgba_row<const BITS: u32, const ALPHA:
   }
 }
 
-/// AVX-512 YUV 4:4:4 planar 10/12/14-bit → **native-depth u16** RGB.
-/// Const-generic over `BITS ∈ {10, 12, 14}`. 64 pixels per iter.
+/// AVX-512 YUV 4:4:4 planar 9/10/12/14-bit → **native-depth u16** RGB.
+/// Const-generic over `BITS ∈ {9, 10, 12, 14}`. 64 pixels per iter.
 ///
 /// # Safety
 ///

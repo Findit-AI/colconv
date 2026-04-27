@@ -699,7 +699,7 @@ pub(crate) unsafe fn yuv_420p_n_to_rgb_or_rgba_u16_row<const BITS: u32, const AL
 }
 
 /// NEON YUV 4:4:4 planar high-bit-depth → **u8** RGB.
-/// Const-generic over `BITS ∈ {10, 12, 14}`. Same structure as
+/// Const-generic over `BITS ∈ {9, 10, 12, 14}`. Same structure as
 /// [`yuv_420p_n_to_rgb_row`] but with full-width U/V (no chroma
 /// duplication) and no width parity constraint.
 ///
@@ -894,7 +894,7 @@ pub(crate) unsafe fn yuv_444p_n_to_rgb_or_rgba_row<const BITS: u32, const ALPHA:
 }
 
 /// NEON YUV 4:4:4 planar high-bit-depth → **native-depth u16** RGB.
-/// Const-generic over `BITS ∈ {10, 12, 14}`.
+/// Const-generic over `BITS ∈ {9, 10, 12, 14}`.
 ///
 /// # Safety
 ///
@@ -2211,7 +2211,7 @@ fn scale_y(
 
 // ===== 16-bit YUV → RGB ==================================================
 //
-// At 16-bit, two precision issues arise compared to the 10/12/14-bit generic:
+// At 16-bit, two precision issues arise compared to the 9/10/12/14-bit generic:
 //
 // 1. The chroma bias (32768) and full-range u16 values (0..65535) do not fit
 //    in i16, so all bias-subtractions happen in i32 after unsigned widening

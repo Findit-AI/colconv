@@ -1078,8 +1078,8 @@ fn clamp_u16_max(v: __m128i, zero_v: __m128i, max_v: __m128i) -> __m128i {
   unsafe { _mm_min_epi16(_mm_max_epi16(v, zero_v), max_v) }
 }
 
-/// SSE4.1 YUV 4:4:4 planar 10/12/14-bit → packed **u8** RGB.
-/// Const-generic over `BITS ∈ {10, 12, 14}`.
+/// SSE4.1 YUV 4:4:4 planar 9/10/12/14-bit → packed **u8** RGB.
+/// Const-generic over `BITS ∈ {9, 10, 12, 14}`.
 ///
 /// Block size: 16 pixels per iteration (same as the 4:2:0 sibling).
 /// Differs from [`yuv_420p_n_to_rgb_row`] by loading full-width U/V
@@ -1115,7 +1115,7 @@ pub(crate) unsafe fn yuv_444p_n_to_rgb_row<const BITS: u32>(
   }
 }
 
-/// SSE4.1 YUV 4:4:4 planar 10/12/14-bit → packed **8-bit RGBA**
+/// SSE4.1 YUV 4:4:4 planar 9/10/12/14-bit → packed **8-bit RGBA**
 /// (`R, G, B, 0xFF`). Same numerical contract as
 /// [`yuv_444p_n_to_rgb_row`].
 ///
@@ -1275,8 +1275,8 @@ pub(crate) unsafe fn yuv_444p_n_to_rgb_or_rgba_row<const BITS: u32, const ALPHA:
   }
 }
 
-/// SSE4.1 YUV 4:4:4 planar 10/12/14-bit → **native-depth u16** RGB.
-/// Const-generic over `BITS ∈ {10, 12, 14}`.
+/// SSE4.1 YUV 4:4:4 planar 9/10/12/14-bit → **native-depth u16** RGB.
+/// Const-generic over `BITS ∈ {9, 10, 12, 14}`.
 ///
 /// # Safety
 ///
