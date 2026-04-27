@@ -772,7 +772,9 @@ pub(crate) unsafe fn yuv_444p_n_to_rgb_row<const BITS: u32>(
 ) {
   // SAFETY: caller obligations forwarded to the shared impl.
   unsafe {
-    yuv_444p_n_to_rgb_or_rgba_row::<BITS, false>(y, u, v, rgb_out, width, matrix, full_range);
+    yuv_444p_n_to_rgb_or_rgba_row::<BITS, false, false>(
+      y, u, v, rgb_out, width, matrix, full_range, None,
+    );
   }
 }
 
@@ -780,7 +782,8 @@ pub(crate) unsafe fn yuv_444p_n_to_rgb_row<const BITS: u32>(
 /// (`R, G, B, 0xFF`). Same numerical contract as
 /// [`yuv_444p_n_to_rgb_row`].
 ///
-/// Thin wrapper over [`yuv_444p_n_to_rgb_or_rgba_row`] with `ALPHA = true`.
+/// Thin wrapper over [`yuv_444p_n_to_rgb_or_rgba_row`] with
+/// `ALPHA = true, ALPHA_SRC = false`.
 ///
 /// # Safety
 ///
@@ -798,24 +801,75 @@ pub(crate) unsafe fn yuv_444p_n_to_rgba_row<const BITS: u32>(
 ) {
   // SAFETY: caller obligations forwarded to the shared impl.
   unsafe {
-    yuv_444p_n_to_rgb_or_rgba_row::<BITS, true>(y, u, v, rgba_out, width, matrix, full_range);
+    yuv_444p_n_to_rgb_or_rgba_row::<BITS, true, false>(
+      y, u, v, rgba_out, width, matrix, full_range, None,
+    );
+  }
+}
+
+/// AVX2 YUVA 4:4:4 planar 9/10/12/14-bit → packed **8-bit RGBA** with
+/// the per-pixel alpha byte **sourced from `a_src`** (depth-converted
+/// via `>> (BITS - 8)`) instead of being constant `0xFF`. Same
+/// numerical contract as [`yuv_444p_n_to_rgba_row`] for R/G/B.
+///
+/// Thin wrapper over [`yuv_444p_n_to_rgb_or_rgba_row`] with
+/// `ALPHA = true, ALPHA_SRC = true`.
+///
+/// # Safety
+///
+/// Same as [`yuv_444p_n_to_rgba_row`] plus `a_src.len() >= width`.
+#[inline]
+#[target_feature(enable = "avx2")]
+#[allow(clippy::too_many_arguments)]
+pub(crate) unsafe fn yuv_444p_n_to_rgba_with_alpha_src_row<const BITS: u32>(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  a_src: &[u16],
+  rgba_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  // SAFETY: caller obligations forwarded to the shared impl.
+  unsafe {
+    yuv_444p_n_to_rgb_or_rgba_row::<BITS, true, true>(
+      y,
+      u,
+      v,
+      rgba_out,
+      width,
+      matrix,
+      full_range,
+      Some(a_src),
+    );
   }
 }
 
 /// Shared AVX2 high-bit-depth YUV 4:4:4 kernel for
-/// [`yuv_444p_n_to_rgb_row`] (`ALPHA = false`, `write_rgb_32`) and
-/// [`yuv_444p_n_to_rgba_row`] (`ALPHA = true`, `write_rgba_32` with
-/// constant `0xFF` alpha vector).
+/// [`yuv_444p_n_to_rgb_row`] (`ALPHA = false, ALPHA_SRC = false`,
+/// `write_rgb_32`), [`yuv_444p_n_to_rgba_row`] (`ALPHA = true,
+/// ALPHA_SRC = false`, `write_rgba_32` with constant `0xFF` alpha) and
+/// [`yuv_444p_n_to_rgba_with_alpha_src_row`] (`ALPHA = true,
+/// ALPHA_SRC = true`, `write_rgba_32` with the alpha lane loaded and
+/// depth-converted from `a_src`).
 ///
 /// # Safety
 ///
 /// 1. **AVX2 must be available on the current CPU.**
 /// 2. `y.len() >= width`, `u.len() >= width`, `v.len() >= width`,
 ///    `out.len() >= width * if ALPHA { 4 } else { 3 }`.
-/// 3. `BITS` must be one of `{9, 10, 12, 14}`.
+/// 3. When `ALPHA_SRC = true`: `a_src` must be `Some(_)` and
+///    `a_src.unwrap().len() >= width`.
+/// 4. `BITS` must be one of `{9, 10, 12, 14}`.
 #[inline]
 #[target_feature(enable = "avx2")]
-pub(crate) unsafe fn yuv_444p_n_to_rgb_or_rgba_row<const BITS: u32, const ALPHA: bool>(
+#[allow(clippy::too_many_arguments)]
+pub(crate) unsafe fn yuv_444p_n_to_rgb_or_rgba_row<
+  const BITS: u32,
+  const ALPHA: bool,
+  const ALPHA_SRC: bool,
+>(
   y: &[u16],
   u: &[u16],
   v: &[u16],
@@ -823,13 +877,20 @@ pub(crate) unsafe fn yuv_444p_n_to_rgb_or_rgba_row<const BITS: u32, const ALPHA:
   width: usize,
   matrix: ColorMatrix,
   full_range: bool,
+  a_src: Option<&[u16]>,
 ) {
   const { assert!(BITS == 9 || BITS == 10 || BITS == 12 || BITS == 14) };
+  // Source alpha requires RGBA output — there is no 3 bpp store with
+  // alpha to put it in.
+  const { assert!(!ALPHA_SRC || ALPHA) };
   let bpp: usize = if ALPHA { 4 } else { 3 };
   debug_assert!(y.len() >= width);
   debug_assert!(u.len() >= width);
   debug_assert!(v.len() >= width);
   debug_assert!(out.len() >= width * bpp);
+  if ALPHA_SRC {
+    debug_assert!(a_src.as_ref().is_some_and(|s| s.len() >= width));
+  }
 
   let coeffs = scalar::Coefficients::for_matrix(matrix);
   let (y_off, y_scale, c_scale) = scalar::range_params_n::<BITS, 8>(full_range);
@@ -932,7 +993,27 @@ pub(crate) unsafe fn yuv_444p_n_to_rgb_or_rgba_row<const BITS: u32, const ALPHA:
       let r_u8 = narrow_u8x32(r_lo, r_hi);
 
       if ALPHA {
-        write_rgba_32(r_u8, g_u8, b_u8, alpha_u8, out.as_mut_ptr().add(x * 4));
+        let a_u8 = if ALPHA_SRC {
+          // SAFETY (const-checked): ALPHA_SRC = true implies the
+          // wrapper passed Some(_), validated by debug_assert.
+          let a_ptr = a_src.as_ref().unwrap_unchecked().as_ptr();
+          let a_lo = _mm256_and_si256(_mm256_loadu_si256(a_ptr.add(x).cast()), mask_v);
+          let a_hi = _mm256_and_si256(_mm256_loadu_si256(a_ptr.add(x + 16).cast()), mask_v);
+          // Mask before shifting to harden against over-range source
+          // alpha (e.g. 1024 at BITS=10), matching scalar. AVX2's
+          // `_mm256_srli_epi16::<IMM8>` requires a literal shift, so
+          // use `_mm256_srl_epi16` with a count vector built from
+          // `BITS - 8`. `_mm256_packus_epi16` interleaves the two
+          // 128-bit lanes — `narrow_u8x32` already pays this cost for
+          // R/G/B; we use the same helper for the alpha lane.
+          let a_shr = _mm_cvtsi32_si128((BITS - 8) as i32);
+          let a_lo_shifted = _mm256_srl_epi16(a_lo, a_shr);
+          let a_hi_shifted = _mm256_srl_epi16(a_hi, a_shr);
+          narrow_u8x32(a_lo_shifted, a_hi_shifted)
+        } else {
+          alpha_u8
+        };
+        write_rgba_32(r_u8, g_u8, b_u8, a_u8, out.as_mut_ptr().add(x * 4));
       } else {
         write_rgb_32(r_u8, g_u8, b_u8, out.as_mut_ptr().add(x * 3));
       }
@@ -946,7 +1027,13 @@ pub(crate) unsafe fn yuv_444p_n_to_rgb_or_rgba_row<const BITS: u32, const ALPHA:
       let tail_v = &v[x..width];
       let tail_out = &mut out[x * bpp..width * bpp];
       let tail_w = width - x;
-      if ALPHA {
+      if ALPHA_SRC {
+        // SAFETY (const-checked): ALPHA_SRC = true implies Some(_).
+        let tail_a = &a_src.as_ref().unwrap_unchecked()[x..width];
+        scalar::yuv_444p_n_to_rgba_with_alpha_src_row::<BITS>(
+          tail_y, tail_u, tail_v, tail_a, tail_out, tail_w, matrix, full_range,
+        );
+      } else if ALPHA {
         scalar::yuv_444p_n_to_rgba_row::<BITS>(
           tail_y, tail_u, tail_v, tail_out, tail_w, matrix, full_range,
         );

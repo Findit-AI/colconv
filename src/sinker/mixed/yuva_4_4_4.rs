@@ -28,12 +28,6 @@ impl<'a> MixedSinker<'a, Yuva444p10> {
   /// kernel family used by [`MixedSinker<Yuv444p10>::with_rgba`]; the
   /// per-pixel alpha byte is **sourced from the alpha plane**
   /// (depth-converted via `a >> 2` to fit `u8`) — not constant `0xFF`.
-  ///
-  /// **Performance note (Ship 8b‑1a):** the alpha-source path runs
-  /// scalar regardless of `with_simd(true)` until SIMD wiring lands in
-  /// **Ship 8b‑1b**. The non-alpha 4:4:4 paths
-  /// (`MixedSinker<Yuv444p10>`) already have native SIMD — only the
-  /// alpha-aware fork is staged.
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub fn with_rgba(mut self, buf: &'a mut [u8]) -> Result<Self, MixedSinkerError> {
     self.set_rgba(buf)?;

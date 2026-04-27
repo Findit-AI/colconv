@@ -5004,21 +5004,14 @@ pub fn yuv444p16_to_rgba_u16_row(
   scalar::yuv_444p16_to_rgba_u16_row(y, u, v, rgba_out, width, matrix, full_range);
 }
 
-// ---- YUVA 4:4:4 RGBA dispatchers (Ship 8b‑1a prep) --------------------
+// ---- YUVA 4:4:4 RGBA dispatchers --------------------------------------
 //
 // Per-row dispatchers for the YUVA source family (currently Yuva444p10
-// only). The `use_simd` parameter is accepted for API parity with the
-// rest of the dispatcher family but is ignored in this PR — SIMD per-arch
-// routes for the alpha-source path land in:
-//
-//   - Ship 8b‑1b: u8 RGBA SIMD on neon / avx512 / avx2 / sse41 /
-//     wasm_simd128.
-//   - Ship 8b‑1c: u16 RGBA SIMD on the same backends.
-//
-// Until then the dispatcher routes unconditionally to the scalar path
-// (`scalar::yuv_444p_n_to_rgba_with_alpha_src_row::<10>` / its u16
-// counterpart), which already monomorphizes optimally — the
-// `ALPHA_SRC = true` branch is the only live arm in the per-pixel store.
+// only). The u8 RGBA dispatcher routes through the per-arch
+// `yuv_444p_n_to_rgba_with_alpha_src_row` SIMD wrappers, mirroring the
+// `yuv444p10_to_rgba_row` dispatcher's pattern. The u16 RGBA
+// dispatcher (`yuva444p10_to_rgba_u16_row`) stays scalar until SIMD
+// wiring lands in **Ship 8b‑1c**.
 
 /// Converts one row of **10-bit** YUVA 4:4:4 to packed **8-bit**
 /// **RGBA**. R / G / B are produced by the same Q15 i32 kernel family
@@ -5026,15 +5019,8 @@ pub fn yuv444p16_to_rgba_u16_row(
 /// **sourced from `a`** (depth-converted via `a >> 2` to fit `u8`)
 /// instead of being constant `0xFF`.
 ///
-/// # ⚠ Scalar-only as of Ship 8b‑1a
-///
-/// `use_simd` is accepted for forward-compatible API parity with the
-/// rest of the dispatcher family **but is ignored in this PR**. Every
-/// invocation runs the scalar reference regardless of the flag — SIMD
-/// wiring lands in **Ship 8b‑1b**. Throughput on 4:4:4 + alpha is
-/// substantially below the 4:4:4-no-alpha SIMD path until then;
-/// callers benchmarking the alpha-source path should re-measure once
-/// 8b‑1b lands. See the section comment above for staging context.
+/// `use_simd = false` forces the scalar reference path; otherwise
+/// per-arch dispatch matches [`yuv444p10_to_rgba_row`]'s pattern.
 #[cfg_attr(not(tarpaulin), inline(always))]
 #[allow(clippy::too_many_arguments)]
 pub fn yuva444p10_to_rgba_row(
@@ -5055,7 +5041,63 @@ pub fn yuva444p10_to_rgba_row(
   assert!(a.len() >= width, "a row too short");
   assert!(rgba_out.len() >= rgba_min, "rgba_out row too short");
 
-  let _ = use_simd; // SIMD per-arch routes land in Ship 8b‑1b PR.
+  if use_simd {
+    cfg_select! {
+      target_arch = "aarch64" => {
+        if neon_available() {
+          // SAFETY: NEON verified.
+          unsafe {
+            arch::neon::yuv_444p_n_to_rgba_with_alpha_src_row::<10>(
+              y, u, v, a, rgba_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+      },
+      target_arch = "x86_64" => {
+        if avx512_available() {
+          // SAFETY: AVX‑512BW verified.
+          unsafe {
+            arch::x86_avx512::yuv_444p_n_to_rgba_with_alpha_src_row::<10>(
+              y, u, v, a, rgba_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+        if avx2_available() {
+          // SAFETY: AVX2 verified.
+          unsafe {
+            arch::x86_avx2::yuv_444p_n_to_rgba_with_alpha_src_row::<10>(
+              y, u, v, a, rgba_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+        if sse41_available() {
+          // SAFETY: SSE4.1 verified.
+          unsafe {
+            arch::x86_sse41::yuv_444p_n_to_rgba_with_alpha_src_row::<10>(
+              y, u, v, a, rgba_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+      },
+      target_arch = "wasm32" => {
+        if simd128_available() {
+          // SAFETY: simd128 compile‑time verified.
+          unsafe {
+            arch::wasm_simd128::yuv_444p_n_to_rgba_with_alpha_src_row::<10>(
+              y, u, v, a, rgba_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+      },
+      _ => {}
+    }
+  }
+
   scalar::yuv_444p_n_to_rgba_with_alpha_src_row::<10>(
     y, u, v, a, rgba_out, width, matrix, full_range,
   );
