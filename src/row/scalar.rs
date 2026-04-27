@@ -1067,7 +1067,11 @@ pub(crate) fn yuv_444p_n_to_rgb_or_rgba_row<
     if ALPHA_SRC {
       // SAFETY (const-checked): ALPHA_SRC = true implies the wrapper
       // passed Some(_), validated above by debug_assert.
-      let a_u16 = a_src.as_ref().unwrap()[x];
+      // Mask the source alpha to BITS like Y/U/V — `try_new` admits
+      // out-of-range u16 samples, and an unmasked overrange value
+      // (e.g. 1024 at BITS=10) would shift down to 256 → cast-to-u8 0,
+      // silently turning over-range alpha into transparent output.
+      let a_u16 = a_src.as_ref().unwrap()[x] & mask;
       out[x * bpp + 3] = (a_u16 >> (BITS - 8)) as u8;
     } else if ALPHA {
       out[x * bpp + 3] = 0xFF;
@@ -1234,7 +1238,11 @@ pub(crate) fn yuv_444p_n_to_rgb_or_rgba_u16_row<
     out[x * bpp + 2] = (y0 + b_chroma).clamp(0, out_max) as u16;
     if ALPHA_SRC {
       // SAFETY (const-checked): ALPHA_SRC = true implies Some(_).
-      out[x * bpp + 3] = a_src.as_ref().unwrap()[x];
+      // Mask the source alpha to BITS like Y/U/V — `try_new` admits
+      // out-of-range u16 samples, and the documented native-depth
+      // output range is `[0, (1 << BITS) - 1]`. Without masking, an
+      // overrange `1024` at BITS=10 would leak straight to output.
+      out[x * bpp + 3] = a_src.as_ref().unwrap()[x] & mask;
     } else if ALPHA {
       out[x * bpp + 3] = alpha_max;
     }
