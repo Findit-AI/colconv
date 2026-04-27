@@ -6421,3 +6421,233 @@ fn yuv422p16_rgba_u16_only_native_depth_gray_with_opaque_alpha() {
     assert_eq!(px[3], 0xFFFF, "alpha must equal 0xFFFF");
   }
 }
+
+// ===== Ship 8 Tranche 7c — high-bit 4:4:4 RGBA sinker tests ==========
+//
+// Mirrors PR #26's 4:2:0 coverage scope: representative formats only,
+// not exhaustive per-format. Yuv444p10 covers the BITS-generic planar
+// path; P410 covers the Pn semi-planar path; Yuv444p16 covers the
+// 16-bit dedicated kernel; Yuv440p10 covers the 4:4:0 kernel-reuse
+// path. The remaining 4:4:4 high-bit formats (9/12/14, P412/P416,
+// Yuv440p12) are exercised by row-layer tests + the compile-time
+// guarantee that the new sinker builders typecheck.
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn yuv444p10_rgba_u8_only_gray_with_opaque_alpha() {
+  // 10-bit mid-gray (Y=512, U=512, V=512) → 8-bit RGBA ≈ (128, 128, 128, 255).
+  let (yp, up, vp) = solid_yuv444p_n_frame(16, 8, 512, 512, 512);
+  let src = Yuv444p10Frame::new(&yp, &up, &vp, 16, 8, 16, 16, 16);
+
+  let mut rgba = std::vec![0u8; 16 * 8 * 4];
+  let mut sink = MixedSinker::<Yuv444p10>::new(16, 8)
+    .with_rgba(&mut rgba)
+    .unwrap();
+  yuv444p10_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+  for px in rgba.chunks(4) {
+    assert!(px[0].abs_diff(128) <= 1);
+    assert_eq!(px[0], px[1]);
+    assert_eq!(px[1], px[2]);
+    assert_eq!(px[3], 0xFF, "alpha must be opaque");
+  }
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn yuv444p10_rgba_u16_only_native_depth_gray_with_opaque_alpha() {
+  // 10-bit mid-gray → u16 RGBA: each color element ≈ 512, alpha = 1023.
+  let (yp, up, vp) = solid_yuv444p_n_frame(16, 8, 512, 512, 512);
+  let src = Yuv444p10Frame::new(&yp, &up, &vp, 16, 8, 16, 16, 16);
+
+  let mut rgba = std::vec![0u16; 16 * 8 * 4];
+  let mut sink = MixedSinker::<Yuv444p10>::new(16, 8)
+    .with_rgba_u16(&mut rgba)
+    .unwrap();
+  yuv444p10_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+  for px in rgba.chunks(4) {
+    assert!(px[0].abs_diff(512) <= 1, "got {px:?}");
+    assert_eq!(px[0], px[1]);
+    assert_eq!(px[1], px[2]);
+    assert_eq!(px[3], 1023, "alpha must equal (1 << 10) - 1");
+  }
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn yuv444p10_with_rgb_and_with_rgba_produce_byte_identical_rgb_bytes() {
+  // Strategy A on the u8 path: rgb buffer populated by the RGB kernel,
+  // rgba buffer populated via the cheap expand_rgb_to_rgba_row pass.
+  // RGB triples must be byte-identical to the standalone RGB-only run.
+  let (yp, up, vp) = solid_yuv444p_n_frame(64, 16, 600, 400, 700);
+  let src = Yuv444p10Frame::new(&yp, &up, &vp, 64, 16, 64, 64, 64);
+
+  let mut rgb_solo = std::vec![0u8; 64 * 16 * 3];
+  let mut s_solo = MixedSinker::<Yuv444p10>::new(64, 16)
+    .with_rgb(&mut rgb_solo)
+    .unwrap();
+  yuv444p10_to(&src, true, ColorMatrix::Bt709, &mut s_solo).unwrap();
+
+  let mut rgb_combined = std::vec![0u8; 64 * 16 * 3];
+  let mut rgba = std::vec![0u8; 64 * 16 * 4];
+  let mut s_combined = MixedSinker::<Yuv444p10>::new(64, 16)
+    .with_rgb(&mut rgb_combined)
+    .unwrap()
+    .with_rgba(&mut rgba)
+    .unwrap();
+  yuv444p10_to(&src, true, ColorMatrix::Bt709, &mut s_combined).unwrap();
+
+  assert_eq!(rgb_solo, rgb_combined, "RGB bytes must match across runs");
+  for (rgb_px, rgba_px) in rgb_combined.chunks(3).zip(rgba.chunks(4)) {
+    assert_eq!(rgb_px[0], rgba_px[0]);
+    assert_eq!(rgb_px[1], rgba_px[1]);
+    assert_eq!(rgb_px[2], rgba_px[2]);
+    assert_eq!(rgba_px[3], 0xFF);
+  }
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn yuv444p10_with_rgb_u16_and_with_rgba_u16_produce_byte_identical_rgb_elems() {
+  // Strategy A on the u16 path: rgb_u16 buffer populated by the u16 RGB
+  // kernel, rgba_u16 fanned out via expand_rgb_u16_to_rgba_u16_row<10>.
+  let (yp, up, vp) = solid_yuv444p_n_frame(64, 16, 600, 400, 700);
+  let src = Yuv444p10Frame::new(&yp, &up, &vp, 64, 16, 64, 64, 64);
+
+  let mut rgb_solo = std::vec![0u16; 64 * 16 * 3];
+  let mut s_solo = MixedSinker::<Yuv444p10>::new(64, 16)
+    .with_rgb_u16(&mut rgb_solo)
+    .unwrap();
+  yuv444p10_to(&src, true, ColorMatrix::Bt709, &mut s_solo).unwrap();
+
+  let mut rgb_combined = std::vec![0u16; 64 * 16 * 3];
+  let mut rgba = std::vec![0u16; 64 * 16 * 4];
+  let mut s_combined = MixedSinker::<Yuv444p10>::new(64, 16)
+    .with_rgb_u16(&mut rgb_combined)
+    .unwrap()
+    .with_rgba_u16(&mut rgba)
+    .unwrap();
+  yuv444p10_to(&src, true, ColorMatrix::Bt709, &mut s_combined).unwrap();
+
+  assert_eq!(
+    rgb_solo, rgb_combined,
+    "RGB u16 elements must match across runs"
+  );
+  for (rgb_px, rgba_px) in rgb_combined.chunks(3).zip(rgba.chunks(4)) {
+    assert_eq!(rgb_px[0], rgba_px[0]);
+    assert_eq!(rgb_px[1], rgba_px[1]);
+    assert_eq!(rgb_px[2], rgba_px[2]);
+    assert_eq!(rgba_px[3], 1023, "alpha = (1 << 10) - 1");
+  }
+}
+
+#[test]
+fn yuv444p10_rgba_too_short_returns_err() {
+  let mut rgba = std::vec![0u8; 10];
+  let err = MixedSinker::<Yuv444p10>::new(16, 8)
+    .with_rgba(&mut rgba)
+    .err()
+    .expect("expected RgbaBufferTooShort");
+  assert!(matches!(err, MixedSinkerError::RgbaBufferTooShort { .. }));
+}
+
+#[test]
+fn yuv444p10_rgba_u16_too_short_returns_err() {
+  let mut rgba = std::vec![0u16; 10];
+  let err = MixedSinker::<Yuv444p10>::new(16, 8)
+    .with_rgba_u16(&mut rgba)
+    .err()
+    .expect("expected RgbaU16BufferTooShort");
+  assert!(matches!(
+    err,
+    MixedSinkerError::RgbaU16BufferTooShort { .. }
+  ));
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn p410_rgba_u16_only_native_depth_gray_with_opaque_alpha() {
+  // P410 (semi-planar 10-bit): mid-gray (high-bit-packed = 512 << 6).
+  // u16 RGBA output ≈ 512, alpha = 1023.
+  let (yp, uvp) = solid_p4x0_frame(16, 8, 10, 512, 512, 512);
+  let src = P410Frame::new(&yp, &uvp, 16, 8, 16, 32);
+
+  let mut rgba = std::vec![0u16; 16 * 8 * 4];
+  let mut sink = MixedSinker::<P410>::new(16, 8)
+    .with_rgba_u16(&mut rgba)
+    .unwrap();
+  p410_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+
+  for px in rgba.chunks(4) {
+    assert!(px[0].abs_diff(512) <= 1, "got {px:?}");
+    assert_eq!(px[0], px[1]);
+    assert_eq!(px[1], px[2]);
+    assert_eq!(px[3], 1023, "alpha must equal (1 << 10) - 1");
+  }
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn yuv444p16_rgba_u16_only_native_depth_gray_with_opaque_alpha() {
+  // 16-bit mid-gray → u16 RGBA: each color element ≈ 32768, alpha = 0xFFFF.
+  // Covers the 16-bit dedicated kernel family (no Q15 downshift).
+  let (yp, up, vp) = solid_yuv444p_n_frame(16, 8, 32768, 32768, 32768);
+  let src = Yuv444p16Frame::new(&yp, &up, &vp, 16, 8, 16, 16, 16);
+
+  let mut rgba = std::vec![0u16; 16 * 8 * 4];
+  let mut sink = MixedSinker::<Yuv444p16>::new(16, 8)
+    .with_rgba_u16(&mut rgba)
+    .unwrap();
+  yuv444p16_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+
+  for px in rgba.chunks(4) {
+    assert!(px[0].abs_diff(32768) <= 256, "got {px:?}");
+    assert_eq!(px[0], px[1]);
+    assert_eq!(px[1], px[2]);
+    assert_eq!(px[3], 0xFFFF, "alpha must equal 0xFFFF");
+  }
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn yuv440p10_rgba_u16_only_native_depth_gray_with_opaque_alpha() {
+  // 4:4:0 reuses the 4:4:4 dispatcher. Confirms the kernel-reuse path
+  // wires through correctly at the sinker boundary.
+  let (yp, up, vp) = solid_yuv440p_n_frame(16, 8, 512, 512, 512);
+  let src = Yuv440p10Frame::new(&yp, &up, &vp, 16, 8, 16, 16, 16);
+
+  let mut rgba = std::vec![0u16; 16 * 8 * 4];
+  let mut sink = MixedSinker::<Yuv440p10>::new(16, 8)
+    .with_rgba_u16(&mut rgba)
+    .unwrap();
+  yuv440p10_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+
+  for px in rgba.chunks(4) {
+    assert!(px[0].abs_diff(512) <= 1, "got {px:?}");
+    assert_eq!(px[0], px[1]);
+    assert_eq!(px[1], px[2]);
+    assert_eq!(px[3], 1023, "alpha must equal (1 << 10) - 1");
+  }
+}

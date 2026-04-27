@@ -31,12 +31,13 @@ impl<'a> MixedSinker<'a, Yuv420p> {
   ///
   /// ```compile_fail
   /// // Attaching RGBA to a sink that doesn't write it is rejected
-  /// // at compile time. Yuv444p10 (10‑bit 4:4:4 planar) has not yet
-  /// // been wired for RGBA — once a future tranche lands it the
-  /// // negative example here moves to the next not‑yet‑wired format.
-  /// use colconv::{sinker::MixedSinker, yuv::Yuv444p10};
+  /// // at compile time. `Bayer` (RAW Bayer-mosaic) has no RGBA path —
+  /// // there's no inherent alpha channel and the format demosaics to
+  /// // RGB only. Once / if a future PR adds RGBA, the negative example
+  /// // here moves to the next not‑yet‑wired format.
+  /// use colconv::{sinker::MixedSinker, raw::Bayer};
   /// let mut buf = vec![0u8; 16 * 8 * 4];
-  /// let _ = MixedSinker::<Yuv444p10>::new(16, 8).with_rgba(&mut buf);
+  /// let _ = MixedSinker::<Bayer>::new(16, 8).with_rgba(&mut buf);
   /// ```
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub fn with_rgba(mut self, buf: &'a mut [u8]) -> Result<Self, MixedSinkerError> {

@@ -2546,3 +2546,191 @@ fn neon_p416_rgba_matches_scalar_all_matrices() {
     check_p_n_444_16_u8_neon_rgba_equivalence(w, ColorMatrix::Bt709, false);
   }
 }
+
+// ---- High-bit 4:4:4 native-depth `u16` RGBA equivalence (Ship 8 Tranche 7c) ----
+//
+// u16 RGBA wrappers share the math of their u16 RGB siblings — only
+// the store (and tail dispatch) branches on `ALPHA`, with alpha set to
+// `(1 << BITS) - 1` for BITS-generic kernels and `0xFFFF` for 16-bit
+// kernels. Tests pin byte-identical output against the scalar RGBA
+// reference.
+
+fn check_yuv444p_n_u16_neon_rgba_equivalence<const BITS: u32>(
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  let y = planar_n_plane::<BITS>(width, 37);
+  let u = planar_n_plane::<BITS>(width, 53);
+  let v = planar_n_plane::<BITS>(width, 71);
+  let mut rgba_scalar = std::vec![0u16; width * 4];
+  let mut rgba_neon = std::vec![0u16; width * 4];
+  scalar::yuv_444p_n_to_rgba_u16_row::<BITS>(
+    &y,
+    &u,
+    &v,
+    &mut rgba_scalar,
+    width,
+    matrix,
+    full_range,
+  );
+  unsafe {
+    yuv_444p_n_to_rgba_u16_row::<BITS>(&y, &u, &v, &mut rgba_neon, width, matrix, full_range);
+  }
+  assert_eq!(
+    rgba_scalar, rgba_neon,
+    "NEON Yuv444p<{BITS}> → RGBA u16 diverges (width={width}, matrix={matrix:?}, full_range={full_range})"
+  );
+}
+
+fn check_pn_444_u16_neon_rgba_equivalence<const BITS: u32>(
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  let y = high_bit_plane::<BITS>(width, 37);
+  let u = high_bit_plane::<BITS>(width, 53);
+  let v = high_bit_plane::<BITS>(width, 71);
+  let uv = interleave_uv(&u, &v);
+  let mut rgba_scalar = std::vec![0u16; width * 4];
+  let mut rgba_neon = std::vec![0u16; width * 4];
+  scalar::p_n_444_to_rgba_u16_row::<BITS>(&y, &uv, &mut rgba_scalar, width, matrix, full_range);
+  unsafe {
+    p_n_444_to_rgba_u16_row::<BITS>(&y, &uv, &mut rgba_neon, width, matrix, full_range);
+  }
+  assert_eq!(
+    rgba_scalar, rgba_neon,
+    "NEON Pn4:4:4<{BITS}> → RGBA u16 diverges (width={width}, matrix={matrix:?}, full_range={full_range})"
+  );
+}
+
+fn check_yuv444p16_u16_neon_rgba_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+  let y = p16_plane_neon(width, 37);
+  let u = p16_plane_neon(width, 53);
+  let v = p16_plane_neon(width, 71);
+  let mut rgba_scalar = std::vec![0u16; width * 4];
+  let mut rgba_neon = std::vec![0u16; width * 4];
+  scalar::yuv_444p16_to_rgba_u16_row(&y, &u, &v, &mut rgba_scalar, width, matrix, full_range);
+  unsafe {
+    yuv_444p16_to_rgba_u16_row(&y, &u, &v, &mut rgba_neon, width, matrix, full_range);
+  }
+  assert_eq!(
+    rgba_scalar, rgba_neon,
+    "NEON Yuv444p16 → RGBA u16 diverges (width={width}, matrix={matrix:?}, full_range={full_range})"
+  );
+}
+
+fn check_p_n_444_16_u16_neon_rgba_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+  let y = p16_plane_neon(width, 37);
+  let u = p16_plane_neon(width, 53);
+  let v = p16_plane_neon(width, 71);
+  let uv = interleave_uv(&u, &v);
+  let mut rgba_scalar = std::vec![0u16; width * 4];
+  let mut rgba_neon = std::vec![0u16; width * 4];
+  scalar::p_n_444_16_to_rgba_u16_row(&y, &uv, &mut rgba_scalar, width, matrix, full_range);
+  unsafe {
+    p_n_444_16_to_rgba_u16_row(&y, &uv, &mut rgba_neon, width, matrix, full_range);
+  }
+  assert_eq!(
+    rgba_scalar, rgba_neon,
+    "NEON P416 → RGBA u16 diverges (width={width}, matrix={matrix:?}, full_range={full_range})"
+  );
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
+fn neon_yuv444p_n_rgba_u16_matches_scalar_all_bits() {
+  for m in [
+    ColorMatrix::Bt601,
+    ColorMatrix::Bt709,
+    ColorMatrix::Bt2020Ncl,
+    ColorMatrix::Smpte240m,
+    ColorMatrix::Fcc,
+    ColorMatrix::YCgCo,
+  ] {
+    for full in [true, false] {
+      check_yuv444p_n_u16_neon_rgba_equivalence::<9>(16, m, full);
+      check_yuv444p_n_u16_neon_rgba_equivalence::<10>(16, m, full);
+      check_yuv444p_n_u16_neon_rgba_equivalence::<12>(16, m, full);
+      check_yuv444p_n_u16_neon_rgba_equivalence::<14>(16, m, full);
+    }
+  }
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
+fn neon_yuv444p_n_rgba_u16_matches_scalar_tail_and_widths() {
+  for w in [17usize, 31, 47, 63, 1920, 1922] {
+    check_yuv444p_n_u16_neon_rgba_equivalence::<9>(w, ColorMatrix::Bt601, false);
+    check_yuv444p_n_u16_neon_rgba_equivalence::<10>(w, ColorMatrix::Bt709, true);
+    check_yuv444p_n_u16_neon_rgba_equivalence::<12>(w, ColorMatrix::Bt2020Ncl, false);
+    check_yuv444p_n_u16_neon_rgba_equivalence::<14>(w, ColorMatrix::YCgCo, true);
+  }
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
+fn neon_pn_444_rgba_u16_matches_scalar_all_bits() {
+  for m in [
+    ColorMatrix::Bt601,
+    ColorMatrix::Bt709,
+    ColorMatrix::Bt2020Ncl,
+    ColorMatrix::Smpte240m,
+    ColorMatrix::Fcc,
+    ColorMatrix::YCgCo,
+  ] {
+    for full in [true, false] {
+      check_pn_444_u16_neon_rgba_equivalence::<10>(16, m, full);
+      check_pn_444_u16_neon_rgba_equivalence::<12>(16, m, full);
+    }
+  }
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
+fn neon_pn_444_rgba_u16_matches_scalar_tail_and_widths() {
+  for w in [17usize, 31, 47, 63, 1920, 1922] {
+    check_pn_444_u16_neon_rgba_equivalence::<10>(w, ColorMatrix::Bt601, false);
+    check_pn_444_u16_neon_rgba_equivalence::<12>(w, ColorMatrix::Bt709, true);
+  }
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
+fn neon_yuv444p16_rgba_u16_matches_scalar_all_matrices() {
+  for m in [
+    ColorMatrix::Bt601,
+    ColorMatrix::Bt709,
+    ColorMatrix::Bt2020Ncl,
+    ColorMatrix::Smpte240m,
+    ColorMatrix::Fcc,
+    ColorMatrix::YCgCo,
+  ] {
+    for full in [true, false] {
+      check_yuv444p16_u16_neon_rgba_equivalence(16, m, full);
+    }
+  }
+  for w in [17usize, 31, 47, 63, 1920, 1922] {
+    check_yuv444p16_u16_neon_rgba_equivalence(w, ColorMatrix::Bt709, false);
+  }
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
+fn neon_p416_rgba_u16_matches_scalar_all_matrices() {
+  for m in [
+    ColorMatrix::Bt601,
+    ColorMatrix::Bt709,
+    ColorMatrix::Bt2020Ncl,
+    ColorMatrix::Smpte240m,
+    ColorMatrix::Fcc,
+    ColorMatrix::YCgCo,
+  ] {
+    for full in [true, false] {
+      check_p_n_444_16_u16_neon_rgba_equivalence(16, m, full);
+    }
+  }
+  for w in [17usize, 31, 47, 63, 1920, 1922] {
+    check_p_n_444_16_u16_neon_rgba_equivalence(w, ColorMatrix::Bt709, false);
+  }
+}
