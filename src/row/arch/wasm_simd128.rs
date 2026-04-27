@@ -1901,7 +1901,7 @@ pub(crate) unsafe fn p_n_to_rgb_or_rgba_row<const BITS: u32, const ALPHA: bool>(
     let alpha_u8 = u8x16_splat(0xFF);
 
     // High-bit-packed samples: shift right by `16 - BITS`.
-    let shr = (16 - BITS) as u32;
+    let shr = 16 - BITS;
 
     let mut x = 0usize;
     while x + 16 <= width {
@@ -2079,7 +2079,7 @@ pub(crate) unsafe fn p_n_to_rgb_or_rgba_u16_row<const BITS: u32, const ALPHA: bo
     let alpha_u16 = u16x8_splat(out_max as u16);
 
     // High-bit-packed samples: shift right by `16 - BITS`.
-    let shr = (16 - BITS) as u32;
+    let shr = 16 - BITS;
 
     let mut x = 0usize;
     while x + 16 <= width {
@@ -4072,7 +4072,7 @@ pub(crate) unsafe fn p_n_444_to_rgb_or_rgba_row<const BITS: u32, const ALPHA: bo
     let cbv = i32x4_splat(coeffs.b_v());
     let alpha_u8 = u8x16_splat(0xFF);
 
-    let shr = (16 - BITS) as u32;
+    let shr = 16 - BITS;
 
     let mut x = 0usize;
     while x + 16 <= width {
@@ -4250,7 +4250,7 @@ pub(crate) unsafe fn p_n_444_to_rgb_or_rgba_u16_row<const BITS: u32, const ALPHA
     let cbv = i32x4_splat(coeffs.b_v());
     let alpha_u16 = u16x8_splat(out_max as u16);
 
-    let shr = (16 - BITS) as u32;
+    let shr = 16 - BITS;
 
     let mut x = 0usize;
     while x + 16 <= width {
