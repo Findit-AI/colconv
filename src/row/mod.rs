@@ -4264,6 +4264,441 @@ pub fn p412_to_rgb_u16_row(
   p_n_444_to_rgb_u16_row::<12>(y, uv_full, rgb_out, width, matrix, full_range, use_simd);
 }
 
+// ---- High-bit 4:4:4 RGBA dispatchers (Ship 8 Tranche 6 prep) ----------
+//
+// Both u8 and native-depth `u16` RGBA dispatchers route to the scalar
+// reference path. SIMD per-arch routes land in the follow-up Ship 8
+// Tranche 6b (u8) and Tranche 6c (u16) PRs; the `use_simd` parameter
+// is held in the signature for API stability, but every body is
+// `let _ = use_simd;` plus a scalar call until the SIMD wiring lands.
+
+/// Converts one row of **9-bit** YUV 4:4:4 to packed **8-bit**
+/// **RGBA** (`R, G, B, 0xFF`; alpha defaults to opaque since the
+/// source has no alpha plane).
+///
+/// Same numerical contract as [`yuv444p9_to_rgb_row`] except for the
+/// per-pixel stride (4 vs 3) and the constant alpha byte. See
+/// `scalar::yuv_444p_n_to_rgba_row` for the reference.
+///
+/// `use_simd = false` forces the scalar reference path.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn yuv444p9_to_rgba_row(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  rgba_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  use_simd: bool,
+) {
+  let rgba_min = rgba_row_bytes(width);
+  assert!(y.len() >= width, "y row too short");
+  assert!(u.len() >= width, "u row too short");
+  assert!(v.len() >= width, "v row too short");
+  assert!(rgba_out.len() >= rgba_min, "rgba_out row too short");
+
+  let _ = use_simd; // SIMD per-arch routes land in Ship 8 Tranche 6b.
+  scalar::yuv_444p_n_to_rgba_row::<9>(y, u, v, rgba_out, width, matrix, full_range);
+}
+
+/// Converts one row of **9-bit** YUV 4:4:4 to **native-depth `u16`**
+/// packed **RGBA** — output is low-bit-packed (`[0, (1 << 9) - 1]`
+/// in the low bits of each `u16`); alpha element is `(1 << 9) - 1`
+/// (opaque maximum at the input bit depth).
+///
+/// See `scalar::yuv_444p_n_to_rgba_u16_row` for the reference.
+/// `use_simd = false` forces the scalar reference path.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn yuv444p9_to_rgba_u16_row(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  rgba_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  use_simd: bool,
+) {
+  let rgba_min = rgba_row_elems(width);
+  assert!(y.len() >= width, "y row too short");
+  assert!(u.len() >= width, "u row too short");
+  assert!(v.len() >= width, "v row too short");
+  assert!(rgba_out.len() >= rgba_min, "rgba_out row too short");
+
+  let _ = use_simd; // SIMD per-arch routes land in Ship 8 Tranche 6c.
+  scalar::yuv_444p_n_to_rgba_u16_row::<9>(y, u, v, rgba_out, width, matrix, full_range);
+}
+
+/// Converts one row of **10-bit** YUV 4:4:4 to packed **8-bit**
+/// **RGBA** (`R, G, B, 0xFF`).
+///
+/// `use_simd = false` forces the scalar reference path.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn yuv444p10_to_rgba_row(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  rgba_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  use_simd: bool,
+) {
+  let rgba_min = rgba_row_bytes(width);
+  assert!(y.len() >= width, "y row too short");
+  assert!(u.len() >= width, "u row too short");
+  assert!(v.len() >= width, "v row too short");
+  assert!(rgba_out.len() >= rgba_min, "rgba_out row too short");
+
+  let _ = use_simd; // SIMD per-arch routes land in Ship 8 Tranche 6b.
+  scalar::yuv_444p_n_to_rgba_row::<10>(y, u, v, rgba_out, width, matrix, full_range);
+}
+
+/// Converts one row of **10-bit** YUV 4:4:4 to **native-depth `u16`**
+/// packed **RGBA** — output is low-bit-packed (`[0, 1023]`); alpha
+/// element is `1023`.
+///
+/// `use_simd = false` forces the scalar reference path.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn yuv444p10_to_rgba_u16_row(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  rgba_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  use_simd: bool,
+) {
+  let rgba_min = rgba_row_elems(width);
+  assert!(y.len() >= width, "y row too short");
+  assert!(u.len() >= width, "u row too short");
+  assert!(v.len() >= width, "v row too short");
+  assert!(rgba_out.len() >= rgba_min, "rgba_out row too short");
+
+  let _ = use_simd; // SIMD per-arch routes land in Ship 8 Tranche 6c.
+  scalar::yuv_444p_n_to_rgba_u16_row::<10>(y, u, v, rgba_out, width, matrix, full_range);
+}
+
+/// Converts one row of **12-bit** YUV 4:4:4 to packed **8-bit**
+/// **RGBA** (`R, G, B, 0xFF`).
+///
+/// `use_simd = false` forces the scalar reference path.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn yuv444p12_to_rgba_row(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  rgba_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  use_simd: bool,
+) {
+  let rgba_min = rgba_row_bytes(width);
+  assert!(y.len() >= width, "y row too short");
+  assert!(u.len() >= width, "u row too short");
+  assert!(v.len() >= width, "v row too short");
+  assert!(rgba_out.len() >= rgba_min, "rgba_out row too short");
+
+  let _ = use_simd; // SIMD per-arch routes land in Ship 8 Tranche 6b.
+  scalar::yuv_444p_n_to_rgba_row::<12>(y, u, v, rgba_out, width, matrix, full_range);
+}
+
+/// Converts one row of **12-bit** YUV 4:4:4 to **native-depth `u16`**
+/// packed **RGBA** — output is low-bit-packed (`[0, 4095]`); alpha
+/// element is `4095`.
+///
+/// `use_simd = false` forces the scalar reference path.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn yuv444p12_to_rgba_u16_row(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  rgba_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  use_simd: bool,
+) {
+  let rgba_min = rgba_row_elems(width);
+  assert!(y.len() >= width, "y row too short");
+  assert!(u.len() >= width, "u row too short");
+  assert!(v.len() >= width, "v row too short");
+  assert!(rgba_out.len() >= rgba_min, "rgba_out row too short");
+
+  let _ = use_simd; // SIMD per-arch routes land in Ship 8 Tranche 6c.
+  scalar::yuv_444p_n_to_rgba_u16_row::<12>(y, u, v, rgba_out, width, matrix, full_range);
+}
+
+/// Converts one row of **14-bit** YUV 4:4:4 to packed **8-bit**
+/// **RGBA** (`R, G, B, 0xFF`).
+///
+/// `use_simd = false` forces the scalar reference path.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn yuv444p14_to_rgba_row(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  rgba_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  use_simd: bool,
+) {
+  let rgba_min = rgba_row_bytes(width);
+  assert!(y.len() >= width, "y row too short");
+  assert!(u.len() >= width, "u row too short");
+  assert!(v.len() >= width, "v row too short");
+  assert!(rgba_out.len() >= rgba_min, "rgba_out row too short");
+
+  let _ = use_simd; // SIMD per-arch routes land in Ship 8 Tranche 6b.
+  scalar::yuv_444p_n_to_rgba_row::<14>(y, u, v, rgba_out, width, matrix, full_range);
+}
+
+/// Converts one row of **14-bit** YUV 4:4:4 to **native-depth `u16`**
+/// packed **RGBA** — output is low-bit-packed (`[0, 16383]`); alpha
+/// element is `16383`.
+///
+/// `use_simd = false` forces the scalar reference path.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn yuv444p14_to_rgba_u16_row(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  rgba_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  use_simd: bool,
+) {
+  let rgba_min = rgba_row_elems(width);
+  assert!(y.len() >= width, "y row too short");
+  assert!(u.len() >= width, "u row too short");
+  assert!(v.len() >= width, "v row too short");
+  assert!(rgba_out.len() >= rgba_min, "rgba_out row too short");
+
+  let _ = use_simd; // SIMD per-arch routes land in Ship 8 Tranche 6c.
+  scalar::yuv_444p_n_to_rgba_u16_row::<14>(y, u, v, rgba_out, width, matrix, full_range);
+}
+
+/// Converts one row of **16-bit** YUV 4:4:4 to packed **8-bit**
+/// **RGBA** (`R, G, B, 0xFF`). Routes through the dedicated 16-bit
+/// scalar kernel (`scalar::yuv_444p16_to_rgba_row`).
+///
+/// `use_simd = false` forces the scalar reference path.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn yuv444p16_to_rgba_row(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  rgba_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  use_simd: bool,
+) {
+  let rgba_min = rgba_row_bytes(width);
+  assert!(y.len() >= width, "y row too short");
+  assert!(u.len() >= width, "u row too short");
+  assert!(v.len() >= width, "v row too short");
+  assert!(rgba_out.len() >= rgba_min, "rgba_out row too short");
+
+  let _ = use_simd; // SIMD per-arch routes land in Ship 8 Tranche 6b.
+  scalar::yuv_444p16_to_rgba_row(y, u, v, rgba_out, width, matrix, full_range);
+}
+
+/// Converts one row of **16-bit** YUV 4:4:4 to **native-depth `u16`**
+/// packed **RGBA** — full-range output `[0, 65535]`; alpha element is
+/// `0xFFFF`. Routes through the dedicated 16-bit u16-output scalar
+/// kernel (`scalar::yuv_444p16_to_rgba_u16_row`) — i64 chroma multiply.
+///
+/// `use_simd = false` forces the scalar reference path.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn yuv444p16_to_rgba_u16_row(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  rgba_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  use_simd: bool,
+) {
+  let rgba_min = rgba_row_elems(width);
+  assert!(y.len() >= width, "y row too short");
+  assert!(u.len() >= width, "u row too short");
+  assert!(v.len() >= width, "v row too short");
+  assert!(rgba_out.len() >= rgba_min, "rgba_out row too short");
+
+  let _ = use_simd; // SIMD per-arch routes land in Ship 8 Tranche 6c.
+  scalar::yuv_444p16_to_rgba_u16_row(y, u, v, rgba_out, width, matrix, full_range);
+}
+
+/// P410 (semi-planar 4:4:4, 10-bit high-packed) → packed **8-bit**
+/// **RGBA** (`R, G, B, 0xFF`).
+///
+/// `use_simd = false` forces the scalar reference path.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn p410_to_rgba_row(
+  y: &[u16],
+  uv_full: &[u16],
+  rgba_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  use_simd: bool,
+) {
+  let rgba_min = rgba_row_bytes(width);
+  let uv_min = uv_full_row_elems(width);
+  assert!(y.len() >= width, "y row too short");
+  assert!(uv_full.len() >= uv_min, "uv_full row too short");
+  assert!(rgba_out.len() >= rgba_min, "rgba_out row too short");
+
+  let _ = use_simd; // SIMD per-arch routes land in Ship 8 Tranche 6b.
+  scalar::p_n_444_to_rgba_row::<10>(y, uv_full, rgba_out, width, matrix, full_range);
+}
+
+/// P410 → **native-depth `u16`** packed **RGBA** — output is
+/// low-bit-packed (`[0, 1023]`); alpha element is `1023`.
+///
+/// `use_simd = false` forces the scalar reference path.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn p410_to_rgba_u16_row(
+  y: &[u16],
+  uv_full: &[u16],
+  rgba_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  use_simd: bool,
+) {
+  let rgba_min = rgba_row_elems(width);
+  let uv_min = uv_full_row_elems(width);
+  assert!(y.len() >= width, "y row too short");
+  assert!(uv_full.len() >= uv_min, "uv_full row too short");
+  assert!(rgba_out.len() >= rgba_min, "rgba_out row too short");
+
+  let _ = use_simd; // SIMD per-arch routes land in Ship 8 Tranche 6c.
+  scalar::p_n_444_to_rgba_u16_row::<10>(y, uv_full, rgba_out, width, matrix, full_range);
+}
+
+/// P412 (semi-planar 4:4:4, 12-bit high-packed) → packed **8-bit**
+/// **RGBA** (`R, G, B, 0xFF`).
+///
+/// `use_simd = false` forces the scalar reference path.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn p412_to_rgba_row(
+  y: &[u16],
+  uv_full: &[u16],
+  rgba_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  use_simd: bool,
+) {
+  let rgba_min = rgba_row_bytes(width);
+  let uv_min = uv_full_row_elems(width);
+  assert!(y.len() >= width, "y row too short");
+  assert!(uv_full.len() >= uv_min, "uv_full row too short");
+  assert!(rgba_out.len() >= rgba_min, "rgba_out row too short");
+
+  let _ = use_simd; // SIMD per-arch routes land in Ship 8 Tranche 6b.
+  scalar::p_n_444_to_rgba_row::<12>(y, uv_full, rgba_out, width, matrix, full_range);
+}
+
+/// P412 → **native-depth `u16`** packed **RGBA** — output is
+/// low-bit-packed (`[0, 4095]`); alpha element is `4095`.
+///
+/// `use_simd = false` forces the scalar reference path.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn p412_to_rgba_u16_row(
+  y: &[u16],
+  uv_full: &[u16],
+  rgba_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  use_simd: bool,
+) {
+  let rgba_min = rgba_row_elems(width);
+  let uv_min = uv_full_row_elems(width);
+  assert!(y.len() >= width, "y row too short");
+  assert!(uv_full.len() >= uv_min, "uv_full row too short");
+  assert!(rgba_out.len() >= rgba_min, "rgba_out row too short");
+
+  let _ = use_simd; // SIMD per-arch routes land in Ship 8 Tranche 6c.
+  scalar::p_n_444_to_rgba_u16_row::<12>(y, uv_full, rgba_out, width, matrix, full_range);
+}
+
+/// P416 (semi-planar 4:4:4, 16-bit) → packed **8-bit** **RGBA**
+/// (`R, G, B, 0xFF`). Routes through the dedicated 16-bit scalar
+/// kernel (`scalar::p_n_444_16_to_rgba_row`).
+///
+/// `use_simd = false` forces the scalar reference path.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn p416_to_rgba_row(
+  y: &[u16],
+  uv_full: &[u16],
+  rgba_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  use_simd: bool,
+) {
+  let rgba_min = rgba_row_bytes(width);
+  let uv_min = uv_full_row_elems(width);
+  assert!(y.len() >= width, "y row too short");
+  assert!(uv_full.len() >= uv_min, "uv_full row too short");
+  assert!(rgba_out.len() >= rgba_min, "rgba_out row too short");
+
+  let _ = use_simd; // SIMD per-arch routes land in Ship 8 Tranche 6b.
+  scalar::p_n_444_16_to_rgba_row(y, uv_full, rgba_out, width, matrix, full_range);
+}
+
+/// P416 → **native-depth `u16`** packed **RGBA** — full-range output
+/// `[0, 65535]`; alpha element is `0xFFFF`. Routes through the
+/// dedicated 16-bit u16-output scalar kernel
+/// (`scalar::p_n_444_16_to_rgba_u16_row`) — i64 chroma multiply.
+///
+/// `use_simd = false` forces the scalar reference path.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn p416_to_rgba_u16_row(
+  y: &[u16],
+  uv_full: &[u16],
+  rgba_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  use_simd: bool,
+) {
+  let rgba_min = rgba_row_elems(width);
+  let uv_min = uv_full_row_elems(width);
+  assert!(y.len() >= width, "y row too short");
+  assert!(uv_full.len() >= uv_min, "uv_full row too short");
+  assert!(rgba_out.len() >= rgba_min, "rgba_out row too short");
+
+  let _ = use_simd; // SIMD per-arch routes land in Ship 8 Tranche 6c.
+  scalar::p_n_444_16_to_rgba_u16_row(y, uv_full, rgba_out, width, matrix, full_range);
+}
+
 /// Converts one row of packed RGB to planar HSV (OpenCV 8‑bit
 /// encoding). See `scalar::rgb_to_hsv_row` for semantics.
 ///

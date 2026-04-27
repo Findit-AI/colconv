@@ -900,9 +900,11 @@ pub(crate) fn yuv_420p_n_to_rgb_or_rgba_u16_row<const BITS: u32, const ALPHA: bo
 }
 
 /// YUV 4:4:4 planar high‑bit‑depth → **u8** packed RGB. Const‑generic
-/// over `BITS ∈ {10, 12, 14}`. 1:1 chroma per Y pixel (no chroma
+/// over `BITS ∈ {9, 10, 12, 14}`. 1:1 chroma per Y pixel (no chroma
 /// pair, no upsampling). Math is identical to
 /// [`yuv_420p_n_to_rgb_row`] except each pixel gets its own U / V.
+///
+/// Thin wrapper over [`yuv_444p_n_to_rgb_or_rgba_row`] with `ALPHA = false`.
 ///
 /// # Panics (debug builds)
 ///
@@ -918,16 +920,65 @@ pub(crate) fn yuv_444p_n_to_rgb_row<const BITS: u32>(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
+  yuv_444p_n_to_rgb_or_rgba_row::<BITS, false>(y, u, v, rgb_out, width, matrix, full_range);
+}
+
+/// YUV 4:4:4 planar high‑bit‑depth → **u8** packed **RGBA**. Same
+/// numerical contract as [`yuv_444p_n_to_rgb_row`]; the only
+/// differences are the per-pixel stride (4 vs 3) and the alpha byte
+/// (`0xFF`, opaque).
+///
+/// Thin wrapper over [`yuv_444p_n_to_rgb_or_rgba_row`] with `ALPHA = true`.
+///
+/// # Panics (debug builds)
+///
+/// - `y.len() >= width`, `u.len() >= width`, `v.len() >= width`,
+///   `rgba_out.len() >= 4 * width`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn yuv_444p_n_to_rgba_row<const BITS: u32>(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  rgba_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  yuv_444p_n_to_rgb_or_rgba_row::<BITS, true>(y, u, v, rgba_out, width, matrix, full_range);
+}
+
+/// Shared kernel for [`yuv_444p_n_to_rgb_row`] (`ALPHA = false`,
+/// 3 bpp store) and [`yuv_444p_n_to_rgba_row`] (`ALPHA = true`,
+/// 4 bpp store with constant `0xFF` alpha).
+///
+/// The compiler monomorphizes into two separate functions; the
+/// `if ALPHA` branch is DCE'd at each call site.
+///
+/// # Panics (debug builds)
+///
+/// - `y.len() >= width`, `u.len() >= width`, `v.len() >= width`,
+///   `out.len() >= width * if ALPHA { 4 } else { 3 }`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn yuv_444p_n_to_rgb_or_rgba_row<const BITS: u32, const ALPHA: bool>(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
   // Compile-time guard — fails monomorphization for any BITS outside
-  // {10, 12, 14}. The 16-bit path lives in `yuv_444p16_to_rgb_row`
+  // {9, 10, 12, 14}. The 16-bit path lives in `yuv_444p16_to_rgb_row`
   // (i32 u8-output kernel family). Without this guard a caller
-  // invoking ::<16> would reach the NEON clamp where
+  // invoking ::<16, _> would reach the NEON clamp where
   // `(1 << BITS) - 1 as i16` silently wraps to -1.
   const { assert!(BITS == 9 || BITS == 10 || BITS == 12 || BITS == 14) };
+  let bpp: usize = if ALPHA { 4 } else { 3 };
   debug_assert!(y.len() >= width, "y row too short");
   debug_assert!(u.len() >= width, "u row too short");
   debug_assert!(v.len() >= width, "v row too short");
-  debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
+  debug_assert!(out.len() >= width * bpp, "out row too short");
 
   let coeffs = Coefficients::for_matrix(matrix);
   let (y_off, y_scale, c_scale) = range_params_n::<BITS, 8>(full_range);
@@ -944,14 +995,19 @@ pub(crate) fn yuv_444p_n_to_rgb_row<const BITS: u32>(
     let b_chroma = q15_chroma(coeffs.b_u(), u_d, coeffs.b_v(), v_d);
 
     let y0 = q15_scale((y[x] & mask) as i32 - y_off, y_scale);
-    rgb_out[x * 3] = clamp_u8(y0 + r_chroma);
-    rgb_out[x * 3 + 1] = clamp_u8(y0 + g_chroma);
-    rgb_out[x * 3 + 2] = clamp_u8(y0 + b_chroma);
+    out[x * bpp] = clamp_u8(y0 + r_chroma);
+    out[x * bpp + 1] = clamp_u8(y0 + g_chroma);
+    out[x * bpp + 2] = clamp_u8(y0 + b_chroma);
+    if ALPHA {
+      out[x * bpp + 3] = 0xFF;
+    }
   }
 }
 
 /// YUV 4:4:4 planar high‑bit‑depth → **native‑depth `u16`** packed RGB.
-/// Const‑generic over `BITS ∈ {10, 12, 14}`. Low‑bit‑packed output.
+/// Const‑generic over `BITS ∈ {9, 10, 12, 14}`. Low‑bit‑packed output.
+///
+/// Thin wrapper over [`yuv_444p_n_to_rgb_or_rgba_u16_row`] with `ALPHA = false`.
 ///
 /// # Panics (debug builds)
 ///
@@ -967,20 +1023,68 @@ pub(crate) fn yuv_444p_n_to_rgb_u16_row<const BITS: u32>(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  // Compile-time guard — see note on `yuv_444p_n_to_rgb_row`. The
-  // 16-bit u16-output path is `yuv_444p16_to_rgb_u16_row` (i64
+  yuv_444p_n_to_rgb_or_rgba_u16_row::<BITS, false>(y, u, v, rgb_out, width, matrix, full_range);
+}
+
+/// YUV 4:4:4 planar high‑bit‑depth → **native‑depth `u16`** packed
+/// **RGBA**. Same numerical contract as [`yuv_444p_n_to_rgb_u16_row`];
+/// the only differences are the per-pixel stride (4 vs 3 `u16`
+/// elements) and the alpha element, `(1 << BITS) - 1` (opaque maximum
+/// at the input bit depth).
+///
+/// Thin wrapper over [`yuv_444p_n_to_rgb_or_rgba_u16_row`] with `ALPHA = true`.
+///
+/// # Panics (debug builds)
+///
+/// - `y.len() >= width`, `u.len() >= width`, `v.len() >= width`,
+///   `rgba_out.len() >= 4 * width`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn yuv_444p_n_to_rgba_u16_row<const BITS: u32>(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  rgba_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  yuv_444p_n_to_rgb_or_rgba_u16_row::<BITS, true>(y, u, v, rgba_out, width, matrix, full_range);
+}
+
+/// Shared kernel for [`yuv_444p_n_to_rgb_u16_row`] (`ALPHA = false`,
+/// 3 bpp store) and [`yuv_444p_n_to_rgba_u16_row`] (`ALPHA = true`,
+/// 4 bpp store with opaque alpha = `(1 << BITS) - 1`).
+///
+/// # Panics (debug builds)
+///
+/// - `y.len() >= width`, `u.len() >= width`, `v.len() >= width`,
+///   `out.len() >= width * if ALPHA { 4 } else { 3 }` (`u16` elements).
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn yuv_444p_n_to_rgb_or_rgba_u16_row<const BITS: u32, const ALPHA: bool>(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  // Compile-time guard — see note on `yuv_444p_n_to_rgb_or_rgba_row`.
+  // The 16-bit u16-output path is `yuv_444p16_to_rgb_u16_row` (i64
   // chroma family).
   const { assert!(BITS == 9 || BITS == 10 || BITS == 12 || BITS == 14) };
+  let bpp: usize = if ALPHA { 4 } else { 3 };
   debug_assert!(y.len() >= width, "y row too short");
   debug_assert!(u.len() >= width, "u row too short");
   debug_assert!(v.len() >= width, "v row too short");
-  debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
+  debug_assert!(out.len() >= width * bpp, "out row too short");
 
   let coeffs = Coefficients::for_matrix(matrix);
   let (y_off, y_scale, c_scale) = range_params_n::<BITS, BITS>(full_range);
   let bias = chroma_bias::<BITS>();
   let out_max: i32 = (1i32 << BITS) - 1;
   let mask = bits_mask::<BITS>();
+  let alpha_max: u16 = out_max as u16;
 
   for x in 0..width {
     let u_d = q15_scale((u[x] & mask) as i32 - bias, c_scale);
@@ -991,9 +1095,12 @@ pub(crate) fn yuv_444p_n_to_rgb_u16_row<const BITS: u32>(
     let b_chroma = q15_chroma(coeffs.b_u(), u_d, coeffs.b_v(), v_d);
 
     let y0 = q15_scale((y[x] & mask) as i32 - y_off, y_scale);
-    rgb_out[x * 3] = (y0 + r_chroma).clamp(0, out_max) as u16;
-    rgb_out[x * 3 + 1] = (y0 + g_chroma).clamp(0, out_max) as u16;
-    rgb_out[x * 3 + 2] = (y0 + b_chroma).clamp(0, out_max) as u16;
+    out[x * bpp] = (y0 + r_chroma).clamp(0, out_max) as u16;
+    out[x * bpp + 1] = (y0 + g_chroma).clamp(0, out_max) as u16;
+    out[x * bpp + 2] = (y0 + b_chroma).clamp(0, out_max) as u16;
+    if ALPHA {
+      out[x * bpp + 3] = alpha_max;
+    }
   }
 }
 
@@ -1257,6 +1364,8 @@ pub(crate) fn yuv_420p16_to_rgb_or_rgba_u16_row<const ALPHA: bool>(
 /// YUV 4:4:4 planar **16‑bit** → packed **8‑bit** RGB. Same i32
 /// chroma pipeline as 10/12/14 (output‑range scaling keeps `coeff × u_d`
 /// inside i32 for u8 target). 1:1 chroma per Y pixel, no width parity.
+///
+/// Thin wrapper over [`yuv_444p16_to_rgb_or_rgba_row`] with `ALPHA = false`.
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn yuv_444p16_to_rgb_row(
   y: &[u16],
@@ -1267,10 +1376,50 @@ pub(crate) fn yuv_444p16_to_rgb_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
+  yuv_444p16_to_rgb_or_rgba_row::<false>(y, u, v, rgb_out, width, matrix, full_range);
+}
+
+/// YUV 4:4:4 planar **16‑bit** → packed **8‑bit** **RGBA**. Same
+/// numerical contract as [`yuv_444p16_to_rgb_row`]; the only
+/// differences are the per-pixel stride (4 vs 3) and the alpha byte
+/// (`0xFF`, opaque).
+///
+/// Thin wrapper over [`yuv_444p16_to_rgb_or_rgba_row`] with `ALPHA = true`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn yuv_444p16_to_rgba_row(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  rgba_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  yuv_444p16_to_rgb_or_rgba_row::<true>(y, u, v, rgba_out, width, matrix, full_range);
+}
+
+/// Shared 16-bit YUV 4:4:4 → 8-bit RGB / RGBA kernel. `ALPHA = false`
+/// emits 3 bpp; `ALPHA = true` emits 4 bpp with constant `0xFF` alpha.
+///
+/// 16-bit input has no AND-mask (every `u16` is a valid sample) and
+/// uses i32 chroma — output-target scaling keeps `u_d * coeff` inside
+/// i32 for u8 output (the i64 chroma family lives in
+/// [`yuv_444p16_to_rgb_or_rgba_u16_row`]).
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn yuv_444p16_to_rgb_or_rgba_row<const ALPHA: bool>(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  let bpp: usize = if ALPHA { 4 } else { 3 };
   debug_assert!(y.len() >= width, "y row too short");
   debug_assert!(u.len() >= width, "u row too short");
   debug_assert!(v.len() >= width, "v row too short");
-  debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
+  debug_assert!(out.len() >= width * bpp, "out row too short");
 
   let coeffs = Coefficients::for_matrix(matrix);
   let (y_off, y_scale, c_scale) = range_params_n::<16, 8>(full_range);
@@ -1285,9 +1434,12 @@ pub(crate) fn yuv_444p16_to_rgb_row(
     let b_chroma = q15_chroma(coeffs.b_u(), u_d, coeffs.b_v(), v_d);
 
     let y0 = q15_scale(y[x] as i32 - y_off, y_scale);
-    rgb_out[x * 3] = clamp_u8(y0 + r_chroma);
-    rgb_out[x * 3 + 1] = clamp_u8(y0 + g_chroma);
-    rgb_out[x * 3 + 2] = clamp_u8(y0 + b_chroma);
+    out[x * bpp] = clamp_u8(y0 + r_chroma);
+    out[x * bpp + 1] = clamp_u8(y0 + g_chroma);
+    out[x * bpp + 2] = clamp_u8(y0 + b_chroma);
+    if ALPHA {
+      out[x * bpp + 3] = 0xFF;
+    }
   }
 }
 
@@ -1296,6 +1448,8 @@ pub(crate) fn yuv_444p16_to_rgb_row(
 /// ~2.31·10⁹ at limited‑range 16→u16 — overflows i32). Y path widens
 /// via [`q15_scale64`] to handle unclamped Y samples above the
 /// limited‑range nominal max.
+///
+/// Thin wrapper over [`yuv_444p16_to_rgb_or_rgba_u16_row`] with `ALPHA = false`.
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn yuv_444p16_to_rgb_u16_row(
   y: &[u16],
@@ -1306,10 +1460,47 @@ pub(crate) fn yuv_444p16_to_rgb_u16_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
+  yuv_444p16_to_rgb_or_rgba_u16_row::<false>(y, u, v, rgb_out, width, matrix, full_range);
+}
+
+/// YUV 4:4:4 planar **16‑bit** → packed **native‑depth `u16`** **RGBA**
+/// — alpha element is `0xFFFF` (opaque maximum at 16‑bit).
+///
+/// Thin wrapper over [`yuv_444p16_to_rgb_or_rgba_u16_row`] with `ALPHA = true`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn yuv_444p16_to_rgba_u16_row(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  rgba_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  yuv_444p16_to_rgb_or_rgba_u16_row::<true>(y, u, v, rgba_out, width, matrix, full_range);
+}
+
+/// Shared 16-bit YUV 4:4:4 → native-depth `u16` RGB / RGBA kernel.
+/// `ALPHA = false` emits 3 bpp; `ALPHA = true` emits 4 bpp with
+/// constant `0xFFFF` alpha.
+///
+/// Uses i64 chroma multiply (same rationale as
+/// [`yuv_444p16_to_rgb_u16_row`]).
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn yuv_444p16_to_rgb_or_rgba_u16_row<const ALPHA: bool>(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  let bpp: usize = if ALPHA { 4 } else { 3 };
   debug_assert!(y.len() >= width, "y row too short");
   debug_assert!(u.len() >= width, "u row too short");
   debug_assert!(v.len() >= width, "v row too short");
-  debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
+  debug_assert!(out.len() >= width * bpp, "out row too short");
 
   let coeffs = Coefficients::for_matrix(matrix);
   let (y_off, y_scale, c_scale) = range_params_n::<16, 16>(full_range);
@@ -1325,9 +1516,12 @@ pub(crate) fn yuv_444p16_to_rgb_u16_row(
     let b_chroma = q15_chroma64(coeffs.b_u(), u_d, coeffs.b_v(), v_d);
 
     let y0 = q15_scale64(y[x] as i32 - y_off, y_scale);
-    rgb_out[x * 3] = (y0 + r_chroma).clamp(0, out_max) as u16;
-    rgb_out[x * 3 + 1] = (y0 + g_chroma).clamp(0, out_max) as u16;
-    rgb_out[x * 3 + 2] = (y0 + b_chroma).clamp(0, out_max) as u16;
+    out[x * bpp] = (y0 + r_chroma).clamp(0, out_max) as u16;
+    out[x * bpp + 1] = (y0 + g_chroma).clamp(0, out_max) as u16;
+    out[x * bpp + 2] = (y0 + b_chroma).clamp(0, out_max) as u16;
+    if ALPHA {
+      out[x * bpp + 3] = 0xFFFF;
+    }
   }
 }
 
@@ -1800,6 +1994,8 @@ pub(crate) fn p_n_to_rgb_or_rgba_u16_row<const BITS: u32, const ALPHA: bool>(
 /// shifted right by `16 - BITS` to extract the active value before
 /// running the standard Q15 i32 pipeline.
 ///
+/// Thin wrapper over [`p_n_444_to_rgb_or_rgba_row`] with `ALPHA = false`.
+///
 /// # Panics (debug builds)
 ///
 /// - `y.len() >= width`, `uv_full.len() >= 2 * width`,
@@ -1813,10 +2009,54 @@ pub(crate) fn p_n_444_to_rgb_row<const BITS: u32>(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
+  p_n_444_to_rgb_or_rgba_row::<BITS, false>(y, uv_full, rgb_out, width, matrix, full_range);
+}
+
+/// Converts one row of high-bit-packed semi-planar 4:4:4 (P410, P412)
+/// to **8-bit** packed **RGBA**. Same numerical contract as
+/// [`p_n_444_to_rgb_row`]; the only differences are the per-pixel
+/// stride (4 vs 3) and the alpha byte (`0xFF`, opaque).
+///
+/// Thin wrapper over [`p_n_444_to_rgb_or_rgba_row`] with `ALPHA = true`.
+///
+/// # Panics (debug builds)
+///
+/// - `y.len() >= width`, `uv_full.len() >= 2 * width`,
+///   `rgba_out.len() >= 4 * width`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn p_n_444_to_rgba_row<const BITS: u32>(
+  y: &[u16],
+  uv_full: &[u16],
+  rgba_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  p_n_444_to_rgb_or_rgba_row::<BITS, true>(y, uv_full, rgba_out, width, matrix, full_range);
+}
+
+/// Shared kernel for [`p_n_444_to_rgb_row`] (`ALPHA = false`, 3 bpp
+/// store) and [`p_n_444_to_rgba_row`] (`ALPHA = true`, 4 bpp store
+/// with constant `0xFF` alpha).
+///
+/// # Panics (debug builds)
+///
+/// - `y.len() >= width`, `uv_full.len() >= 2 * width`,
+///   `out.len() >= width * if ALPHA { 4 } else { 3 }`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn p_n_444_to_rgb_or_rgba_row<const BITS: u32, const ALPHA: bool>(
+  y: &[u16],
+  uv_full: &[u16],
+  out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
   const { assert!(BITS == 10 || BITS == 12) };
+  let bpp: usize = if ALPHA { 4 } else { 3 };
   debug_assert!(y.len() >= width, "y row too short");
   debug_assert!(uv_full.len() >= 2 * width, "uv_full row too short");
-  debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
+  debug_assert!(out.len() >= width * bpp, "out row too short");
 
   let coeffs = Coefficients::for_matrix(matrix);
   let (y_off, y_scale, c_scale) = range_params_n::<BITS, 8>(full_range);
@@ -1835,9 +2075,12 @@ pub(crate) fn p_n_444_to_rgb_row<const BITS: u32>(
     let b_chroma = q15_chroma(coeffs.b_u(), u_d, coeffs.b_v(), v_d);
 
     let y0 = q15_scale((y[x] >> shift) as i32 - y_off, y_scale);
-    rgb_out[x * 3] = clamp_u8(y0 + r_chroma);
-    rgb_out[x * 3 + 1] = clamp_u8(y0 + g_chroma);
-    rgb_out[x * 3 + 2] = clamp_u8(y0 + b_chroma);
+    out[x * bpp] = clamp_u8(y0 + r_chroma);
+    out[x * bpp + 1] = clamp_u8(y0 + g_chroma);
+    out[x * bpp + 2] = clamp_u8(y0 + b_chroma);
+    if ALPHA {
+      out[x * bpp + 3] = 0xFF;
+    }
   }
 }
 
@@ -1846,6 +2089,8 @@ pub(crate) fn p_n_444_to_rgb_row<const BITS: u32>(
 /// `BITS` active bits in the **low** bits of each `u16`, upper bits
 /// zero), matching the [`yuv_444p_n_to_rgb_u16_row`] convention.
 /// `BITS ∈ {10, 12}`.
+///
+/// Thin wrapper over [`p_n_444_to_rgb_or_rgba_u16_row`] with `ALPHA = false`.
 ///
 /// # Panics (debug builds)
 ///
@@ -1860,16 +2105,61 @@ pub(crate) fn p_n_444_to_rgb_u16_row<const BITS: u32>(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
+  p_n_444_to_rgb_or_rgba_u16_row::<BITS, false>(y, uv_full, rgb_out, width, matrix, full_range);
+}
+
+/// Converts one row of high-bit-packed semi-planar 4:4:4 (P410, P412)
+/// to **native-depth `u16`** packed **RGBA** — low-bit-packed output;
+/// alpha element is `(1 << BITS) - 1` (opaque maximum at the input
+/// bit depth).
+///
+/// Thin wrapper over [`p_n_444_to_rgb_or_rgba_u16_row`] with `ALPHA = true`.
+///
+/// # Panics (debug builds)
+///
+/// - `y.len() >= width`, `uv_full.len() >= 2 * width`,
+///   `rgba_out.len() >= 4 * width`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn p_n_444_to_rgba_u16_row<const BITS: u32>(
+  y: &[u16],
+  uv_full: &[u16],
+  rgba_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  p_n_444_to_rgb_or_rgba_u16_row::<BITS, true>(y, uv_full, rgba_out, width, matrix, full_range);
+}
+
+/// Shared kernel for [`p_n_444_to_rgb_u16_row`] (`ALPHA = false`,
+/// 3 bpp store) and [`p_n_444_to_rgba_u16_row`] (`ALPHA = true`,
+/// 4 bpp store with opaque alpha = `(1 << BITS) - 1`).
+///
+/// # Panics (debug builds)
+///
+/// - `y.len() >= width`, `uv_full.len() >= 2 * width`,
+///   `out.len() >= width * if ALPHA { 4 } else { 3 }` (`u16` elements).
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn p_n_444_to_rgb_or_rgba_u16_row<const BITS: u32, const ALPHA: bool>(
+  y: &[u16],
+  uv_full: &[u16],
+  out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
   const { assert!(BITS == 10 || BITS == 12) };
+  let bpp: usize = if ALPHA { 4 } else { 3 };
   debug_assert!(y.len() >= width, "y row too short");
   debug_assert!(uv_full.len() >= 2 * width, "uv_full row too short");
-  debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
+  debug_assert!(out.len() >= width * bpp, "out row too short");
 
   let coeffs = Coefficients::for_matrix(matrix);
   let (y_off, y_scale, c_scale) = range_params_n::<BITS, BITS>(full_range);
   let bias = chroma_bias::<BITS>();
   let out_max: i32 = (1i32 << BITS) - 1;
   let shift = 16 - BITS;
+  let alpha_max: u16 = out_max as u16;
 
   for x in 0..width {
     let u_sample = uv_full[x * 2] >> shift;
@@ -1882,15 +2172,20 @@ pub(crate) fn p_n_444_to_rgb_u16_row<const BITS: u32>(
     let b_chroma = q15_chroma(coeffs.b_u(), u_d, coeffs.b_v(), v_d);
 
     let y0 = q15_scale((y[x] >> shift) as i32 - y_off, y_scale);
-    rgb_out[x * 3] = (y0 + r_chroma).clamp(0, out_max) as u16;
-    rgb_out[x * 3 + 1] = (y0 + g_chroma).clamp(0, out_max) as u16;
-    rgb_out[x * 3 + 2] = (y0 + b_chroma).clamp(0, out_max) as u16;
+    out[x * bpp] = (y0 + r_chroma).clamp(0, out_max) as u16;
+    out[x * bpp + 1] = (y0 + g_chroma).clamp(0, out_max) as u16;
+    out[x * bpp + 2] = (y0 + b_chroma).clamp(0, out_max) as u16;
+    if ALPHA {
+      out[x * bpp + 3] = alpha_max;
+    }
   }
 }
 
 /// Converts one row of P416 (semi-planar 4:4:4, 16-bit, full UV) to
 /// **8-bit** packed RGB. Y and chroma both stay on i32 — same logic
 /// as `p16_to_rgb_row` plus the full-width UV layout.
+///
+/// Thin wrapper over [`p_n_444_16_to_rgb_or_rgba_row`] with `ALPHA = false`.
 ///
 /// # Panics (debug builds)
 ///
@@ -1905,9 +2200,42 @@ pub(crate) fn p_n_444_16_to_rgb_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
+  p_n_444_16_to_rgb_or_rgba_row::<false>(y, uv_full, rgb_out, width, matrix, full_range);
+}
+
+/// Converts one row of P416 to **8-bit** packed **RGBA**. Same
+/// numerical contract as [`p_n_444_16_to_rgb_row`]; the only
+/// differences are the per-pixel stride (4 vs 3) and the alpha byte
+/// (`0xFF`, opaque).
+///
+/// Thin wrapper over [`p_n_444_16_to_rgb_or_rgba_row`] with `ALPHA = true`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn p_n_444_16_to_rgba_row(
+  y: &[u16],
+  uv_full: &[u16],
+  rgba_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  p_n_444_16_to_rgb_or_rgba_row::<true>(y, uv_full, rgba_out, width, matrix, full_range);
+}
+
+/// Shared P416 → 8-bit RGB / RGBA kernel. `ALPHA = false` emits 3 bpp;
+/// `ALPHA = true` emits 4 bpp with constant `0xFF` alpha.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn p_n_444_16_to_rgb_or_rgba_row<const ALPHA: bool>(
+  y: &[u16],
+  uv_full: &[u16],
+  out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  let bpp: usize = if ALPHA { 4 } else { 3 };
   debug_assert!(y.len() >= width, "y row too short");
   debug_assert!(uv_full.len() >= 2 * width, "uv_full row too short");
-  debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
+  debug_assert!(out.len() >= width * bpp, "out row too short");
 
   let coeffs = Coefficients::for_matrix(matrix);
   let (y_off, y_scale, c_scale) = range_params_n::<16, 8>(full_range);
@@ -1924,9 +2252,12 @@ pub(crate) fn p_n_444_16_to_rgb_row(
     let b_chroma = q15_chroma(coeffs.b_u(), u_d, coeffs.b_v(), v_d);
 
     let y0 = q15_scale(y[x] as i32 - y_off, y_scale);
-    rgb_out[x * 3] = clamp_u8(y0 + r_chroma);
-    rgb_out[x * 3 + 1] = clamp_u8(y0 + g_chroma);
-    rgb_out[x * 3 + 2] = clamp_u8(y0 + b_chroma);
+    out[x * bpp] = clamp_u8(y0 + r_chroma);
+    out[x * bpp + 1] = clamp_u8(y0 + g_chroma);
+    out[x * bpp + 2] = clamp_u8(y0 + b_chroma);
+    if ALPHA {
+      out[x * bpp + 3] = 0xFF;
+    }
   }
 }
 
@@ -1935,6 +2266,8 @@ pub(crate) fn p_n_444_16_to_rgb_row(
 /// (same rationale as `p16_to_rgb_u16_row` and
 /// `yuv_444p16_to_rgb_u16_row`: `coeff × u_d` overflows i32 at 16
 /// bits for the BT.2020 blue coefficient).
+///
+/// Thin wrapper over [`p_n_444_16_to_rgb_or_rgba_u16_row`] with `ALPHA = false`.
 ///
 /// # Panics (debug builds)
 ///
@@ -1949,9 +2282,43 @@ pub(crate) fn p_n_444_16_to_rgb_u16_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
+  p_n_444_16_to_rgb_or_rgba_u16_row::<false>(y, uv_full, rgb_out, width, matrix, full_range);
+}
+
+/// Converts one row of P416 to **native-depth `u16`** packed
+/// **RGBA** — full-range output `[0, 65535]`; alpha element is
+/// `0xFFFF`.
+///
+/// Thin wrapper over [`p_n_444_16_to_rgb_or_rgba_u16_row`] with `ALPHA = true`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn p_n_444_16_to_rgba_u16_row(
+  y: &[u16],
+  uv_full: &[u16],
+  rgba_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  p_n_444_16_to_rgb_or_rgba_u16_row::<true>(y, uv_full, rgba_out, width, matrix, full_range);
+}
+
+/// Shared P416 → native-depth `u16` RGB / RGBA kernel. `ALPHA = false`
+/// emits 3 bpp; `ALPHA = true` emits 4 bpp with constant `0xFFFF`
+/// alpha. Uses i64 chroma multiply (same rationale as
+/// [`p_n_444_16_to_rgb_u16_row`]).
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn p_n_444_16_to_rgb_or_rgba_u16_row<const ALPHA: bool>(
+  y: &[u16],
+  uv_full: &[u16],
+  out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  let bpp: usize = if ALPHA { 4 } else { 3 };
   debug_assert!(y.len() >= width, "y row too short");
   debug_assert!(uv_full.len() >= 2 * width, "uv_full row too short");
-  debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
+  debug_assert!(out.len() >= width * bpp, "out row too short");
 
   let coeffs = Coefficients::for_matrix(matrix);
   let (y_off, y_scale, c_scale) = range_params_n::<16, 16>(full_range);
@@ -1969,9 +2336,12 @@ pub(crate) fn p_n_444_16_to_rgb_u16_row(
     let b_chroma = q15_chroma64(coeffs.b_u(), u_d, coeffs.b_v(), v_d);
 
     let y0 = q15_scale64(y[x] as i32 - y_off, y_scale);
-    rgb_out[x * 3] = (y0 + r_chroma).clamp(0, out_max) as u16;
-    rgb_out[x * 3 + 1] = (y0 + g_chroma).clamp(0, out_max) as u16;
-    rgb_out[x * 3 + 2] = (y0 + b_chroma).clamp(0, out_max) as u16;
+    out[x * bpp] = (y0 + r_chroma).clamp(0, out_max) as u16;
+    out[x * bpp + 1] = (y0 + g_chroma).clamp(0, out_max) as u16;
+    out[x * bpp + 2] = (y0 + b_chroma).clamp(0, out_max) as u16;
+    if ALPHA {
+      out[x * bpp + 3] = 0xFFFF;
+    }
   }
 }
 
