@@ -50,11 +50,6 @@ impl<'a> MixedSinker<'a, Yuva444p10> {
   /// Attaches a packed **`u16`** RGBA output buffer. 10-bit
   /// low-packed (`[0, 1023]`); the per-pixel alpha element is
   /// **sourced from the alpha plane** at native depth.
-  ///
-  /// **Performance note (Ship 8b‑1a):** the alpha-source u16 path runs
-  /// scalar regardless of `with_simd(true)` until SIMD wiring lands in
-  /// **Ship 8b‑1c**. See [`Self::with_rgba`] for the same warning on
-  /// the u8 path.
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub fn with_rgba_u16(mut self, buf: &'a mut [u16]) -> Result<Self, MixedSinkerError> {
     self.set_rgba_u16(buf)?;

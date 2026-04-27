@@ -154,6 +154,132 @@ scheduled as a dedicated follow-up PR (`feat/bayer-simd`).
   end-to-end "all three channels at MAX_COEFFICIENT, all pixels
   255" stays inside the `u32` accumulator and clamps to 255.
 
+## Ship 8b — source-side YUVA (alpha-preserving RGBA output)
+
+The follow-up to Ship 8: source-side alpha. Where Ship 8 padded the
+output alpha lane to `0xFF` / `(1 << BITS) - 1` regardless of source,
+Ship 8b adds **YUVA source types** that carry an alpha plane through
+to the RGBA output. The first vertical slice ships `Yuva444p10`
+(ProRes 4444 + α territory — the highest-value VFX format from the
+Format Share table § 2a-1 row 10).
+
+### Strategy B (forked kernels) over Strategy A (separate splice)
+
+Two implementation strategies were considered:
+
+- **Strategy A** (deferred) — run the existing RGBA kernel (alpha =
+  opaque), then a second-pass helper reads source alpha + overwrites
+  the alpha byte. Memory traffic 6W per pixel; ~50 LOC + 1 helper.
+- **Strategy B** (adopted) — extend each kernel's const-`ALPHA`
+  template with a third `ALPHA_SRC: bool` generic. Source-alpha is
+  loaded inside the kernel, masked, and stored straight into the
+  alpha lane in the same pass. Memory traffic 5W per pixel (single
+  pass); ~3,000 LOC across 30+ kernels for an L1-noise ~10% perf
+  win in the alpha-present case.
+
+Strategy B was picked for best alpha-present throughput on the
+high-bandwidth 4:4:4 + α format that motivated the work. Existing
+`*_to_rgb_*` and `*_to_rgba_*` public wrappers are backward-compat
+shims passing `ALPHA_SRC = false` and `None` to the templates — zero
+overhead when alpha-source is off; existing call sites compile
+unchanged.
+
+### Vertical slice 1: `Yuva444p10` (3 PRs)
+
+The first format follows the same staging pattern as Ship 8 high-bit
+tranches (5/6/7): scalar prep first (call-site stable), then u8 SIMD,
+then u16 SIMD.
+
+| # | Tranche | Status |
+|---|---|---|
+| 1 | scalar prep + Frame + walker + dispatchers + sinker integration | ✅ shipped (PR #32) — `Yuva444pFrame16<BITS=10>`, `Yuva444p10Frame` alias, `yuva444p10_to` walker, `MixedSinker<Yuva444p10>`, scalar tests |
+| 1b | u8 RGBA SIMD across all 5 backends | ✅ shipped (PR #33) |
+| 1c | u16 RGBA SIMD across all 5 backends | ✅ shipped (PR #34) |
+
+### Surface added
+
+- **`Yuva444pFrame16<'a, const BITS: u32>`** — mirrors `Yuv444pFrame16`
+  with an extra `a` slice + `a_stride`. Const-asserted `BITS == 10`
+  in this slice; other bit depths land in subsequent vertical slices.
+  `try_new` validates dimensions + plane lengths; `try_new_checked`
+  additionally validates every active sample range.
+- **`Yuva444p10Frame<'a>`** type alias.
+- **`Yuva444p10`** marker + `Yuva444p10Row<'a>` (carries `a` slice)
+  + `Yuva444p10Sink` trait + `yuva444p10_to` walker.
+- **`MixedSinker<Yuva444p10>`** with `with_rgba` / `set_rgba` (u8) +
+  `with_rgba_u16` / `set_rgba_u16` (u16) per-format builders, plus
+  `with_rgb` / `with_rgb_u16` / `with_luma` / `with_hsv` alpha-drop
+  paths that reuse the `Yuv444p10` row dispatchers verbatim.
+- **Public dispatchers** in `colconv::row`: `yuva444p10_to_rgba_row`
+  and `yuva444p10_to_rgba_u16_row` — same SIMD-via-`use_simd` shape
+  as `yuv444p10_to_rgba_*`.
+
+### Strategy B template extension
+
+The four 4:4:4 const-`ALPHA` templates gained the `ALPHA_SRC` third
+generic in this slice (only the BITS-generic planar variant is in
+scope for this vertical slice; other 4:4:4 variants land later):
+
+- `scalar::yuv_444p_n_to_rgb_or_rgba_row<BITS, ALPHA, ALPHA_SRC>` (u8)
+- `scalar::yuv_444p_n_to_rgb_or_rgba_u16_row<BITS, ALPHA, ALPHA_SRC>` (u16)
+- Same SIMD templates × 5 backends (NEON / SSE4.1 / AVX2 / AVX-512 /
+  wasm simd128) — refactor in PRs #33 (u8) and #34 (u16).
+
+Per-pixel store branched on three combinations:
+
+| `ALPHA` | `ALPHA_SRC` | Per-pixel alpha |
+|---|---|---|
+| false | false | RGB-only (no alpha lane) |
+| true | false | RGBA, alpha = `0xFF` u8 / `(1 << BITS) - 1` u16 (existing path) |
+| true | true | RGBA, alpha = `(a_src[x] & bits_mask::<BITS>())` from source plane; depth-converted via `>> (BITS - 8)` for u8 output, native depth for u16 output |
+
+`!ALPHA_SRC || ALPHA` const-asserted at every template top.
+
+### Hardenings (Codex review fixes)
+
+- **Source alpha is masked with `bits_mask::<BITS>()` before depth
+  conversion** — `Yuva444p10Frame::try_new` accepts unchecked u16
+  samples; without masking an overrange `1024` at BITS=10 would shift
+  to `256` and cast to u8 zero, silently turning over-range alpha
+  into transparent output. Same masking pattern that Y/U/V already
+  use. Pinned by 2 regression tests at the sinker layer.
+- **`MixedSinker<Yuva444p10>` wires alpha-drop paths** for `with_rgb`
+  / `with_rgb_u16` / `with_luma` / `with_hsv` (declared on the
+  generic `MixedSinker<F>` impl) — initial implementation only wrote
+  RGBA buffers, leaving the others as silent stale-buffer bugs.
+  Pinned by 4 cross-format byte-equivalence tests against
+  `MixedSinker<Yuv444p10>`.
+
+### Tests
+
+- **Per-backend SIMD equivalence tests**: 30 per backend × 5 backends
+  for `Yuva444p10` (5 u8 added in PR #33 + 5 u16 added in PR #34).
+  Solid-alpha + random-alpha + tail-width coverage. All x86 tests
+  carry `is_x86_feature_detected!` early-return guards.
+- **Sinker integration tests**: 17 (PR #32 added 7 covering alpha
+  pass-through / opacity contracts / buffer-too-short error paths;
+  PR #32 review-fix added 7 covering alpha-drop paths + Strategy A
+  combine; PR #32 review-fix added 2 covering overrange-alpha
+  masking).
+- **Test count growth**: 578 → 588 on aarch64-darwin host (583 after
+  PR #33, 588 after PR #34); +5 NEON tests run at each tranche; the
+  +20 x86/wasm tests fire on their respective CI runners.
+
+### Notes
+
+- **Sink-side YUVA + Ship 8 sinks are now end-to-end for the format**:
+  with `Yuva444p10Frame` source and `MixedSinker<Yuva444p10>` sink,
+  the alpha plane flows through to `with_rgba` / `with_rgba_u16`
+  output. `with_rgb` / `with_rgb_u16` / `with_luma` / `with_hsv`
+  are alpha-drop (reuse `Yuv444p10` row kernels).
+- **Subsequent vertical slices (Ship 8b‑2 onward)** will mass-apply
+  the established Strategy B template to other Yuva format families:
+  `Yuva420p*` (4:2:0 with α — `yuva420p`, `yuva420p9/10/16`),
+  `Yuva422p*` (4:2:2 with α — `yuva422p`, `yuva422p9/10/16`), and
+  the remaining `Yuva444p*` variants (8-bit, 9-bit, 16-bit). The
+  template's third generic + per-backend wrapper pattern is now
+  proven; subsequent slices reuse it mechanically.
+
 ## Ship 8 — alpha + RGBA output (`with_rgba` / `with_rgba_u16`)
 
 Adds packed RGBA output across the YUV format inventory. Every YUV
