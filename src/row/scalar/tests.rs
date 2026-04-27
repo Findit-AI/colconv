@@ -487,3 +487,150 @@ fn p010_rgb_u16_limited_range_endpoints() {
   assert_eq!((rgb[0], rgb[1], rgb[2]), (0, 0, 0));
   assert_eq!((rgb[3], rgb[4], rgb[5]), (1023, 1023, 1023));
 }
+
+// ---- yuv_444p_n_to_rgba_row (10-bit → u8 RGBA) ----------------------
+
+#[test]
+fn yuv444p10_rgba_gray_alpha_is_ff() {
+  // Mid-gray 10-bit Y=512 ↔ 8-bit ≈128. RGBA stride is 4 bytes/px;
+  // alpha must be 0xFF on every pixel.
+  let y = [512u16; 4];
+  let u = [512u16; 4];
+  let v = [512u16; 4];
+  let mut rgba = [0u8; 16];
+  yuv_444p_n_to_rgba_row::<10>(&y, &u, &v, &mut rgba, 4, ColorMatrix::Bt601, true);
+  for x in 0..4 {
+    let (r, g, b, a) = (
+      rgba[x * 4],
+      rgba[x * 4 + 1],
+      rgba[x * 4 + 2],
+      rgba[x * 4 + 3],
+    );
+    assert_eq!(r, g, "RGB should be gray");
+    assert_eq!(g, b, "RGB should be gray");
+    assert!(r.abs_diff(128) <= 1, "got R={r}");
+    assert_eq!(a, 0xFF, "alpha must be 0xFF at px {x}");
+  }
+}
+
+// ---- yuv_444p_n_to_rgba_u16_row (10-bit → 10-bit u16 RGBA) ---------
+
+#[test]
+fn yuv444p10_rgba_u16_gray_alpha_is_1023() {
+  // 10-bit u16 RGBA: alpha element is `(1 << BITS) - 1 = 1023`.
+  let y = [512u16; 4];
+  let u = [512u16; 4];
+  let v = [512u16; 4];
+  let mut rgba = [0u16; 16];
+  yuv_444p_n_to_rgba_u16_row::<10>(&y, &u, &v, &mut rgba, 4, ColorMatrix::Bt601, true);
+  for x in 0..4 {
+    let (r, g, b, a) = (
+      rgba[x * 4],
+      rgba[x * 4 + 1],
+      rgba[x * 4 + 2],
+      rgba[x * 4 + 3],
+    );
+    assert_eq!(r, g);
+    assert_eq!(g, b);
+    assert!(r.abs_diff(512) <= 1, "got R={r}");
+    assert_eq!(a, 1023, "alpha must be (1 << 10) - 1 at px {x}");
+  }
+}
+
+// ---- yuv_444p16_to_rgba_row (16-bit → u8 RGBA) ----------------------
+
+#[test]
+fn yuv444p16_rgba_gray_alpha_is_ff() {
+  // 16-bit mid-gray Y = 0x8000 → 8-bit ≈128. Alpha = 0xFF.
+  let y = [0x8000u16; 4];
+  let u = [0x8000u16; 4];
+  let v = [0x8000u16; 4];
+  let mut rgba = [0u8; 16];
+  yuv_444p16_to_rgba_row(&y, &u, &v, &mut rgba, 4, ColorMatrix::Bt601, true);
+  for x in 0..4 {
+    let (r, g, b, a) = (
+      rgba[x * 4],
+      rgba[x * 4 + 1],
+      rgba[x * 4 + 2],
+      rgba[x * 4 + 3],
+    );
+    assert_eq!(r, g);
+    assert_eq!(g, b);
+    assert!(r.abs_diff(128) <= 1, "got R={r}");
+    assert_eq!(a, 0xFF, "alpha must be 0xFF at px {x}");
+  }
+}
+
+// ---- yuv_444p16_to_rgba_u16_row (16-bit → 16-bit u16 RGBA) ---------
+
+#[test]
+fn yuv444p16_rgba_u16_gray_alpha_is_ffff() {
+  // 16-bit u16 RGBA: alpha element is `0xFFFF`.
+  let y = [0x8000u16; 4];
+  let u = [0x8000u16; 4];
+  let v = [0x8000u16; 4];
+  let mut rgba = [0u16; 16];
+  yuv_444p16_to_rgba_u16_row(&y, &u, &v, &mut rgba, 4, ColorMatrix::Bt601, true);
+  for x in 0..4 {
+    let (r, g, b, a) = (
+      rgba[x * 4],
+      rgba[x * 4 + 1],
+      rgba[x * 4 + 2],
+      rgba[x * 4 + 3],
+    );
+    assert_eq!(r, g);
+    assert_eq!(g, b);
+    // Y=0x8000 in full-range 16→16 maps near 32768; allow rounding.
+    assert!(r.abs_diff(0x8000) <= 1, "got R={r}");
+    assert_eq!(a, 0xFFFF, "alpha must be 0xFFFF at px {x}");
+  }
+}
+
+// ---- p_n_444_to_rgba_row (P410 → u8 RGBA) ---------------------------
+
+#[test]
+fn p410_rgba_gray_alpha_is_ff() {
+  // P410: 10 active bits in HIGH 10 of each u16. Mid-gray 10-bit
+  // Y=512 → P410 Y = 0x8000. UV interleaved: U V U V ... full width.
+  let y = [0x8000u16; 4];
+  // 4 pixels × (U,V) per pixel = 8 elements.
+  let uv = [0x8000u16; 8];
+  let mut rgba = [0u8; 16];
+  p_n_444_to_rgba_row::<10>(&y, &uv, &mut rgba, 4, ColorMatrix::Bt601, true);
+  for x in 0..4 {
+    let (r, g, b, a) = (
+      rgba[x * 4],
+      rgba[x * 4 + 1],
+      rgba[x * 4 + 2],
+      rgba[x * 4 + 3],
+    );
+    assert_eq!(r, g);
+    assert_eq!(g, b);
+    assert!(r.abs_diff(128) <= 1, "got R={r}");
+    assert_eq!(a, 0xFF, "alpha must be 0xFF at px {x}");
+  }
+}
+
+// ---- p_n_444_16_to_rgba_u16_row (P416 → 16-bit u16 RGBA) -----------
+
+#[test]
+fn p416_rgba_u16_gray_alpha_is_ffff() {
+  // P416: full 16-bit samples. Mid-gray Y=0x8000, neutral UV=0x8000.
+  // 16-bit u16 RGBA: alpha element is `0xFFFF`.
+  let y = [0x8000u16; 4];
+  let uv = [0x8000u16; 8];
+  let mut rgba = [0u16; 16];
+  p_n_444_16_to_rgba_u16_row(&y, &uv, &mut rgba, 4, ColorMatrix::Bt601, true);
+  for x in 0..4 {
+    let (r, g, b, a) = (
+      rgba[x * 4],
+      rgba[x * 4 + 1],
+      rgba[x * 4 + 2],
+      rgba[x * 4 + 3],
+    );
+    assert_eq!(r, g);
+    assert_eq!(g, b);
+    assert!(r.abs_diff(0x8000) <= 1, "got R={r}");
+    assert_eq!(a, 0xFFFF, "alpha must be 0xFFFF at px {x}");
+  }
+}
