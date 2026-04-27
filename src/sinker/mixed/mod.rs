@@ -288,6 +288,11 @@ pub enum RowSlice {
   /// Full-width V row of a **10-bit** 4:4:4 planar source.
   #[display("V Full 10")]
   VFull10,
+  /// Full-width alpha row of a **10-bit** 4:4:4 planar source with an
+  /// alpha plane ([`Yuva444p10`](crate::yuv::Yuva444p10)). `u16`
+  /// samples, `width` elements, low-bit-packed.
+  #[display("A Full 10")]
+  AFull10,
   /// Full-width U row of a **12-bit** 4:4:4 planar source.
   #[display("U Full 12")]
   UFull12,
@@ -1254,6 +1259,7 @@ mod semi_planar_8bit;
 mod subsampled_4_2_0_high_bit;
 mod subsampled_4_2_2_high_bit;
 mod subsampled_4_4_4_high_bit;
+mod yuva_4_4_4;
 
 #[cfg(all(test, feature = "std"))]
 mod tests;
