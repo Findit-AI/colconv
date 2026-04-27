@@ -2334,3 +2334,197 @@ fn avx2_p416_rgba_matches_scalar_all_matrices() {
     check_p_n_444_16_u8_avx2_rgba_equivalence(w, ColorMatrix::Bt709, false);
   }
 }
+
+// ---- High-bit 4:4:4 native-depth `u16` RGBA equivalence (Ship 8 Tranche 7c) ----
+
+fn check_yuv444p_n_u16_avx2_rgba_equivalence<const BITS: u32>(
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  let y = planar_n_plane::<BITS>(width, 37);
+  let u = planar_n_plane::<BITS>(width, 53);
+  let v = planar_n_plane::<BITS>(width, 71);
+  let mut rgba_scalar = std::vec![0u16; width * 4];
+  let mut rgba_simd = std::vec![0u16; width * 4];
+  scalar::yuv_444p_n_to_rgba_u16_row::<BITS>(
+    &y,
+    &u,
+    &v,
+    &mut rgba_scalar,
+    width,
+    matrix,
+    full_range,
+  );
+  unsafe {
+    yuv_444p_n_to_rgba_u16_row::<BITS>(&y, &u, &v, &mut rgba_simd, width, matrix, full_range);
+  }
+  assert_eq!(
+    rgba_scalar, rgba_simd,
+    "AVX2 Yuv444p<{BITS}> → RGBA u16 diverges (width={width}, matrix={matrix:?}, full_range={full_range})"
+  );
+}
+
+fn check_pn_444_u16_avx2_rgba_equivalence<const BITS: u32>(
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  let y = high_bit_plane_avx2::<BITS>(width, 37);
+  let u = high_bit_plane_avx2::<BITS>(width, 53);
+  let v = high_bit_plane_avx2::<BITS>(width, 71);
+  let uv = interleave_uv_avx2(&u, &v);
+  let mut rgba_scalar = std::vec![0u16; width * 4];
+  let mut rgba_simd = std::vec![0u16; width * 4];
+  scalar::p_n_444_to_rgba_u16_row::<BITS>(&y, &uv, &mut rgba_scalar, width, matrix, full_range);
+  unsafe {
+    p_n_444_to_rgba_u16_row::<BITS>(&y, &uv, &mut rgba_simd, width, matrix, full_range);
+  }
+  assert_eq!(
+    rgba_scalar, rgba_simd,
+    "AVX2 Pn4:4:4<{BITS}> → RGBA u16 diverges (width={width}, matrix={matrix:?}, full_range={full_range})"
+  );
+}
+
+fn check_yuv444p16_u16_avx2_rgba_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+  let y = p16_plane_avx2(width, 37);
+  let u = p16_plane_avx2(width, 53);
+  let v = p16_plane_avx2(width, 71);
+  let mut rgba_scalar = std::vec![0u16; width * 4];
+  let mut rgba_simd = std::vec![0u16; width * 4];
+  scalar::yuv_444p16_to_rgba_u16_row(&y, &u, &v, &mut rgba_scalar, width, matrix, full_range);
+  unsafe {
+    yuv_444p16_to_rgba_u16_row(&y, &u, &v, &mut rgba_simd, width, matrix, full_range);
+  }
+  assert_eq!(
+    rgba_scalar, rgba_simd,
+    "AVX2 Yuv444p16 → RGBA u16 diverges (width={width}, matrix={matrix:?}, full_range={full_range})"
+  );
+}
+
+fn check_p_n_444_16_u16_avx2_rgba_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+  let y = p16_plane_avx2(width, 37);
+  let u = p16_plane_avx2(width, 53);
+  let v = p16_plane_avx2(width, 71);
+  let uv = interleave_uv_avx2(&u, &v);
+  let mut rgba_scalar = std::vec![0u16; width * 4];
+  let mut rgba_simd = std::vec![0u16; width * 4];
+  scalar::p_n_444_16_to_rgba_u16_row(&y, &uv, &mut rgba_scalar, width, matrix, full_range);
+  unsafe {
+    p_n_444_16_to_rgba_u16_row(&y, &uv, &mut rgba_simd, width, matrix, full_range);
+  }
+  assert_eq!(
+    rgba_scalar, rgba_simd,
+    "AVX2 P416 → RGBA u16 diverges (width={width}, matrix={matrix:?}, full_range={full_range})"
+  );
+}
+
+#[test]
+fn avx2_yuv444p_n_rgba_u16_matches_scalar_all_bits() {
+  if !std::arch::is_x86_feature_detected!("avx2") {
+    return;
+  }
+  for m in [
+    ColorMatrix::Bt601,
+    ColorMatrix::Bt709,
+    ColorMatrix::Bt2020Ncl,
+    ColorMatrix::Smpte240m,
+    ColorMatrix::Fcc,
+    ColorMatrix::YCgCo,
+  ] {
+    for full in [true, false] {
+      check_yuv444p_n_u16_avx2_rgba_equivalence::<9>(32, m, full);
+      check_yuv444p_n_u16_avx2_rgba_equivalence::<10>(32, m, full);
+      check_yuv444p_n_u16_avx2_rgba_equivalence::<12>(32, m, full);
+      check_yuv444p_n_u16_avx2_rgba_equivalence::<14>(32, m, full);
+    }
+  }
+}
+
+#[test]
+fn avx2_yuv444p_n_rgba_u16_matches_scalar_tail_and_widths() {
+  if !std::arch::is_x86_feature_detected!("avx2") {
+    return;
+  }
+  for w in [17usize, 31, 47, 63, 1920, 1922] {
+    check_yuv444p_n_u16_avx2_rgba_equivalence::<9>(w, ColorMatrix::Bt601, false);
+    check_yuv444p_n_u16_avx2_rgba_equivalence::<10>(w, ColorMatrix::Bt709, true);
+    check_yuv444p_n_u16_avx2_rgba_equivalence::<12>(w, ColorMatrix::Bt2020Ncl, false);
+    check_yuv444p_n_u16_avx2_rgba_equivalence::<14>(w, ColorMatrix::YCgCo, true);
+  }
+}
+
+#[test]
+fn avx2_pn_444_rgba_u16_matches_scalar_all_bits() {
+  if !std::arch::is_x86_feature_detected!("avx2") {
+    return;
+  }
+  for m in [
+    ColorMatrix::Bt601,
+    ColorMatrix::Bt709,
+    ColorMatrix::Bt2020Ncl,
+    ColorMatrix::Smpte240m,
+    ColorMatrix::Fcc,
+    ColorMatrix::YCgCo,
+  ] {
+    for full in [true, false] {
+      check_pn_444_u16_avx2_rgba_equivalence::<10>(32, m, full);
+      check_pn_444_u16_avx2_rgba_equivalence::<12>(32, m, full);
+    }
+  }
+}
+
+#[test]
+fn avx2_pn_444_rgba_u16_matches_scalar_tail_and_widths() {
+  if !std::arch::is_x86_feature_detected!("avx2") {
+    return;
+  }
+  for w in [17usize, 31, 47, 63, 1920, 1922] {
+    check_pn_444_u16_avx2_rgba_equivalence::<10>(w, ColorMatrix::Bt601, false);
+    check_pn_444_u16_avx2_rgba_equivalence::<12>(w, ColorMatrix::Bt709, true);
+  }
+}
+
+#[test]
+fn avx2_yuv444p16_rgba_u16_matches_scalar_all_matrices() {
+  if !std::arch::is_x86_feature_detected!("avx2") {
+    return;
+  }
+  for m in [
+    ColorMatrix::Bt601,
+    ColorMatrix::Bt709,
+    ColorMatrix::Bt2020Ncl,
+    ColorMatrix::Smpte240m,
+    ColorMatrix::Fcc,
+    ColorMatrix::YCgCo,
+  ] {
+    for full in [true, false] {
+      check_yuv444p16_u16_avx2_rgba_equivalence(16, m, full);
+    }
+  }
+  for w in [17usize, 31, 47, 63, 1920, 1922] {
+    check_yuv444p16_u16_avx2_rgba_equivalence(w, ColorMatrix::Bt709, false);
+  }
+}
+
+#[test]
+fn avx2_p416_rgba_u16_matches_scalar_all_matrices() {
+  if !std::arch::is_x86_feature_detected!("avx2") {
+    return;
+  }
+  for m in [
+    ColorMatrix::Bt601,
+    ColorMatrix::Bt709,
+    ColorMatrix::Bt2020Ncl,
+    ColorMatrix::Smpte240m,
+    ColorMatrix::Fcc,
+    ColorMatrix::YCgCo,
+  ] {
+    for full in [true, false] {
+      check_p_n_444_16_u16_avx2_rgba_equivalence(16, m, full);
+    }
+  }
+  for w in [17usize, 31, 47, 63, 1920, 1922] {
+    check_p_n_444_16_u16_avx2_rgba_equivalence(w, ColorMatrix::Bt709, false);
+  }
+}

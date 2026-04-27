@@ -1330,6 +1330,48 @@ impl<'a> MixedSinker<'a, Yuv440p10> {
     self.rgb_u16 = Some(buf);
     Ok(self)
   }
+
+  /// Attaches a packed **8-bit** RGBA output buffer. Yuv440p10 reuses
+  /// the `BITS = 10` 4:4:4 RGBA kernel; alpha = `0xFF`.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn with_rgba(mut self, buf: &'a mut [u8]) -> Result<Self, MixedSinkerError> {
+    self.set_rgba(buf)?;
+    Ok(self)
+  }
+  /// In-place variant of [`with_rgba`](Self::with_rgba).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn set_rgba(&mut self, buf: &'a mut [u8]) -> Result<&mut Self, MixedSinkerError> {
+    let expected = self.frame_bytes(4)?;
+    if buf.len() < expected {
+      return Err(MixedSinkerError::RgbaBufferTooShort {
+        expected,
+        actual: buf.len(),
+      });
+    }
+    self.rgba = Some(buf);
+    Ok(self)
+  }
+
+  /// Attaches a packed **`u16`** RGBA output buffer. 10-bit low-packed
+  /// (`[0, 1023]`); alpha element is `1023`.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn with_rgba_u16(mut self, buf: &'a mut [u16]) -> Result<Self, MixedSinkerError> {
+    self.set_rgba_u16(buf)?;
+    Ok(self)
+  }
+  /// In-place variant of [`with_rgba_u16`](Self::with_rgba_u16).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn set_rgba_u16(&mut self, buf: &'a mut [u16]) -> Result<&mut Self, MixedSinkerError> {
+    let expected = self.frame_bytes(4)?;
+    if buf.len() < expected {
+      return Err(MixedSinkerError::RgbaU16BufferTooShort {
+        expected,
+        actual: buf.len(),
+      });
+    }
+    self.rgba_u16 = Some(buf);
+    Ok(self)
+  }
 }
 
 impl Yuv440p10Sink for MixedSinker<'_, Yuv440p10> {}
@@ -1383,6 +1425,8 @@ impl PixelSink for MixedSinker<'_, Yuv440p10> {
     let Self {
       rgb,
       rgb_u16,
+      rgba,
+      rgba_u16,
       luma,
       hsv,
       rgb_scratch,
@@ -1398,7 +1442,26 @@ impl PixelSink for MixedSinker<'_, Yuv440p10> {
       }
     }
 
-    if let Some(buf) = rgb_u16.as_deref_mut() {
+    // ===== u16 RGB / RGBA path (Strategy A) =====
+    let want_rgb_u16 = rgb_u16.is_some();
+    let want_rgba_u16 = rgba_u16.is_some();
+
+    if want_rgba_u16 && !want_rgb_u16 {
+      let rgba_u16_buf = rgba_u16.as_deref_mut().unwrap();
+      let rgba_u16_row =
+        rgba_u16_plane_row_slice(rgba_u16_buf, one_plane_start, one_plane_end, w, h)?;
+      yuv444p10_to_rgba_u16_row(
+        row.y(),
+        row.u(),
+        row.v(),
+        rgba_u16_row,
+        w,
+        row.matrix(),
+        row.full_range(),
+        use_simd,
+      );
+    } else if want_rgb_u16 {
+      let rgb_u16_buf = rgb_u16.as_deref_mut().unwrap();
       let rgb_plane_end =
         one_plane_end
           .checked_mul(3)
@@ -1408,19 +1471,47 @@ impl PixelSink for MixedSinker<'_, Yuv440p10> {
             channels: 3,
           })?;
       let rgb_plane_start = one_plane_start * 3;
+      let rgb_u16_row = &mut rgb_u16_buf[rgb_plane_start..rgb_plane_end];
       yuv444p10_to_rgb_u16_row(
         row.y(),
         row.u(),
         row.v(),
-        &mut buf[rgb_plane_start..rgb_plane_end],
+        rgb_u16_row,
         w,
         row.matrix(),
         row.full_range(),
         use_simd,
       );
+      if want_rgba_u16 {
+        let rgba_u16_buf = rgba_u16.as_deref_mut().unwrap();
+        let rgba_u16_row =
+          rgba_u16_plane_row_slice(rgba_u16_buf, one_plane_start, one_plane_end, w, h)?;
+        expand_rgb_u16_to_rgba_u16_row::<BITS>(rgb_u16_row, rgba_u16_row, w);
+      }
     }
 
-    if rgb.is_none() && hsv.is_none() {
+    // ===== u8 RGB / RGBA / HSV path (Strategy A) =====
+    let want_rgba = rgba.is_some();
+    let want_hsv = hsv.is_some();
+    let need_rgb_kernel = rgb.is_some() || want_hsv;
+
+    if want_rgba && !need_rgb_kernel {
+      let rgba_buf = rgba.as_deref_mut().unwrap();
+      let rgba_row = rgba_plane_row_slice(rgba_buf, one_plane_start, one_plane_end, w, h)?;
+      yuv444p10_to_rgba_row(
+        row.y(),
+        row.u(),
+        row.v(),
+        rgba_row,
+        w,
+        row.matrix(),
+        row.full_range(),
+        use_simd,
+      );
+      return Ok(());
+    }
+
+    if !need_rgb_kernel {
       return Ok(());
     }
 
@@ -1454,6 +1545,12 @@ impl PixelSink for MixedSinker<'_, Yuv440p10> {
         use_simd,
       );
     }
+
+    if let Some(buf) = rgba.as_deref_mut() {
+      let rgba_row = rgba_plane_row_slice(buf, one_plane_start, one_plane_end, w, h)?;
+      expand_rgb_to_rgba_row(rgb_row, rgba_row, w);
+    }
+
     Ok(())
   }
 }
@@ -1478,6 +1575,48 @@ impl<'a> MixedSinker<'a, Yuv440p12> {
       });
     }
     self.rgb_u16 = Some(buf);
+    Ok(self)
+  }
+
+  /// Attaches a packed **8-bit** RGBA output buffer. Yuv440p12 reuses
+  /// the `BITS = 12` 4:4:4 RGBA kernel; alpha = `0xFF`.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn with_rgba(mut self, buf: &'a mut [u8]) -> Result<Self, MixedSinkerError> {
+    self.set_rgba(buf)?;
+    Ok(self)
+  }
+  /// In-place variant of [`with_rgba`](Self::with_rgba).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn set_rgba(&mut self, buf: &'a mut [u8]) -> Result<&mut Self, MixedSinkerError> {
+    let expected = self.frame_bytes(4)?;
+    if buf.len() < expected {
+      return Err(MixedSinkerError::RgbaBufferTooShort {
+        expected,
+        actual: buf.len(),
+      });
+    }
+    self.rgba = Some(buf);
+    Ok(self)
+  }
+
+  /// Attaches a packed **`u16`** RGBA output buffer. 12-bit low-packed
+  /// (`[0, 4095]`); alpha element is `4095`.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn with_rgba_u16(mut self, buf: &'a mut [u16]) -> Result<Self, MixedSinkerError> {
+    self.set_rgba_u16(buf)?;
+    Ok(self)
+  }
+  /// In-place variant of [`with_rgba_u16`](Self::with_rgba_u16).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn set_rgba_u16(&mut self, buf: &'a mut [u16]) -> Result<&mut Self, MixedSinkerError> {
+    let expected = self.frame_bytes(4)?;
+    if buf.len() < expected {
+      return Err(MixedSinkerError::RgbaU16BufferTooShort {
+        expected,
+        actual: buf.len(),
+      });
+    }
+    self.rgba_u16 = Some(buf);
     Ok(self)
   }
 }
@@ -1533,6 +1672,8 @@ impl PixelSink for MixedSinker<'_, Yuv440p12> {
     let Self {
       rgb,
       rgb_u16,
+      rgba,
+      rgba_u16,
       luma,
       hsv,
       rgb_scratch,
@@ -1548,7 +1689,26 @@ impl PixelSink for MixedSinker<'_, Yuv440p12> {
       }
     }
 
-    if let Some(buf) = rgb_u16.as_deref_mut() {
+    // ===== u16 RGB / RGBA path (Strategy A) =====
+    let want_rgb_u16 = rgb_u16.is_some();
+    let want_rgba_u16 = rgba_u16.is_some();
+
+    if want_rgba_u16 && !want_rgb_u16 {
+      let rgba_u16_buf = rgba_u16.as_deref_mut().unwrap();
+      let rgba_u16_row =
+        rgba_u16_plane_row_slice(rgba_u16_buf, one_plane_start, one_plane_end, w, h)?;
+      yuv444p12_to_rgba_u16_row(
+        row.y(),
+        row.u(),
+        row.v(),
+        rgba_u16_row,
+        w,
+        row.matrix(),
+        row.full_range(),
+        use_simd,
+      );
+    } else if want_rgb_u16 {
+      let rgb_u16_buf = rgb_u16.as_deref_mut().unwrap();
       let rgb_plane_end =
         one_plane_end
           .checked_mul(3)
@@ -1558,19 +1718,47 @@ impl PixelSink for MixedSinker<'_, Yuv440p12> {
             channels: 3,
           })?;
       let rgb_plane_start = one_plane_start * 3;
+      let rgb_u16_row = &mut rgb_u16_buf[rgb_plane_start..rgb_plane_end];
       yuv444p12_to_rgb_u16_row(
         row.y(),
         row.u(),
         row.v(),
-        &mut buf[rgb_plane_start..rgb_plane_end],
+        rgb_u16_row,
         w,
         row.matrix(),
         row.full_range(),
         use_simd,
       );
+      if want_rgba_u16 {
+        let rgba_u16_buf = rgba_u16.as_deref_mut().unwrap();
+        let rgba_u16_row =
+          rgba_u16_plane_row_slice(rgba_u16_buf, one_plane_start, one_plane_end, w, h)?;
+        expand_rgb_u16_to_rgba_u16_row::<BITS>(rgb_u16_row, rgba_u16_row, w);
+      }
     }
 
-    if rgb.is_none() && hsv.is_none() {
+    // ===== u8 RGB / RGBA / HSV path (Strategy A) =====
+    let want_rgba = rgba.is_some();
+    let want_hsv = hsv.is_some();
+    let need_rgb_kernel = rgb.is_some() || want_hsv;
+
+    if want_rgba && !need_rgb_kernel {
+      let rgba_buf = rgba.as_deref_mut().unwrap();
+      let rgba_row = rgba_plane_row_slice(rgba_buf, one_plane_start, one_plane_end, w, h)?;
+      yuv444p12_to_rgba_row(
+        row.y(),
+        row.u(),
+        row.v(),
+        rgba_row,
+        w,
+        row.matrix(),
+        row.full_range(),
+        use_simd,
+      );
+      return Ok(());
+    }
+
+    if !need_rgb_kernel {
       return Ok(());
     }
 
@@ -1604,6 +1792,12 @@ impl PixelSink for MixedSinker<'_, Yuv440p12> {
         use_simd,
       );
     }
+
+    if let Some(buf) = rgba.as_deref_mut() {
+      let rgba_row = rgba_plane_row_slice(buf, one_plane_start, one_plane_end, w, h)?;
+      expand_rgb_to_rgba_row(rgb_row, rgba_row, w);
+    }
+
     Ok(())
   }
 }

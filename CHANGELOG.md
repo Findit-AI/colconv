@@ -199,20 +199,22 @@ backends are wired in follow-up sub-PRs without breaking call sites.**
 | 4c | 4:4:0 planar | `Yuv440p` | ✅ shipped (PR #22) — wiring-only (reuses `yuv_444_to_rgba_row`) |
 | 5 | High-bit 4:2:0 | `Yuv420p9/10/12/14/16`, `P010/P012/P016` | ✅ shipped — **5** scalar prep + dispatchers (PR #24); **5a** u8 SIMD across all 5 backends (PR #25); **5b** u16 SIMD + sinker integration (PR #26) |
 | 6 | High-bit 4:2:2 | `Yuv422p9/10/12/14/16`, `P210/P212/P216` | ✅ shipped (PR #28) — sinker-only; reuses tranche-5 row kernels via the established 4:2:2 → 4:2:0 dispatcher pattern. (`Yuv440p10/12` deferred to tranche 7 alongside the 4:4:4 work it depends on.) |
-| 7 | High-bit 4:4:4 + 4:4:0 | `Yuv444p9/10/12/14/16`, `P410/P412/P416`, `Yuv440p10/12` | ⏳ **in progress** — **7** scalar prep + dispatchers shipped (PR #29; `use_simd` parameter held in the signature but routes to scalar until 7b/7c wire SIMD). 7b u8 SIMD pending; 7c u16 SIMD + sinker integration pending. |
+| 7 | High-bit 4:4:4 + 4:4:0 | `Yuv444p9/10/12/14/16`, `P410/P412/P416`, `Yuv440p10/12` | ✅ shipped — **7** scalar prep + dispatchers (PR #29); **7b** u8 SIMD across all 5 backends (PR #30); **7c** u16 SIMD + sinker integration incl. `Yuv440p10/12` reusing 4:4:4 dispatchers (PR #31) |
 | 8 | RAW | `Bayer`, `Bayer16<BITS>` | (deferred — RAW already has `with_luma_coefficients`) |
 
 ### SIMD coverage
 
-For tranches 1–6 (everything shipped): all 5 backends (NEON, SSE4.1,
-AVX2, AVX-512, wasm simd128) have the const-ALPHA `<…, ALPHA>` template
-wired for both u8 and u16 RGBA paths. Per-arch RGBA store helpers added
-where needed: `vst4q_u8` / `vst4q_u16` (NEON), `write_rgba_16` /
-`write_rgba_u16_8` (SSE4.1, AVX2 via re-export), `write_rgba_64` /
-`write_rgba_u16_32` + `write_quarter_rgba` (AVX-512), `u8x16_splat` /
-`i16x8_shuffle`-based `write_rgba_u16_8` (wasm).
-
-For tranche 7: scalar-only as of PR #29. SIMD backends land in 7b/7c.
+**All 7 tranches (Ship 8 complete)**: 5 backends (NEON, SSE4.1, AVX2,
+AVX-512, wasm simd128) have the const-ALPHA `<…, ALPHA>` template
+wired for both u8 and u16 RGBA paths across every high-bit kernel
+family (4:2:0 in tranche 5; 4:4:4 + Pn-444 in tranche 7). 4:2:2 and
+4:4:0 sinkers reuse 4:2:0 / 4:4:4 dispatchers respectively — no new
+SIMD code needed for those subsampling families. Per-arch RGBA store
+helpers added in tranche 5: `vst4q_u8` / `vst4q_u16` (NEON),
+`write_rgba_16` / `write_rgba_u16_8` (SSE4.1, AVX2 via re-export),
+`write_rgba_64` / `write_rgba_u16_32` + `write_quarter_rgba`
+(AVX-512), `u8x16_splat` / `i16x8_shuffle`-based `write_rgba_u16_8`
+(wasm). Reused verbatim across tranches 5–7.
 
 ### Cleanup PRs
 
@@ -226,17 +228,20 @@ For tranche 7: scalar-only as of PR #29. SIMD backends land in 7b/7c.
   (`src/frame.rs`, `src/raw/types.rs`, `src/raw/bayer.rs`,
   `src/raw/bayer16.rs`) into sibling files. Same shape as PR #21.
 
-### Tests (cumulative through PR #29)
+### Tests (cumulative through PR #31, Ship 8 complete)
 
-- **513 tests pass on aarch64-darwin** (host) at the end of tranche 7
-  scalar prep; +6 since tranche 6 (PR #28: 507) for the new 4:4:4
-  scalar reference paths.
-- Per-arch RGBA equivalence tests: 30 tests × 5 backends per high-bit
-  family (Tranche 5 added BITS=9/10/12/14 + 16 + Pn for both u8 and
-  u16 paths, all matrices × ranges × tail widths).
-- Sinker integration tests: 8 new in PR #26 (4:2:0), 8 in PR #28
-  (4:2:2), 6 in PR #29 (4:4:4 scalar). Cover both standalone-RGBA
-  and Strategy A combine paths plus buffer-too-short error variants.
+- **534 tests pass on aarch64-darwin** (host) at Ship 8 close;
+  trajectory: 507 (PR #28, 4:2:2 sinker) → 513 (PR #29, 4:4:4 scalar
+  prep) → 519 (PR #30, 4:4:4 u8 SIMD) → 534 (PR #31, 4:4:4 u16 SIMD
+  + sinker).
+- Per-arch RGBA equivalence tests: ~30 per high-bit family across all
+  5 backends — tranche 5 added 4:2:0 (u8 + u16, BITS=9/10/12/14 + 16
+  + Pn); tranche 7b/7c added 4:4:4 (u8 + u16, BITS=9/10/12/14 + 16 +
+  Pn-444). All matrices × ranges × natural-block + tail widths.
+- Sinker integration tests: 8 in PR #26 (4:2:0), 8 in PR #28 (4:2:2),
+  6 in PR #29 (4:4:4 scalar), 9 in PR #31 (4:4:4 + Yuv440p10 cross-
+  family kernel-reuse proof). Cover standalone-RGBA, Strategy A
+  combine, and buffer-too-short error variants.
 - All x86 `#[test]` functions exercising new SIMD kernels include
   `is_x86_feature_detected!` early-return guards (per the PR #25 CI
   fallout — without them, ASAN sanitizer saw `SIGILL` and Miri
