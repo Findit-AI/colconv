@@ -703,7 +703,8 @@ pub(crate) unsafe fn yuv_420p_n_to_rgb_or_rgba_u16_row<const BITS: u32, const AL
 /// [`yuv_420p_n_to_rgb_row`] but with full-width U/V (no chroma
 /// duplication) and no width parity constraint.
 ///
-/// Thin wrapper over [`yuv_444p_n_to_rgb_or_rgba_row`] with `ALPHA = false`.
+/// Thin wrapper over [`yuv_444p_n_to_rgb_or_rgba_row`] with
+/// `ALPHA = false, ALPHA_SRC = false`.
 ///
 /// # Safety
 ///
@@ -721,7 +722,9 @@ pub(crate) unsafe fn yuv_444p_n_to_rgb_row<const BITS: u32>(
 ) {
   // SAFETY: caller obligations forwarded to the shared impl.
   unsafe {
-    yuv_444p_n_to_rgb_or_rgba_row::<BITS, false>(y, u, v, rgb_out, width, matrix, full_range);
+    yuv_444p_n_to_rgb_or_rgba_row::<BITS, false, false>(
+      y, u, v, rgb_out, width, matrix, full_range, None,
+    );
   }
 }
 
@@ -730,7 +733,8 @@ pub(crate) unsafe fn yuv_444p_n_to_rgb_row<const BITS: u32>(
 /// [`yuv_444p_n_to_rgb_row`]; the only differences are the per-pixel
 /// stride (4 vs 3) and the constant alpha byte (`0xFF`, opaque).
 ///
-/// Thin wrapper over [`yuv_444p_n_to_rgb_or_rgba_row`] with `ALPHA = true`.
+/// Thin wrapper over [`yuv_444p_n_to_rgb_or_rgba_row`] with
+/// `ALPHA = true, ALPHA_SRC = false`.
 ///
 /// # Safety
 ///
@@ -748,24 +752,75 @@ pub(crate) unsafe fn yuv_444p_n_to_rgba_row<const BITS: u32>(
 ) {
   // SAFETY: caller obligations forwarded to the shared impl.
   unsafe {
-    yuv_444p_n_to_rgb_or_rgba_row::<BITS, true>(y, u, v, rgba_out, width, matrix, full_range);
+    yuv_444p_n_to_rgb_or_rgba_row::<BITS, true, false>(
+      y, u, v, rgba_out, width, matrix, full_range, None,
+    );
+  }
+}
+
+/// NEON YUVA 4:4:4 planar high-bit-depth → packed **8-bit RGBA** with
+/// the per-pixel alpha byte **sourced from `a_src`** (depth-converted
+/// via `>> (BITS - 8)` to fit `u8`) instead of being constant `0xFF`.
+/// Same numerical contract as [`yuv_444p_n_to_rgba_row`] for R/G/B.
+///
+/// Thin wrapper over [`yuv_444p_n_to_rgb_or_rgba_row`] with
+/// `ALPHA = true, ALPHA_SRC = true`.
+///
+/// # Safety
+///
+/// Same as [`yuv_444p_n_to_rgba_row`] plus `a_src.len() >= width`.
+#[inline]
+#[target_feature(enable = "neon")]
+#[allow(clippy::too_many_arguments)]
+pub(crate) unsafe fn yuv_444p_n_to_rgba_with_alpha_src_row<const BITS: u32>(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  a_src: &[u16],
+  rgba_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  // SAFETY: caller obligations forwarded to the shared impl.
+  unsafe {
+    yuv_444p_n_to_rgb_or_rgba_row::<BITS, true, true>(
+      y,
+      u,
+      v,
+      rgba_out,
+      width,
+      matrix,
+      full_range,
+      Some(a_src),
+    );
   }
 }
 
 /// Shared NEON high-bit-depth YUV 4:4:4 kernel for
-/// [`yuv_444p_n_to_rgb_row`] (`ALPHA = false`, `vst3q_u8`) and
-/// [`yuv_444p_n_to_rgba_row`] (`ALPHA = true`, `vst4q_u8` with
-/// constant `0xFF` alpha vector).
+/// [`yuv_444p_n_to_rgb_row`] (`ALPHA = false, ALPHA_SRC = false`,
+/// `vst3q_u8`), [`yuv_444p_n_to_rgba_row`] (`ALPHA = true,
+/// ALPHA_SRC = false`, `vst4q_u8` with constant `0xFF` alpha vector)
+/// and [`yuv_444p_n_to_rgba_with_alpha_src_row`] (`ALPHA = true,
+/// ALPHA_SRC = true`, `vst4q_u8` with the alpha lane loaded and
+/// depth-converted from `a_src`).
 ///
 /// # Safety
 ///
 /// 1. **NEON must be available.**
 /// 2. `y.len() >= width`, `u.len() >= width`, `v.len() >= width`,
 ///    `out.len() >= width * if ALPHA { 4 } else { 3 }`.
-/// 3. `BITS` must be one of `{9, 10, 12, 14}`.
+/// 3. When `ALPHA_SRC = true`: `a_src` must be `Some(_)` and
+///    `a_src.unwrap().len() >= width`.
+/// 4. `BITS` must be one of `{9, 10, 12, 14}`.
 #[inline]
 #[target_feature(enable = "neon")]
-pub(crate) unsafe fn yuv_444p_n_to_rgb_or_rgba_row<const BITS: u32, const ALPHA: bool>(
+#[allow(clippy::too_many_arguments)]
+pub(crate) unsafe fn yuv_444p_n_to_rgb_or_rgba_row<
+  const BITS: u32,
+  const ALPHA: bool,
+  const ALPHA_SRC: bool,
+>(
   y: &[u16],
   u: &[u16],
   v: &[u16],
@@ -773,13 +828,20 @@ pub(crate) unsafe fn yuv_444p_n_to_rgb_or_rgba_row<const BITS: u32, const ALPHA:
   width: usize,
   matrix: ColorMatrix,
   full_range: bool,
+  a_src: Option<&[u16]>,
 ) {
   const { assert!(BITS == 9 || BITS == 10 || BITS == 12 || BITS == 14) };
+  // Source alpha requires RGBA output — there is no 3 bpp store with
+  // alpha to put it in.
+  const { assert!(!ALPHA_SRC || ALPHA) };
   let bpp: usize = if ALPHA { 4 } else { 3 };
   debug_assert!(y.len() >= width);
   debug_assert!(u.len() >= width);
   debug_assert!(v.len() >= width);
   debug_assert!(out.len() >= width * bpp);
+  if ALPHA_SRC {
+    debug_assert!(a_src.as_ref().is_some_and(|s| s.len() >= width));
+  }
 
   let coeffs = scalar::Coefficients::for_matrix(matrix);
   let (y_off, y_scale, c_scale) = scalar::range_params_n::<BITS, 8>(full_range);
@@ -863,9 +925,28 @@ pub(crate) unsafe fn yuv_444p_n_to_rgb_or_rgba_row<const BITS: u32, const ALPHA:
       );
 
       if ALPHA {
+        let a_u8 = if ALPHA_SRC {
+          // SAFETY (const-checked): ALPHA_SRC = true implies the
+          // wrapper passed Some(_), validated by debug_assert above.
+          let a_ptr = a_src.as_ref().unwrap_unchecked().as_ptr();
+          let a_lo_u16 = vandq_u16(vld1q_u16(a_ptr.add(x)), mask_v);
+          let a_hi_u16 = vandq_u16(vld1q_u16(a_ptr.add(x + 8)), mask_v);
+          // Mask before shifting to harden against over-range source
+          // alpha (e.g. 1024 at BITS=10), matching scalar. NEON's
+          // `vshrq_n_u16` requires a literal const generic shift, but
+          // `BITS - 8` is not a stable const expression on a const
+          // generic — `vshlq_u16` with a negative count vector
+          // performs the same logical right shift dynamically.
+          let a_shr = vdupq_n_s16(-((BITS - 8) as i16));
+          let a_lo_shifted = vshlq_u16(a_lo_u16, a_shr);
+          let a_hi_shifted = vshlq_u16(a_hi_u16, a_shr);
+          vcombine_u8(vqmovn_u16(a_lo_shifted), vqmovn_u16(a_hi_shifted))
+        } else {
+          alpha_u8
+        };
         vst4q_u8(
           out.as_mut_ptr().add(x * 4),
-          uint8x16x4_t(r_u8, g_u8, b_u8, alpha_u8),
+          uint8x16x4_t(r_u8, g_u8, b_u8, a_u8),
         );
       } else {
         vst3q_u8(out.as_mut_ptr().add(x * 3), uint8x16x3_t(r_u8, g_u8, b_u8));
@@ -880,7 +961,13 @@ pub(crate) unsafe fn yuv_444p_n_to_rgb_or_rgba_row<const BITS: u32, const ALPHA:
       let tail_v = &v[x..width];
       let tail_out = &mut out[x * bpp..width * bpp];
       let tail_w = width - x;
-      if ALPHA {
+      if ALPHA_SRC {
+        // SAFETY (const-checked): ALPHA_SRC = true implies Some(_).
+        let tail_a = &a_src.as_ref().unwrap_unchecked()[x..width];
+        scalar::yuv_444p_n_to_rgba_with_alpha_src_row::<BITS>(
+          tail_y, tail_u, tail_v, tail_a, tail_out, tail_w, matrix, full_range,
+        );
+      } else if ALPHA {
         scalar::yuv_444p_n_to_rgba_row::<BITS>(
           tail_y, tail_u, tail_v, tail_out, tail_w, matrix, full_range,
         );
