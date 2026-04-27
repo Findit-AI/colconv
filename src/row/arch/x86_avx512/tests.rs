@@ -2705,8 +2705,18 @@ fn avx512_yuva420p_n_rgba_matches_scalar_widths() {
     return;
   }
   for w in [64usize, 66, 78, 94, 1920, 1922] {
-    check_yuv420p_n_u8_avx512_rgba_with_alpha_src_equivalence::<9>(w, ColorMatrix::Bt601, false, 89);
-    check_yuv420p_n_u8_avx512_rgba_with_alpha_src_equivalence::<10>(w, ColorMatrix::Bt709, true, 89);
+    check_yuv420p_n_u8_avx512_rgba_with_alpha_src_equivalence::<9>(
+      w,
+      ColorMatrix::Bt601,
+      false,
+      89,
+    );
+    check_yuv420p_n_u8_avx512_rgba_with_alpha_src_equivalence::<10>(
+      w,
+      ColorMatrix::Bt709,
+      true,
+      89,
+    );
   }
 }
 
