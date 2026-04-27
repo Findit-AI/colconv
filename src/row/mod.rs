@@ -5193,14 +5193,15 @@ pub fn yuva444p10_to_rgba_u16_row(
   );
 }
 
-// ---- YUVA 4:2:0 RGBA dispatchers (Ship 8b-2a prep) --------------------
+// ---- YUVA 4:2:0 RGBA dispatchers --------------------------------------
 //
 // Per-row dispatchers for the YUVA 4:2:0 source family — Yuva420p
-// (8-bit) plus Yuva420p9 / Yuva420p10 / Yuva420p16. Each routes
-// through the new `yuv_420*_to_rgba*_with_alpha_src_row` scalar
-// kernels with `let _ = use_simd;` stubs. SIMD wiring lands in
-// Ship 8b-2b (u8 RGBA) and 8b-2c (u16 RGBA). Until then `use_simd`
-// is accepted for API stability but ignored.
+// (8-bit) plus Yuva420p9 / Yuva420p10 / Yuva420p16. The u8 RGBA
+// dispatchers route through per-arch
+// `yuv_420*_to_rgba*_with_alpha_src_row` SIMD wrappers (Ship 8b-2b),
+// mirroring the non-alpha sibling dispatchers' `cfg_select!` blocks.
+// The native-depth `u16` RGBA dispatchers below remain scalar pending
+// Ship 8b-2c.
 
 /// Converts one row of 8‑bit YUVA 4:2:0 to packed **8‑bit** **RGBA**.
 /// R / G / B are produced by the same Q15 i32 8‑bit kernel that backs
@@ -5208,11 +5209,8 @@ pub fn yuva444p10_to_rgba_u16_row(
 /// from `a`** (one byte per pixel, full-width — alpha is at luma
 /// resolution in 4:2:0, only chroma is subsampled).
 ///
-/// # ⚠ Scalar-only as of Ship 8b‑2a
-///
-/// This dispatcher routes to scalar regardless of `use_simd`. SIMD
-/// wiring lands in Ship 8b‑2b. The `use_simd` parameter is accepted
-/// for API stability and ignored.
+/// `use_simd = false` forces the scalar reference path; otherwise
+/// per-arch dispatch matches [`yuv_420_to_rgba_row`]'s pattern.
 #[cfg_attr(not(tarpaulin), inline(always))]
 #[allow(clippy::too_many_arguments)]
 pub fn yuva420p_to_rgba_row(
@@ -5234,7 +5232,63 @@ pub fn yuva420p_to_rgba_row(
   assert!(a.len() >= width, "a row too short");
   assert!(rgba_out.len() >= rgba_min, "rgba_out row too short");
 
-  let _ = use_simd; // SIMD per-arch routes land in Ship 8b-2b PR.
+  if use_simd {
+    cfg_select! {
+      target_arch = "aarch64" => {
+        if neon_available() {
+          // SAFETY: NEON verified.
+          unsafe {
+            arch::neon::yuv_420_to_rgba_with_alpha_src_row(
+              y, u_half, v_half, a, rgba_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+      },
+      target_arch = "x86_64" => {
+        if avx512_available() {
+          // SAFETY: AVX‑512BW verified.
+          unsafe {
+            arch::x86_avx512::yuv_420_to_rgba_with_alpha_src_row(
+              y, u_half, v_half, a, rgba_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+        if avx2_available() {
+          // SAFETY: AVX2 verified.
+          unsafe {
+            arch::x86_avx2::yuv_420_to_rgba_with_alpha_src_row(
+              y, u_half, v_half, a, rgba_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+        if sse41_available() {
+          // SAFETY: SSE4.1 verified.
+          unsafe {
+            arch::x86_sse41::yuv_420_to_rgba_with_alpha_src_row(
+              y, u_half, v_half, a, rgba_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+      },
+      target_arch = "wasm32" => {
+        if simd128_available() {
+          // SAFETY: simd128 compile‑time verified.
+          unsafe {
+            arch::wasm_simd128::yuv_420_to_rgba_with_alpha_src_row(
+              y, u_half, v_half, a, rgba_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+      },
+      _ => {}
+    }
+  }
+
   scalar::yuv_420_to_rgba_with_alpha_src_row(
     y, u_half, v_half, a, rgba_out, width, matrix, full_range,
   );
@@ -5246,10 +5300,8 @@ pub fn yuva420p_to_rgba_row(
 /// **sourced from `a`** (depth-converted via `a >> 1` to fit `u8`)
 /// instead of being constant `0xFF`.
 ///
-/// # ⚠ Scalar-only as of Ship 8b‑2a
-///
-/// This dispatcher routes to scalar regardless of `use_simd`. SIMD
-/// wiring lands in Ship 8b‑2b.
+/// `use_simd = false` forces the scalar reference path; otherwise
+/// per-arch dispatch matches [`yuv420p9_to_rgba_row`]'s pattern.
 #[cfg_attr(not(tarpaulin), inline(always))]
 #[allow(clippy::too_many_arguments)]
 pub fn yuva420p9_to_rgba_row(
@@ -5271,7 +5323,63 @@ pub fn yuva420p9_to_rgba_row(
   assert!(a.len() >= width, "a row too short");
   assert!(rgba_out.len() >= rgba_min, "rgba_out row too short");
 
-  let _ = use_simd; // SIMD per-arch routes land in Ship 8b-2b PR.
+  if use_simd {
+    cfg_select! {
+      target_arch = "aarch64" => {
+        if neon_available() {
+          // SAFETY: NEON verified.
+          unsafe {
+            arch::neon::yuv_420p_n_to_rgba_with_alpha_src_row::<9>(
+              y, u_half, v_half, a, rgba_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+      },
+      target_arch = "x86_64" => {
+        if avx512_available() {
+          // SAFETY: AVX‑512BW verified.
+          unsafe {
+            arch::x86_avx512::yuv_420p_n_to_rgba_with_alpha_src_row::<9>(
+              y, u_half, v_half, a, rgba_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+        if avx2_available() {
+          // SAFETY: AVX2 verified.
+          unsafe {
+            arch::x86_avx2::yuv_420p_n_to_rgba_with_alpha_src_row::<9>(
+              y, u_half, v_half, a, rgba_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+        if sse41_available() {
+          // SAFETY: SSE4.1 verified.
+          unsafe {
+            arch::x86_sse41::yuv_420p_n_to_rgba_with_alpha_src_row::<9>(
+              y, u_half, v_half, a, rgba_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+      },
+      target_arch = "wasm32" => {
+        if simd128_available() {
+          // SAFETY: simd128 compile‑time verified.
+          unsafe {
+            arch::wasm_simd128::yuv_420p_n_to_rgba_with_alpha_src_row::<9>(
+              y, u_half, v_half, a, rgba_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+      },
+      _ => {}
+    }
+  }
+
   scalar::yuv_420p_n_to_rgba_with_alpha_src_row::<9>(
     y, u_half, v_half, a, rgba_out, width, matrix, full_range,
   );
@@ -5320,10 +5428,8 @@ pub fn yuva420p9_to_rgba_u16_row(
 /// **sourced from `a`** (depth-converted via `a >> 2` to fit `u8`)
 /// instead of being constant `0xFF`.
 ///
-/// # ⚠ Scalar-only as of Ship 8b‑2a
-///
-/// This dispatcher routes to scalar regardless of `use_simd`. SIMD
-/// wiring lands in Ship 8b‑2b.
+/// `use_simd = false` forces the scalar reference path; otherwise
+/// per-arch dispatch matches [`yuv420p10_to_rgba_row`]'s pattern.
 #[cfg_attr(not(tarpaulin), inline(always))]
 #[allow(clippy::too_many_arguments)]
 pub fn yuva420p10_to_rgba_row(
@@ -5345,7 +5451,63 @@ pub fn yuva420p10_to_rgba_row(
   assert!(a.len() >= width, "a row too short");
   assert!(rgba_out.len() >= rgba_min, "rgba_out row too short");
 
-  let _ = use_simd; // SIMD per-arch routes land in Ship 8b-2b PR.
+  if use_simd {
+    cfg_select! {
+      target_arch = "aarch64" => {
+        if neon_available() {
+          // SAFETY: NEON verified.
+          unsafe {
+            arch::neon::yuv_420p_n_to_rgba_with_alpha_src_row::<10>(
+              y, u_half, v_half, a, rgba_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+      },
+      target_arch = "x86_64" => {
+        if avx512_available() {
+          // SAFETY: AVX‑512BW verified.
+          unsafe {
+            arch::x86_avx512::yuv_420p_n_to_rgba_with_alpha_src_row::<10>(
+              y, u_half, v_half, a, rgba_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+        if avx2_available() {
+          // SAFETY: AVX2 verified.
+          unsafe {
+            arch::x86_avx2::yuv_420p_n_to_rgba_with_alpha_src_row::<10>(
+              y, u_half, v_half, a, rgba_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+        if sse41_available() {
+          // SAFETY: SSE4.1 verified.
+          unsafe {
+            arch::x86_sse41::yuv_420p_n_to_rgba_with_alpha_src_row::<10>(
+              y, u_half, v_half, a, rgba_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+      },
+      target_arch = "wasm32" => {
+        if simd128_available() {
+          // SAFETY: simd128 compile‑time verified.
+          unsafe {
+            arch::wasm_simd128::yuv_420p_n_to_rgba_with_alpha_src_row::<10>(
+              y, u_half, v_half, a, rgba_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+      },
+      _ => {}
+    }
+  }
+
   scalar::yuv_420p_n_to_rgba_with_alpha_src_row::<10>(
     y, u_half, v_half, a, rgba_out, width, matrix, full_range,
   );
@@ -5391,10 +5553,8 @@ pub fn yuva420p10_to_rgba_u16_row(
 /// [`yuv420p16_to_rgba_row`]; the per-pixel alpha byte is **sourced
 /// from `a`** (depth-converted via `a >> 8` to fit `u8`).
 ///
-/// # ⚠ Scalar-only as of Ship 8b‑2a
-///
-/// This dispatcher routes to scalar regardless of `use_simd`. SIMD
-/// wiring lands in Ship 8b‑2b.
+/// `use_simd = false` forces the scalar reference path; otherwise
+/// per-arch dispatch matches [`yuv420p16_to_rgba_row`]'s pattern.
 #[cfg_attr(not(tarpaulin), inline(always))]
 #[allow(clippy::too_many_arguments)]
 pub fn yuva420p16_to_rgba_row(
@@ -5416,7 +5576,63 @@ pub fn yuva420p16_to_rgba_row(
   assert!(a.len() >= width, "a row too short");
   assert!(rgba_out.len() >= rgba_min, "rgba_out row too short");
 
-  let _ = use_simd; // SIMD per-arch routes land in Ship 8b-2b PR.
+  if use_simd {
+    cfg_select! {
+      target_arch = "aarch64" => {
+        if neon_available() {
+          // SAFETY: NEON verified.
+          unsafe {
+            arch::neon::yuv_420p16_to_rgba_with_alpha_src_row(
+              y, u_half, v_half, a, rgba_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+      },
+      target_arch = "x86_64" => {
+        if avx512_available() {
+          // SAFETY: AVX‑512BW verified.
+          unsafe {
+            arch::x86_avx512::yuv_420p16_to_rgba_with_alpha_src_row(
+              y, u_half, v_half, a, rgba_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+        if avx2_available() {
+          // SAFETY: AVX2 verified.
+          unsafe {
+            arch::x86_avx2::yuv_420p16_to_rgba_with_alpha_src_row(
+              y, u_half, v_half, a, rgba_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+        if sse41_available() {
+          // SAFETY: SSE4.1 verified.
+          unsafe {
+            arch::x86_sse41::yuv_420p16_to_rgba_with_alpha_src_row(
+              y, u_half, v_half, a, rgba_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+      },
+      target_arch = "wasm32" => {
+        if simd128_available() {
+          // SAFETY: simd128 compile‑time verified.
+          unsafe {
+            arch::wasm_simd128::yuv_420p16_to_rgba_with_alpha_src_row(
+              y, u_half, v_half, a, rgba_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+      },
+      _ => {}
+    }
+  }
+
   scalar::yuv_420p16_to_rgba_with_alpha_src_row(
     y, u_half, v_half, a, rgba_out, width, matrix, full_range,
   );
