@@ -245,10 +245,11 @@ unsafe fn yuv_420_to_rgb_or_rgba_row<const ALPHA: bool>(
 
     // Scalar tail for the 0..14 leftover pixels.
     if x < width {
-      scalar::yuv_420_to_rgb_or_rgba_row::<ALPHA>(
+      scalar::yuv_420_to_rgb_or_rgba_row::<ALPHA, false>(
         &y[x..width],
         &u_half[x / 2..width / 2],
         &v_half[x / 2..width / 2],
+        None,
         &mut out[x * bpp..width * bpp],
         width - x,
         matrix,
