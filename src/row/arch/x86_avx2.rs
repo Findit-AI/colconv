@@ -89,7 +89,9 @@ pub(crate) unsafe fn yuv_420_to_rgb_row(
   // SAFETY: caller-checked AVX2 availability + slice bounds — see
   // [`yuv_420_to_rgb_or_rgba_row`] safety contract.
   unsafe {
-    yuv_420_to_rgb_or_rgba_row::<false>(y, u_half, v_half, rgb_out, width, matrix, full_range);
+    yuv_420_to_rgb_or_rgba_row::<false, false>(
+      y, u_half, v_half, None, rgb_out, width, matrix, full_range,
+    );
   }
 }
 
@@ -117,37 +119,88 @@ pub(crate) unsafe fn yuv_420_to_rgba_row(
   // SAFETY: caller-checked AVX2 availability + slice bounds — see
   // [`yuv_420_to_rgb_or_rgba_row`] safety contract.
   unsafe {
-    yuv_420_to_rgb_or_rgba_row::<true>(y, u_half, v_half, rgba_out, width, matrix, full_range);
+    yuv_420_to_rgb_or_rgba_row::<true, false>(
+      y, u_half, v_half, None, rgba_out, width, matrix, full_range,
+    );
   }
 }
 
-/// Shared AVX2 kernel for [`yuv_420_to_rgb_row`] (`ALPHA = false`,
-/// [`write_rgb_32`]) and [`yuv_420_to_rgba_row`] (`ALPHA = true`,
-/// [`write_rgba_32`] with constant `0xFF` alpha). Math is
-/// byte-identical to `scalar::yuv_420_to_rgb_or_rgba_row::<ALPHA>`.
+/// AVX2 YUVA 4:2:0 → packed **8-bit RGBA** with the per-pixel
+/// alpha byte **sourced from `a_src`** (8-bit YUVA's alpha is already
+/// `u8` — no depth conversion needed). Same numerical contract as
+/// [`yuv_420_to_rgba_row`] for R/G/B.
+///
+/// Thin wrapper over [`yuv_420_to_rgb_or_rgba_row`] with
+/// `ALPHA = true, ALPHA_SRC = true`.
+///
+/// # Safety
+///
+/// Same as [`yuv_420_to_rgba_row`] plus `a_src.len() >= width`.
+#[inline]
+#[target_feature(enable = "avx2")]
+#[allow(clippy::too_many_arguments)]
+pub(crate) unsafe fn yuv_420_to_rgba_with_alpha_src_row(
+  y: &[u8],
+  u_half: &[u8],
+  v_half: &[u8],
+  a_src: &[u8],
+  rgba_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  // SAFETY: caller obligations forwarded to the shared impl.
+  unsafe {
+    yuv_420_to_rgb_or_rgba_row::<true, true>(
+      y,
+      u_half,
+      v_half,
+      Some(a_src),
+      rgba_out,
+      width,
+      matrix,
+      full_range,
+    );
+  }
+}
+
+/// Shared AVX2 kernel for [`yuv_420_to_rgb_row`] (`ALPHA = false,
+/// ALPHA_SRC = false`, [`write_rgb_32`]), [`yuv_420_to_rgba_row`]
+/// (`ALPHA = true, ALPHA_SRC = false`, [`write_rgba_32`] with constant
+/// `0xFF` alpha) and [`yuv_420_to_rgba_with_alpha_src_row`]
+/// (`ALPHA = true, ALPHA_SRC = true`, [`write_rgba_32`] with the
+/// alpha lane loaded directly from `a_src`).
 ///
 /// # Safety
 ///
 /// Same as [`yuv_420_to_rgb_row`] / [`yuv_420_to_rgba_row`]; the
 /// `out` slice must be `>= width * (if ALPHA { 4 } else { 3 })`
-/// bytes long.
+/// bytes long. When `ALPHA_SRC = true`: `a_src` must be `Some(_)`
+/// and `a_src.unwrap().len() >= width`.
 #[inline]
 #[target_feature(enable = "avx2")]
-unsafe fn yuv_420_to_rgb_or_rgba_row<const ALPHA: bool>(
+#[allow(clippy::too_many_arguments)]
+unsafe fn yuv_420_to_rgb_or_rgba_row<const ALPHA: bool, const ALPHA_SRC: bool>(
   y: &[u8],
   u_half: &[u8],
   v_half: &[u8],
+  a_src: Option<&[u8]>,
   out: &mut [u8],
   width: usize,
   matrix: ColorMatrix,
   full_range: bool,
 ) {
+  // Source alpha requires RGBA output.
+  const { assert!(!ALPHA_SRC || ALPHA) };
   debug_assert_eq!(width & 1, 0, "YUV 4:2:0 requires even width");
   debug_assert!(y.len() >= width);
   debug_assert!(u_half.len() >= width / 2);
   debug_assert!(v_half.len() >= width / 2);
   let bpp: usize = if ALPHA { 4 } else { 3 };
   debug_assert!(out.len() >= width * bpp);
+  if ALPHA_SRC {
+    debug_assert!(a_src.as_ref().is_some_and(|s| s.len() >= width));
+  }
 
   let coeffs = scalar::Coefficients::for_matrix(matrix);
   let (y_off, y_scale, c_scale) = scalar::range_params(full_range);
@@ -242,8 +295,17 @@ unsafe fn yuv_420_to_rgb_or_rgba_row<const ALPHA: bool>(
       let r_u8 = narrow_u8x32(r_lo, r_hi);
 
       if ALPHA {
+        let a_u8 = if ALPHA_SRC {
+          // SAFETY (const-checked): ALPHA_SRC = true implies the
+          // wrapper passed Some(_), validated by debug_assert above.
+          // 8-bit YUVA alpha is already u8; load 32 bytes via 256-bit
+          // load.
+          _mm256_loadu_si256(a_src.as_ref().unwrap_unchecked().as_ptr().add(x).cast())
+        } else {
+          alpha_u8
+        };
         // 4‑way interleave → packed RGBA (128 bytes = 4 × 32).
-        write_rgba_32(r_u8, g_u8, b_u8, alpha_u8, out.as_mut_ptr().add(x * 4));
+        write_rgba_32(r_u8, g_u8, b_u8, a_u8, out.as_mut_ptr().add(x * 4));
       } else {
         // 3‑way interleave → packed RGB (96 bytes = 3 × 32).
         write_rgb_32(r_u8, g_u8, b_u8, out.as_mut_ptr().add(x * 3));
@@ -255,11 +317,17 @@ unsafe fn yuv_420_to_rgb_or_rgba_row<const ALPHA: bool>(
     // Scalar tail for the 0..30 leftover pixels (always even; 4:2:0
     // requires even width so x/2 and width/2 are well‑defined).
     if x < width {
-      scalar::yuv_420_to_rgb_or_rgba_row::<ALPHA, false>(
+      let tail_a = if ALPHA_SRC {
+        // SAFETY (const-checked): ALPHA_SRC = true implies Some(_).
+        Some(&a_src.as_ref().unwrap_unchecked()[x..width])
+      } else {
+        None
+      };
+      scalar::yuv_420_to_rgb_or_rgba_row::<ALPHA, ALPHA_SRC>(
         &y[x..width],
         &u_half[x / 2..width / 2],
         &v_half[x / 2..width / 2],
-        None,
+        tail_a,
         &mut out[x * bpp..width * bpp],
         width - x,
         matrix,
@@ -309,8 +377,8 @@ pub(crate) unsafe fn yuv_420p_n_to_rgb_row<const BITS: u32>(
 ) {
   // SAFETY: caller obligations forwarded to the shared impl.
   unsafe {
-    yuv_420p_n_to_rgb_or_rgba_row::<BITS, false>(
-      y, u_half, v_half, rgb_out, width, matrix, full_range,
+    yuv_420p_n_to_rgb_or_rgba_row::<BITS, false, false>(
+      y, u_half, v_half, None, rgb_out, width, matrix, full_range,
     );
   }
 }
@@ -331,40 +399,95 @@ pub(crate) unsafe fn yuv_420p_n_to_rgba_row<const BITS: u32>(
 ) {
   // SAFETY: caller obligations forwarded to the shared impl.
   unsafe {
-    yuv_420p_n_to_rgb_or_rgba_row::<BITS, true>(
-      y, u_half, v_half, rgba_out, width, matrix, full_range,
+    yuv_420p_n_to_rgb_or_rgba_row::<BITS, true, false>(
+      y, u_half, v_half, None, rgba_out, width, matrix, full_range,
     );
   }
 }
 
-/// Shared AVX2 high-bit YUV 4:2:0 kernel. `ALPHA = false` uses
-/// `write_rgb_32`; `ALPHA = true` uses `write_rgba_32` with constant
-/// `0xFF` alpha.
+/// AVX2 YUVA 4:2:0 high-bit-depth → packed **8-bit RGBA** with the
+/// per-pixel alpha byte **sourced from `a_src`** (depth-converted via
+/// `>> (BITS - 8)` to fit `u8`). Same numerical contract as
+/// [`yuv_420p_n_to_rgba_row`] for R/G/B.
+///
+/// Thin wrapper over [`yuv_420p_n_to_rgb_or_rgba_row`] with
+/// `ALPHA = true, ALPHA_SRC = true`.
+///
+/// # Safety
+///
+/// Same as [`yuv_420p_n_to_rgba_row`] plus `a_src.len() >= width`.
+#[inline]
+#[target_feature(enable = "avx2")]
+#[allow(clippy::too_many_arguments)]
+pub(crate) unsafe fn yuv_420p_n_to_rgba_with_alpha_src_row<const BITS: u32>(
+  y: &[u16],
+  u_half: &[u16],
+  v_half: &[u16],
+  a_src: &[u16],
+  rgba_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  // SAFETY: caller obligations forwarded to the shared impl.
+  unsafe {
+    yuv_420p_n_to_rgb_or_rgba_row::<BITS, true, true>(
+      y,
+      u_half,
+      v_half,
+      Some(a_src),
+      rgba_out,
+      width,
+      matrix,
+      full_range,
+    );
+  }
+}
+
+/// Shared AVX2 high-bit YUV 4:2:0 kernel.
+/// - `ALPHA = false, ALPHA_SRC = false`: `write_rgb_32`.
+/// - `ALPHA = true, ALPHA_SRC = false`: `write_rgba_32` with constant
+///   `0xFF` alpha.
+/// - `ALPHA = true, ALPHA_SRC = true`: `write_rgba_32` with the alpha
+///   lane loaded from `a_src`, masked to BITS, and depth-converted via
+///   `_mm256_srl_epi16` with a count of `BITS - 8`.
 ///
 /// # Safety
 ///
 /// 1. **AVX2 must be available.**
 /// 2. `width & 1 == 0`. 3. slices long enough for `BITS` semantics +
-///    `out.len() >= width * if ALPHA { 4 } else { 3 }`. 4. `BITS` ∈
-///    `{9, 10, 12, 14}`.
+///    `out.len() >= width * if ALPHA { 4 } else { 3 }`. 4. When
+///    `ALPHA_SRC = true`: `a_src` must be `Some(_)` and
+///    `a_src.unwrap().len() >= width`. 5. `BITS` ∈ `{9, 10, 12, 14}`.
 #[inline]
 #[target_feature(enable = "avx2")]
-pub(crate) unsafe fn yuv_420p_n_to_rgb_or_rgba_row<const BITS: u32, const ALPHA: bool>(
+#[allow(clippy::too_many_arguments)]
+pub(crate) unsafe fn yuv_420p_n_to_rgb_or_rgba_row<
+  const BITS: u32,
+  const ALPHA: bool,
+  const ALPHA_SRC: bool,
+>(
   y: &[u16],
   u_half: &[u16],
   v_half: &[u16],
+  a_src: Option<&[u16]>,
   out: &mut [u8],
   width: usize,
   matrix: ColorMatrix,
   full_range: bool,
 ) {
   const { assert!(BITS == 9 || BITS == 10 || BITS == 12 || BITS == 14) };
+  // Source alpha requires RGBA output.
+  const { assert!(!ALPHA_SRC || ALPHA) };
   let bpp: usize = if ALPHA { 4 } else { 3 };
   debug_assert_eq!(width & 1, 0);
   debug_assert!(y.len() >= width);
   debug_assert!(u_half.len() >= width / 2);
   debug_assert!(v_half.len() >= width / 2);
   debug_assert!(out.len() >= width * bpp);
+  if ALPHA_SRC {
+    debug_assert!(a_src.as_ref().is_some_and(|s| s.len() >= width));
+  }
 
   let coeffs = scalar::Coefficients::for_matrix(matrix);
   let (y_off, y_scale, c_scale) = scalar::range_params_n::<BITS, 8>(full_range);
@@ -451,7 +574,28 @@ pub(crate) unsafe fn yuv_420p_n_to_rgb_or_rgba_row<const BITS: u32, const ALPHA:
       let r_u8 = narrow_u8x32(r_lo, r_hi);
 
       if ALPHA {
-        write_rgba_32(r_u8, g_u8, b_u8, alpha_u8, out.as_mut_ptr().add(x * 4));
+        let a_u8 = if ALPHA_SRC {
+          // SAFETY (const-checked): ALPHA_SRC = true implies the
+          // wrapper passed Some(_), validated by debug_assert above.
+          // Mask before shifting to harden against over-range source
+          // alpha (e.g. 1024 at BITS=10), matching scalar.
+          // `_mm256_srli_epi16::<IMM8>` requires a literal const
+          // generic shift (not stable for `BITS - 8`); use
+          // `_mm256_srl_epi16` with a count vector built from `BITS-8`.
+          let a_ptr = a_src.as_ref().unwrap_unchecked().as_ptr();
+          let a_lo = _mm256_and_si256(_mm256_loadu_si256(a_ptr.add(x).cast()), mask_v);
+          let a_hi = _mm256_and_si256(_mm256_loadu_si256(a_ptr.add(x + 16).cast()), mask_v);
+          let a_shr = _mm_cvtsi32_si128((BITS - 8) as i32);
+          let a_lo_shifted = _mm256_srl_epi16(a_lo, a_shr);
+          let a_hi_shifted = _mm256_srl_epi16(a_hi, a_shr);
+          // Saturate-narrow each i16x16 → u8x16 to match the existing
+          // narrow_u8x32 lane order so the alpha bytes line up with
+          // R/G/B in `write_rgba_32`.
+          narrow_u8x32(a_lo_shifted, a_hi_shifted)
+        } else {
+          alpha_u8
+        };
+        write_rgba_32(r_u8, g_u8, b_u8, a_u8, out.as_mut_ptr().add(x * 4));
       } else {
         write_rgb_32(r_u8, g_u8, b_u8, out.as_mut_ptr().add(x * 3));
       }
@@ -465,7 +609,13 @@ pub(crate) unsafe fn yuv_420p_n_to_rgb_or_rgba_row<const BITS: u32, const ALPHA:
       let tail_v = &v_half[x / 2..width / 2];
       let tail_out = &mut out[x * bpp..width * bpp];
       let tail_w = width - x;
-      if ALPHA {
+      if ALPHA_SRC {
+        // SAFETY (const-checked): ALPHA_SRC = true implies Some(_).
+        let tail_a = &a_src.as_ref().unwrap_unchecked()[x..width];
+        scalar::yuv_420p_n_to_rgba_with_alpha_src_row::<BITS>(
+          tail_y, tail_u, tail_v, tail_a, tail_out, tail_w, matrix, full_range,
+        );
+      } else if ALPHA {
         scalar::yuv_420p_n_to_rgba_row::<BITS>(
           tail_y, tail_u, tail_v, tail_out, tail_w, matrix, full_range,
         );
@@ -3358,7 +3508,9 @@ pub(crate) unsafe fn yuv_420p16_to_rgb_row(
 ) {
   // SAFETY: caller obligations forwarded to the shared impl.
   unsafe {
-    yuv_420p16_to_rgb_or_rgba_row::<false>(y, u_half, v_half, rgb_out, width, matrix, full_range);
+    yuv_420p16_to_rgb_or_rgba_row::<false, false>(
+      y, u_half, v_half, None, rgb_out, width, matrix, full_range,
+    );
   }
 }
 
@@ -3378,30 +3530,82 @@ pub(crate) unsafe fn yuv_420p16_to_rgba_row(
 ) {
   // SAFETY: caller obligations forwarded to the shared impl.
   unsafe {
-    yuv_420p16_to_rgb_or_rgba_row::<true>(y, u_half, v_half, rgba_out, width, matrix, full_range);
+    yuv_420p16_to_rgb_or_rgba_row::<true, false>(
+      y, u_half, v_half, None, rgba_out, width, matrix, full_range,
+    );
   }
 }
 
-/// Shared AVX2 16-bit YUV 4:2:0 kernel. `ALPHA = false` uses
-/// `write_rgb_32`; `ALPHA = true` uses `write_rgba_32` with constant
-/// `0xFF` alpha.
+/// AVX2 16-bit YUVA 4:2:0 → packed **8-bit RGBA** with the per-pixel
+/// alpha byte **sourced from `a_src`** (depth-converted via `>> 8` to
+/// fit `u8`). 16-bit alpha is full-range u16 — no AND-mask step.
+/// Same numerical contract as [`yuv_420p16_to_rgba_row`] for R/G/B.
+///
+/// Thin wrapper over [`yuv_420p16_to_rgb_or_rgba_row`] with
+/// `ALPHA = true, ALPHA_SRC = true`.
+///
+/// # Safety
+///
+/// Same as [`yuv_420p16_to_rgba_row`] plus `a_src.len() >= width`.
 #[inline]
 #[target_feature(enable = "avx2")]
-pub(crate) unsafe fn yuv_420p16_to_rgb_or_rgba_row<const ALPHA: bool>(
+#[allow(clippy::too_many_arguments)]
+pub(crate) unsafe fn yuv_420p16_to_rgba_with_alpha_src_row(
   y: &[u16],
   u_half: &[u16],
   v_half: &[u16],
+  a_src: &[u16],
+  rgba_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  // SAFETY: caller obligations forwarded to the shared impl.
+  unsafe {
+    yuv_420p16_to_rgb_or_rgba_row::<true, true>(
+      y,
+      u_half,
+      v_half,
+      Some(a_src),
+      rgba_out,
+      width,
+      matrix,
+      full_range,
+    );
+  }
+}
+
+/// Shared AVX2 16-bit YUV 4:2:0 kernel.
+/// - `ALPHA = false, ALPHA_SRC = false`: `write_rgb_32`.
+/// - `ALPHA = true, ALPHA_SRC = false`: `write_rgba_32` with constant
+///   `0xFF` alpha.
+/// - `ALPHA = true, ALPHA_SRC = true`: `write_rgba_32` with the alpha
+///   lane loaded from `a_src` and depth-converted via
+///   `_mm256_srli_epi16::<8>` (literal const shift).
+#[inline]
+#[target_feature(enable = "avx2")]
+#[allow(clippy::too_many_arguments)]
+pub(crate) unsafe fn yuv_420p16_to_rgb_or_rgba_row<const ALPHA: bool, const ALPHA_SRC: bool>(
+  y: &[u16],
+  u_half: &[u16],
+  v_half: &[u16],
+  a_src: Option<&[u16]>,
   out: &mut [u8],
   width: usize,
   matrix: ColorMatrix,
   full_range: bool,
 ) {
+  // Source alpha requires RGBA output.
+  const { assert!(!ALPHA_SRC || ALPHA) };
   let bpp: usize = if ALPHA { 4 } else { 3 };
   debug_assert_eq!(width & 1, 0);
   debug_assert!(y.len() >= width);
   debug_assert!(u_half.len() >= width / 2);
   debug_assert!(v_half.len() >= width / 2);
   debug_assert!(out.len() >= width * bpp);
+  if ALPHA_SRC {
+    debug_assert!(a_src.as_ref().is_some_and(|s| s.len() >= width));
+  }
 
   let coeffs = scalar::Coefficients::for_matrix(matrix);
   let (y_off, y_scale, c_scale) = scalar::range_params_n::<16, 8>(full_range);
@@ -3476,7 +3680,19 @@ pub(crate) unsafe fn yuv_420p16_to_rgb_or_rgba_row<const ALPHA: bool>(
       let b_u8 = narrow_u8x32(b_lo, b_hi);
 
       if ALPHA {
-        write_rgba_32(r_u8, g_u8, b_u8, alpha_u8, out.as_mut_ptr().add(x * 4));
+        let a_u8 = if ALPHA_SRC {
+          // SAFETY (const-checked): ALPHA_SRC = true implies the
+          // wrapper passed Some(_), validated by debug_assert above.
+          // 16-bit alpha is full-range u16 — `>> 8` to fit u8.
+          // `_mm256_srli_epi16::<8>` accepts a const literal shift.
+          let a_ptr = a_src.as_ref().unwrap_unchecked().as_ptr();
+          let a_lo = _mm256_srli_epi16::<8>(_mm256_loadu_si256(a_ptr.add(x).cast()));
+          let a_hi = _mm256_srli_epi16::<8>(_mm256_loadu_si256(a_ptr.add(x + 16).cast()));
+          narrow_u8x32(a_lo, a_hi)
+        } else {
+          alpha_u8
+        };
+        write_rgba_32(r_u8, g_u8, b_u8, a_u8, out.as_mut_ptr().add(x * 4));
       } else {
         write_rgb_32(r_u8, g_u8, b_u8, out.as_mut_ptr().add(x * 3));
       }
@@ -3489,7 +3705,13 @@ pub(crate) unsafe fn yuv_420p16_to_rgb_or_rgba_row<const ALPHA: bool>(
       let tail_v = &v_half[x / 2..width / 2];
       let tail_out = &mut out[x * bpp..width * bpp];
       let tail_w = width - x;
-      if ALPHA {
+      if ALPHA_SRC {
+        // SAFETY (const-checked): ALPHA_SRC = true implies Some(_).
+        let tail_a = &a_src.as_ref().unwrap_unchecked()[x..width];
+        scalar::yuv_420p16_to_rgba_with_alpha_src_row(
+          tail_y, tail_u, tail_v, tail_a, tail_out, tail_w, matrix, full_range,
+        );
+      } else if ALPHA {
         scalar::yuv_420p16_to_rgba_row(
           tail_y, tail_u, tail_v, tail_out, tail_w, matrix, full_range,
         );
