@@ -2720,3 +2720,166 @@ fn avx512_p416_rgba_u16_matches_scalar_all_matrices() {
     check_p_n_444_16_u16_avx512_rgba_equivalence(w, ColorMatrix::Bt709, false);
   }
 }
+
+// ---- YUVA 4:4:4 native-depth `u16` RGBA equivalence (Ship 8b‑1c) ----
+//
+// Mirrors the u8 RGBA alpha-source tests above for the u16 output
+// path: per-pixel alpha element is loaded from the source plane,
+// AND-masked with `bits_mask::<10>()`, and stored at native depth (no
+// `>> (BITS - 8)` since both source alpha and output element are at
+// the same bit depth). 64 px per iter → 32 alpha u16 per `__m512i`
+// load × 2 halves; per-half splits into four `__m128i` quarters via
+// `_mm512_extracti32x4_epi32::<0..3>` fed to the eight
+// `write_quarter_rgba` calls per iter.
+
+fn check_yuv444p_n_u16_avx512_rgba_with_alpha_src_equivalence<const BITS: u32>(
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  alpha_seed: usize,
+) {
+  let y = planar_n_plane::<BITS>(width, 37);
+  let u = planar_n_plane::<BITS>(width, 53);
+  let v = planar_n_plane::<BITS>(width, 71);
+  let a_src = planar_n_plane::<BITS>(width, alpha_seed);
+  let mut rgba_scalar = std::vec![0u16; width * 4];
+  let mut rgba_simd = std::vec![0u16; width * 4];
+  scalar::yuv_444p_n_to_rgba_u16_with_alpha_src_row::<BITS>(
+    &y,
+    &u,
+    &v,
+    &a_src,
+    &mut rgba_scalar,
+    width,
+    matrix,
+    full_range,
+  );
+  unsafe {
+    yuv_444p_n_to_rgba_u16_with_alpha_src_row::<BITS>(
+      &y,
+      &u,
+      &v,
+      &a_src,
+      &mut rgba_simd,
+      width,
+      matrix,
+      full_range,
+    );
+  }
+  assert_eq!(
+    rgba_scalar, rgba_simd,
+    "AVX-512 Yuva444p<{BITS}> → RGBA u16 diverges (width={width}, matrix={matrix:?}, full_range={full_range}, alpha_seed={alpha_seed})"
+  );
+}
+
+#[test]
+fn avx512_yuva444p10_rgba_u16_matches_scalar_all_matrices_64() {
+  if !std::arch::is_x86_feature_detected!("avx512bw") {
+    return;
+  }
+  for m in [
+    ColorMatrix::Bt601,
+    ColorMatrix::Bt709,
+    ColorMatrix::Bt2020Ncl,
+    ColorMatrix::Smpte240m,
+    ColorMatrix::Fcc,
+    ColorMatrix::YCgCo,
+  ] {
+    for full in [true, false] {
+      check_yuv444p_n_u16_avx512_rgba_with_alpha_src_equivalence::<10>(64, m, full, 89);
+    }
+  }
+}
+
+#[test]
+fn avx512_yuva444p10_rgba_u16_matches_scalar_widths() {
+  if !std::arch::is_x86_feature_detected!("avx512bw") {
+    return;
+  }
+  // Natural width + tail widths forcing scalar-tail dispatch.
+  for w in [64usize, 17, 31, 47, 63, 1920, 1922] {
+    check_yuv444p_n_u16_avx512_rgba_with_alpha_src_equivalence::<10>(
+      w,
+      ColorMatrix::Bt709,
+      true,
+      89,
+    );
+  }
+}
+
+#[test]
+fn avx512_yuva444p10_rgba_u16_matches_scalar_random_alpha() {
+  if !std::arch::is_x86_feature_detected!("avx512bw") {
+    return;
+  }
+  // Different alpha seeds — the 512-bit alpha load splits into four
+  // 128-bit quarters via `_mm512_extracti32x4_epi32::<0..3>`; each
+  // quarter feeds `write_quarter_rgba`, which routes the alpha lane
+  // into the 4th channel of the RGBA output.
+  for seed in [13usize, 41, 89, 127, 211] {
+    check_yuv444p_n_u16_avx512_rgba_with_alpha_src_equivalence::<10>(
+      64,
+      ColorMatrix::Bt601,
+      false,
+      seed,
+    );
+    check_yuv444p_n_u16_avx512_rgba_with_alpha_src_equivalence::<10>(
+      127,
+      ColorMatrix::Bt2020Ncl,
+      true,
+      seed,
+    );
+  }
+}
+
+#[test]
+fn avx512_yuva444p_n_rgba_u16_matches_scalar_all_bits() {
+  if !std::arch::is_x86_feature_detected!("avx512bw") {
+    return;
+  }
+  // BITS = 9, 12, 14 (BITS = 10 covered above). Confirms the
+  // AND-mask `mask_v` resolves correctly across the supported bit
+  // depths.
+  for full in [true, false] {
+    check_yuv444p_n_u16_avx512_rgba_with_alpha_src_equivalence::<9>(
+      64,
+      ColorMatrix::Bt601,
+      full,
+      53,
+    );
+    check_yuv444p_n_u16_avx512_rgba_with_alpha_src_equivalence::<12>(
+      64,
+      ColorMatrix::Bt709,
+      full,
+      53,
+    );
+    check_yuv444p_n_u16_avx512_rgba_with_alpha_src_equivalence::<14>(
+      64,
+      ColorMatrix::Bt2020Ncl,
+      full,
+      53,
+    );
+  }
+}
+
+#[test]
+fn avx512_yuva444p_n_rgba_u16_matches_scalar_all_bits_widths() {
+  if !std::arch::is_x86_feature_detected!("avx512bw") {
+    return;
+  }
+  for w in [65usize, 95, 1922] {
+    check_yuv444p_n_u16_avx512_rgba_with_alpha_src_equivalence::<9>(
+      w,
+      ColorMatrix::Smpte240m,
+      false,
+      89,
+    );
+    check_yuv444p_n_u16_avx512_rgba_with_alpha_src_equivalence::<12>(w, ColorMatrix::Fcc, true, 89);
+    check_yuv444p_n_u16_avx512_rgba_with_alpha_src_equivalence::<14>(
+      w,
+      ColorMatrix::YCgCo,
+      false,
+      89,
+    );
+  }
+}
