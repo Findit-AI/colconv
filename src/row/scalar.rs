@@ -36,7 +36,9 @@ pub(crate) fn yuv_420_to_rgb_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  yuv_420_to_rgb_or_rgba_row::<false>(y, u_half, v_half, rgb_out, width, matrix, full_range);
+  yuv_420_to_rgb_or_rgba_row::<false, false>(
+    y, u_half, v_half, None, rgb_out, width, matrix, full_range,
+  );
 }
 
 /// Same as [`yuv_420_to_rgb_row`] but writes packed `R, G, B, A`
@@ -54,15 +56,65 @@ pub(crate) fn yuv_420_to_rgba_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  yuv_420_to_rgb_or_rgba_row::<true>(y, u_half, v_half, rgba_out, width, matrix, full_range);
+  yuv_420_to_rgb_or_rgba_row::<true, false>(
+    y, u_half, v_half, None, rgba_out, width, matrix, full_range,
+  );
 }
 
-/// Shared scalar kernel for [`yuv_420_to_rgb_row`] (`ALPHA = false`,
-/// 3 bytes / pixel) and [`yuv_420_to_rgba_row`] (`ALPHA = true`,
-/// 4 bytes / pixel — 4th is opaque `0xFF`). The math is identical;
-/// only the per-pixel store differs. `const` generic drives
-/// compile-time monomorphization — each public wrapper is inlined
-/// with the branch eliminated.
+/// YUVA 4:2:0 8‑bit → packed **8‑bit** **RGBA**. Same numerical
+/// contract as [`yuv_420_to_rgba_row`] for R/G/B; the per-pixel alpha
+/// byte is sourced from `a_src` (one byte per pixel, full-width)
+/// instead of being constant `0xFF`. Used by the YUVA source family
+/// ([`crate::yuv::Yuva420p`] in tranche 8b‑2a).
+///
+/// Thin wrapper over [`yuv_420_to_rgb_or_rgba_row`] with
+/// `ALPHA = true, ALPHA_SRC = true`.
+///
+/// # Panics (debug builds)
+///
+/// - `width` must be even.
+/// - `y.len() >= width`, `u_half.len() >= width / 2`,
+///   `v_half.len() >= width / 2`, `a_src.len() >= width`,
+///   `rgba_out.len() >= 4 * width`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn yuv_420_to_rgba_with_alpha_src_row(
+  y: &[u8],
+  u_half: &[u8],
+  v_half: &[u8],
+  a_src: &[u8],
+  rgba_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  yuv_420_to_rgb_or_rgba_row::<true, true>(
+    y,
+    u_half,
+    v_half,
+    Some(a_src),
+    rgba_out,
+    width,
+    matrix,
+    full_range,
+  );
+}
+
+/// Shared scalar kernel for [`yuv_420_to_rgb_row`] (`ALPHA = false,
+/// ALPHA_SRC = false`, 3 bytes / pixel), [`yuv_420_to_rgba_row`]
+/// (`ALPHA = true, ALPHA_SRC = false`, 4 bytes / pixel — 4th is opaque
+/// `0xFF`) and [`yuv_420_to_rgba_with_alpha_src_row`] (`ALPHA = true,
+/// ALPHA_SRC = true`, 4 bytes / pixel with source-derived alpha). The
+/// math is identical; only the per-pixel store differs. The const
+/// generics drive compile-time monomorphization — each public wrapper
+/// is inlined with the branches eliminated.
+///
+/// `a_src` is `None` for both `ALPHA_SRC = false` flavors — reading
+/// it is a const-disabled branch in those monomorphizations, so
+/// callers pay zero overhead for the strategy parameter. The 8-bit
+/// alpha path stores `a_src[x]` directly: there's no `bits_mask` step
+/// like the high-bit-depth siblings since `u8` already fits the
+/// output.
 ///
 /// # Panics (debug builds)
 ///
@@ -70,22 +122,35 @@ pub(crate) fn yuv_420_to_rgba_row(
 /// - `y.len() >= width`, `u_half.len() >= width / 2`,
 ///   `v_half.len() >= width / 2`,
 ///   `out.len() >= width * (if ALPHA { 4 } else { 3 })`.
+/// - When `ALPHA_SRC = true`: `a_src` must be `Some(_)` and
+///   `a_src.unwrap().len() >= width`.
 #[cfg_attr(not(tarpaulin), inline(always))]
-pub(crate) fn yuv_420_to_rgb_or_rgba_row<const ALPHA: bool>(
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn yuv_420_to_rgb_or_rgba_row<const ALPHA: bool, const ALPHA_SRC: bool>(
   y: &[u8],
   u_half: &[u8],
   v_half: &[u8],
+  a_src: Option<&[u8]>,
   out: &mut [u8],
   width: usize,
   matrix: ColorMatrix,
   full_range: bool,
 ) {
+  // Source alpha requires RGBA output — there is no 3 bpp store with
+  // alpha to put it in.
+  const { assert!(!ALPHA_SRC || ALPHA) };
   debug_assert_eq!(width & 1, 0, "YUV 4:2:0 requires even width");
   debug_assert!(y.len() >= width, "y row too short");
   debug_assert!(u_half.len() >= width / 2, "u_half row too short");
   debug_assert!(v_half.len() >= width / 2, "v_half row too short");
   let bpp: usize = if ALPHA { 4 } else { 3 };
   debug_assert!(out.len() >= width * bpp, "out row too short for {bpp}bpp");
+  if ALPHA_SRC {
+    debug_assert!(
+      a_src.as_ref().is_some_and(|s| s.len() >= width),
+      "a_src row too short"
+    );
+  }
 
   let coeffs = Coefficients::for_matrix(matrix);
   let (y_off, y_scale, c_scale) = range_params(full_range);
@@ -118,7 +183,13 @@ pub(crate) fn yuv_420_to_rgb_or_rgba_row<const ALPHA: bool>(
     out[x * bpp] = r0;
     out[x * bpp + 1] = g0;
     out[x * bpp + 2] = b0;
-    if ALPHA {
+    if ALPHA_SRC {
+      // SAFETY (const-checked): ALPHA_SRC = true implies the wrapper
+      // passed Some(_), validated above by debug_assert. 8-bit input
+      // means u8 fits the u8 output directly — no `bits_mask` /
+      // depth-conversion shift like the high-bit-depth siblings.
+      out[x * bpp + 3] = a_src.as_ref().unwrap()[x];
+    } else if ALPHA {
       out[x * bpp + 3] = 0xFF;
     }
 
@@ -130,7 +201,9 @@ pub(crate) fn yuv_420_to_rgb_or_rgba_row<const ALPHA: bool>(
     out[(x + 1) * bpp] = r1;
     out[(x + 1) * bpp + 1] = g1;
     out[(x + 1) * bpp + 2] = b1;
-    if ALPHA {
+    if ALPHA_SRC {
+      out[(x + 1) * bpp + 3] = a_src.as_ref().unwrap()[x + 1];
+    } else if ALPHA {
       out[(x + 1) * bpp + 3] = 0xFF;
     }
 
@@ -619,8 +692,8 @@ pub(crate) fn yuv_420p_n_to_rgb_row<const BITS: u32>(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  yuv_420p_n_to_rgb_or_rgba_row::<BITS, false>(
-    y, u_half, v_half, rgb_out, width, matrix, full_range,
+  yuv_420p_n_to_rgb_or_rgba_row::<BITS, false, false>(
+    y, u_half, v_half, None, rgb_out, width, matrix, full_range,
   );
 }
 
@@ -650,17 +723,63 @@ pub(crate) fn yuv_420p_n_to_rgba_row<const BITS: u32>(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  yuv_420p_n_to_rgb_or_rgba_row::<BITS, true>(
-    y, u_half, v_half, rgba_out, width, matrix, full_range,
+  yuv_420p_n_to_rgb_or_rgba_row::<BITS, true, false>(
+    y, u_half, v_half, None, rgba_out, width, matrix, full_range,
   );
 }
 
-/// Shared kernel for [`yuv_420p_n_to_rgb_row`] (`ALPHA = false`,
-/// 3 bpp store) and [`yuv_420p_n_to_rgba_row`] (`ALPHA = true`,
-/// 4 bpp store with constant `0xFF` alpha).
+/// YUVA 4:2:0 high‑bit‑depth → **u8** packed **RGBA**. Same numerical
+/// contract as [`yuv_420p_n_to_rgba_row`] for R/G/B; the per-pixel
+/// alpha byte is sourced from `a_src` (depth-converted by
+/// `BITS - 8` shift) instead of being constant `0xFF`. Used by the
+/// YUVA 4:2:0 source family ([`crate::yuv::Yuva420p9`] /
+/// [`crate::yuv::Yuva420p10`] in tranche 8b‑2a).
 ///
-/// The compiler monomorphizes into two separate functions; the
-/// `if ALPHA` branches are DCE'd at each call site.
+/// Thin wrapper over [`yuv_420p_n_to_rgb_or_rgba_row`] with
+/// `ALPHA = true, ALPHA_SRC = true`.
+///
+/// # Panics (debug builds)
+///
+/// - `width` must be even.
+/// - `y.len() >= width`, `u_half.len() >= width / 2`,
+///   `v_half.len() >= width / 2`, `a_src.len() >= width`,
+///   `rgba_out.len() >= 4 * width`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn yuv_420p_n_to_rgba_with_alpha_src_row<const BITS: u32>(
+  y: &[u16],
+  u_half: &[u16],
+  v_half: &[u16],
+  a_src: &[u16],
+  rgba_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  yuv_420p_n_to_rgb_or_rgba_row::<BITS, true, true>(
+    y,
+    u_half,
+    v_half,
+    Some(a_src),
+    rgba_out,
+    width,
+    matrix,
+    full_range,
+  );
+}
+
+/// Shared kernel for [`yuv_420p_n_to_rgb_row`] (`ALPHA = false,
+/// ALPHA_SRC = false`, 3 bpp store), [`yuv_420p_n_to_rgba_row`]
+/// (`ALPHA = true, ALPHA_SRC = false`, 4 bpp store with constant
+/// `0xFF` alpha) and
+/// [`yuv_420p_n_to_rgba_with_alpha_src_row`] (`ALPHA = true,
+/// ALPHA_SRC = true`, 4 bpp store with depth-converted source alpha).
+///
+/// The compiler monomorphizes into separate functions per
+/// `(ALPHA, ALPHA_SRC)`; the const branches are DCE'd at each call
+/// site. `a_src` is `None` for both `ALPHA_SRC = false` flavors —
+/// reading it is a const-disabled branch in those monomorphizations,
+/// so callers pay zero overhead for the strategy parameter.
 ///
 /// # Panics (debug builds)
 ///
@@ -668,11 +787,19 @@ pub(crate) fn yuv_420p_n_to_rgba_row<const BITS: u32>(
 /// - `y.len() >= width`, `u_half.len() >= width / 2`,
 ///   `v_half.len() >= width / 2`,
 ///   `out.len() >= width * if ALPHA { 4 } else { 3 }`.
+/// - When `ALPHA_SRC = true`: `a_src` must be `Some(_)` and
+///   `a_src.unwrap().len() >= width`.
 #[cfg_attr(not(tarpaulin), inline(always))]
-pub(crate) fn yuv_420p_n_to_rgb_or_rgba_row<const BITS: u32, const ALPHA: bool>(
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn yuv_420p_n_to_rgb_or_rgba_row<
+  const BITS: u32,
+  const ALPHA: bool,
+  const ALPHA_SRC: bool,
+>(
   y: &[u16],
   u_half: &[u16],
   v_half: &[u16],
+  a_src: Option<&[u16]>,
   out: &mut [u8],
   width: usize,
   matrix: ColorMatrix,
@@ -682,15 +809,24 @@ pub(crate) fn yuv_420p_n_to_rgb_or_rgba_row<const BITS: u32, const ALPHA: bool>(
   // {9, 10, 12, 14}. 16 would overflow the Q15 chroma sum (16-bit lives
   // in `yuv_420p16_to_rgb_row`'s i64 chroma family); 8 belongs to the
   // non-const-generic `yuv_420_to_rgb_or_rgba_row`. Without this guard a
-  // release build instantiating ::<16, _> would silently produce wrong
+  // release build instantiating ::<16, _, _> would silently produce wrong
   // output.
   const { assert!(BITS == 9 || BITS == 10 || BITS == 12 || BITS == 14) };
+  // Source alpha requires RGBA output — there is no 3 bpp store with
+  // alpha to put it in.
+  const { assert!(!ALPHA_SRC || ALPHA) };
   let bpp: usize = if ALPHA { 4 } else { 3 };
   debug_assert_eq!(width & 1, 0, "YUV 4:2:0 requires even width");
   debug_assert!(y.len() >= width, "y row too short");
   debug_assert!(u_half.len() >= width / 2, "u_half row too short");
   debug_assert!(v_half.len() >= width / 2, "v_half row too short");
   debug_assert!(out.len() >= width * bpp, "out row too short");
+  if ALPHA_SRC {
+    debug_assert!(
+      a_src.as_ref().is_some_and(|s| s.len() >= width),
+      "a_src row too short"
+    );
+  }
 
   let coeffs = Coefficients::for_matrix(matrix);
   let (y_off, y_scale, c_scale) = range_params_n::<BITS, 8>(full_range);
@@ -720,7 +856,16 @@ pub(crate) fn yuv_420p_n_to_rgb_or_rgba_row<const BITS: u32, const ALPHA: bool>(
     out[x * bpp] = clamp_u8(y0 + r_chroma);
     out[x * bpp + 1] = clamp_u8(y0 + g_chroma);
     out[x * bpp + 2] = clamp_u8(y0 + b_chroma);
-    if ALPHA {
+    if ALPHA_SRC {
+      // SAFETY (const-checked): ALPHA_SRC = true implies the wrapper
+      // passed Some(_), validated above by debug_assert.
+      // Mask the source alpha to BITS like Y/U/V — `try_new` admits
+      // out-of-range u16 samples, and an unmasked overrange value
+      // (e.g. 1024 at BITS=10) would shift down to 256 → cast-to-u8 0,
+      // silently turning over-range alpha into transparent output.
+      let a_u16 = a_src.as_ref().unwrap()[x] & mask;
+      out[x * bpp + 3] = (a_u16 >> (BITS - 8)) as u8;
+    } else if ALPHA {
       out[x * bpp + 3] = 0xFF;
     }
 
@@ -728,7 +873,10 @@ pub(crate) fn yuv_420p_n_to_rgb_or_rgba_row<const BITS: u32, const ALPHA: bool>(
     out[(x + 1) * bpp] = clamp_u8(y1 + r_chroma);
     out[(x + 1) * bpp + 1] = clamp_u8(y1 + g_chroma);
     out[(x + 1) * bpp + 2] = clamp_u8(y1 + b_chroma);
-    if ALPHA {
+    if ALPHA_SRC {
+      let a_u16 = a_src.as_ref().unwrap()[x + 1] & mask;
+      out[(x + 1) * bpp + 3] = (a_u16 >> (BITS - 8)) as u8;
+    } else if ALPHA {
       out[(x + 1) * bpp + 3] = 0xFF;
     }
 
@@ -787,8 +935,8 @@ pub(crate) fn yuv_420p_n_to_rgb_u16_row<const BITS: u32>(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  yuv_420p_n_to_rgb_or_rgba_u16_row::<BITS, false>(
-    y, u_half, v_half, rgb_out, width, matrix, full_range,
+  yuv_420p_n_to_rgb_or_rgba_u16_row::<BITS, false, false>(
+    y, u_half, v_half, None, rgb_out, width, matrix, full_range,
   );
 }
 
@@ -818,14 +966,59 @@ pub(crate) fn yuv_420p_n_to_rgba_u16_row<const BITS: u32>(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  yuv_420p_n_to_rgb_or_rgba_u16_row::<BITS, true>(
-    y, u_half, v_half, rgba_out, width, matrix, full_range,
+  yuv_420p_n_to_rgb_or_rgba_u16_row::<BITS, true, false>(
+    y, u_half, v_half, None, rgba_out, width, matrix, full_range,
   );
 }
 
-/// Shared kernel for [`yuv_420p_n_to_rgb_u16_row`] (`ALPHA = false`,
-/// 3 bpp store) and [`yuv_420p_n_to_rgba_u16_row`] (`ALPHA = true`,
-/// 4 bpp store with opaque alpha = `(1 << BITS) - 1`).
+/// YUVA 4:2:0 high‑bit‑depth → **native‑depth `u16`** packed
+/// **RGBA**. Same numerical contract as
+/// [`yuv_420p_n_to_rgba_u16_row`] for R/G/B; the per-pixel alpha
+/// element is sourced from `a_src` (already at the source's native
+/// bit depth) instead of being the opaque maximum
+/// `(1 << BITS) - 1`. Used by the YUVA 4:2:0 source family
+/// ([`crate::yuv::Yuva420p9`] / [`crate::yuv::Yuva420p10`] in
+/// tranche 8b‑2a).
+///
+/// Thin wrapper over [`yuv_420p_n_to_rgb_or_rgba_u16_row`] with
+/// `ALPHA = true, ALPHA_SRC = true`.
+///
+/// # Panics (debug builds)
+///
+/// - `width` must be even.
+/// - `y.len() >= width`, `u_half.len() >= width / 2`,
+///   `v_half.len() >= width / 2`, `a_src.len() >= width`,
+///   `rgba_out.len() >= 4 * width`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn yuv_420p_n_to_rgba_u16_with_alpha_src_row<const BITS: u32>(
+  y: &[u16],
+  u_half: &[u16],
+  v_half: &[u16],
+  a_src: &[u16],
+  rgba_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  yuv_420p_n_to_rgb_or_rgba_u16_row::<BITS, true, true>(
+    y,
+    u_half,
+    v_half,
+    Some(a_src),
+    rgba_out,
+    width,
+    matrix,
+    full_range,
+  );
+}
+
+/// Shared kernel for [`yuv_420p_n_to_rgb_u16_row`] (`ALPHA = false,
+/// ALPHA_SRC = false`, 3 bpp store), [`yuv_420p_n_to_rgba_u16_row`]
+/// (`ALPHA = true, ALPHA_SRC = false`, 4 bpp store with opaque alpha
+/// `(1 << BITS) - 1`) and
+/// [`yuv_420p_n_to_rgba_u16_with_alpha_src_row`] (`ALPHA = true,
+/// ALPHA_SRC = true`, 4 bpp store with native-depth source alpha).
 ///
 /// # Panics (debug builds)
 ///
@@ -833,11 +1026,19 @@ pub(crate) fn yuv_420p_n_to_rgba_u16_row<const BITS: u32>(
 /// - `y.len() >= width`, `u_half.len() >= width / 2`,
 ///   `v_half.len() >= width / 2`,
 ///   `out.len() >= width * if ALPHA { 4 } else { 3 }` (`u16` elements).
+/// - When `ALPHA_SRC = true`: `a_src` must be `Some(_)` and
+///   `a_src.unwrap().len() >= width`.
 #[cfg_attr(not(tarpaulin), inline(always))]
-pub(crate) fn yuv_420p_n_to_rgb_or_rgba_u16_row<const BITS: u32, const ALPHA: bool>(
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn yuv_420p_n_to_rgb_or_rgba_u16_row<
+  const BITS: u32,
+  const ALPHA: bool,
+  const ALPHA_SRC: bool,
+>(
   y: &[u16],
   u_half: &[u16],
   v_half: &[u16],
+  a_src: Option<&[u16]>,
   out: &mut [u16],
   width: usize,
   matrix: ColorMatrix,
@@ -847,12 +1048,20 @@ pub(crate) fn yuv_420p_n_to_rgb_or_rgba_u16_row<const BITS: u32, const ALPHA: bo
   // The 16-bit u16-output path is `yuv_420p16_to_rgb_or_rgba_u16_row`
   // (i64 chroma family).
   const { assert!(BITS == 9 || BITS == 10 || BITS == 12 || BITS == 14) };
+  // Source alpha requires RGBA output.
+  const { assert!(!ALPHA_SRC || ALPHA) };
   let bpp: usize = if ALPHA { 4 } else { 3 };
   debug_assert_eq!(width & 1, 0, "YUV 4:2:0 requires even width");
   debug_assert!(y.len() >= width, "y row too short");
   debug_assert!(u_half.len() >= width / 2, "u_half row too short");
   debug_assert!(v_half.len() >= width / 2, "v_half row too short");
   debug_assert!(out.len() >= width * bpp, "out row too short");
+  if ALPHA_SRC {
+    debug_assert!(
+      a_src.as_ref().is_some_and(|s| s.len() >= width),
+      "a_src row too short"
+    );
+  }
 
   let coeffs = Coefficients::for_matrix(matrix);
   let (y_off, y_scale, c_scale) = range_params_n::<BITS, BITS>(full_range);
@@ -883,7 +1092,14 @@ pub(crate) fn yuv_420p_n_to_rgb_or_rgba_u16_row<const BITS: u32, const ALPHA: bo
     out[x * bpp] = (y0 + r_chroma).clamp(0, out_max) as u16;
     out[x * bpp + 1] = (y0 + g_chroma).clamp(0, out_max) as u16;
     out[x * bpp + 2] = (y0 + b_chroma).clamp(0, out_max) as u16;
-    if ALPHA {
+    if ALPHA_SRC {
+      // SAFETY (const-checked): ALPHA_SRC = true implies Some(_).
+      // Mask the source alpha to BITS like Y/U/V — `try_new` admits
+      // out-of-range u16 samples, and the documented native-depth
+      // output range is `[0, (1 << BITS) - 1]`. Without masking, an
+      // overrange `1024` at BITS=10 would leak straight to output.
+      out[x * bpp + 3] = a_src.as_ref().unwrap()[x] & mask;
+    } else if ALPHA {
       out[x * bpp + 3] = alpha_max;
     }
 
@@ -891,7 +1107,9 @@ pub(crate) fn yuv_420p_n_to_rgb_or_rgba_u16_row<const BITS: u32, const ALPHA: bo
     out[(x + 1) * bpp] = (y1 + r_chroma).clamp(0, out_max) as u16;
     out[(x + 1) * bpp + 1] = (y1 + g_chroma).clamp(0, out_max) as u16;
     out[(x + 1) * bpp + 2] = (y1 + b_chroma).clamp(0, out_max) as u16;
-    if ALPHA {
+    if ALPHA_SRC {
+      out[(x + 1) * bpp + 3] = a_src.as_ref().unwrap()[x + 1] & mask;
+    } else if ALPHA {
       out[(x + 1) * bpp + 3] = alpha_max;
     }
 
@@ -1315,7 +1533,9 @@ pub(crate) fn yuv_420p16_to_rgb_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  yuv_420p16_to_rgb_or_rgba_row::<false>(y, u_half, v_half, rgb_out, width, matrix, full_range);
+  yuv_420p16_to_rgb_or_rgba_row::<false, false>(
+    y, u_half, v_half, None, rgb_out, width, matrix, full_range,
+  );
 }
 
 /// Converts one row of **16-bit** YUV 4:2:0 to **8-bit** packed
@@ -1338,32 +1558,87 @@ pub(crate) fn yuv_420p16_to_rgba_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  yuv_420p16_to_rgb_or_rgba_row::<true>(y, u_half, v_half, rgba_out, width, matrix, full_range);
+  yuv_420p16_to_rgb_or_rgba_row::<true, false>(
+    y, u_half, v_half, None, rgba_out, width, matrix, full_range,
+  );
 }
 
-/// Shared 16-bit YUV 4:2:0 → 8-bit RGB / RGBA kernel. `ALPHA = false`
-/// emits 3 bpp; `ALPHA = true` emits 4 bpp with constant `0xFF` alpha.
+/// YUVA 4:2:0 16‑bit → packed **8‑bit** **RGBA**. Same numerical
+/// contract as [`yuv_420p16_to_rgba_row`] for R/G/B; the per-pixel
+/// alpha byte is sourced from `a_src` (depth-converted by `>> 8`)
+/// instead of being constant `0xFF`. Used by the YUVA 4:2:0 source
+/// family ([`crate::yuv::Yuva420p16`] in tranche 8b‑2a).
+///
+/// Thin wrapper over [`yuv_420p16_to_rgb_or_rgba_row`] with
+/// `ALPHA = true, ALPHA_SRC = true`.
+///
+/// # Panics (debug builds)
+///
+/// - `width` must be even.
+/// - `y.len() >= width`, `u_half.len() >= width / 2`,
+///   `v_half.len() >= width / 2`, `a_src.len() >= width`,
+///   `rgba_out.len() >= 4 * width`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn yuv_420p16_to_rgba_with_alpha_src_row(
+  y: &[u16],
+  u_half: &[u16],
+  v_half: &[u16],
+  a_src: &[u16],
+  rgba_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  yuv_420p16_to_rgb_or_rgba_row::<true, true>(
+    y,
+    u_half,
+    v_half,
+    Some(a_src),
+    rgba_out,
+    width,
+    matrix,
+    full_range,
+  );
+}
+
+/// Shared 16-bit YUV 4:2:0 → 8-bit RGB / RGBA kernel. `ALPHA = false,
+/// ALPHA_SRC = false` emits 3 bpp; `ALPHA = true, ALPHA_SRC = false`
+/// emits 4 bpp with constant `0xFF` alpha; `ALPHA = true, ALPHA_SRC =
+/// true` emits 4 bpp with depth-converted source alpha.
 ///
 /// 16-bit input has no AND-mask (every `u16` is a valid sample) and
 /// uses i32 chroma — output-target scaling keeps `u_d * coeff` inside
 /// i32 for u8 output (the i64 chroma family lives in
-/// [`yuv_420p16_to_rgb_or_rgba_u16_row`]).
+/// [`yuv_420p16_to_rgb_or_rgba_u16_row`]). Source alpha at 16-bit
+/// depth-converts to u8 via `>> 8`; no mask is needed since every
+/// u16 is in range.
 #[cfg_attr(not(tarpaulin), inline(always))]
-pub(crate) fn yuv_420p16_to_rgb_or_rgba_row<const ALPHA: bool>(
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn yuv_420p16_to_rgb_or_rgba_row<const ALPHA: bool, const ALPHA_SRC: bool>(
   y: &[u16],
   u_half: &[u16],
   v_half: &[u16],
+  a_src: Option<&[u16]>,
   out: &mut [u8],
   width: usize,
   matrix: ColorMatrix,
   full_range: bool,
 ) {
+  // Source alpha requires RGBA output.
+  const { assert!(!ALPHA_SRC || ALPHA) };
   let bpp: usize = if ALPHA { 4 } else { 3 };
   debug_assert_eq!(width & 1, 0, "YUV 4:2:0 requires even width");
   debug_assert!(y.len() >= width, "y row too short");
   debug_assert!(u_half.len() >= width / 2, "u_half row too short");
   debug_assert!(v_half.len() >= width / 2, "v_half row too short");
   debug_assert!(out.len() >= width * bpp, "out row too short");
+  if ALPHA_SRC {
+    debug_assert!(
+      a_src.as_ref().is_some_and(|s| s.len() >= width),
+      "a_src row too short"
+    );
+  }
 
   let coeffs = Coefficients::for_matrix(matrix);
   let (y_off, y_scale, c_scale) = range_params_n::<16, 8>(full_range);
@@ -1386,7 +1661,12 @@ pub(crate) fn yuv_420p16_to_rgb_or_rgba_row<const ALPHA: bool>(
     out[x * bpp] = clamp_u8(y0 + r_chroma);
     out[x * bpp + 1] = clamp_u8(y0 + g_chroma);
     out[x * bpp + 2] = clamp_u8(y0 + b_chroma);
-    if ALPHA {
+    if ALPHA_SRC {
+      // SAFETY (const-checked): ALPHA_SRC = true implies Some(_).
+      // 16-bit input is full-range u16 — no `bits_mask` step. Depth
+      // convert via `>> 8` to fit the u8 output.
+      out[x * bpp + 3] = (a_src.as_ref().unwrap()[x] >> 8) as u8;
+    } else if ALPHA {
       out[x * bpp + 3] = 0xFF;
     }
 
@@ -1394,7 +1674,9 @@ pub(crate) fn yuv_420p16_to_rgb_or_rgba_row<const ALPHA: bool>(
     out[(x + 1) * bpp] = clamp_u8(y1 + r_chroma);
     out[(x + 1) * bpp + 1] = clamp_u8(y1 + g_chroma);
     out[(x + 1) * bpp + 2] = clamp_u8(y1 + b_chroma);
-    if ALPHA {
+    if ALPHA_SRC {
+      out[(x + 1) * bpp + 3] = (a_src.as_ref().unwrap()[x + 1] >> 8) as u8;
+    } else if ALPHA {
       out[(x + 1) * bpp + 3] = 0xFF;
     }
 
@@ -1423,7 +1705,9 @@ pub(crate) fn yuv_420p16_to_rgb_u16_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  yuv_420p16_to_rgb_or_rgba_u16_row::<false>(y, u_half, v_half, rgb_out, width, matrix, full_range);
+  yuv_420p16_to_rgb_or_rgba_u16_row::<false, false>(
+    y, u_half, v_half, None, rgb_out, width, matrix, full_range,
+  );
 }
 
 /// Converts one row of **16-bit** YUV 4:2:0 to **native-depth `u16`**
@@ -1445,31 +1729,86 @@ pub(crate) fn yuv_420p16_to_rgba_u16_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  yuv_420p16_to_rgb_or_rgba_u16_row::<true>(y, u_half, v_half, rgba_out, width, matrix, full_range);
+  yuv_420p16_to_rgb_or_rgba_u16_row::<true, false>(
+    y, u_half, v_half, None, rgba_out, width, matrix, full_range,
+  );
 }
 
-/// Shared 16-bit YUV 4:2:0 → native-depth `u16` RGB / RGBA kernel.
-/// `ALPHA = false` emits 3 bpp; `ALPHA = true` emits 4 bpp with
-/// constant `0xFFFF` alpha.
+/// YUVA 4:2:0 16‑bit → packed **native‑depth `u16`** **RGBA**. Same
+/// numerical contract as [`yuv_420p16_to_rgba_u16_row`] for R/G/B;
+/// the per-pixel alpha element is sourced from `a_src` (already at
+/// the source's native bit depth — no shift needed) instead of being
+/// the opaque maximum `0xFFFF`. Used by the YUVA 4:2:0 source family
+/// ([`crate::yuv::Yuva420p16`] in tranche 8b‑2a).
 ///
-/// Uses i64 chroma multiply (same rationale as
-/// [`yuv_420p16_to_rgb_u16_row`]).
+/// Thin wrapper over [`yuv_420p16_to_rgb_or_rgba_u16_row`] with
+/// `ALPHA = true, ALPHA_SRC = true`.
+///
+/// # Panics (debug builds)
+///
+/// - `width` must be even.
+/// - `y.len() >= width`, `u_half.len() >= width / 2`,
+///   `v_half.len() >= width / 2`, `a_src.len() >= width`,
+///   `rgba_out.len() >= 4 * width`.
 #[cfg_attr(not(tarpaulin), inline(always))]
-pub(crate) fn yuv_420p16_to_rgb_or_rgba_u16_row<const ALPHA: bool>(
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn yuv_420p16_to_rgba_u16_with_alpha_src_row(
   y: &[u16],
   u_half: &[u16],
   v_half: &[u16],
+  a_src: &[u16],
+  rgba_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  yuv_420p16_to_rgb_or_rgba_u16_row::<true, true>(
+    y,
+    u_half,
+    v_half,
+    Some(a_src),
+    rgba_out,
+    width,
+    matrix,
+    full_range,
+  );
+}
+
+/// Shared 16-bit YUV 4:2:0 → native-depth `u16` RGB / RGBA kernel.
+/// `ALPHA = false, ALPHA_SRC = false` emits 3 bpp; `ALPHA = true,
+/// ALPHA_SRC = false` emits 4 bpp with constant `0xFFFF` alpha;
+/// `ALPHA = true, ALPHA_SRC = true` emits 4 bpp with native-depth
+/// source alpha.
+///
+/// Uses i64 chroma multiply (same rationale as
+/// [`yuv_420p16_to_rgb_u16_row`]). Source alpha at 16-bit is already
+/// at native depth (full u16 range, no `bits_mask` needed).
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn yuv_420p16_to_rgb_or_rgba_u16_row<const ALPHA: bool, const ALPHA_SRC: bool>(
+  y: &[u16],
+  u_half: &[u16],
+  v_half: &[u16],
+  a_src: Option<&[u16]>,
   out: &mut [u16],
   width: usize,
   matrix: ColorMatrix,
   full_range: bool,
 ) {
+  // Source alpha requires RGBA output.
+  const { assert!(!ALPHA_SRC || ALPHA) };
   let bpp: usize = if ALPHA { 4 } else { 3 };
   debug_assert_eq!(width & 1, 0, "YUV 4:2:0 requires even width");
   debug_assert!(y.len() >= width, "y row too short");
   debug_assert!(u_half.len() >= width / 2, "u_half row too short");
   debug_assert!(v_half.len() >= width / 2, "v_half row too short");
   debug_assert!(out.len() >= width * bpp, "out row too short");
+  if ALPHA_SRC {
+    debug_assert!(
+      a_src.as_ref().is_some_and(|s| s.len() >= width),
+      "a_src row too short"
+    );
+  }
 
   let coeffs = Coefficients::for_matrix(matrix);
   let (y_off, y_scale, c_scale) = range_params_n::<16, 16>(full_range);
@@ -1490,7 +1829,12 @@ pub(crate) fn yuv_420p16_to_rgb_or_rgba_u16_row<const ALPHA: bool>(
     out[x * bpp] = (y0 + r_chroma).clamp(0, out_max) as u16;
     out[x * bpp + 1] = (y0 + g_chroma).clamp(0, out_max) as u16;
     out[x * bpp + 2] = (y0 + b_chroma).clamp(0, out_max) as u16;
-    if ALPHA {
+    if ALPHA_SRC {
+      // SAFETY (const-checked): ALPHA_SRC = true implies Some(_).
+      // 16-bit alpha is already at native depth (full u16 range);
+      // no mask needed since every u16 is in range.
+      out[x * bpp + 3] = a_src.as_ref().unwrap()[x];
+    } else if ALPHA {
       out[x * bpp + 3] = 0xFFFF;
     }
 
@@ -1498,7 +1842,9 @@ pub(crate) fn yuv_420p16_to_rgb_or_rgba_u16_row<const ALPHA: bool>(
     out[(x + 1) * bpp] = (y1 + r_chroma).clamp(0, out_max) as u16;
     out[(x + 1) * bpp + 1] = (y1 + g_chroma).clamp(0, out_max) as u16;
     out[(x + 1) * bpp + 2] = (y1 + b_chroma).clamp(0, out_max) as u16;
-    if ALPHA {
+    if ALPHA_SRC {
+      out[(x + 1) * bpp + 3] = a_src.as_ref().unwrap()[x + 1];
+    } else if ALPHA {
       out[(x + 1) * bpp + 3] = 0xFFFF;
     }
 
