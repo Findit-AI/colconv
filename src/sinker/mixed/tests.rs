@@ -7386,3 +7386,158 @@ fn yuv440p10_rgba_u16_only_native_depth_gray_with_opaque_alpha() {
     assert_eq!(px[3], 1023, "alpha must equal (1 << 10) - 1");
   }
 }
+
+// ---- Yuva444p10 (Ship 8b‑1a) ----------------------------------
+
+fn solid_yuva444p10_frame(
+  width: u32,
+  height: u32,
+  y: u16,
+  u: u16,
+  v: u16,
+  a: u16,
+) -> (Vec<u16>, Vec<u16>, Vec<u16>, Vec<u16>) {
+  let n = (width * height) as usize;
+  (
+    std::vec![y; n],
+    std::vec![u; n],
+    std::vec![v; n],
+    std::vec![a; n],
+  )
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn yuva444p10_rgba_u8_with_source_alpha_passes_through() {
+  // 10-bit mid-gray with non-opaque alpha: Y=U=V=512, A=256.
+  // u8 RGBA path: each color byte ≈ 128, alpha = 256 >> 2 = 64.
+  let (yp, up, vp, ap) = solid_yuva444p10_frame(16, 8, 512, 512, 512, 256);
+  let src = Yuva444p10Frame::try_new(&yp, &up, &vp, &ap, 16, 8, 16, 16, 16, 16).unwrap();
+
+  let mut rgba = std::vec![0u8; 16 * 8 * 4];
+  let mut sink = MixedSinker::<Yuva444p10>::new(16, 8)
+    .with_rgba(&mut rgba)
+    .unwrap();
+  yuva444p10_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+  for px in rgba.chunks(4) {
+    assert!(px[0].abs_diff(128) <= 1, "got {px:?}");
+    assert_eq!(px[0], px[1]);
+    assert_eq!(px[1], px[2]);
+    assert_eq!(px[3], 64, "alpha must equal 256 >> 2 = 64");
+  }
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn yuva444p10_rgba_u16_with_source_alpha_passes_through_native_depth() {
+  // 10-bit mid-gray with non-opaque alpha: Y=U=V=512, A=256.
+  // u16 RGBA path: each color element ≈ 512, alpha = 256 (native depth).
+  let (yp, up, vp, ap) = solid_yuva444p10_frame(16, 8, 512, 512, 512, 256);
+  let src = Yuva444p10Frame::try_new(&yp, &up, &vp, &ap, 16, 8, 16, 16, 16, 16).unwrap();
+
+  let mut rgba = std::vec![0u16; 16 * 8 * 4];
+  let mut sink = MixedSinker::<Yuva444p10>::new(16, 8)
+    .with_rgba_u16(&mut rgba)
+    .unwrap();
+  yuva444p10_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+  for px in rgba.chunks(4) {
+    assert!(px[0].abs_diff(512) <= 1, "got {px:?}");
+    assert_eq!(px[0], px[1]);
+    assert_eq!(px[1], px[2]);
+    assert_eq!(px[3], 256, "alpha must equal source A (native depth)");
+  }
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn yuva444p10_rgba_u8_fully_opaque_alpha_yields_0xff() {
+  // Source A = (1 << 10) - 1 = 1023 → u8 alpha = 1023 >> 2 = 255 = 0xFF.
+  let (yp, up, vp, ap) = solid_yuva444p10_frame(16, 8, 512, 512, 512, 1023);
+  let src = Yuva444p10Frame::try_new(&yp, &up, &vp, &ap, 16, 8, 16, 16, 16, 16).unwrap();
+
+  let mut rgba = std::vec![0u8; 16 * 8 * 4];
+  let mut sink = MixedSinker::<Yuva444p10>::new(16, 8)
+    .with_rgba(&mut rgba)
+    .unwrap();
+  yuva444p10_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+  for px in rgba.chunks(4) {
+    assert_eq!(px[3], 0xFF, "fully-opaque source alpha must yield 0xFF");
+  }
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn yuva444p10_rgba_u16_fully_opaque_alpha_yields_native_max() {
+  // Source A = 1023 → u16 alpha = 1023 (no depth conversion needed).
+  let (yp, up, vp, ap) = solid_yuva444p10_frame(16, 8, 512, 512, 512, 1023);
+  let src = Yuva444p10Frame::try_new(&yp, &up, &vp, &ap, 16, 8, 16, 16, 16, 16).unwrap();
+
+  let mut rgba = std::vec![0u16; 16 * 8 * 4];
+  let mut sink = MixedSinker::<Yuva444p10>::new(16, 8)
+    .with_rgba_u16(&mut rgba)
+    .unwrap();
+  yuva444p10_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+  for px in rgba.chunks(4) {
+    assert_eq!(px[3], 1023, "fully-opaque source alpha = (1 << 10) - 1");
+  }
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn yuva444p10_rgba_u8_zero_alpha_yields_0() {
+  // Source A = 0 → u8 alpha = 0 (fully transparent).
+  let (yp, up, vp, ap) = solid_yuva444p10_frame(16, 8, 512, 512, 512, 0);
+  let src = Yuva444p10Frame::try_new(&yp, &up, &vp, &ap, 16, 8, 16, 16, 16, 16).unwrap();
+
+  let mut rgba = std::vec![0xFFu8; 16 * 8 * 4];
+  let mut sink = MixedSinker::<Yuva444p10>::new(16, 8)
+    .with_rgba(&mut rgba)
+    .unwrap();
+  yuva444p10_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+  for px in rgba.chunks(4) {
+    assert_eq!(px[3], 0, "zero source alpha must yield 0");
+  }
+}
+
+#[test]
+fn yuva444p10_rgba_buf_too_short_returns_err() {
+  let mut rgba = std::vec![0u8; 10];
+  let err = MixedSinker::<Yuva444p10>::new(16, 8)
+    .with_rgba(&mut rgba)
+    .err()
+    .expect("expected RgbaBufferTooShort");
+  assert!(matches!(err, MixedSinkerError::RgbaBufferTooShort { .. }));
+}
+
+#[test]
+fn yuva444p10_rgba_u16_buf_too_short_returns_err() {
+  let mut rgba = std::vec![0u16; 10];
+  let err = MixedSinker::<Yuva444p10>::new(16, 8)
+    .with_rgba_u16(&mut rgba)
+    .err()
+    .expect("expected RgbaU16BufferTooShort");
+  assert!(matches!(
+    err,
+    MixedSinkerError::RgbaU16BufferTooShort { .. }
+  ));
+}

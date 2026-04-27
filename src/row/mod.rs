@@ -5004,6 +5004,92 @@ pub fn yuv444p16_to_rgba_u16_row(
   scalar::yuv_444p16_to_rgba_u16_row(y, u, v, rgba_out, width, matrix, full_range);
 }
 
+// ---- YUVA 4:4:4 RGBA dispatchers (Ship 8b‑1a prep) --------------------
+//
+// Per-row dispatchers for the YUVA source family (currently Yuva444p10
+// only). The `use_simd` parameter is accepted for API parity with the
+// rest of the dispatcher family but is ignored in this PR — SIMD per-arch
+// routes for the alpha-source path land in:
+//
+//   - Ship 8b‑1b: u8 RGBA SIMD on neon / avx512 / avx2 / sse41 /
+//     wasm_simd128.
+//   - Ship 8b‑1c: u16 RGBA SIMD on the same backends.
+//
+// Until then the dispatcher routes unconditionally to the scalar path
+// (`scalar::yuv_444p_n_to_rgba_with_alpha_src_row::<10>` / its u16
+// counterpart), which already monomorphizes optimally — the
+// `ALPHA_SRC = true` branch is the only live arm in the per-pixel store.
+
+/// Converts one row of **10-bit** YUVA 4:4:4 to packed **8-bit**
+/// **RGBA**. R / G / B are produced by the same Q15 i32 kernel family
+/// that backs [`yuv444p10_to_rgba_row`]; the per-pixel alpha byte is
+/// **sourced from `a`** (depth-converted via `a >> 2` to fit `u8`)
+/// instead of being constant `0xFF`.
+///
+/// `use_simd` is accepted for parity with the rest of the dispatcher
+/// family but is ignored in this PR — see the section comment above.
+/// SIMD wiring lands in Ship 8b‑1b.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn yuva444p10_to_rgba_row(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  a: &[u16],
+  rgba_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  use_simd: bool,
+) {
+  let rgba_min = rgba_row_bytes(width);
+  assert!(y.len() >= width, "y row too short");
+  assert!(u.len() >= width, "u row too short");
+  assert!(v.len() >= width, "v row too short");
+  assert!(a.len() >= width, "a row too short");
+  assert!(rgba_out.len() >= rgba_min, "rgba_out row too short");
+
+  let _ = use_simd; // SIMD per-arch routes land in Ship 8b‑1b PR.
+  scalar::yuv_444p_n_to_rgba_with_alpha_src_row::<10>(
+    y, u, v, a, rgba_out, width, matrix, full_range,
+  );
+}
+
+/// Converts one row of **10-bit** YUVA 4:4:4 to **native-depth `u16`**
+/// packed **RGBA** — output is low-bit-packed (`[0, 1023]`); the
+/// per-pixel alpha element is **sourced from `a`** (already at the
+/// source's native bit depth) instead of being the opaque maximum
+/// `1023`.
+///
+/// `use_simd` is accepted for parity with the rest of the dispatcher
+/// family but is ignored in this PR — see the section comment above.
+/// SIMD wiring lands in Ship 8b‑1c.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn yuva444p10_to_rgba_u16_row(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  a: &[u16],
+  rgba_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  use_simd: bool,
+) {
+  let rgba_min = rgba_row_elems(width);
+  assert!(y.len() >= width, "y row too short");
+  assert!(u.len() >= width, "u row too short");
+  assert!(v.len() >= width, "v row too short");
+  assert!(a.len() >= width, "a row too short");
+  assert!(rgba_out.len() >= rgba_min, "rgba_out row too short");
+
+  let _ = use_simd; // SIMD per-arch routes land in Ship 8b‑1c PR.
+  scalar::yuv_444p_n_to_rgba_u16_with_alpha_src_row::<10>(
+    y, u, v, a, rgba_out, width, matrix, full_range,
+  );
+}
+
 /// P410 (semi-planar 4:4:4, 10-bit high-packed) → packed **8-bit**
 /// **RGBA** (`R, G, B, 0xFF`).
 ///
