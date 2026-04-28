@@ -8445,3 +8445,300 @@ fn yuva420p16_with_rgb_alpha_drop_matches_yuv420p16() {
 
   assert_eq!(rgb_yuv, rgb_yuva);
 }
+
+// ---- Yuva422p family (Ship 8b‑3) -----------------------------------
+
+fn solid_yuva422p_frame(
+  width: u32,
+  height: u32,
+  y: u8,
+  u: u8,
+  v: u8,
+  a: u8,
+) -> (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>) {
+  let w = width as usize;
+  let h = height as usize;
+  let cw = w / 2;
+  // 4:2:2: chroma full-height (only horizontal subsampling).
+  (
+    std::vec![y; w * h],
+    std::vec![u; cw * h],
+    std::vec![v; cw * h],
+    std::vec![a; w * h],
+  )
+}
+
+fn solid_yuva422p_frame_u16(
+  width: u32,
+  height: u32,
+  y: u16,
+  u: u16,
+  v: u16,
+  a: u16,
+) -> (Vec<u16>, Vec<u16>, Vec<u16>, Vec<u16>) {
+  let w = width as usize;
+  let h = height as usize;
+  let cw = w / 2;
+  (
+    std::vec![y; w * h],
+    std::vec![u; cw * h],
+    std::vec![v; cw * h],
+    std::vec![a; w * h],
+  )
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn yuva422p_rgba_u8_with_source_alpha_passes_through() {
+  let (yp, up, vp, ap) = solid_yuva422p_frame(16, 8, 128, 128, 128, 128);
+  let src = Yuva422pFrame::try_new(&yp, &up, &vp, &ap, 16, 8, 16, 8, 8, 16).unwrap();
+
+  let mut rgba = std::vec![0u8; 16 * 8 * 4];
+  let mut sink = MixedSinker::<Yuva422p>::new(16, 8)
+    .with_rgba(&mut rgba)
+    .unwrap();
+  yuva422p_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+  for px in rgba.chunks(4) {
+    assert!(px[0].abs_diff(128) <= 1, "got {px:?}");
+    assert_eq!(px[3], 128, "alpha pass-through");
+  }
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn yuva422p_with_rgb_alpha_drop_matches_yuv422p() {
+  let (yp_a, up_a, vp_a, ap) = solid_yuva422p_frame(16, 8, 180, 60, 200, 200);
+  let yuv = Yuv422pFrame::try_new(&yp_a, &up_a, &vp_a, 16, 8, 16, 8, 8).unwrap();
+  let yuva = Yuva422pFrame::try_new(&yp_a, &up_a, &vp_a, &ap, 16, 8, 16, 8, 8, 16).unwrap();
+
+  let mut rgb_yuv = std::vec![0u8; 16 * 8 * 3];
+  let mut s_yuv = MixedSinker::<Yuv422p>::new(16, 8)
+    .with_rgb(&mut rgb_yuv)
+    .unwrap();
+  yuv422p_to(&yuv, true, ColorMatrix::Bt709, &mut s_yuv).unwrap();
+
+  let mut rgb_yuva = std::vec![0u8; 16 * 8 * 3];
+  let mut s_yuva = MixedSinker::<Yuva422p>::new(16, 8)
+    .with_rgb(&mut rgb_yuva)
+    .unwrap();
+  yuva422p_to(&yuva, true, ColorMatrix::Bt709, &mut s_yuva).unwrap();
+
+  assert_eq!(rgb_yuv, rgb_yuva);
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn yuva422p9_rgba_u8_with_source_alpha_passes_through() {
+  // 9-bit mid-gray (Y=U=V=256) and mid-alpha (A=128 → u8 alpha = 128 >> 1 = 64).
+  let (yp, up, vp, ap) = solid_yuva422p_frame_u16(16, 8, 256, 256, 256, 128);
+  let src = Yuva422p9Frame::try_new(&yp, &up, &vp, &ap, 16, 8, 16, 8, 8, 16).unwrap();
+
+  let mut rgba = std::vec![0u8; 16 * 8 * 4];
+  let mut sink = MixedSinker::<Yuva422p9>::new(16, 8)
+    .with_rgba(&mut rgba)
+    .unwrap();
+  yuva422p9_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+  for px in rgba.chunks(4) {
+    assert!(px[0].abs_diff(128) <= 1, "got {px:?}");
+    assert_eq!(px[3], 64, "alpha = 128 >> (9-8) = 64");
+  }
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn yuva422p9_rgba_u16_native_depth() {
+  let (yp, up, vp, ap) = solid_yuva422p_frame_u16(16, 8, 256, 256, 256, 128);
+  let src = Yuva422p9Frame::try_new(&yp, &up, &vp, &ap, 16, 8, 16, 8, 8, 16).unwrap();
+
+  let mut rgba = std::vec![0u16; 16 * 8 * 4];
+  let mut sink = MixedSinker::<Yuva422p9>::new(16, 8)
+    .with_rgba_u16(&mut rgba)
+    .unwrap();
+  yuva422p9_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+  for px in rgba.chunks(4) {
+    assert_eq!(px[3], 128, "alpha at native depth");
+  }
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn yuva422p10_rgba_u8_with_source_alpha_passes_through() {
+  let (yp, up, vp, ap) = solid_yuva422p_frame_u16(16, 8, 512, 512, 512, 512);
+  let src = Yuva422p10Frame::try_new(&yp, &up, &vp, &ap, 16, 8, 16, 8, 8, 16).unwrap();
+
+  let mut rgba = std::vec![0u8; 16 * 8 * 4];
+  let mut sink = MixedSinker::<Yuva422p10>::new(16, 8)
+    .with_rgba(&mut rgba)
+    .unwrap();
+  yuva422p10_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+  for px in rgba.chunks(4) {
+    assert_eq!(px[3], 128, "alpha = 512 >> (10-8) = 128");
+  }
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn yuva422p10_rgba_u16_native_depth() {
+  let (yp, up, vp, ap) = solid_yuva422p_frame_u16(16, 8, 512, 512, 512, 512);
+  let src = Yuva422p10Frame::try_new(&yp, &up, &vp, &ap, 16, 8, 16, 8, 8, 16).unwrap();
+
+  let mut rgba = std::vec![0u16; 16 * 8 * 4];
+  let mut sink = MixedSinker::<Yuva422p10>::new(16, 8)
+    .with_rgba_u16(&mut rgba)
+    .unwrap();
+  yuva422p10_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+  for px in rgba.chunks(4) {
+    assert_eq!(px[3], 512, "alpha at native depth");
+  }
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn yuva422p16_rgba_u8_with_source_alpha_passes_through() {
+  // 16-bit full-range Y=U=V=32768 (mid-gray) + alpha=32768 → u8 alpha = 32768 >> 8 = 128.
+  let (yp, up, vp, ap) = solid_yuva422p_frame_u16(16, 8, 32768, 32768, 32768, 32768);
+  let src = Yuva422p16Frame::try_new(&yp, &up, &vp, &ap, 16, 8, 16, 8, 8, 16).unwrap();
+
+  let mut rgba = std::vec![0u8; 16 * 8 * 4];
+  let mut sink = MixedSinker::<Yuva422p16>::new(16, 8)
+    .with_rgba(&mut rgba)
+    .unwrap();
+  yuva422p16_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+  for px in rgba.chunks(4) {
+    assert_eq!(px[3], 128, "alpha = 32768 >> 8 = 128");
+  }
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn yuva422p16_rgba_u16_native_depth_full_range() {
+  let (yp, up, vp, ap) = solid_yuva422p_frame_u16(16, 8, 32768, 32768, 32768, 32768);
+  let src = Yuva422p16Frame::try_new(&yp, &up, &vp, &ap, 16, 8, 16, 8, 8, 16).unwrap();
+
+  let mut rgba = std::vec![0u16; 16 * 8 * 4];
+  let mut sink = MixedSinker::<Yuva422p16>::new(16, 8)
+    .with_rgba_u16(&mut rgba)
+    .unwrap();
+  yuva422p16_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+  for px in rgba.chunks(4) {
+    assert_eq!(px[3], 32768, "alpha at native depth");
+  }
+}
+
+// ---- Yuva444p9 (Ship 8b‑3) -----------------------------------------
+
+fn solid_yuva444p9_frame(
+  width: u32,
+  height: u32,
+  y: u16,
+  u: u16,
+  v: u16,
+  a: u16,
+) -> (Vec<u16>, Vec<u16>, Vec<u16>, Vec<u16>) {
+  let w = width as usize;
+  let h = height as usize;
+  // 4:4:4: chroma full-width × full-height.
+  (
+    std::vec![y; w * h],
+    std::vec![u; w * h],
+    std::vec![v; w * h],
+    std::vec![a; w * h],
+  )
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn yuva444p9_rgba_u8_with_source_alpha_passes_through() {
+  let (yp, up, vp, ap) = solid_yuva444p9_frame(16, 8, 256, 256, 256, 128);
+  let src = Yuva444p9Frame::try_new(&yp, &up, &vp, &ap, 16, 8, 16, 16, 16, 16).unwrap();
+
+  let mut rgba = std::vec![0u8; 16 * 8 * 4];
+  let mut sink = MixedSinker::<Yuva444p9>::new(16, 8)
+    .with_rgba(&mut rgba)
+    .unwrap();
+  yuva444p9_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+  for px in rgba.chunks(4) {
+    assert!(px[0].abs_diff(128) <= 1, "got {px:?}");
+    assert_eq!(px[3], 64, "alpha = 128 >> (9-8) = 64");
+  }
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn yuva444p9_rgba_u16_native_depth() {
+  let (yp, up, vp, ap) = solid_yuva444p9_frame(16, 8, 256, 256, 256, 128);
+  let src = Yuva444p9Frame::try_new(&yp, &up, &vp, &ap, 16, 8, 16, 16, 16, 16).unwrap();
+
+  let mut rgba = std::vec![0u16; 16 * 8 * 4];
+  let mut sink = MixedSinker::<Yuva444p9>::new(16, 8)
+    .with_rgba_u16(&mut rgba)
+    .unwrap();
+  yuva444p9_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+  for px in rgba.chunks(4) {
+    assert_eq!(px[3], 128, "alpha at native depth");
+  }
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn yuva444p9_with_rgb_alpha_drop_matches_yuv444p9() {
+  let (yp, up, vp, ap) = solid_yuva444p9_frame(16, 8, 256, 100, 200, 256);
+  let yuv = Yuv444p9Frame::try_new(&yp, &up, &vp, 16, 8, 16, 16, 16).unwrap();
+  let yuva = Yuva444p9Frame::try_new(&yp, &up, &vp, &ap, 16, 8, 16, 16, 16, 16).unwrap();
+
+  let mut rgb_yuv = std::vec![0u8; 16 * 8 * 3];
+  let mut s_yuv = MixedSinker::<Yuv444p9>::new(16, 8)
+    .with_rgb(&mut rgb_yuv)
+    .unwrap();
+  yuv444p9_to(&yuv, true, ColorMatrix::Bt709, &mut s_yuv).unwrap();
+
+  let mut rgb_yuva = std::vec![0u8; 16 * 8 * 3];
+  let mut s_yuva = MixedSinker::<Yuva444p9>::new(16, 8)
+    .with_rgb(&mut rgb_yuva)
+    .unwrap();
+  yuva444p9_to(&yuva, true, ColorMatrix::Bt709, &mut s_yuva).unwrap();
+
+  assert_eq!(rgb_yuv, rgb_yuva);
+}
