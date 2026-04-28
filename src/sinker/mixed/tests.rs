@@ -9447,20 +9447,6 @@ fn solid_rgb24_frame(width: u32, height: u32, r: u8, g: u8, b: u8) -> Vec<u8> {
 }
 
 #[test]
-fn rgb24_frame_try_new_validates_stride() {
-  let buf = std::vec![0u8; 16 * 4 * 3];
-  // Valid: stride = 3 * width.
-  assert!(Rgb24Frame::try_new(&buf, 16, 4, 48).is_ok());
-  // Stride too small.
-  assert!(Rgb24Frame::try_new(&buf, 16, 4, 47).is_err());
-  // Plane too short for declared geometry.
-  let small = std::vec![0u8; 16 * 3];
-  assert!(Rgb24Frame::try_new(&small, 16, 4, 48).is_err());
-  // Zero dimension.
-  assert!(Rgb24Frame::try_new(&buf, 0, 4, 48).is_err());
-}
-
-#[test]
 fn rgb24_with_rgb_passes_through_identity() {
   let pix = solid_rgb24_frame(16, 4, 200, 100, 50);
   let src = Rgb24Frame::try_new(&pix, 16, 4, 48).unwrap();
@@ -9579,6 +9565,48 @@ fn rgb24_with_hsv_matches_existing_kernel() {
   }
 }
 
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn rgb24_random_input_produces_stable_output() {
+  // Smoke test that non-uniform input doesn't crash and produces
+  // well-formed output across all sinks.
+  let w = 31usize;
+  let h = 5usize;
+  let mut pix = std::vec![0u8; w * h * 3];
+  pseudo_random_u8(&mut pix, 0xC001_C0DE);
+  let src = Rgb24Frame::try_new(&pix, w as u32, h as u32, (w * 3) as u32).unwrap();
+
+  let mut rgb = std::vec![0u8; w * h * 3];
+  let mut rgba = std::vec![0u8; w * h * 4];
+  let mut luma = std::vec![0u8; w * h];
+  let mut hh = std::vec![0u8; w * h];
+  let mut ss = std::vec![0u8; w * h];
+  let mut vv = std::vec![0u8; w * h];
+  let mut sink = MixedSinker::<Rgb24>::new(w, h)
+    .with_rgb(&mut rgb)
+    .unwrap()
+    .with_rgba(&mut rgba)
+    .unwrap()
+    .with_luma(&mut luma)
+    .unwrap()
+    .with_hsv(&mut hh, &mut ss, &mut vv)
+    .unwrap();
+  rgb24_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+
+  // RGB is identity-copied.
+  assert_eq!(rgb, pix);
+  // RGBA's RGB channels match RGB output, and alpha is 0xFF.
+  for (i, px) in rgba.chunks(4).enumerate() {
+    assert_eq!(px[0], pix[i * 3]);
+    assert_eq!(px[1], pix[i * 3 + 1]);
+    assert_eq!(px[2], pix[i * 3 + 2]);
+    assert_eq!(px[3], 0xFF);
+  }
+}
+
 // ---- Bgr24 ---------------------------------------------------------
 
 fn solid_bgr24_frame(width: u32, height: u32, b: u8, g: u8, r: u8) -> Vec<u8> {
@@ -9662,46 +9690,4 @@ fn bgr24_luma_matches_rgb24_after_swap() {
   rgb24_to(&rgb_src, true, ColorMatrix::Bt709, &mut s_rgb).unwrap();
 
   assert_eq!(bgr_luma, rgb_luma);
-}
-
-#[test]
-#[cfg_attr(
-  miri,
-  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
-)]
-fn rgb24_random_input_produces_stable_output() {
-  // Smoke test that non-uniform input doesn't crash and produces
-  // well-formed output across all sinks.
-  let w = 31usize;
-  let h = 5usize;
-  let mut pix = std::vec![0u8; w * h * 3];
-  pseudo_random_u8(&mut pix, 0xC001_C0DE);
-  let src = Rgb24Frame::try_new(&pix, w as u32, h as u32, (w * 3) as u32).unwrap();
-
-  let mut rgb = std::vec![0u8; w * h * 3];
-  let mut rgba = std::vec![0u8; w * h * 4];
-  let mut luma = std::vec![0u8; w * h];
-  let mut hh = std::vec![0u8; w * h];
-  let mut ss = std::vec![0u8; w * h];
-  let mut vv = std::vec![0u8; w * h];
-  let mut sink = MixedSinker::<Rgb24>::new(w, h)
-    .with_rgb(&mut rgb)
-    .unwrap()
-    .with_rgba(&mut rgba)
-    .unwrap()
-    .with_luma(&mut luma)
-    .unwrap()
-    .with_hsv(&mut hh, &mut ss, &mut vv)
-    .unwrap();
-  rgb24_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
-
-  // RGB is identity-copied.
-  assert_eq!(rgb, pix);
-  // RGBA's RGB channels match RGB output, and alpha is 0xFF.
-  for (i, px) in rgba.chunks(4).enumerate() {
-    assert_eq!(px[0], pix[i * 3]);
-    assert_eq!(px[1], pix[i * 3 + 1]);
-    assert_eq!(px[2], pix[i * 3 + 2]);
-    assert_eq!(px[3], 0xFF);
-  }
 }

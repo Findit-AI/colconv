@@ -1570,3 +1570,115 @@ fn bayer16_new_panics_on_invalid() {
   let data = std::vec![0u16; 10];
   let _ = Bayer12Frame::new(&data, 16, 8, 16);
 }
+
+// ---- Rgb24Frame --------------------------------------------------------
+//
+// Single-plane 8-bit packed RGB. `stride` is in bytes (≥ 3 * width);
+// `plane.len() >= stride * height`. No width parity constraint.
+
+#[test]
+fn rgb24_frame_try_new_accepts_valid_tight() {
+  let buf = std::vec![0u8; 16 * 4 * 3];
+  Rgb24Frame::try_new(&buf, 16, 4, 48).expect("valid");
+}
+
+#[test]
+fn rgb24_frame_try_new_accepts_oversized_stride() {
+  // stride > 3 * width (row padding) is allowed.
+  let buf = std::vec![0u8; 64 * 4];
+  Rgb24Frame::try_new(&buf, 16, 4, 64).expect("padded stride is valid");
+}
+
+#[test]
+fn rgb24_frame_try_new_rejects_zero_dimension() {
+  let buf = std::vec![0u8; 16 * 4 * 3];
+  assert!(matches!(
+    Rgb24Frame::try_new(&buf, 0, 4, 48),
+    Err(Rgb24FrameError::ZeroDimension { width: 0, height: 4 })
+  ));
+  assert!(matches!(
+    Rgb24Frame::try_new(&buf, 16, 0, 48),
+    Err(Rgb24FrameError::ZeroDimension { width: 16, height: 0 })
+  ));
+}
+
+#[test]
+fn rgb24_frame_try_new_rejects_stride_too_small() {
+  let buf = std::vec![0u8; 16 * 4 * 3];
+  assert!(matches!(
+    Rgb24Frame::try_new(&buf, 16, 4, 47),
+    Err(Rgb24FrameError::StrideTooSmall {
+      min_stride: 48,
+      stride: 47,
+    })
+  ));
+}
+
+#[test]
+fn rgb24_frame_try_new_rejects_short_plane() {
+  let small = std::vec![0u8; 16 * 3];
+  assert!(matches!(
+    Rgb24Frame::try_new(&small, 16, 4, 48),
+    Err(Rgb24FrameError::PlaneTooShort {
+      expected: 192,
+      actual: 48,
+    })
+  ));
+}
+
+#[test]
+#[should_panic(expected = "invalid Rgb24Frame")]
+fn rgb24_frame_new_panics_on_invalid() {
+  let buf = std::vec![0u8; 10];
+  let _ = Rgb24Frame::new(&buf, 16, 4, 48);
+}
+
+// ---- Bgr24Frame --------------------------------------------------------
+//
+// Mirrors Rgb24Frame: same single-plane layout, channel order is
+// purely a marker / accessor distinction. Validation is identical in
+// shape so we re-test the variants to catch typos in the parallel
+// implementation.
+
+#[test]
+fn bgr24_frame_try_new_accepts_valid_tight() {
+  let buf = std::vec![0u8; 16 * 4 * 3];
+  Bgr24Frame::try_new(&buf, 16, 4, 48).expect("valid");
+}
+
+#[test]
+fn bgr24_frame_try_new_rejects_zero_dimension() {
+  let buf = std::vec![0u8; 16 * 4 * 3];
+  assert!(matches!(
+    Bgr24Frame::try_new(&buf, 0, 4, 48),
+    Err(Bgr24FrameError::ZeroDimension { .. })
+  ));
+}
+
+#[test]
+fn bgr24_frame_try_new_rejects_stride_too_small() {
+  let buf = std::vec![0u8; 16 * 4 * 3];
+  assert!(matches!(
+    Bgr24Frame::try_new(&buf, 16, 4, 47),
+    Err(Bgr24FrameError::StrideTooSmall {
+      min_stride: 48,
+      stride: 47,
+    })
+  ));
+}
+
+#[test]
+fn bgr24_frame_try_new_rejects_short_plane() {
+  let small = std::vec![0u8; 16 * 3];
+  assert!(matches!(
+    Bgr24Frame::try_new(&small, 16, 4, 48),
+    Err(Bgr24FrameError::PlaneTooShort { .. })
+  ));
+}
+
+#[test]
+#[should_panic(expected = "invalid Bgr24Frame")]
+fn bgr24_frame_new_panics_on_invalid() {
+  let buf = std::vec![0u8; 10];
+  let _ = Bgr24Frame::new(&buf, 16, 4, 48);
+}

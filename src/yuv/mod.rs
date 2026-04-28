@@ -114,13 +114,24 @@
 //!   the `>> 15`. Scalar stays free; SIMD pays a ~2× chroma compute
 //!   tax in exchange for i32 overflow safety.
 //!
+//! # Shipped (packed RGB sources)
+//!
+//! - [`Rgb24`](crate::yuv::Rgb24) — packed `R, G, B` 8‑bit (3 bytes
+//!   per pixel), single plane. Source-side feed for callers that
+//!   already hold packed RGB and want HSV / luma / RGBA via the
+//!   standard `MixedSinker` channels (Ship 9a).
+//! - [`Bgr24`](crate::yuv::Bgr24) — packed `B, G, R` 8‑bit. Reuses
+//!   [`Rgb24`](crate::yuv::Rgb24)'s sink pipeline behind a
+//!   `bgr_to_rgb_row` swap into the existing `rgb_scratch` buffer.
+//!
 //! # Not yet shipped
 //!
 //! - **Legacy planar** (`Yuv411p`, `Yuv410p`) — DV / Cinepak only;
 //!   uncommon enough that adding them would be speculative.
-//! - **Packed RGB sources** (`Rgb24`, `Bgr24`, `Rgba`, `Bgra`,
-//!   `Rgba1010102`, etc.) — follow‑up. Will land as their own
-//!   family of `*_to` kernels feeding a new row‑shape subtrait.
+//! - **Packed RGB sources with alpha / padding** (`Rgba`, `Bgra`,
+//!   `Argb`, `Abgr`, the `0rgb` / `rgb0` / `0bgr` / `bgr0`
+//!   variants, `Rgba1010102`) — queued for Ship 9b‑9d as the
+//!   follow‑up tranches to Ship 9a.
 //!
 //! # Tracked refactor (no behavior change)
 //!
