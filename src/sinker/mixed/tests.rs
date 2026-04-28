@@ -9196,16 +9196,7 @@ fn yuva444p16_rgba_u8_simd_matches_scalar_with_random_yuva() {
   pseudo_random_u16_low_n_bits(&mut vp, 0xDEAD_BEEF, 16);
   pseudo_random_u16_low_n_bits(&mut ap, 0xA1FA_5EED, 16);
   let src = Yuva444p16Frame::try_new(
-    &yp,
-    &up,
-    &vp,
-    &ap,
-    w as u32,
-    h as u32,
-    w as u32,
-    w as u32,
-    w as u32,
-    w as u32,
+    &yp, &up, &vp, &ap, w as u32, h as u32, w as u32, w as u32, w as u32, w as u32,
   )
   .unwrap();
 
