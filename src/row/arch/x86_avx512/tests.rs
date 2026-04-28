@@ -3011,6 +3011,78 @@ fn avx512_yuv444p16_rgba_u16_matches_scalar_all_matrices() {
   }
 }
 
+fn check_yuv444p16_u16_avx512_rgba_with_alpha_src_equivalence(
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  alpha_seed: usize,
+) {
+  let y = p16_plane_avx512(width, 37);
+  let u = p16_plane_avx512(width, 53);
+  let v = p16_plane_avx512(width, 71);
+  let a_src = p16_plane_avx512(width, alpha_seed);
+  let mut rgba_scalar = std::vec![0u16; width * 4];
+  let mut rgba_simd = std::vec![0u16; width * 4];
+  scalar::yuv_444p16_to_rgba_u16_with_alpha_src_row(
+    &y,
+    &u,
+    &v,
+    &a_src,
+    &mut rgba_scalar,
+    width,
+    matrix,
+    full_range,
+  );
+  unsafe {
+    yuv_444p16_to_rgba_u16_with_alpha_src_row(
+      &y,
+      &u,
+      &v,
+      &a_src,
+      &mut rgba_simd,
+      width,
+      matrix,
+      full_range,
+    );
+  }
+  assert_eq!(
+    rgba_scalar, rgba_simd,
+    "AVX-512 Yuva444p16 → RGBA u16 diverges (width={width}, matrix={matrix:?}, full_range={full_range}, alpha_seed={alpha_seed})"
+  );
+}
+
+#[test]
+fn avx512_yuva444p16_rgba_u16_matches_scalar_all_matrices() {
+  if !std::arch::is_x86_feature_detected!("avx512bw") {
+    return;
+  }
+  for m in [
+    ColorMatrix::Bt601,
+    ColorMatrix::Bt709,
+    ColorMatrix::Bt2020Ncl,
+    ColorMatrix::Smpte240m,
+    ColorMatrix::Fcc,
+    ColorMatrix::YCgCo,
+  ] {
+    for full in [true, false] {
+      check_yuv444p16_u16_avx512_rgba_with_alpha_src_equivalence(32, m, full, 89);
+    }
+  }
+}
+
+#[test]
+fn avx512_yuva444p16_rgba_u16_matches_scalar_widths_and_alpha() {
+  if !std::arch::is_x86_feature_detected!("avx512bw") {
+    return;
+  }
+  for w in [32usize, 33, 47, 63, 95, 1920, 1922] {
+    check_yuv444p16_u16_avx512_rgba_with_alpha_src_equivalence(w, ColorMatrix::Bt709, true, 89);
+  }
+  for seed in [13usize, 41, 127, 211] {
+    check_yuv444p16_u16_avx512_rgba_with_alpha_src_equivalence(32, ColorMatrix::Bt601, false, seed);
+  }
+}
+
 #[test]
 fn avx512_p416_rgba_u16_matches_scalar_all_matrices() {
   if !std::arch::is_x86_feature_detected!("avx512bw") {
