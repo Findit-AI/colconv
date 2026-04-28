@@ -9300,3 +9300,134 @@ fn yuva444p16_rgba_u16_simd_matches_scalar_with_random_yuva() {
     }
   }
 }
+
+// ---- Yuva444p (8-bit) tests (Ship 8b‑6) ---------------------------
+
+fn solid_yuva444p_frame(
+  width: u32,
+  height: u32,
+  y: u8,
+  u: u8,
+  v: u8,
+  a: u8,
+) -> (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>) {
+  let w = width as usize;
+  let h = height as usize;
+  // 4:4:4: chroma full-width × full-height; alpha 1:1 with Y.
+  (
+    std::vec![y; w * h],
+    std::vec![u; w * h],
+    std::vec![v; w * h],
+    std::vec![a; w * h],
+  )
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn yuva444p_rgba_u8_with_source_alpha_passes_through() {
+  let (yp, up, vp, ap) = solid_yuva444p_frame(16, 8, 128, 128, 128, 128);
+  let src = Yuva444pFrame::try_new(&yp, &up, &vp, &ap, 16, 8, 16, 16, 16, 16).unwrap();
+
+  let mut rgba = std::vec![0u8; 16 * 8 * 4];
+  let mut sink = MixedSinker::<Yuva444p>::new(16, 8)
+    .with_rgba(&mut rgba)
+    .unwrap();
+  yuva444p_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+  for px in rgba.chunks(4) {
+    assert!(px[0].abs_diff(128) <= 1, "got {px:?}");
+    assert_eq!(px[3], 128, "alpha pass-through");
+  }
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn yuva444p_with_rgb_alpha_drop_matches_yuv444p() {
+  let (yp, up, vp, ap) = solid_yuva444p_frame(16, 8, 180, 60, 200, 200);
+  let yuv = Yuv444pFrame::try_new(&yp, &up, &vp, 16, 8, 16, 16, 16).unwrap();
+  let yuva = Yuva444pFrame::try_new(&yp, &up, &vp, &ap, 16, 8, 16, 16, 16, 16).unwrap();
+
+  let mut rgb_yuv = std::vec![0u8; 16 * 8 * 3];
+  let mut s_yuv = MixedSinker::<Yuv444p>::new(16, 8)
+    .with_rgb(&mut rgb_yuv)
+    .unwrap();
+  yuv444p_to(&yuv, true, ColorMatrix::Bt709, &mut s_yuv).unwrap();
+
+  let mut rgb_yuva = std::vec![0u8; 16 * 8 * 3];
+  let mut s_yuva = MixedSinker::<Yuva444p>::new(16, 8)
+    .with_rgb(&mut rgb_yuva)
+    .unwrap();
+  yuva444p_to(&yuva, true, ColorMatrix::Bt709, &mut s_yuva).unwrap();
+
+  assert_eq!(rgb_yuv, rgb_yuva);
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn yuva444p_rgba_simd_matches_scalar_with_random_yuva() {
+  // Yuva444p u8 RGBA goes through per-arch SIMD wrappers
+  // (yuv_444_to_rgba_with_alpha_src_row across NEON / SSE4.1 / AVX2 /
+  // AVX-512 / wasm simd128). Width 1922 enters and exits each
+  // backend's main loop (NEON 16, SSE4.1 16, AVX2 32, AVX-512 64,
+  // wasm 16) plus a scalar tail.
+  let w = 1922usize;
+  let h = 4usize;
+  let mut yp = std::vec![0u8; w * h];
+  let mut up = std::vec![0u8; w * h];
+  let mut vp = std::vec![0u8; w * h];
+  let mut ap = std::vec![0u8; w * h];
+  pseudo_random_u8(&mut yp, 0xC001_C0DE);
+  pseudo_random_u8(&mut up, 0xCAFE_F00D);
+  pseudo_random_u8(&mut vp, 0xDEAD_BEEF);
+  pseudo_random_u8(&mut ap, 0xA1FA_5EED);
+  let src = Yuva444pFrame::try_new(
+    &yp, &up, &vp, &ap, w as u32, h as u32, w as u32, w as u32, w as u32, w as u32,
+  )
+  .unwrap();
+
+  for &matrix in &[
+    ColorMatrix::Bt601,
+    ColorMatrix::Bt709,
+    ColorMatrix::Bt2020Ncl,
+    ColorMatrix::YCgCo,
+  ] {
+    for &full_range in &[true, false] {
+      let mut rgba_simd = std::vec![0u8; w * h * 4];
+      let mut rgba_scalar = std::vec![0u8; w * h * 4];
+
+      let mut s_simd = MixedSinker::<Yuva444p>::new(w, h)
+        .with_rgba(&mut rgba_simd)
+        .unwrap();
+      yuva444p_to(&src, full_range, matrix, &mut s_simd).unwrap();
+
+      let mut s_scalar = MixedSinker::<Yuva444p>::new(w, h)
+        .with_rgba(&mut rgba_scalar)
+        .unwrap();
+      s_scalar.set_simd(false);
+      yuva444p_to(&src, full_range, matrix, &mut s_scalar).unwrap();
+
+      if rgba_simd != rgba_scalar {
+        let mismatch = rgba_simd
+          .iter()
+          .zip(rgba_scalar.iter())
+          .position(|(a, b)| a != b)
+          .unwrap();
+        let pixel = mismatch / 4;
+        let channel = ["R", "G", "B", "A"][mismatch % 4];
+        panic!(
+          "Yuva444p RGBA u8 SIMD ≠ scalar at byte {mismatch} (px {pixel} {channel}) for matrix={matrix:?} full_range={full_range}: simd={} scalar={}",
+          rgba_simd[mismatch], rgba_scalar[mismatch]
+        );
+      }
+    }
+  }
+}

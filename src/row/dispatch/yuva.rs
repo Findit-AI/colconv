@@ -35,12 +35,99 @@ use crate::{
 
 // ---- YUVA 4:4:4 RGBA dispatchers --------------------------------------
 //
-// Per-row dispatchers for Yuva444p9 and Yuva444p10 (Yuva444p9 added in
-// Ship 8b‑3 — its SIMD comes free off the existing
-// `yuv_444p_n_to_rgba*_with_alpha_src_row<BITS>` template). Both the
-// u8 and native-depth `u16` RGBA dispatchers route through per-arch
-// SIMD wrappers, mirroring the `yuv444p9_to_rgba_row` /
-// `yuv444p10_to_rgba_row` dispatchers' patterns.
+// Per-row dispatchers for Yuva444p (8-bit, Ship 8b‑6), Yuva444p9 /
+// Yuva444p10 / Yuva444p12 / Yuva444p14 (BITS-generic Q15 i32 family),
+// and Yuva444p16 (dedicated i64 16-bit family). Both the u8 and
+// native-depth `u16` RGBA dispatchers route through per-arch SIMD
+// wrappers, mirroring the non-alpha siblings.
+
+/// Converts one row of **8-bit** YUVA 4:4:4 to packed **8-bit**
+/// **RGBA**. R / G / B are produced by the same Q15 i32 8-bit kernel
+/// that backs [`yuv444p_to_rgba_row`]; the per-pixel alpha byte is
+/// **sourced from `a`** (one byte per pixel, full-width) instead of
+/// being constant `0xFF`.
+///
+/// `use_simd = false` forces the scalar reference path; otherwise
+/// per-arch dispatch matches [`yuv444p_to_rgba_row`]'s pattern.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn yuva444p_to_rgba_row(
+  y: &[u8],
+  u: &[u8],
+  v: &[u8],
+  a: &[u8],
+  rgba_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  use_simd: bool,
+) {
+  let rgba_min = rgba_row_bytes(width);
+  assert!(y.len() >= width, "y row too short");
+  assert!(u.len() >= width, "u row too short");
+  assert!(v.len() >= width, "v row too short");
+  assert!(a.len() >= width, "a row too short");
+  assert!(rgba_out.len() >= rgba_min, "rgba_out row too short");
+
+  if use_simd {
+    cfg_select! {
+      target_arch = "aarch64" => {
+        if neon_available() {
+          // SAFETY: NEON verified.
+          unsafe {
+            arch::neon::yuv_444_to_rgba_with_alpha_src_row(
+              y, u, v, a, rgba_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+      },
+      target_arch = "x86_64" => {
+        if avx512_available() {
+          // SAFETY: AVX‑512BW verified.
+          unsafe {
+            arch::x86_avx512::yuv_444_to_rgba_with_alpha_src_row(
+              y, u, v, a, rgba_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+        if avx2_available() {
+          // SAFETY: AVX2 verified.
+          unsafe {
+            arch::x86_avx2::yuv_444_to_rgba_with_alpha_src_row(
+              y, u, v, a, rgba_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+        if sse41_available() {
+          // SAFETY: SSE4.1 verified.
+          unsafe {
+            arch::x86_sse41::yuv_444_to_rgba_with_alpha_src_row(
+              y, u, v, a, rgba_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+      },
+      target_arch = "wasm32" => {
+        if simd128_available() {
+          // SAFETY: simd128 compile‑time verified.
+          unsafe {
+            arch::wasm_simd128::yuv_444_to_rgba_with_alpha_src_row(
+              y, u, v, a, rgba_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+      },
+      _ => {}
+    }
+  }
+
+  scalar::yuv_444_to_rgba_with_alpha_src_row(y, u, v, a, rgba_out, width, matrix, full_range);
+}
 
 /// Converts one row of **9-bit** YUVA 4:4:4 to packed **8-bit**
 /// **RGBA**. R / G / B are produced by the same Q15 i32 kernel family

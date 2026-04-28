@@ -870,6 +870,77 @@ fn yuv_444_neon_rgba_matches_scalar_widths() {
   }
 }
 
+fn check_yuv_444_rgba_with_alpha_src_equivalence(
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  alpha_seed: usize,
+) {
+  let y: std::vec::Vec<u8> = (0..width).map(|i| ((i * 37 + 11) & 0xFF) as u8).collect();
+  let u: std::vec::Vec<u8> = (0..width).map(|i| ((i * 53 + 23) & 0xFF) as u8).collect();
+  let v: std::vec::Vec<u8> = (0..width).map(|i| ((i * 71 + 91) & 0xFF) as u8).collect();
+  let a_src: std::vec::Vec<u8> = (0..width)
+    .map(|i| ((i * alpha_seed + 17) & 0xFF) as u8)
+    .collect();
+  let mut rgba_scalar = std::vec![0u8; width * 4];
+  let mut rgba_neon = std::vec![0u8; width * 4];
+
+  scalar::yuv_444_to_rgba_with_alpha_src_row(
+    &y,
+    &u,
+    &v,
+    &a_src,
+    &mut rgba_scalar,
+    width,
+    matrix,
+    full_range,
+  );
+  unsafe {
+    yuv_444_to_rgba_with_alpha_src_row(
+      &y,
+      &u,
+      &v,
+      &a_src,
+      &mut rgba_neon,
+      width,
+      matrix,
+      full_range,
+    );
+  }
+  assert_eq!(
+    rgba_scalar, rgba_neon,
+    "NEON Yuva444p → RGBA u8 diverges (width={width}, matrix={matrix:?}, full_range={full_range}, alpha_seed={alpha_seed})"
+  );
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
+fn neon_yuva444p_rgba_matches_scalar_all_matrices() {
+  for m in [
+    ColorMatrix::Bt601,
+    ColorMatrix::Bt709,
+    ColorMatrix::Bt2020Ncl,
+    ColorMatrix::Smpte240m,
+    ColorMatrix::Fcc,
+    ColorMatrix::YCgCo,
+  ] {
+    for full in [true, false] {
+      check_yuv_444_rgba_with_alpha_src_equivalence(16, m, full, 89);
+    }
+  }
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
+fn neon_yuva444p_rgba_matches_scalar_widths_and_alpha() {
+  for w in [16usize, 17, 31, 47, 1920, 1922] {
+    check_yuv_444_rgba_with_alpha_src_equivalence(w, ColorMatrix::Bt709, true, 89);
+  }
+  for seed in [13usize, 41, 127, 211] {
+    check_yuv_444_rgba_with_alpha_src_equivalence(16, ColorMatrix::Bt601, false, seed);
+  }
+}
+
 // ---- rgb_to_hsv_row equivalence ------------------------------------
 //
 // The NEON HSV kernel uses `vmaxq_f32` / `vminq_f32` / `vdivq_f32`
