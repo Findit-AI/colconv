@@ -1,5 +1,7 @@
 //! 12-bit planar YUV 4:4:4 dispatchers — 4 variants.
 
+#[cfg(any(target_arch = "aarch64", target_arch = "x86_64", target_arch = "wasm32"))]
+use crate::row::arch;
 #[cfg(target_arch = "aarch64")]
 use crate::row::neon_available;
 #[cfg(target_arch = "wasm32")]
@@ -8,7 +10,7 @@ use crate::row::simd128_available;
 use crate::row::{avx2_available, avx512_available, sse41_available};
 use crate::{
   ColorMatrix,
-  row::{arch, rgba_row_bytes, rgba_row_elems, scalar},
+  row::{rgba_row_bytes, rgba_row_elems, scalar},
 };
 
 use super::{yuv_444p_n_to_rgb_row, yuv_444p_n_to_rgb_u16_row};

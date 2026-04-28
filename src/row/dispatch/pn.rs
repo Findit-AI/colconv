@@ -11,6 +11,8 @@
 //! since they share the 4:2:0 chroma layout with the planar
 //! yuv420p9/10/12/14/16 family.
 
+#[cfg(any(target_arch = "aarch64", target_arch = "x86_64", target_arch = "wasm32"))]
+use crate::row::arch;
 #[cfg(target_arch = "aarch64")]
 use crate::row::neon_available;
 #[cfg(target_arch = "wasm32")]
@@ -20,7 +22,7 @@ use crate::row::{avx2_available, avx512_available, sse41_available};
 use crate::{
   ColorMatrix,
   row::{
-    arch, rgb_row_bytes, rgb_row_elems, rgba_row_bytes, rgba_row_elems, scalar, uv_full_row_elems,
+    rgb_row_bytes, rgb_row_elems, rgba_row_bytes, rgba_row_elems, scalar, uv_full_row_elems,
   },
 };
 
