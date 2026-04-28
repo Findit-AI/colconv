@@ -1867,7 +1867,9 @@ pub(crate) fn yuv_444p16_to_rgb_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  yuv_444p16_to_rgb_or_rgba_row::<false>(y, u, v, rgb_out, width, matrix, full_range);
+  yuv_444p16_to_rgb_or_rgba_row::<false, false>(
+    y, u, v, None, rgb_out, width, matrix, full_range,
+  );
 }
 
 /// YUV 4:4:4 planar **16‑bit** → packed **8‑bit** **RGBA**. Same
@@ -1886,31 +1888,85 @@ pub(crate) fn yuv_444p16_to_rgba_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  yuv_444p16_to_rgb_or_rgba_row::<true>(y, u, v, rgba_out, width, matrix, full_range);
+  yuv_444p16_to_rgb_or_rgba_row::<true, false>(
+    y, u, v, None, rgba_out, width, matrix, full_range,
+  );
 }
 
-/// Shared 16-bit YUV 4:4:4 → 8-bit RGB / RGBA kernel. `ALPHA = false`
-/// emits 3 bpp; `ALPHA = true` emits 4 bpp with constant `0xFF` alpha.
+/// YUVA 4:4:4 16‑bit → packed **8‑bit** **RGBA**. Same numerical
+/// contract as [`yuv_444p16_to_rgba_row`] for R/G/B; the per-pixel
+/// alpha byte is **sourced from `a_src`** (depth-converted via
+/// `>> 8` to fit `u8`) instead of being constant `0xFF`. Used by the
+/// YUVA 4:4:4 source family ([`crate::yuv::Yuva444p16`] in tranche
+/// 8b‑5a).
+///
+/// Thin wrapper over [`yuv_444p16_to_rgb_or_rgba_row`] with
+/// `ALPHA = true, ALPHA_SRC = true`.
+///
+/// # Panics (debug builds)
+///
+/// - `y.len() >= width`, `u.len() >= width`, `v.len() >= width`,
+///   `a_src.len() >= width`, `rgba_out.len() >= 4 * width`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn yuv_444p16_to_rgba_with_alpha_src_row(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  a_src: &[u16],
+  rgba_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  yuv_444p16_to_rgb_or_rgba_row::<true, true>(
+    y,
+    u,
+    v,
+    Some(a_src),
+    rgba_out,
+    width,
+    matrix,
+    full_range,
+  );
+}
+
+/// Shared 16-bit YUV 4:4:4 → 8-bit RGB / RGBA kernel. `ALPHA = false,
+/// ALPHA_SRC = false` emits 3 bpp; `ALPHA = true, ALPHA_SRC = false`
+/// emits 4 bpp with constant `0xFF` alpha; `ALPHA = true, ALPHA_SRC =
+/// true` emits 4 bpp with depth-converted source alpha.
 ///
 /// 16-bit input has no AND-mask (every `u16` is a valid sample) and
 /// uses i32 chroma — output-target scaling keeps `u_d * coeff` inside
 /// i32 for u8 output (the i64 chroma family lives in
-/// [`yuv_444p16_to_rgb_or_rgba_u16_row`]).
+/// [`yuv_444p16_to_rgb_or_rgba_u16_row`]). Source alpha at 16-bit
+/// depth-converts to u8 via `>> 8`; no mask is needed since every
+/// u16 is in range.
 #[cfg_attr(not(tarpaulin), inline(always))]
-pub(crate) fn yuv_444p16_to_rgb_or_rgba_row<const ALPHA: bool>(
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn yuv_444p16_to_rgb_or_rgba_row<const ALPHA: bool, const ALPHA_SRC: bool>(
   y: &[u16],
   u: &[u16],
   v: &[u16],
+  a_src: Option<&[u16]>,
   out: &mut [u8],
   width: usize,
   matrix: ColorMatrix,
   full_range: bool,
 ) {
+  // Source alpha requires RGBA output.
+  const { assert!(!ALPHA_SRC || ALPHA) };
   let bpp: usize = if ALPHA { 4 } else { 3 };
   debug_assert!(y.len() >= width, "y row too short");
   debug_assert!(u.len() >= width, "u row too short");
   debug_assert!(v.len() >= width, "v row too short");
   debug_assert!(out.len() >= width * bpp, "out row too short");
+  if ALPHA_SRC {
+    debug_assert!(
+      a_src.as_ref().is_some_and(|s| s.len() >= width),
+      "a_src row too short"
+    );
+  }
 
   let coeffs = Coefficients::for_matrix(matrix);
   let (y_off, y_scale, c_scale) = range_params_n::<16, 8>(full_range);
@@ -1928,7 +1984,12 @@ pub(crate) fn yuv_444p16_to_rgb_or_rgba_row<const ALPHA: bool>(
     out[x * bpp] = clamp_u8(y0 + r_chroma);
     out[x * bpp + 1] = clamp_u8(y0 + g_chroma);
     out[x * bpp + 2] = clamp_u8(y0 + b_chroma);
-    if ALPHA {
+    if ALPHA_SRC {
+      // SAFETY (const-checked): ALPHA_SRC = true implies Some(_).
+      // 16-bit input is full-range u16 — no `bits_mask` step. Depth
+      // convert via `>> 8` to fit the u8 output.
+      out[x * bpp + 3] = (a_src.as_ref().unwrap()[x] >> 8) as u8;
+    } else if ALPHA {
       out[x * bpp + 3] = 0xFF;
     }
   }
@@ -1951,7 +2012,9 @@ pub(crate) fn yuv_444p16_to_rgb_u16_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  yuv_444p16_to_rgb_or_rgba_u16_row::<false>(y, u, v, rgb_out, width, matrix, full_range);
+  yuv_444p16_to_rgb_or_rgba_u16_row::<false, false>(
+    y, u, v, None, rgb_out, width, matrix, full_range,
+  );
 }
 
 /// YUV 4:4:4 planar **16‑bit** → packed **native‑depth `u16`** **RGBA**
@@ -1968,30 +2031,83 @@ pub(crate) fn yuv_444p16_to_rgba_u16_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  yuv_444p16_to_rgb_or_rgba_u16_row::<true>(y, u, v, rgba_out, width, matrix, full_range);
+  yuv_444p16_to_rgb_or_rgba_u16_row::<true, false>(
+    y, u, v, None, rgba_out, width, matrix, full_range,
+  );
+}
+
+/// YUVA 4:4:4 16‑bit → packed **native‑depth `u16`** **RGBA**. Same
+/// numerical contract as [`yuv_444p16_to_rgba_u16_row`] for R/G/B; the
+/// per-pixel alpha element is sourced from `a_src` (already at the
+/// source's native bit depth — no shift needed) instead of being the
+/// opaque maximum `0xFFFF`. Used by the YUVA 4:4:4 source family
+/// ([`crate::yuv::Yuva444p16`] in tranche 8b‑5a).
+///
+/// Thin wrapper over [`yuv_444p16_to_rgb_or_rgba_u16_row`] with
+/// `ALPHA = true, ALPHA_SRC = true`.
+///
+/// # Panics (debug builds)
+///
+/// - `y.len() >= width`, `u.len() >= width`, `v.len() >= width`,
+///   `a_src.len() >= width`, `rgba_out.len() >= 4 * width`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn yuv_444p16_to_rgba_u16_with_alpha_src_row(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  a_src: &[u16],
+  rgba_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  yuv_444p16_to_rgb_or_rgba_u16_row::<true, true>(
+    y,
+    u,
+    v,
+    Some(a_src),
+    rgba_out,
+    width,
+    matrix,
+    full_range,
+  );
 }
 
 /// Shared 16-bit YUV 4:4:4 → native-depth `u16` RGB / RGBA kernel.
-/// `ALPHA = false` emits 3 bpp; `ALPHA = true` emits 4 bpp with
-/// constant `0xFFFF` alpha.
+/// `ALPHA = false, ALPHA_SRC = false` emits 3 bpp; `ALPHA = true,
+/// ALPHA_SRC = false` emits 4 bpp with constant `0xFFFF` alpha;
+/// `ALPHA = true, ALPHA_SRC = true` emits 4 bpp with the alpha
+/// element copied from `a_src` (16-bit input is full-range — no
+/// shift needed).
 ///
 /// Uses i64 chroma multiply (same rationale as
 /// [`yuv_444p16_to_rgb_u16_row`]).
 #[cfg_attr(not(tarpaulin), inline(always))]
-pub(crate) fn yuv_444p16_to_rgb_or_rgba_u16_row<const ALPHA: bool>(
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn yuv_444p16_to_rgb_or_rgba_u16_row<const ALPHA: bool, const ALPHA_SRC: bool>(
   y: &[u16],
   u: &[u16],
   v: &[u16],
+  a_src: Option<&[u16]>,
   out: &mut [u16],
   width: usize,
   matrix: ColorMatrix,
   full_range: bool,
 ) {
+  // Source alpha requires RGBA output.
+  const { assert!(!ALPHA_SRC || ALPHA) };
   let bpp: usize = if ALPHA { 4 } else { 3 };
   debug_assert!(y.len() >= width, "y row too short");
   debug_assert!(u.len() >= width, "u row too short");
   debug_assert!(v.len() >= width, "v row too short");
   debug_assert!(out.len() >= width * bpp, "out row too short");
+  if ALPHA_SRC {
+    debug_assert!(
+      a_src.as_ref().is_some_and(|s| s.len() >= width),
+      "a_src row too short"
+    );
+  }
 
   let coeffs = Coefficients::for_matrix(matrix);
   let (y_off, y_scale, c_scale) = range_params_n::<16, 16>(full_range);
@@ -2010,7 +2126,11 @@ pub(crate) fn yuv_444p16_to_rgb_or_rgba_u16_row<const ALPHA: bool>(
     out[x * bpp] = (y0 + r_chroma).clamp(0, out_max) as u16;
     out[x * bpp + 1] = (y0 + g_chroma).clamp(0, out_max) as u16;
     out[x * bpp + 2] = (y0 + b_chroma).clamp(0, out_max) as u16;
-    if ALPHA {
+    if ALPHA_SRC {
+      // SAFETY (const-checked): ALPHA_SRC = true implies Some(_).
+      // 16-bit native-depth output keeps alpha verbatim — no shift.
+      out[x * bpp + 3] = a_src.as_ref().unwrap()[x];
+    } else if ALPHA {
       out[x * bpp + 3] = 0xFFFF;
     }
   }

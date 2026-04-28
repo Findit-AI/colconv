@@ -428,10 +428,21 @@ pub enum RowSlice {
   #[display("UV Half 16")]
   UvHalf16,
   /// Full-width alpha row of a **16-bit** YUVA planar source
-  /// ([`Yuva420p16`](crate::yuv::Yuva420p16)). `u16` samples,
+  /// ([`Yuva420p16`](crate::yuv::Yuva420p16) /
+  /// [`Yuva444p16`](crate::yuv::Yuva444p16)). `u16` samples,
   /// `width` elements (full u16 range).
   #[display("A Full 16")]
   AFull16,
+  /// Full-width U row of a **16-bit** 4:4:4 planar source
+  /// ([`Yuv444p16`](crate::yuv::Yuv444p16) /
+  /// [`Yuva444p16`](crate::yuv::Yuva444p16)). `u16` samples,
+  /// `width` elements (full u16 range).
+  #[display("U Full 16")]
+  UFull16,
+  /// Full-width V row of a **16-bit** 4:4:4 planar source. `u16`
+  /// samples, `width` elements (full u16 range).
+  #[display("V Full 16")]
+  VFull16,
   /// Full‑width interleaved UV row of a **10‑bit semi‑planar 4:4:4**
   /// source ([`P410`](crate::yuv::P410)). `u16` samples, `2 * width`
   /// elements, high‑bit‑packed.

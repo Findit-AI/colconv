@@ -9102,3 +9102,70 @@ fn yuva422p12_rgba_u16_simd_matches_scalar_with_random_yuva() {
     }
   }
 }
+
+// ---- Yuva444p16 (Ship 8b‑5a — scalar prep) ------------------------
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn yuva444p16_rgba_u8_with_source_alpha_passes_through() {
+  let (yp, up, vp, ap) = solid_yuva444p_frame_u16(16, 8, 32768, 32768, 32768, 32768);
+  let src = Yuva444p16Frame::try_new(&yp, &up, &vp, &ap, 16, 8, 16, 16, 16, 16).unwrap();
+
+  let mut rgba = std::vec![0u8; 16 * 8 * 4];
+  let mut sink = MixedSinker::<Yuva444p16>::new(16, 8)
+    .with_rgba(&mut rgba)
+    .unwrap();
+  yuva444p16_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+  for px in rgba.chunks(4) {
+    assert_eq!(px[3], 128, "alpha = 32768 >> 8 = 128");
+  }
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn yuva444p16_rgba_u16_native_depth() {
+  let (yp, up, vp, ap) = solid_yuva444p_frame_u16(16, 8, 32768, 32768, 32768, 32768);
+  let src = Yuva444p16Frame::try_new(&yp, &up, &vp, &ap, 16, 8, 16, 16, 16, 16).unwrap();
+
+  let mut rgba = std::vec![0u16; 16 * 8 * 4];
+  let mut sink = MixedSinker::<Yuva444p16>::new(16, 8)
+    .with_rgba_u16(&mut rgba)
+    .unwrap();
+  yuva444p16_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+  for px in rgba.chunks(4) {
+    assert_eq!(px[3], 32768, "alpha at native depth");
+  }
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn yuva444p16_with_rgb_alpha_drop_matches_yuv444p16() {
+  let (yp, up, vp, ap) = solid_yuva444p_frame_u16(16, 8, 32768, 24000, 40000, 32768);
+  let yuv = Yuv444p16Frame::try_new(&yp, &up, &vp, 16, 8, 16, 16, 16).unwrap();
+  let yuva = Yuva444p16Frame::try_new(&yp, &up, &vp, &ap, 16, 8, 16, 16, 16, 16).unwrap();
+
+  let mut rgb_yuv = std::vec![0u8; 16 * 8 * 3];
+  let mut s_yuv = MixedSinker::<Yuv444p16>::new(16, 8)
+    .with_rgb(&mut rgb_yuv)
+    .unwrap();
+  yuv444p16_to(&yuv, true, ColorMatrix::Bt709, &mut s_yuv).unwrap();
+
+  let mut rgb_yuva = std::vec![0u8; 16 * 8 * 3];
+  let mut s_yuva = MixedSinker::<Yuva444p16>::new(16, 8)
+    .with_rgb(&mut rgb_yuva)
+    .unwrap();
+  yuva444p16_to(&yuva, true, ColorMatrix::Bt709, &mut s_yuva).unwrap();
+
+  assert_eq!(rgb_yuv, rgb_yuva);
+}
