@@ -2651,6 +2651,7 @@ fn avx2_yuva420p_n_rgba_matches_scalar_all_bits() {
     for full in [true, false] {
       check_yuv420p_n_u8_avx2_rgba_with_alpha_src_equivalence::<9>(32, m, full, 89);
       check_yuv420p_n_u8_avx2_rgba_with_alpha_src_equivalence::<10>(32, m, full, 89);
+      check_yuv420p_n_u8_avx2_rgba_with_alpha_src_equivalence::<12>(32, m, full, 89);
     }
   }
 }
@@ -2663,6 +2664,7 @@ fn avx2_yuva420p_n_rgba_matches_scalar_widths() {
   for w in [32usize, 34, 46, 62, 1920, 1922] {
     check_yuv420p_n_u8_avx2_rgba_with_alpha_src_equivalence::<9>(w, ColorMatrix::Bt601, false, 89);
     check_yuv420p_n_u8_avx2_rgba_with_alpha_src_equivalence::<10>(w, ColorMatrix::Bt709, true, 89);
+    check_yuv420p_n_u8_avx2_rgba_with_alpha_src_equivalence::<12>(w, ColorMatrix::Bt709, true, 89);
   }
 }
 
@@ -3142,6 +3144,7 @@ fn avx2_yuva420p_n_rgba_u16_matches_scalar_all_bits() {
     for full in [true, false] {
       check_yuv420p_n_u16_avx2_rgba_with_alpha_src_equivalence::<9>(32, m, full, 89);
       check_yuv420p_n_u16_avx2_rgba_with_alpha_src_equivalence::<10>(32, m, full, 89);
+      check_yuv420p_n_u16_avx2_rgba_with_alpha_src_equivalence::<12>(32, m, full, 89);
     }
   }
 }
@@ -3154,6 +3157,7 @@ fn avx2_yuva420p_n_rgba_u16_matches_scalar_widths() {
   for w in [32usize, 34, 46, 62, 1920, 1922] {
     check_yuv420p_n_u16_avx2_rgba_with_alpha_src_equivalence::<9>(w, ColorMatrix::Bt601, false, 89);
     check_yuv420p_n_u16_avx2_rgba_with_alpha_src_equivalence::<10>(w, ColorMatrix::Bt709, true, 89);
+    check_yuv420p_n_u16_avx2_rgba_with_alpha_src_equivalence::<12>(w, ColorMatrix::Bt709, true, 89);
   }
 }
 

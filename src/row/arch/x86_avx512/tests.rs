@@ -2695,6 +2695,7 @@ fn avx512_yuva420p_n_rgba_matches_scalar_all_bits() {
     for full in [true, false] {
       check_yuv420p_n_u8_avx512_rgba_with_alpha_src_equivalence::<9>(64, m, full, 89);
       check_yuv420p_n_u8_avx512_rgba_with_alpha_src_equivalence::<10>(64, m, full, 89);
+      check_yuv420p_n_u8_avx512_rgba_with_alpha_src_equivalence::<12>(64, m, full, 89);
     }
   }
 }
@@ -2714,6 +2715,12 @@ fn avx512_yuva420p_n_rgba_matches_scalar_widths() {
     check_yuv420p_n_u8_avx512_rgba_with_alpha_src_equivalence::<10>(
       w,
       ColorMatrix::Bt709,
+      true,
+      89,
+    );
+    check_yuv420p_n_u8_avx512_rgba_with_alpha_src_equivalence::<12>(
+      w,
+      ColorMatrix::Smpte240m,
       true,
       89,
     );
@@ -3215,6 +3222,7 @@ fn avx512_yuva420p_n_rgba_u16_matches_scalar_all_bits() {
     for full in [true, false] {
       check_yuv420p_n_u16_avx512_rgba_with_alpha_src_equivalence::<9>(64, m, full, 89);
       check_yuv420p_n_u16_avx512_rgba_with_alpha_src_equivalence::<10>(64, m, full, 89);
+      check_yuv420p_n_u16_avx512_rgba_with_alpha_src_equivalence::<12>(64, m, full, 89);
     }
   }
 }
@@ -3234,6 +3242,12 @@ fn avx512_yuva420p_n_rgba_u16_matches_scalar_widths() {
     check_yuv420p_n_u16_avx512_rgba_with_alpha_src_equivalence::<10>(
       w,
       ColorMatrix::Bt709,
+      true,
+      89,
+    );
+    check_yuv420p_n_u16_avx512_rgba_with_alpha_src_equivalence::<12>(
+      w,
+      ColorMatrix::Smpte240m,
       true,
       89,
     );
