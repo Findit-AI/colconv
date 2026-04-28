@@ -1,7 +1,9 @@
 //! Sinker impls for source-side YUVA 4:4:4 formats —
-//! [`Yuva444p9`](crate::yuv::Yuva444p9) and
-//! [`Yuva444p10`](crate::yuv::Yuva444p10) (other Yuva444p variants —
-//! 12 / 14 / 16 — land in later Ship 8b tranches).
+//! [`Yuva444p9`](crate::yuv::Yuva444p9),
+//! [`Yuva444p10`](crate::yuv::Yuva444p10),
+//! [`Yuva444p12`](crate::yuv::Yuva444p12), and
+//! [`Yuva444p14`](crate::yuv::Yuva444p14). The 16-bit sibling
+//! (`Yuva444p16`) needs its own SIMD work and lands in Ship 8b‑5.
 //!
 //! For each format:
 //! - **RGBA output paths (u8 + native-depth u16)** — alpha is sourced
@@ -17,11 +19,11 @@
 //!   the generic impl) would silently accept a buffer and never write
 //!   it.
 //!
-//! The 9 / 10-bit `process` bodies are structurally identical — only
-//! the depth-named row primitives, the `RowSlice` variants used in
-//! error reports, and the depth-conversion shift (`BITS - 8`) for
-//! luma differ. They share the
-//! [`yuva444p_high_bit_process`] helper to avoid 2× of the same ~70
+//! The 9 / 10 / 12 / 14-bit `process` bodies are structurally
+//! identical — only the depth-named row primitives, the `RowSlice`
+//! variants used in error reports, and the depth-conversion shift
+//! (`BITS - 8`) for luma differ. They share the
+//! [`yuva444p_high_bit_process`] helper to avoid 4× of the same ~70
 //! lines.
 
 use super::{

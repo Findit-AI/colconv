@@ -1,5 +1,5 @@
 //! Sinker impls for source-side YUVA 4:2:2 formats — Yuva422p (8-bit),
-//! Yuva422p9, Yuva422p10, Yuva422p16. Wiring-only: per-row chroma
+//! Yuva422p9, Yuva422p10, Yuva422p12, Yuva422p16. Wiring-only: per-row chroma
 //! layout is identical to YUVA 4:2:0 (half-width U / V), so this file
 //! delegates row-level work to the existing
 //! `yuva420p*_to_rgba*_with_alpha_src_row` dispatchers from Ship 8b‑2.

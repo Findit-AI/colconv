@@ -5792,10 +5792,9 @@ pub enum Yuva422pFrame16Plane {
 }
 
 /// A validated planar 4:2:2 `u16`-backed frame **with an alpha plane**,
-/// generic over `const BITS: u32 ∈ {9, 10, 16}`. FFmpeg ships
-/// `yuva422p9le`, `yuva422p10le`, `yuva422p12le`, and `yuva422p16le`;
-/// this crate currently exposes 9 / 10 / 16 (12 lands in a follow-up
-/// tranche).
+/// generic over `const BITS: u32 ∈ {9, 10, 12, 16}`. Matches the full
+/// FFmpeg set — `yuva422p9le`, `yuva422p10le`, `yuva422p12le`,
+/// `yuva422p16le`.
 ///
 /// Four planes — Y full-width × full-height, U / V half-width ×
 /// full-height (4:2:2 chroma subsamples horizontally only), A
