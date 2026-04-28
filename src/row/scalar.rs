@@ -3393,8 +3393,10 @@ pub(crate) fn bgr_rgb_swap_row(input: &[u8], output: &mut [u8], width: usize) {
 // ---- Tier 6 packed-RGBA helpers (Ship 9b) ------------------------------
 //
 // Compact byte-rearrangement kernels behind the [`Rgba`] / [`Bgra`]
-// source-side sinker family. All scalar; SIMD wiring deferred until
-// callers exist (the cadence matches `rgb_to_luma_row`).
+// source-side sinker family. This file provides the scalar reference /
+// fallback implementations; SIMD dispatch and the per-arch backends
+// (NEON / SSE4.1 / AVX2 / AVX-512 / wasm-simd128) live in
+// `row::dispatch::rgb_ops` and `row::arch::*`.
 
 /// Drops the alpha byte from packed `R, G, B, A` input, producing
 /// packed `R, G, B` output (`4 * width` → `3 * width` bytes).
