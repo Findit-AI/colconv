@@ -3510,8 +3510,13 @@ fn sse41_rgba_to_rgb_matches_scalar() {
     let mut out_scalar = std::vec![0u8; w * 3];
     let mut out_sse = std::vec![0u8; w * 3];
     scalar::rgba_to_rgb_row(&input, &mut out_scalar, w);
-    unsafe { rgba_to_rgb_row(&input, &mut out_sse, w); }
-    assert_eq!(out_scalar, out_sse, "SSE4.1 rgba_to_rgb diverges (width={w})");
+    unsafe {
+      rgba_to_rgb_row(&input, &mut out_sse, w);
+    }
+    assert_eq!(
+      out_scalar, out_sse,
+      "SSE4.1 rgba_to_rgb diverges (width={w})"
+    );
   }
 }
 
@@ -3525,8 +3530,13 @@ fn sse41_bgra_to_rgba_matches_scalar() {
     let mut out_scalar = std::vec![0u8; w * 4];
     let mut out_sse = std::vec![0u8; w * 4];
     scalar::bgra_to_rgba_row(&input, &mut out_scalar, w);
-    unsafe { bgra_to_rgba_row(&input, &mut out_sse, w); }
-    assert_eq!(out_scalar, out_sse, "SSE4.1 bgra_to_rgba diverges (width={w})");
+    unsafe {
+      bgra_to_rgba_row(&input, &mut out_sse, w);
+    }
+    assert_eq!(
+      out_scalar, out_sse,
+      "SSE4.1 bgra_to_rgba diverges (width={w})"
+    );
   }
 }
 
@@ -3540,7 +3550,12 @@ fn sse41_bgra_to_rgb_matches_scalar() {
     let mut out_scalar = std::vec![0u8; w * 3];
     let mut out_sse = std::vec![0u8; w * 3];
     scalar::bgra_to_rgb_row(&input, &mut out_scalar, w);
-    unsafe { bgra_to_rgb_row(&input, &mut out_sse, w); }
-    assert_eq!(out_scalar, out_sse, "SSE4.1 bgra_to_rgb diverges (width={w})");
+    unsafe {
+      bgra_to_rgb_row(&input, &mut out_sse, w);
+    }
+    assert_eq!(
+      out_scalar, out_sse,
+      "SSE4.1 bgra_to_rgb diverges (width={w})"
+    );
   }
 }

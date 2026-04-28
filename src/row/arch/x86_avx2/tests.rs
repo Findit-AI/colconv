@@ -3451,7 +3451,10 @@ fn avx2_bgra_to_rgba_matches_scalar() {
     unsafe {
       bgra_to_rgba_row(&input, &mut out_avx, w);
     }
-    assert_eq!(out_scalar, out_avx, "AVX2 bgra_to_rgba diverges (width={w})");
+    assert_eq!(
+      out_scalar, out_avx,
+      "AVX2 bgra_to_rgba diverges (width={w})"
+    );
   }
 }
 

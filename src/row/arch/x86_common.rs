@@ -386,7 +386,9 @@ pub(super) unsafe fn drop_alpha_16_pixels(input_ptr: *const u8, output_ptr: *mut
     let out1 = _mm_or_si128(_mm_shuffle_epi8(in1, m11), _mm_shuffle_epi8(in2, m12));
 
     // out2 (bytes 32..48): B10 + pixel 11 from in2, pixels 12..15 from in3.
-    let m22 = _mm_setr_epi8(10, 12, 13, 14, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
+    let m22 = _mm_setr_epi8(
+      10, 12, 13, 14, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    );
     let m23 = _mm_setr_epi8(-1, -1, -1, -1, 0, 1, 2, 4, 5, 6, 8, 9, 10, 12, 13, 14);
     let out2 = _mm_or_si128(_mm_shuffle_epi8(in2, m22), _mm_shuffle_epi8(in3, m23));
 
@@ -424,7 +426,9 @@ pub(super) unsafe fn bgra_to_rgb_16_pixels(input_ptr: *const u8, output_ptr: *mu
     let m12 = _mm_setr_epi8(-1, -1, -1, -1, -1, -1, -1, -1, 2, 1, 0, 6, 5, 4, 10, 9);
     let out1 = _mm_or_si128(_mm_shuffle_epi8(in1, m11), _mm_shuffle_epi8(in2, m12));
 
-    let m22 = _mm_setr_epi8(8, 14, 13, 12, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
+    let m22 = _mm_setr_epi8(
+      8, 14, 13, 12, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    );
     let m23 = _mm_setr_epi8(-1, -1, -1, -1, 2, 1, 0, 6, 5, 4, 10, 9, 8, 14, 13, 12);
     let out2 = _mm_or_si128(_mm_shuffle_epi8(in2, m22), _mm_shuffle_epi8(in3, m23));
 
