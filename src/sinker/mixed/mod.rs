@@ -1275,6 +1275,7 @@ mod subsampled_4_2_0_high_bit;
 mod subsampled_4_2_2_high_bit;
 mod subsampled_4_4_4_high_bit;
 mod yuva_4_2_0;
+mod yuva_4_2_2;
 mod yuva_4_4_4;
 
 #[cfg(all(test, feature = "std"))]
