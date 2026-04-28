@@ -2,14 +2,13 @@
 //! organization. All three route through the standard
 //! `cfg_select!` per-arch block; `use_simd = false` forces scalar.
 
-use crate::row::scalar;
-use crate::row::{arch, rgb_row_bytes};
 #[cfg(target_arch = "aarch64")]
 use crate::row::neon_available;
-#[cfg(target_arch = "x86_64")]
-use crate::row::{avx2_available, avx512_available, sse41_available};
 #[cfg(target_arch = "wasm32")]
 use crate::row::simd128_available;
+use crate::row::{arch, rgb_row_bytes, scalar};
+#[cfg(target_arch = "x86_64")]
+use crate::row::{avx2_available, avx512_available, sse41_available};
 
 /// Converts one row of packed RGB to planar HSV (OpenCV 8‑bit
 /// encoding). See `scalar::rgb_to_hsv_row` for semantics.

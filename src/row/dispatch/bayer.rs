@@ -6,8 +6,7 @@
 //! parameter is wired through so callers don't have to touch their
 //! call sites when SIMD lands.
 
-use crate::row::scalar;
-use crate::row::{assert_color_transform_well_formed, rgb_row_bytes, rgb_row_elems};
+use crate::row::{assert_color_transform_well_formed, rgb_row_bytes, rgb_row_elems, scalar};
 
 /// Converts one row of an 8-bit Bayer plane to packed RGB.
 ///

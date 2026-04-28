@@ -3555,7 +3555,13 @@ pub(crate) unsafe fn yuv_420p16_to_rgb_or_rgba_u16_row<const ALPHA: bool, const 
         } else {
           alpha_u16
         };
-        write_rgba_u16_8(r_lo_u16, g_lo_u16, b_lo_u16, a_v, out.as_mut_ptr().add(x * 4));
+        write_rgba_u16_8(
+          r_lo_u16,
+          g_lo_u16,
+          b_lo_u16,
+          a_v,
+          out.as_mut_ptr().add(x * 4),
+        );
       } else {
         write_rgb_u16_8(r_lo_u16, g_lo_u16, b_lo_u16, out.as_mut_ptr().add(x * 3));
       }

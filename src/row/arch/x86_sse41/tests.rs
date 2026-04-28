@@ -3217,8 +3217,18 @@ fn sse41_yuva420p_n_rgba_u16_matches_scalar_widths() {
     return;
   }
   for w in [16usize, 18, 30, 34, 1920, 1922] {
-    check_yuv420p_n_u16_sse41_rgba_with_alpha_src_equivalence::<9>(w, ColorMatrix::Bt601, false, 89);
-    check_yuv420p_n_u16_sse41_rgba_with_alpha_src_equivalence::<10>(w, ColorMatrix::Bt709, true, 89);
+    check_yuv420p_n_u16_sse41_rgba_with_alpha_src_equivalence::<9>(
+      w,
+      ColorMatrix::Bt601,
+      false,
+      89,
+    );
+    check_yuv420p_n_u16_sse41_rgba_with_alpha_src_equivalence::<10>(
+      w,
+      ColorMatrix::Bt709,
+      true,
+      89,
+    );
   }
 }
 

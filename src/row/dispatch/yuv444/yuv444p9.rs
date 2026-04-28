@@ -4,18 +4,18 @@
 //! RGBA / RGBA-u16 paths are full dispatchers (the BITS-generic
 //! template doesn't apply for the alpha-fill case).
 
-use crate::row::scalar;
-use crate::row::{arch, rgba_row_bytes, rgba_row_elems};
 #[cfg(target_arch = "aarch64")]
 use crate::row::neon_available;
-#[cfg(target_arch = "x86_64")]
-use crate::row::{avx2_available, avx512_available, sse41_available};
 #[cfg(target_arch = "wasm32")]
 use crate::row::simd128_available;
-use crate::ColorMatrix;
+#[cfg(target_arch = "x86_64")]
+use crate::row::{avx2_available, avx512_available, sse41_available};
+use crate::{
+  ColorMatrix,
+  row::{arch, rgba_row_bytes, rgba_row_elems, scalar},
+};
 
 use super::{yuv_444p_n_to_rgb_row, yuv_444p_n_to_rgb_u16_row};
-
 
 /// YUV 4:4:4 planar 9-bit → u8 RGB. Thin wrapper over the
 /// crate-internal `yuv_444p_n_to_rgb_row::<9>`.

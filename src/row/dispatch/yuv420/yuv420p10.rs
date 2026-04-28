@@ -1,15 +1,15 @@
 //! 10-bit planar YUV 4:2:0 dispatchers — 4 variants.
 
-use crate::row::scalar;
-use crate::row::{arch, rgb_row_bytes, rgb_row_elems, rgba_row_bytes, rgba_row_elems};
 #[cfg(target_arch = "aarch64")]
 use crate::row::neon_available;
-#[cfg(target_arch = "x86_64")]
-use crate::row::{avx2_available, avx512_available, sse41_available};
 #[cfg(target_arch = "wasm32")]
 use crate::row::simd128_available;
-use crate::ColorMatrix;
-
+#[cfg(target_arch = "x86_64")]
+use crate::row::{avx2_available, avx512_available, sse41_available};
+use crate::{
+  ColorMatrix,
+  row::{arch, rgb_row_bytes, rgb_row_elems, rgba_row_bytes, rgba_row_elems, scalar},
+};
 
 /// Converts one row of **10‑bit** YUV 4:2:0 to packed **8‑bit** RGB.
 ///
@@ -194,7 +194,6 @@ pub fn yuv420p10_to_rgb_u16_row(
 
   scalar::yuv_420p_n_to_rgb_u16_row::<10>(y, u_half, v_half, rgb_out, width, matrix, full_range);
 }
-
 
 /// Converts one row of **10-bit** YUV 4:2:0 to packed **8-bit**
 /// **RGBA** (`R, G, B, 0xFF`; alpha defaults to opaque since the

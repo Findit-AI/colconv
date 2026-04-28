@@ -13,16 +13,16 @@
 //! RGB wrappers above. They stay `pub(crate)` and live here at the
 //! `yuv444` module root so siblings can reach them via `super::*`.
 
-use crate::row::scalar;
-use crate::row::{arch, rgb_row_bytes, rgb_row_elems};
 #[cfg(target_arch = "aarch64")]
 use crate::row::neon_available;
-#[cfg(target_arch = "x86_64")]
-use crate::row::{avx2_available, avx512_available, sse41_available};
 #[cfg(target_arch = "wasm32")]
 use crate::row::simd128_available;
-use crate::ColorMatrix;
-
+#[cfg(target_arch = "x86_64")]
+use crate::row::{avx2_available, avx512_available, sse41_available};
+use crate::{
+  ColorMatrix,
+  row::{arch, rgb_row_bytes, rgb_row_elems, scalar},
+};
 
 /// YUV 4:4:4 planar 10/12/14-bit → **u8** RGB dispatcher. Const
 /// generic over `BITS ∈ {10, 12, 14}`. Dispatches to the best
@@ -189,9 +189,9 @@ pub(super) mod yuv444p16;
 pub(super) mod yuv444p9;
 pub(super) mod yuv_444;
 
+pub use yuv_444::*;
+pub use yuv444p9::*;
 pub use yuv444p10::*;
 pub use yuv444p12::*;
 pub use yuv444p14::*;
 pub use yuv444p16::*;
-pub use yuv444p9::*;
-pub use yuv_444::*;

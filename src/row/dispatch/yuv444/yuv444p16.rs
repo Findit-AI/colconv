@@ -2,16 +2,16 @@
 //! helpers in `super::*` are pinned to {9,10,12,14}, so 16-bit gets
 //! its own dedicated dispatchers (i64 chroma at native u16 output).
 
-use crate::row::scalar;
-use crate::row::{arch, rgb_row_bytes, rgb_row_elems, rgba_row_bytes, rgba_row_elems};
 #[cfg(target_arch = "aarch64")]
 use crate::row::neon_available;
-#[cfg(target_arch = "x86_64")]
-use crate::row::{avx2_available, avx512_available, sse41_available};
 #[cfg(target_arch = "wasm32")]
 use crate::row::simd128_available;
-use crate::ColorMatrix;
-
+#[cfg(target_arch = "x86_64")]
+use crate::row::{avx2_available, avx512_available, sse41_available};
+use crate::{
+  ColorMatrix,
+  row::{arch, rgb_row_bytes, rgb_row_elems, rgba_row_bytes, rgba_row_elems, scalar},
+};
 
 /// YUV 4:4:4 planar **16-bit** → packed **u8** RGB. Uses the
 /// parallel 16-bit kernel family (same Q15 i32 output-range pipeline
@@ -154,7 +154,6 @@ pub fn yuv444p16_to_rgb_u16_row(
 
   scalar::yuv_444p16_to_rgb_u16_row(y, u, v, rgb_out, width, matrix, full_range);
 }
-
 
 /// Converts one row of **16-bit** YUV 4:4:4 to packed **8-bit**
 /// **RGBA** (`R, G, B, 0xFF`). Routes through the dedicated 16-bit

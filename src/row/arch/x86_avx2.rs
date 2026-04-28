@@ -4029,8 +4029,7 @@ pub(crate) unsafe fn yuv_420p16_to_rgb_or_rgba_u16_row<const ALPHA: bool, const 
           // wrapper passed Some(_), validated by debug_assert above.
           // 16-bit alpha is full-range u16 — load 16 lanes (one
           // __m256i = 32 bytes), split into two 128-bit halves.
-          let a_vec =
-            _mm256_loadu_si256(a_src.as_ref().unwrap_unchecked().as_ptr().add(x).cast());
+          let a_vec = _mm256_loadu_si256(a_src.as_ref().unwrap_unchecked().as_ptr().add(x).cast());
           (
             _mm256_castsi256_si128(a_vec),
             _mm256_extracti128_si256::<1>(a_vec),

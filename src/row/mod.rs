@@ -41,8 +41,8 @@
 //! see no API change from the split.
 
 pub(crate) mod arch;
-pub(crate) mod scalar;
 mod dispatch;
+pub(crate) mod scalar;
 
 // Re-exported only when a caller is compiled. The `MixedSinker` Strategy A
 // fan-out is the sole consumer, and it lives in `crate::sinker::mixed` which
@@ -54,13 +54,7 @@ pub(crate) use scalar::expand_rgb_to_rgba_row;
 #[cfg(any(feature = "std", feature = "alloc"))]
 pub(crate) use scalar::expand_rgb_u16_to_rgba_u16_row;
 
-pub use dispatch::bayer::*;
-pub use dispatch::nv::*;
-pub use dispatch::pn::*;
-pub use dispatch::rgb_ops::*;
-pub use dispatch::yuv420::*;
-pub use dispatch::yuv444::*;
-pub use dispatch::yuva::*;
+pub use dispatch::{bayer::*, nv::*, pn::*, rgb_ops::*, yuv420::*, yuv444::*, yuva::*};
 
 // `yuv_444p_n_to_rgb_u16_row` is consumed by the 32-bit overflow test
 // `yuv_444p_n_u16_dispatcher_rejects_width_times_3_overflow` below —

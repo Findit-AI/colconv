@@ -1,16 +1,16 @@
 //! 9-bit planar YUV 4:2:0 dispatchers — 4 variants (RGB, RGB-u16,
 //! RGBA, RGBA-u16).
 
-use crate::row::scalar;
-use crate::row::{arch, rgb_row_bytes, rgb_row_elems, rgba_row_bytes, rgba_row_elems};
 #[cfg(target_arch = "aarch64")]
 use crate::row::neon_available;
-#[cfg(target_arch = "x86_64")]
-use crate::row::{avx2_available, avx512_available, sse41_available};
 #[cfg(target_arch = "wasm32")]
 use crate::row::simd128_available;
-use crate::ColorMatrix;
-
+#[cfg(target_arch = "x86_64")]
+use crate::row::{avx2_available, avx512_available, sse41_available};
+use crate::{
+  ColorMatrix,
+  row::{arch, rgb_row_bytes, rgb_row_elems, rgba_row_bytes, rgba_row_elems, scalar},
+};
 
 /// Converts one row of **9‑bit** YUV 4:2:0 to packed **8‑bit** RGB.
 ///

@@ -2,16 +2,16 @@
 //! `yuv_444_to_rgba_row`). Extracted from the parent
 //! `dispatch::yuv444` module per source format for organization.
 
-use crate::row::scalar;
-use crate::row::{arch, rgb_row_bytes, rgba_row_bytes};
 #[cfg(target_arch = "aarch64")]
 use crate::row::neon_available;
-#[cfg(target_arch = "x86_64")]
-use crate::row::{avx2_available, avx512_available, sse41_available};
 #[cfg(target_arch = "wasm32")]
 use crate::row::simd128_available;
-use crate::ColorMatrix;
-
+#[cfg(target_arch = "x86_64")]
+use crate::row::{avx2_available, avx512_available, sse41_available};
+use crate::{
+  ColorMatrix,
+  row::{arch, rgb_row_bytes, rgba_row_bytes, scalar},
+};
 
 /// Converts one row of YUV 4:4:4 planar to packed RGB. Dispatches
 /// to the best available SIMD backend for the current target.
