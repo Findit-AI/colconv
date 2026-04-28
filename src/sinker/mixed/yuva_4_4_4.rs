@@ -238,6 +238,214 @@ impl PixelSink for MixedSinker<'_, Yuva444p10> {
   }
 }
 
+// ---- Yuva444p12 impl --------------------------------------------------
+
+impl<'a> MixedSinker<'a, Yuva444p12> {
+  /// Attaches a packed **8-bit** RGBA output buffer. The 12-bit YUVA
+  /// source is converted to 8-bit RGBA via the same `BITS = 12` Q15
+  /// kernel family used by [`MixedSinker<Yuv444p12>::with_rgba`]; the
+  /// per-pixel alpha byte is **sourced from the alpha plane**
+  /// (depth-converted via `a >> 4` to fit `u8`) — not constant `0xFF`.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn with_rgba(mut self, buf: &'a mut [u8]) -> Result<Self, MixedSinkerError> {
+    self.set_rgba(buf)?;
+    Ok(self)
+  }
+  /// In-place variant of [`with_rgba`](Self::with_rgba).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn set_rgba(&mut self, buf: &'a mut [u8]) -> Result<&mut Self, MixedSinkerError> {
+    let expected = self.frame_bytes(4)?;
+    if buf.len() < expected {
+      return Err(MixedSinkerError::RgbaBufferTooShort {
+        expected,
+        actual: buf.len(),
+      });
+    }
+    self.rgba = Some(buf);
+    Ok(self)
+  }
+
+  /// Attaches a packed **`u16`** RGBA output buffer. 12-bit
+  /// low-packed (`[0, 4095]`); the per-pixel alpha element is
+  /// **sourced from the alpha plane** at native depth.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn with_rgba_u16(mut self, buf: &'a mut [u16]) -> Result<Self, MixedSinkerError> {
+    self.set_rgba_u16(buf)?;
+    Ok(self)
+  }
+  /// In-place variant of [`with_rgba_u16`](Self::with_rgba_u16).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn set_rgba_u16(&mut self, buf: &'a mut [u16]) -> Result<&mut Self, MixedSinkerError> {
+    let expected = self.frame_bytes(4)?;
+    if buf.len() < expected {
+      return Err(MixedSinkerError::RgbaU16BufferTooShort {
+        expected,
+        actual: buf.len(),
+      });
+    }
+    self.rgba_u16 = Some(buf);
+    Ok(self)
+  }
+
+  /// Attaches a packed **`u16`** RGB output buffer (alpha-drop).
+  /// Output is identical to [`MixedSinker<Yuv444p12>::with_rgb_u16`] —
+  /// the alpha plane is ignored.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn with_rgb_u16(mut self, buf: &'a mut [u16]) -> Result<Self, MixedSinkerError> {
+    self.set_rgb_u16(buf)?;
+    Ok(self)
+  }
+  /// In-place variant of [`with_rgb_u16`](Self::with_rgb_u16).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn set_rgb_u16(&mut self, buf: &'a mut [u16]) -> Result<&mut Self, MixedSinkerError> {
+    let expected = self.frame_bytes(3)?;
+    if buf.len() < expected {
+      return Err(MixedSinkerError::RgbU16BufferTooShort {
+        expected,
+        actual: buf.len(),
+      });
+    }
+    self.rgb_u16 = Some(buf);
+    Ok(self)
+  }
+}
+
+impl Yuva444p12Sink for MixedSinker<'_, Yuva444p12> {}
+
+impl PixelSink for MixedSinker<'_, Yuva444p12> {
+  type Input<'r> = Yuva444p12Row<'r>;
+  type Error = MixedSinkerError;
+
+  fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
+    check_dimensions_match(self.width, self.height, width, height)
+  }
+
+  fn process(&mut self, row: Yuva444p12Row<'_>) -> Result<(), Self::Error> {
+    yuva444p_high_bit_process::<12, _, _, _, _>(
+      self,
+      row.row(),
+      row.y(),
+      row.u(),
+      row.v(),
+      row.a(),
+      row.matrix(),
+      row.full_range(),
+      RowSlice::Y12,
+      RowSlice::UFull12,
+      RowSlice::VFull12,
+      RowSlice::AFull12,
+      yuv444p12_to_rgb_row,
+      yuv444p12_to_rgb_u16_row,
+      yuva444p12_to_rgba_row,
+      yuva444p12_to_rgba_u16_row,
+    )
+  }
+}
+
+// ---- Yuva444p14 impl --------------------------------------------------
+
+impl<'a> MixedSinker<'a, Yuva444p14> {
+  /// Attaches a packed **8-bit** RGBA output buffer. The 14-bit YUVA
+  /// source is converted to 8-bit RGBA via the same `BITS = 14` Q15
+  /// kernel family used by [`MixedSinker<Yuv444p14>::with_rgba`]; the
+  /// per-pixel alpha byte is **sourced from the alpha plane**
+  /// (depth-converted via `a >> 6` to fit `u8`) — not constant `0xFF`.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn with_rgba(mut self, buf: &'a mut [u8]) -> Result<Self, MixedSinkerError> {
+    self.set_rgba(buf)?;
+    Ok(self)
+  }
+  /// In-place variant of [`with_rgba`](Self::with_rgba).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn set_rgba(&mut self, buf: &'a mut [u8]) -> Result<&mut Self, MixedSinkerError> {
+    let expected = self.frame_bytes(4)?;
+    if buf.len() < expected {
+      return Err(MixedSinkerError::RgbaBufferTooShort {
+        expected,
+        actual: buf.len(),
+      });
+    }
+    self.rgba = Some(buf);
+    Ok(self)
+  }
+
+  /// Attaches a packed **`u16`** RGBA output buffer. 14-bit
+  /// low-packed (`[0, 16383]`); the per-pixel alpha element is
+  /// **sourced from the alpha plane** at native depth.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn with_rgba_u16(mut self, buf: &'a mut [u16]) -> Result<Self, MixedSinkerError> {
+    self.set_rgba_u16(buf)?;
+    Ok(self)
+  }
+  /// In-place variant of [`with_rgba_u16`](Self::with_rgba_u16).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn set_rgba_u16(&mut self, buf: &'a mut [u16]) -> Result<&mut Self, MixedSinkerError> {
+    let expected = self.frame_bytes(4)?;
+    if buf.len() < expected {
+      return Err(MixedSinkerError::RgbaU16BufferTooShort {
+        expected,
+        actual: buf.len(),
+      });
+    }
+    self.rgba_u16 = Some(buf);
+    Ok(self)
+  }
+
+  /// Attaches a packed **`u16`** RGB output buffer (alpha-drop).
+  /// Output is identical to [`MixedSinker<Yuv444p14>::with_rgb_u16`] —
+  /// the alpha plane is ignored.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn with_rgb_u16(mut self, buf: &'a mut [u16]) -> Result<Self, MixedSinkerError> {
+    self.set_rgb_u16(buf)?;
+    Ok(self)
+  }
+  /// In-place variant of [`with_rgb_u16`](Self::with_rgb_u16).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn set_rgb_u16(&mut self, buf: &'a mut [u16]) -> Result<&mut Self, MixedSinkerError> {
+    let expected = self.frame_bytes(3)?;
+    if buf.len() < expected {
+      return Err(MixedSinkerError::RgbU16BufferTooShort {
+        expected,
+        actual: buf.len(),
+      });
+    }
+    self.rgb_u16 = Some(buf);
+    Ok(self)
+  }
+}
+
+impl Yuva444p14Sink for MixedSinker<'_, Yuva444p14> {}
+
+impl PixelSink for MixedSinker<'_, Yuva444p14> {
+  type Input<'r> = Yuva444p14Row<'r>;
+  type Error = MixedSinkerError;
+
+  fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
+    check_dimensions_match(self.width, self.height, width, height)
+  }
+
+  fn process(&mut self, row: Yuva444p14Row<'_>) -> Result<(), Self::Error> {
+    yuva444p_high_bit_process::<14, _, _, _, _>(
+      self,
+      row.row(),
+      row.y(),
+      row.u(),
+      row.v(),
+      row.a(),
+      row.matrix(),
+      row.full_range(),
+      RowSlice::Y14,
+      RowSlice::UFull14,
+      RowSlice::VFull14,
+      RowSlice::AFull14,
+      yuv444p14_to_rgb_row,
+      yuv444p14_to_rgb_u16_row,
+      yuva444p14_to_rgba_row,
+      yuva444p14_to_rgba_u16_row,
+    )
+  }
+}
+
 // ---- Shared high-bit YUVA 4:4:4 process body --------------------------
 //
 // The 9 / 10-bit YUVA 4:4:4 sinker `process` bodies are structurally

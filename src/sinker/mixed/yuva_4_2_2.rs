@@ -415,6 +415,107 @@ impl PixelSink for MixedSinker<'_, Yuva422p10> {
   }
 }
 
+// ---- Yuva422p12 impl --------------------------------------------------
+
+impl<'a> MixedSinker<'a, Yuva422p12> {
+  /// Attaches a packed **8-bit** RGBA output buffer. Source-derived
+  /// alpha (depth-converted via `>> 4`).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn with_rgba(mut self, buf: &'a mut [u8]) -> Result<Self, MixedSinkerError> {
+    self.set_rgba(buf)?;
+    Ok(self)
+  }
+  /// In-place variant of [`with_rgba`](Self::with_rgba).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn set_rgba(&mut self, buf: &'a mut [u8]) -> Result<&mut Self, MixedSinkerError> {
+    let expected = self.frame_bytes(4)?;
+    if buf.len() < expected {
+      return Err(MixedSinkerError::RgbaBufferTooShort {
+        expected,
+        actual: buf.len(),
+      });
+    }
+    self.rgba = Some(buf);
+    Ok(self)
+  }
+
+  /// Attaches a packed **`u16`** RGBA output buffer (12‑bit
+  /// low‑packed, `[0, 4095]`). Alpha is sourced at native depth.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn with_rgba_u16(mut self, buf: &'a mut [u16]) -> Result<Self, MixedSinkerError> {
+    self.set_rgba_u16(buf)?;
+    Ok(self)
+  }
+  /// In-place variant of [`with_rgba_u16`](Self::with_rgba_u16).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn set_rgba_u16(&mut self, buf: &'a mut [u16]) -> Result<&mut Self, MixedSinkerError> {
+    let expected = self.frame_bytes(4)?;
+    if buf.len() < expected {
+      return Err(MixedSinkerError::RgbaU16BufferTooShort {
+        expected,
+        actual: buf.len(),
+      });
+    }
+    self.rgba_u16 = Some(buf);
+    Ok(self)
+  }
+
+  /// Attaches a packed **`u16`** RGB output buffer (alpha-drop).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn with_rgb_u16(mut self, buf: &'a mut [u16]) -> Result<Self, MixedSinkerError> {
+    self.set_rgb_u16(buf)?;
+    Ok(self)
+  }
+  /// In-place variant of [`with_rgb_u16`](Self::with_rgb_u16).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn set_rgb_u16(&mut self, buf: &'a mut [u16]) -> Result<&mut Self, MixedSinkerError> {
+    let expected = self.frame_bytes(3)?;
+    if buf.len() < expected {
+      return Err(MixedSinkerError::RgbU16BufferTooShort {
+        expected,
+        actual: buf.len(),
+      });
+    }
+    self.rgb_u16 = Some(buf);
+    Ok(self)
+  }
+}
+
+impl Yuva422p12Sink for MixedSinker<'_, Yuva422p12> {}
+
+impl PixelSink for MixedSinker<'_, Yuva422p12> {
+  type Input<'r> = Yuva422p12Row<'r>;
+  type Error = MixedSinkerError;
+
+  fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
+    if self.width & 1 != 0 {
+      return Err(MixedSinkerError::OddWidth { width: self.width });
+    }
+    check_dimensions_match(self.width, self.height, width, height)
+  }
+
+  fn process(&mut self, row: Yuva422p12Row<'_>) -> Result<(), Self::Error> {
+    yuva422p_high_bit_process::<12, _, _, _, _>(
+      self,
+      row.row(),
+      row.y(),
+      row.u_half(),
+      row.v_half(),
+      row.a(),
+      row.matrix(),
+      row.full_range(),
+      RowSlice::Y12,
+      RowSlice::UHalf12,
+      RowSlice::VHalf12,
+      RowSlice::AFull12,
+      yuv420p12_to_rgb_row,
+      yuv420p12_to_rgb_u16_row,
+      yuva420p12_to_rgba_row,
+      yuva420p12_to_rgba_u16_row,
+    )
+  }
+}
+
 // ---- Yuva422p16 impl --------------------------------------------------
 
 impl<'a> MixedSinker<'a, Yuva422p16> {

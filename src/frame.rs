@@ -4100,9 +4100,10 @@ pub type Yuv444p16Frame<'a> = Yuv444pFrame16<'a, 16>;
 #[non_exhaustive]
 pub enum Yuva444pFrame16Error {
   /// `BITS` was not one of the supported depths. Yuva444p Tranche 1
-  /// only ships `BITS == 10`; later tranches will widen the set as
-  /// the corresponding YUVA pixel formats land.
-  #[error("unsupported BITS ({bits}) for Yuva444pFrame16; must be 9 or 10")]
+  /// shipped `BITS == 10`; subsequent tranches widened the set —
+  /// 8b‑3 added 9, and 8b‑4 adds 12 / 14. 16 lands once its SIMD
+  /// tranche ships.
+  #[error("unsupported BITS ({bits}) for Yuva444pFrame16; must be 9, 10, 12, or 14")]
   UnsupportedBits {
     /// The unsupported value of the `BITS` const parameter.
     bits: u32,
@@ -4256,10 +4257,10 @@ impl<'a, const BITS: u32> Yuva444pFrame16<'a, BITS> {
     v_stride: u32,
     a_stride: u32,
   ) -> Result<Self, Yuva444pFrame16Error> {
-    // Ship 8b‑1 shipped 10-bit; Ship 8b‑3 widened the supported set
-    // to {9, 10}. 12 / 14 / 16 land in later tranches once each
-    // gets its own walker / sinker / SIMD wiring.
-    if BITS != 9 && BITS != 10 {
+    // Ship 8b‑1 shipped 10-bit; Ship 8b‑3 added 9; Ship 8b‑4 adds
+    // 12 / 14 (wiring-only — the 4:4:4 BITS-generic kernels already
+    // cover {9,10,12,14}). 16 lands once its SIMD tranche ships.
+    if BITS != 9 && BITS != 10 && BITS != 12 && BITS != 14 {
       return Err(Yuva444pFrame16Error::UnsupportedBits { bits: BITS });
     }
     if width == 0 || height == 0 {
@@ -4534,6 +4535,14 @@ pub type Yuva444p9Frame<'a> = Yuva444pFrame16<'a, 9>;
 /// over [`Yuva444pFrame16`]`<10>`. The highest-value VFX format —
 /// maps to ProRes 4444+α and similar mastering pipelines.
 pub type Yuva444p10Frame<'a> = Yuva444pFrame16<'a, 10>;
+/// 4:4:4 planar with alpha, 12-bit (`AV_PIX_FMT_YUVA444P12LE`). Alias
+/// over [`Yuva444pFrame16`]`<12>`. Reuses the BITS-generic 4:4:4
+/// kernel templates that already cover `BITS ∈ {9, 10, 12, 14}`.
+pub type Yuva444p12Frame<'a> = Yuva444pFrame16<'a, 12>;
+/// 4:4:4 planar with alpha, 14-bit. Alias over [`Yuva444pFrame16`]`<14>`.
+/// FFmpeg does not ship this depth, but the colconv 4:4:4 BITS-generic
+/// kernel templates already cover it for symmetry with [`Yuv444p14Frame`].
+pub type Yuva444p14Frame<'a> = Yuva444pFrame16<'a, 14>;
 
 /// Errors returned by [`Yuva420pFrame::try_new`].
 ///
@@ -5656,11 +5665,11 @@ impl<'a> Yuva422pFrame<'a> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Error)]
 #[non_exhaustive]
 pub enum Yuva422pFrame16Error {
-  /// `BITS` was not one of the supported depths (9, 10, 16). FFmpeg
-  /// ships `yuva422p9le`, `yuva422p10le`, `yuva422p12le`,
-  /// `yuva422p16le`; this crate currently exposes 9 / 10 / 16 (12 lands
-  /// in a follow-up tranche alongside the SIMD work for that depth).
-  #[error("unsupported BITS ({bits}) for Yuva422pFrame16; must be 9, 10, or 16")]
+  /// `BITS` was not one of the supported depths (9, 10, 12, 16).
+  /// FFmpeg ships `yuva422p9le`, `yuva422p10le`, `yuva422p12le`,
+  /// `yuva422p16le`; Ship 8b‑4 wired 12-bit through the existing
+  /// BITS-generic 4:2:2 row kernel templates.
+  #[error("unsupported BITS ({bits}) for Yuva422pFrame16; must be 9, 10, 12, or 16")]
   UnsupportedBits {
     /// The unsupported value of the `BITS` const parameter.
     bits: u32,
@@ -5822,7 +5831,7 @@ impl<'a, const BITS: u32> Yuva422pFrame16<'a, BITS> {
     v_stride: u32,
     a_stride: u32,
   ) -> Result<Self, Yuva422pFrame16Error> {
-    if BITS != 9 && BITS != 10 && BITS != 16 {
+    if BITS != 9 && BITS != 10 && BITS != 12 && BITS != 16 {
       return Err(Yuva422pFrame16Error::UnsupportedBits { bits: BITS });
     }
     if width == 0 || height == 0 {
@@ -6109,6 +6118,11 @@ pub type Yuva422p9Frame<'a> = Yuva422pFrame16<'a, 9>;
 /// 4:2:2 planar with alpha, 10-bit (`AV_PIX_FMT_YUVA422P10LE`). Alias
 /// over [`Yuva422pFrame16`]`<10>`.
 pub type Yuva422p10Frame<'a> = Yuva422pFrame16<'a, 10>;
+
+/// 4:2:2 planar with alpha, 12-bit (`AV_PIX_FMT_YUVA422P12LE`). Alias
+/// over [`Yuva422pFrame16`]`<12>`. Reuses the BITS-generic 4:2:2
+/// kernel templates that already cover `BITS ∈ {9, 10, 12, 14}`.
+pub type Yuva422p12Frame<'a> = Yuva422pFrame16<'a, 12>;
 
 /// 4:2:2 planar with alpha, 16-bit (`AV_PIX_FMT_YUVA422P16LE`). Alias
 /// over [`Yuva422pFrame16`]`<16>`. Uses the parallel i64 kernel
