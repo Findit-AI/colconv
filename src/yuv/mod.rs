@@ -114,13 +114,24 @@
 //!   the `>> 15`. Scalar stays free; SIMD pays a ~2× chroma compute
 //!   tax in exchange for i32 overflow safety.
 //!
+//! # Shipped (packed RGB sources)
+//!
+//! - [`Rgb24`](crate::yuv::Rgb24) — packed `R, G, B` 8‑bit (3 bytes
+//!   per pixel), single plane. Source-side feed for callers that
+//!   already hold packed RGB and want HSV / luma / RGBA via the
+//!   standard `MixedSinker` channels (Ship 9a).
+//! - [`Bgr24`](crate::yuv::Bgr24) — packed `B, G, R` 8‑bit. Reuses
+//!   [`Rgb24`](crate::yuv::Rgb24)'s sink pipeline behind a
+//!   `bgr_to_rgb_row` swap into the existing `rgb_scratch` buffer.
+//!
 //! # Not yet shipped
 //!
 //! - **Legacy planar** (`Yuv411p`, `Yuv410p`) — DV / Cinepak only;
 //!   uncommon enough that adding them would be speculative.
-//! - **Packed RGB sources** (`Rgb24`, `Bgr24`, `Rgba`, `Bgra`,
-//!   `Rgba1010102`, etc.) — follow‑up. Will land as their own
-//!   family of `*_to` kernels feeding a new row‑shape subtrait.
+//! - **Packed RGB sources with alpha / padding** (`Rgba`, `Bgra`,
+//!   `Argb`, `Abgr`, the `0rgb` / `rgb0` / `0bgr` / `bgr0`
+//!   variants, `Rgba1010102`) — queued for Ship 9b‑9d as the
+//!   follow‑up tranches to Ship 9a.
 //!
 //! # Tracked refactor (no behavior change)
 //!
@@ -139,6 +150,7 @@
 //! § "Cleanup follow‑ups → Walker module deduplication" for the full
 //! discussion (originated from PR #14 review).
 
+mod bgr24;
 mod nv12;
 mod nv16;
 mod nv21;
@@ -153,6 +165,7 @@ mod p216;
 mod p410;
 mod p412;
 mod p416;
+mod rgb24;
 mod yuv420p;
 mod yuv420p10;
 mod yuv420p12;
@@ -190,6 +203,7 @@ mod yuva444p14;
 mod yuva444p16;
 mod yuva444p9;
 
+pub use bgr24::{Bgr24, Bgr24Row, Bgr24Sink, bgr24_to};
 pub use nv12::{Nv12, Nv12Row, Nv12Sink, nv12_to};
 pub use nv16::{Nv16, Nv16Row, Nv16Sink, nv16_to};
 pub use nv21::{Nv21, Nv21Row, Nv21Sink, nv21_to};
@@ -204,6 +218,7 @@ pub use p216::{P216, P216Row, P216Sink, p216_to};
 pub use p410::{P410, P410Row, P410Sink, p410_to};
 pub use p412::{P412, P412Row, P412Sink, p412_to};
 pub use p416::{P416, P416Row, P416Sink, p416_to};
+pub use rgb24::{Rgb24, Rgb24Row, Rgb24Sink, rgb24_to};
 pub use yuv420p::{Yuv420p, Yuv420pRow, Yuv420pSink, yuv420p_to};
 pub use yuv420p9::{Yuv420p9, Yuv420p9Row, Yuv420p9Sink, yuv420p9_to};
 pub use yuv420p10::{Yuv420p10, Yuv420p10Row, Yuv420p10Sink, yuv420p10_to};

@@ -3261,6 +3261,83 @@ pub(crate) fn rgb_to_hsv_row(
   }
 }
 
+/// Q15 RGB → luma coefficients `(k_r, k_g, k_b)` for a given color
+/// matrix. `k_r + k_g + k_b ≈ 32768` (1.0 in Q15) — minor rounding
+/// imbalance is below quantization noise. Used by
+/// [`rgb_to_luma_row`] to derive the Y' channel from packed RGB
+/// sources (Tier 6 / Ship 9a).
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(super) const fn luma_coefficients_q15(matrix: ColorMatrix) -> (i32, i32, i32) {
+  match matrix {
+    // BT.601: Kr=0.299, Kg=0.587, Kb=0.114.
+    ColorMatrix::Bt601 | ColorMatrix::Fcc => (9798, 19235, 3735),
+    // BT.709: Kr=0.2126, Kg=0.7152, Kb=0.0722.
+    ColorMatrix::Bt709 => (6966, 23436, 2366),
+    // BT.2020-NCL: Kr=0.2627, Kg=0.6780, Kb=0.0593.
+    ColorMatrix::Bt2020Ncl => (8607, 22217, 1944),
+    // SMPTE 240M: Kr=0.212, Kg=0.701, Kb=0.087.
+    ColorMatrix::Smpte240m => (6947, 22971, 2851),
+    // YCgCo: Y = 0.25 R + 0.5 G + 0.25 B (lossless integer).
+    ColorMatrix::YCgCo => (8192, 16384, 8192),
+  }
+}
+
+/// Derives luma (Y') from packed RGB into a single-channel `u8`
+/// plane.
+///
+/// `matrix` selects the BT.* coefficient set;
+/// `full_range = true` produces full-range Y' in `[0, 255]`,
+/// `full_range = false` produces limited-range Y' in `[16, 235]`
+/// (the standard YUV studio range).
+///
+/// # Panics
+///
+/// Panics (in any build profile, not just debug) if
+/// `rgb.len() < 3 * width` or `luma_out.len() < width` — the inner
+/// loop indexes `rgb[x * 3 + i]` and `luma_out[x]` directly, so
+/// undersized slices fault on bounds-check rather than producing
+/// undefined output. The `debug_assert!`s below add a clearer
+/// message in debug builds; the bounds check is unconditional.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn rgb_to_luma_row(
+  rgb: &[u8],
+  luma_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  debug_assert!(rgb.len() >= width * 3, "rgb row too short");
+  debug_assert!(luma_out.len() >= width, "luma row too short");
+  let (k_r, k_g, k_b) = luma_coefficients_q15(matrix);
+  const RND: i32 = 1 << 14;
+
+  if full_range {
+    for x in 0..width {
+      let r = rgb[x * 3] as i32;
+      let g = rgb[x * 3 + 1] as i32;
+      let b = rgb[x * 3 + 2] as i32;
+      // Q15 weighted sum: each k_x ≤ 32768, sample ≤ 255, so each
+      // term ≤ 8.4M; sum ≤ 32768 * 255 ≈ 8.4M ≪ i32::MAX.
+      let y = (k_r * r + k_g * g + k_b * b + RND) >> 15;
+      luma_out[x] = y.clamp(0, 255) as u8;
+    }
+  } else {
+    // Limited range: Y_lim = 16 + (Y_full * 219 / 255).
+    // 219 / 255 ≈ 0.85882; * 2^15 ≈ 28142 (Q15).
+    // (`round(219 * 32768 / 255)` evaluates to 28142.)
+    const LIMITED_SCALE_Q15: i32 = 28142;
+    for x in 0..width {
+      let r = rgb[x * 3] as i32;
+      let g = rgb[x * 3 + 1] as i32;
+      let b = rgb[x * 3 + 2] as i32;
+      let y_full = (k_r * r + k_g * g + k_b * b + RND) >> 15;
+      let y_full_clamped = y_full.clamp(0, 255);
+      let y_lim = 16 + ((y_full_clamped * LIMITED_SCALE_Q15 + RND) >> 15);
+      luma_out[x] = y_lim.clamp(0, 255) as u8;
+    }
+  }
+}
+
 /// Scalar RGB → HSV for a single pixel, using the shared division LUTs.
 /// All arithmetic is integer; the two divisions `s = 255*delta/v` and
 /// `h = 30*diff/delta` become `(operand * table[divisor] + RND) >> 12`.

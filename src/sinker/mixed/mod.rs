@@ -42,6 +42,17 @@
 //! - **10/12/16‑bit semi‑planar high‑bit‑packed 4:4:4**:
 //!   [`P410`](crate::yuv::P410), [`P412`](crate::yuv::P412),
 //!   [`P416`](crate::yuv::P416).
+//! - **YUVA (alpha-bearing planar)**: the entire FFmpeg-shipped
+//!   YUVA family — `Yuva420p` / `Yuva420p9/10/16`, `Yuva422p` /
+//!   `Yuva422p9/10/12/16`, `Yuva444p` / `Yuva444p9/10/12/14/16`.
+//!   Source-side alpha pass-through to `with_rgba` /
+//!   `with_rgba_u16`, with native SIMD on every backend.
+//! - **8‑bit packed RGB sources** (Tier 6):
+//!   [`Rgb24`](crate::yuv::Rgb24) (`R, G, B` bytes),
+//!   [`Bgr24`](crate::yuv::Bgr24) (`B, G, R` bytes). The source row
+//!   is already RGB — `with_rgb` is an identity copy / channel
+//!   swap, `with_rgba` appends opaque alpha, `with_luma` derives
+//!   Y' from R/G/B, `with_hsv` reuses the existing kernel.
 //!
 //! High‑bit‑depth source impls expose both `with_rgb` (u8 output) and
 //! `with_rgb_u16` (native‑depth u16 output). Calling `with_rgb_u16` on
@@ -494,6 +505,15 @@ pub enum RowSlice {
   /// (`below == mid`) only when `height < 2`.
   #[display("Bayer16 Below")]
   Bayer16Below,
+  /// Packed `R, G, B` row of an [`Rgb24`](crate::yuv::Rgb24) source.
+  /// `3 * width` `u8` bytes.
+  #[display("RGB packed")]
+  RgbPacked,
+  /// Packed `B, G, R` row of a [`Bgr24`](crate::yuv::Bgr24) source.
+  /// `3 * width` `u8` bytes (channel-order swapped relative to
+  /// [`RgbPacked`](Self::RgbPacked)).
+  #[display("BGR packed")]
+  BgrPacked,
 }
 
 /// A sink that writes any subset of `{RGB, Luma, HSV}` into
@@ -1291,6 +1311,7 @@ pub(super) fn rgb_row_to_luma_row(rgb: &[u8], luma: &mut [u8], coeffs_q8: (u32, 
 // and `PixelSink` impls live in the child modules below.
 
 mod bayer;
+mod packed_rgb_8bit;
 mod planar_8bit;
 mod semi_planar_8bit;
 mod subsampled_4_2_0_high_bit;
