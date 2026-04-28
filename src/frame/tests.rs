@@ -1594,11 +1594,17 @@ fn rgb24_frame_try_new_rejects_zero_dimension() {
   let buf = std::vec![0u8; 16 * 4 * 3];
   assert!(matches!(
     Rgb24Frame::try_new(&buf, 0, 4, 48),
-    Err(Rgb24FrameError::ZeroDimension { width: 0, height: 4 })
+    Err(Rgb24FrameError::ZeroDimension {
+      width: 0,
+      height: 4
+    })
   ));
   assert!(matches!(
     Rgb24Frame::try_new(&buf, 16, 0, 48),
-    Err(Rgb24FrameError::ZeroDimension { width: 16, height: 0 })
+    Err(Rgb24FrameError::ZeroDimension {
+      width: 16,
+      height: 0
+    })
   ));
 }
 
