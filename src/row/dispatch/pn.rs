@@ -11,7 +11,11 @@
 //! since they share the 4:2:0 chroma layout with the planar
 //! yuv420p9/10/12/14/16 family.
 
-#[cfg(any(target_arch = "aarch64", target_arch = "x86_64", target_arch = "wasm32"))]
+#[cfg(any(
+  target_arch = "aarch64",
+  target_arch = "x86_64",
+  target_arch = "wasm32"
+))]
 use crate::row::arch;
 #[cfg(target_arch = "aarch64")]
 use crate::row::neon_available;
@@ -21,9 +25,7 @@ use crate::row::simd128_available;
 use crate::row::{avx2_available, avx512_available, sse41_available};
 use crate::{
   ColorMatrix,
-  row::{
-    rgb_row_bytes, rgb_row_elems, rgba_row_bytes, rgba_row_elems, scalar, uv_full_row_elems,
-  },
+  row::{rgb_row_bytes, rgb_row_elems, rgba_row_bytes, rgba_row_elems, scalar, uv_full_row_elems},
 };
 
 // ---- Pn semi-planar 4:4:4 (P410 / P412 / P416) → RGB --------------------

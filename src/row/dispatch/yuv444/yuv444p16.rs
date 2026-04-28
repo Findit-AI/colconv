@@ -2,7 +2,11 @@
 //! helpers in `super::*` are pinned to {9,10,12,14}, so 16-bit gets
 //! its own dedicated dispatchers (i64 chroma at native u16 output).
 
-#[cfg(any(target_arch = "aarch64", target_arch = "x86_64", target_arch = "wasm32"))]
+#[cfg(any(
+  target_arch = "aarch64",
+  target_arch = "x86_64",
+  target_arch = "wasm32"
+))]
 use crate::row::arch;
 #[cfg(target_arch = "aarch64")]
 use crate::row::neon_available;

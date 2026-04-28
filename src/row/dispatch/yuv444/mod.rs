@@ -13,7 +13,11 @@
 //! RGB wrappers above. They stay `pub(crate)` and live here at the
 //! `yuv444` module root so siblings can reach them via `super::*`.
 
-#[cfg(any(target_arch = "aarch64", target_arch = "x86_64", target_arch = "wasm32"))]
+#[cfg(any(
+  target_arch = "aarch64",
+  target_arch = "x86_64",
+  target_arch = "wasm32"
+))]
 use crate::row::arch;
 #[cfg(target_arch = "aarch64")]
 use crate::row::neon_available;

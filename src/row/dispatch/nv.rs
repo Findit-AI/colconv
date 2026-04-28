@@ -1,7 +1,11 @@
 //! NV-family dispatchers (NV12 / NV21 / NV24 / NV42, both RGB and
 //! RGBA outputs) extracted from `row::mod` for organization.
 
-#[cfg(any(target_arch = "aarch64", target_arch = "x86_64", target_arch = "wasm32"))]
+#[cfg(any(
+  target_arch = "aarch64",
+  target_arch = "x86_64",
+  target_arch = "wasm32"
+))]
 use crate::row::arch;
 #[cfg(target_arch = "aarch64")]
 use crate::row::neon_available;
