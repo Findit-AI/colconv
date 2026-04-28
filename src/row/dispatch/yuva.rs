@@ -1583,27 +1583,23 @@ pub fn yuva420p16_to_rgba_u16_row(
   );
 }
 
-// ---- YUVA 4:4:4 16-bit RGBA dispatchers (Ship 8b-5a) ------------------
+// ---- YUVA 4:4:4 16-bit RGBA dispatchers (Ship 8b-5a/b/c) -------------
 //
 // Yuva444p16 uses dedicated 16-bit kernels rather than the
 // BITS-generic Q15 i32 template (which only covers {9,10,12,14}). The
-// 8-bit RGBA path routes through the scalar 16-bit kernel with the
-// i32 chroma pipeline (output-target scaling keeps `coeff × u_d`
-// inside i32); the native-depth `u16` RGBA path is the one that
-// needs the widened i64 handling. Ship 8b-5a wires the scalar-only
-// path; per-arch SIMD for the alpha-source variant lands in 8b-5b
-// (u8 RGBA) and 8b-5c (u16 RGBA) — until then the dispatcher silently
-// falls through to the scalar reference path even when `use_simd` is
-// true.
+// 8-bit RGBA path routes through the i32 chroma pipeline
+// (output-target scaling keeps `coeff × u_d` inside i32); the
+// native-depth `u16` RGBA path is the one that needs the widened i64
+// handling. Ship 8b-5b adds per-arch SIMD for the u8 path (this
+// dispatcher); 8b-5c will follow with the u16 path.
 
 /// Converts one row of **16-bit** YUVA 4:4:4 to packed **8-bit**
 /// **RGBA**. R / G / B are produced by the same i32 kernel that backs
 /// [`yuv444p16_to_rgba_row`]; the per-pixel alpha byte is **sourced
 /// from `a`** (depth-converted via `a >> 8` to fit `u8`).
 ///
-/// `use_simd` is currently a no-op for this format pending Ship 8b-5b
-/// — every call routes through the scalar 16-bit kernel
-/// (`scalar::yuv_444p16_to_rgba_with_alpha_src_row`).
+/// `use_simd = false` forces the scalar reference path; otherwise
+/// per-arch dispatch matches [`yuv444p16_to_rgba_row`]'s pattern.
 #[cfg_attr(not(tarpaulin), inline(always))]
 #[allow(clippy::too_many_arguments)]
 pub fn yuva444p16_to_rgba_row(
@@ -1615,7 +1611,7 @@ pub fn yuva444p16_to_rgba_row(
   width: usize,
   matrix: ColorMatrix,
   full_range: bool,
-  _use_simd: bool,
+  use_simd: bool,
 ) {
   let rgba_min = rgba_row_bytes(width);
   assert!(y.len() >= width, "y row too short");
@@ -1623,6 +1619,63 @@ pub fn yuva444p16_to_rgba_row(
   assert!(v.len() >= width, "v row too short");
   assert!(a.len() >= width, "a row too short");
   assert!(rgba_out.len() >= rgba_min, "rgba_out row too short");
+
+  if use_simd {
+    cfg_select! {
+      target_arch = "aarch64" => {
+        if neon_available() {
+          // SAFETY: NEON verified.
+          unsafe {
+            arch::neon::yuv_444p16_to_rgba_with_alpha_src_row(
+              y, u, v, a, rgba_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+      },
+      target_arch = "x86_64" => {
+        if avx512_available() {
+          // SAFETY: AVX‑512BW verified.
+          unsafe {
+            arch::x86_avx512::yuv_444p16_to_rgba_with_alpha_src_row(
+              y, u, v, a, rgba_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+        if avx2_available() {
+          // SAFETY: AVX2 verified.
+          unsafe {
+            arch::x86_avx2::yuv_444p16_to_rgba_with_alpha_src_row(
+              y, u, v, a, rgba_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+        if sse41_available() {
+          // SAFETY: SSE4.1 verified.
+          unsafe {
+            arch::x86_sse41::yuv_444p16_to_rgba_with_alpha_src_row(
+              y, u, v, a, rgba_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+      },
+      target_arch = "wasm32" => {
+        if simd128_available() {
+          // SAFETY: simd128 compile‑time verified.
+          unsafe {
+            arch::wasm_simd128::yuv_444p16_to_rgba_with_alpha_src_row(
+              y, u, v, a, rgba_out, width, matrix, full_range,
+            );
+          }
+          return;
+        }
+      },
+      _ => {}
+    }
+  }
 
   scalar::yuv_444p16_to_rgba_with_alpha_src_row(y, u, v, a, rgba_out, width, matrix, full_range);
 }
