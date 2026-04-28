@@ -5760,6 +5760,31 @@ pub(crate) unsafe fn bgrx_to_rgba_row(bgrx: &[u8], rgba_out: &mut [u8], width: u
 
 // ===== 10-bit packed RGB shuffles (Ship 9e) ==============================
 
+/// LE-explicit `u32x4` load from a packed-X2*10 byte stream.
+///
+/// `vld1q_u32` interprets the 16 source bytes as `u32` lanes in
+/// host-endian order. The X2RGB10 / X2BGR10 source contract is
+/// documented as **little-endian** (matching the scalar's
+/// `u32::from_le_bytes`), so on big-endian aarch64 (rare —
+/// `aarch64_be-*` custom targets) the host-endian load would put
+/// the bytes in reversed positions within each lane, corrupting
+/// every subsequent shift-and-mask. The `vrev32q_u8` on the
+/// big-endian branch byte-reverses each `u32` lane back to the
+/// LE byte ordering. On every standard aarch64 target
+/// (LE) the `cfg!` evaluates to `false` at compile time and the
+/// load reduces to a plain `vld1q_u32`.
+#[inline(always)]
+unsafe fn x2_load_le_u32x4(ptr: *const u8) -> uint32x4_t {
+  unsafe {
+    let raw = vld1q_u32(ptr as *const u32);
+    if cfg!(target_endian = "big") {
+      vreinterpretq_u32_u8(vrev32q_u8(vreinterpretq_u8_u32(raw)))
+    } else {
+      raw
+    }
+  }
+}
+
 /// Extracts a 10-bit channel as a `u8` (top 8 bits) from each of 4
 /// `u32` pixels in a `uint32x4_t`. Returns 4 `u16` lanes packed in a
 /// `uint16x4_t`. The dropped low 2 bits of each 10-bit value match
@@ -5814,10 +5839,10 @@ pub(crate) unsafe fn x2rgb10_to_rgb_row(x2rgb10: &[u8], rgb_out: &mut [u8], widt
   unsafe {
     let mut x = 0usize;
     while x + 16 <= width {
-      let p0 = vld1q_u32(x2rgb10.as_ptr().add(x * 4) as *const u32);
-      let p1 = vld1q_u32(x2rgb10.as_ptr().add(x * 4 + 16) as *const u32);
-      let p2 = vld1q_u32(x2rgb10.as_ptr().add(x * 4 + 32) as *const u32);
-      let p3 = vld1q_u32(x2rgb10.as_ptr().add(x * 4 + 48) as *const u32);
+      let p0 = x2_load_le_u32x4(x2rgb10.as_ptr().add(x * 4));
+      let p1 = x2_load_le_u32x4(x2rgb10.as_ptr().add(x * 4 + 16));
+      let p2 = x2_load_le_u32x4(x2rgb10.as_ptr().add(x * 4 + 32));
+      let p3 = x2_load_le_u32x4(x2rgb10.as_ptr().add(x * 4 + 48));
 
       // X2RGB10: R at >>22, G at >>12, B at >>2 (top 8 of 10-bit).
       let r_lo = vcombine_u16(
@@ -5882,10 +5907,10 @@ pub(crate) unsafe fn x2rgb10_to_rgba_row(x2rgb10: &[u8], rgba_out: &mut [u8], wi
     let alpha = vdupq_n_u8(0xFF);
     let mut x = 0usize;
     while x + 16 <= width {
-      let p0 = vld1q_u32(x2rgb10.as_ptr().add(x * 4) as *const u32);
-      let p1 = vld1q_u32(x2rgb10.as_ptr().add(x * 4 + 16) as *const u32);
-      let p2 = vld1q_u32(x2rgb10.as_ptr().add(x * 4 + 32) as *const u32);
-      let p3 = vld1q_u32(x2rgb10.as_ptr().add(x * 4 + 48) as *const u32);
+      let p0 = x2_load_le_u32x4(x2rgb10.as_ptr().add(x * 4));
+      let p1 = x2_load_le_u32x4(x2rgb10.as_ptr().add(x * 4 + 16));
+      let p2 = x2_load_le_u32x4(x2rgb10.as_ptr().add(x * 4 + 32));
+      let p3 = x2_load_le_u32x4(x2rgb10.as_ptr().add(x * 4 + 48));
 
       let r_lo = vcombine_u16(
         x2_extract_10bit_u8_lane(p0, 22),
@@ -5948,8 +5973,8 @@ pub(crate) unsafe fn x2rgb10_to_rgb_u16_row(x2rgb10: &[u8], rgb_out: &mut [u16],
   unsafe {
     let mut x = 0usize;
     while x + 8 <= width {
-      let p0 = vld1q_u32(x2rgb10.as_ptr().add(x * 4) as *const u32);
-      let p1 = vld1q_u32(x2rgb10.as_ptr().add(x * 4 + 16) as *const u32);
+      let p0 = x2_load_le_u32x4(x2rgb10.as_ptr().add(x * 4));
+      let p1 = x2_load_le_u32x4(x2rgb10.as_ptr().add(x * 4 + 16));
 
       // Channel low bit positions: R at 20, G at 10, B at 0.
       let r = vcombine_u16(
@@ -5992,10 +6017,10 @@ pub(crate) unsafe fn x2bgr10_to_rgb_row(x2bgr10: &[u8], rgb_out: &mut [u8], widt
   unsafe {
     let mut x = 0usize;
     while x + 16 <= width {
-      let p0 = vld1q_u32(x2bgr10.as_ptr().add(x * 4) as *const u32);
-      let p1 = vld1q_u32(x2bgr10.as_ptr().add(x * 4 + 16) as *const u32);
-      let p2 = vld1q_u32(x2bgr10.as_ptr().add(x * 4 + 32) as *const u32);
-      let p3 = vld1q_u32(x2bgr10.as_ptr().add(x * 4 + 48) as *const u32);
+      let p0 = x2_load_le_u32x4(x2bgr10.as_ptr().add(x * 4));
+      let p1 = x2_load_le_u32x4(x2bgr10.as_ptr().add(x * 4 + 16));
+      let p2 = x2_load_le_u32x4(x2bgr10.as_ptr().add(x * 4 + 32));
+      let p3 = x2_load_le_u32x4(x2bgr10.as_ptr().add(x * 4 + 48));
 
       let r_lo = vcombine_u16(
         x2_extract_10bit_u8_lane(p0, 2),
@@ -6052,10 +6077,10 @@ pub(crate) unsafe fn x2bgr10_to_rgba_row(x2bgr10: &[u8], rgba_out: &mut [u8], wi
     let alpha = vdupq_n_u8(0xFF);
     let mut x = 0usize;
     while x + 16 <= width {
-      let p0 = vld1q_u32(x2bgr10.as_ptr().add(x * 4) as *const u32);
-      let p1 = vld1q_u32(x2bgr10.as_ptr().add(x * 4 + 16) as *const u32);
-      let p2 = vld1q_u32(x2bgr10.as_ptr().add(x * 4 + 32) as *const u32);
-      let p3 = vld1q_u32(x2bgr10.as_ptr().add(x * 4 + 48) as *const u32);
+      let p0 = x2_load_le_u32x4(x2bgr10.as_ptr().add(x * 4));
+      let p1 = x2_load_le_u32x4(x2bgr10.as_ptr().add(x * 4 + 16));
+      let p2 = x2_load_le_u32x4(x2bgr10.as_ptr().add(x * 4 + 32));
+      let p3 = x2_load_le_u32x4(x2bgr10.as_ptr().add(x * 4 + 48));
 
       let r_lo = vcombine_u16(
         x2_extract_10bit_u8_lane(p0, 2),
@@ -6111,8 +6136,8 @@ pub(crate) unsafe fn x2bgr10_to_rgb_u16_row(x2bgr10: &[u8], rgb_out: &mut [u16],
   unsafe {
     let mut x = 0usize;
     while x + 8 <= width {
-      let p0 = vld1q_u32(x2bgr10.as_ptr().add(x * 4) as *const u32);
-      let p1 = vld1q_u32(x2bgr10.as_ptr().add(x * 4 + 16) as *const u32);
+      let p0 = x2_load_le_u32x4(x2bgr10.as_ptr().add(x * 4));
+      let p1 = x2_load_le_u32x4(x2bgr10.as_ptr().add(x * 4 + 16));
 
       // X2BGR10: R at low 10 bits, G at 10..19, B at 20..29.
       let r = vcombine_u16(
