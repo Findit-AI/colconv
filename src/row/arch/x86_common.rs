@@ -728,7 +728,10 @@ unsafe fn pack_u32x4_quad_to_u8x16(v0: __m128i, v1: __m128i, v2: __m128i, v3: __
 /// - `input_ptr` must point to at least 64 readable bytes.
 /// - `output_ptr` must point to at least 48 writable bytes.
 /// - `input_ptr` / `output_ptr` ranges must not alias.
-/// - SSSE3 must be available (caller's `target_feature`).
+/// - **SSE4.1** must be available (caller's `target_feature`; or a
+///   superset such as `avx2` / `avx512bw`). The two-stage narrow
+///   inside [`pack_u32x4_quad_to_u8x16`] uses `_mm_packus_epi32`,
+///   which is SSE4.1 — SSSE3 alone is not enough.
 #[inline(always)]
 pub(super) unsafe fn x2rgb10_to_rgb_16_pixels(input_ptr: *const u8, output_ptr: *mut u8) {
   unsafe {
@@ -771,7 +774,10 @@ pub(super) unsafe fn x2rgb10_to_rgb_16_pixels(input_ptr: *const u8, output_ptr: 
 /// - `input_ptr` must point to at least 64 readable bytes.
 /// - `output_ptr` must point to at least 64 writable bytes.
 /// - `input_ptr` / `output_ptr` ranges must not alias.
-/// - SSSE3 must be available (caller's `target_feature`).
+/// - **SSE4.1** must be available (caller's `target_feature`; or a
+///   superset such as `avx2` / `avx512bw`). See
+///   [`x2rgb10_to_rgb_16_pixels`] for the rationale —
+///   `_mm_packus_epi32` inside the shared narrow helper is SSE4.1.
 #[inline(always)]
 pub(super) unsafe fn x2rgb10_to_rgba_16_pixels(input_ptr: *const u8, output_ptr: *mut u8) {
   unsafe {
@@ -813,7 +819,8 @@ pub(super) unsafe fn x2rgb10_to_rgba_16_pixels(input_ptr: *const u8, output_ptr:
 /// - `input_ptr` must point to at least 32 readable bytes.
 /// - `output_ptr` must point to at least 48 writable bytes.
 /// - `input_ptr` / `output_ptr` ranges must not alias.
-/// - SSSE3 must be available.
+/// - **SSE4.1** must be available — `_mm_packus_epi32` is SSE4.1,
+///   not SSSE3.
 #[inline(always)]
 pub(super) unsafe fn x2rgb10_to_rgb_u16_8_pixels(input_ptr: *const u8, output_ptr: *mut u8) {
   unsafe {

@@ -16,7 +16,7 @@ use crate::row::simd128_available;
 use crate::row::{avx2_available, avx512_available, sse41_available};
 use crate::{
   ColorMatrix,
-  row::{rgb_row_bytes, rgba_row_bytes, scalar},
+  row::{rgb_row_bytes, rgb_row_elems, rgba_row_bytes, scalar},
 };
 
 /// Converts one row of packed RGB to planar HSV (OpenCV 8‑bit
@@ -968,7 +968,9 @@ pub fn x2rgb10_to_rgba_row(x2rgb10: &[u8], rgba_out: &mut [u8], width: usize, us
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub fn x2rgb10_to_rgb_u16_row(x2rgb10: &[u8], rgb_out: &mut [u16], width: usize, use_simd: bool) {
   let in_min = rgba_row_bytes(width);
-  let rgb_min = rgb_row_bytes(width);
+  // u16 RGB output is sized in `u16` *elements*, not bytes — match
+  // the rest of the high-bit-depth dispatchers.
+  let rgb_min = rgb_row_elems(width);
   assert!(x2rgb10.len() >= in_min, "x2rgb10 row too short");
   assert!(rgb_out.len() >= rgb_min, "rgb_out row too short");
 
@@ -1095,7 +1097,8 @@ pub fn x2bgr10_to_rgba_row(x2bgr10: &[u8], rgba_out: &mut [u8], width: usize, us
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub fn x2bgr10_to_rgb_u16_row(x2bgr10: &[u8], rgb_out: &mut [u16], width: usize, use_simd: bool) {
   let in_min = rgba_row_bytes(width);
-  let rgb_min = rgb_row_bytes(width);
+  // u16 RGB output is sized in `u16` *elements*, not bytes.
+  let rgb_min = rgb_row_elems(width);
   assert!(x2bgr10.len() >= in_min, "x2bgr10 row too short");
   assert!(rgb_out.len() >= rgb_min, "rgb_out row too short");
 
