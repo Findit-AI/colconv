@@ -14,6 +14,7 @@ use crate::row::neon_available;
 use crate::row::simd128_available;
 #[cfg(target_arch = "x86_64")]
 use crate::row::{avx2_available, avx512_available, sse41_available};
+use crate::ColorMatrix;
 use crate::row::{rgb_row_bytes, scalar};
 
 /// Converts one row of packed RGB to planar HSV (OpenCV 8‑bit
@@ -89,6 +90,33 @@ pub fn rgb_to_hsv_row(
   }
 
   scalar::rgb_to_hsv_row(rgb, h_out, s_out, v_out, width);
+}
+
+/// Derives **luma** (Y') from packed RGB. Used by Tier 6 packed-RGB
+/// source sinkers' `with_luma` path (the source has no Y plane to
+/// memcpy, so luma must be computed from R/G/B). See
+/// `scalar::rgb_to_luma_row` for semantics — `matrix` selects the
+/// BT.* coefficient set, `full_range` chooses Y' ∈ `[0, 255]` vs
+/// `[16, 235]`.
+///
+/// `use_simd` is currently a no-op — scalar is the only available
+/// path for this kernel today. SIMD wiring lands in a follow-up
+/// once enough Tier 6 callers exist to justify the per-arch work.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn rgb_to_luma_row(
+  rgb: &[u8],
+  luma_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  _use_simd: bool,
+) {
+  let rgb_min = rgb_row_bytes(width);
+  assert!(rgb.len() >= rgb_min, "rgb row too short");
+  assert!(luma_out.len() >= width, "luma row too short");
+
+  scalar::rgb_to_luma_row(rgb, luma_out, width, matrix, full_range);
 }
 
 /// Rewrites a row of packed BGR to packed RGB by swapping the outer

@@ -139,6 +139,7 @@
 //! § "Cleanup follow‑ups → Walker module deduplication" for the full
 //! discussion (originated from PR #14 review).
 
+mod bgr24;
 mod nv12;
 mod nv16;
 mod nv21;
@@ -189,7 +190,9 @@ mod yuva444p12;
 mod yuva444p14;
 mod yuva444p16;
 mod yuva444p9;
+mod rgb24;
 
+pub use bgr24::{Bgr24, Bgr24Row, Bgr24Sink, bgr24_to};
 pub use nv12::{Nv12, Nv12Row, Nv12Sink, nv12_to};
 pub use nv16::{Nv16, Nv16Row, Nv16Sink, nv16_to};
 pub use nv21::{Nv21, Nv21Row, Nv21Sink, nv21_to};
@@ -240,3 +243,4 @@ pub use yuva444p10::{Yuva444p10, Yuva444p10Row, Yuva444p10Sink, yuva444p10_to};
 pub use yuva444p12::{Yuva444p12, Yuva444p12Row, Yuva444p12Sink, yuva444p12_to};
 pub use yuva444p14::{Yuva444p14, Yuva444p14Row, Yuva444p14Sink, yuva444p14_to};
 pub use yuva444p16::{Yuva444p16, Yuva444p16Row, Yuva444p16Sink, yuva444p16_to};
+pub use rgb24::{Rgb24, Rgb24Row, Rgb24Sink, rgb24_to};

@@ -494,6 +494,15 @@ pub enum RowSlice {
   /// (`below == mid`) only when `height < 2`.
   #[display("Bayer16 Below")]
   Bayer16Below,
+  /// Packed `R, G, B` row of an [`Rgb24`](crate::yuv::Rgb24) source.
+  /// `3 * width` `u8` bytes.
+  #[display("RGB packed")]
+  RgbPacked,
+  /// Packed `B, G, R` row of a [`Bgr24`](crate::yuv::Bgr24) source.
+  /// `3 * width` `u8` bytes (channel-order swapped relative to
+  /// [`RgbPacked`](Self::RgbPacked)).
+  #[display("BGR packed")]
+  BgrPacked,
 }
 
 /// A sink that writes any subset of `{RGB, Luma, HSV}` into
@@ -1291,6 +1300,7 @@ pub(super) fn rgb_row_to_luma_row(rgb: &[u8], luma: &mut [u8], coeffs_q8: (u32, 
 // and `PixelSink` impls live in the child modules below.
 
 mod bayer;
+mod packed_rgb_8bit;
 mod planar_8bit;
 mod semi_planar_8bit;
 mod subsampled_4_2_0_high_bit;

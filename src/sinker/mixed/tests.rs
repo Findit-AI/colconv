@@ -9431,3 +9431,257 @@ fn yuva444p_rgba_simd_matches_scalar_with_random_yuva() {
     }
   }
 }
+
+// ---- Tier 6 — Rgb24 / Bgr24 (Ship 9a) ----------------------------
+
+fn solid_rgb24_frame(width: u32, height: u32, r: u8, g: u8, b: u8) -> Vec<u8> {
+  let w = width as usize;
+  let h = height as usize;
+  let mut buf = std::vec![0u8; w * h * 3];
+  for px in buf.chunks_mut(3) {
+    px[0] = r;
+    px[1] = g;
+    px[2] = b;
+  }
+  buf
+}
+
+#[test]
+fn rgb24_frame_try_new_validates_stride() {
+  let buf = std::vec![0u8; 16 * 4 * 3];
+  // Valid: stride = 3 * width.
+  assert!(Rgb24Frame::try_new(&buf, 16, 4, 48).is_ok());
+  // Stride too small.
+  assert!(Rgb24Frame::try_new(&buf, 16, 4, 47).is_err());
+  // Plane too short for declared geometry.
+  let small = std::vec![0u8; 16 * 3];
+  assert!(Rgb24Frame::try_new(&small, 16, 4, 48).is_err());
+  // Zero dimension.
+  assert!(Rgb24Frame::try_new(&buf, 0, 4, 48).is_err());
+}
+
+#[test]
+fn rgb24_with_rgb_passes_through_identity() {
+  let pix = solid_rgb24_frame(16, 4, 200, 100, 50);
+  let src = Rgb24Frame::try_new(&pix, 16, 4, 48).unwrap();
+
+  let mut out = std::vec![0u8; 16 * 4 * 3];
+  let mut sink = MixedSinker::<Rgb24>::new(16, 4).with_rgb(&mut out).unwrap();
+  rgb24_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+
+  assert_eq!(out, pix);
+}
+
+#[test]
+fn rgb24_with_rgba_appends_opaque_alpha() {
+  let pix = solid_rgb24_frame(16, 4, 200, 100, 50);
+  let src = Rgb24Frame::try_new(&pix, 16, 4, 48).unwrap();
+
+  let mut rgba = std::vec![0u8; 16 * 4 * 4];
+  let mut sink = MixedSinker::<Rgb24>::new(16, 4)
+    .with_rgba(&mut rgba)
+    .unwrap();
+  rgb24_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+
+  for px in rgba.chunks(4) {
+    assert_eq!(px, [200, 100, 50, 0xFF]);
+  }
+}
+
+#[test]
+fn rgb24_with_luma_derives_bt709_full_range() {
+  // Pure red full-range BT.709: Y = 0.2126 * 255 ≈ 54.21 → rounded
+  // to 54 by Q15 math.
+  let pix = solid_rgb24_frame(16, 4, 255, 0, 0);
+  let src = Rgb24Frame::try_new(&pix, 16, 4, 48).unwrap();
+
+  let mut luma = std::vec![0u8; 16 * 4];
+  let mut sink = MixedSinker::<Rgb24>::new(16, 4)
+    .with_luma(&mut luma)
+    .unwrap();
+  rgb24_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+
+  // 0.2126 × 255 = 54.213 → 54 after rounding.
+  for &y in &luma {
+    assert!(y.abs_diff(54) <= 1, "got Y={y}");
+  }
+}
+
+#[test]
+fn rgb24_with_luma_derives_bt601_full_range() {
+  // Pure green BT.601: Y = 0.587 * 255 ≈ 149.685 → 150 rounded.
+  let pix = solid_rgb24_frame(16, 4, 0, 255, 0);
+  let src = Rgb24Frame::try_new(&pix, 16, 4, 48).unwrap();
+
+  let mut luma = std::vec![0u8; 16 * 4];
+  let mut sink = MixedSinker::<Rgb24>::new(16, 4)
+    .with_luma(&mut luma)
+    .unwrap();
+  rgb24_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+
+  for &y in &luma {
+    assert!(y.abs_diff(150) <= 1, "got Y={y}");
+  }
+}
+
+#[test]
+fn rgb24_with_luma_limited_range_falls_in_studio_band() {
+  // Pure white full-range maps to Y=255 full → 235 limited.
+  let pix = solid_rgb24_frame(16, 4, 255, 255, 255);
+  let src = Rgb24Frame::try_new(&pix, 16, 4, 48).unwrap();
+
+  let mut luma = std::vec![0u8; 16 * 4];
+  let mut sink = MixedSinker::<Rgb24>::new(16, 4)
+    .with_luma(&mut luma)
+    .unwrap();
+  rgb24_to(&src, false, ColorMatrix::Bt709, &mut sink).unwrap();
+
+  for &y in &luma {
+    assert!((234..=236).contains(&y), "got Y={y}");
+  }
+
+  // Pure black → Y=16 (limited-range black floor).
+  let black = solid_rgb24_frame(16, 4, 0, 0, 0);
+  let src = Rgb24Frame::try_new(&black, 16, 4, 48).unwrap();
+  let mut luma = std::vec![0u8; 16 * 4];
+  let mut sink = MixedSinker::<Rgb24>::new(16, 4)
+    .with_luma(&mut luma)
+    .unwrap();
+  rgb24_to(&src, false, ColorMatrix::Bt709, &mut sink).unwrap();
+
+  for &y in &luma {
+    assert_eq!(y, 16);
+  }
+}
+
+#[test]
+fn rgb24_with_hsv_matches_existing_kernel() {
+  // Pure red → H=0, S=255, V=255 (OpenCV 8-bit HSV uses H ∈ [0, 179]).
+  let pix = solid_rgb24_frame(16, 4, 255, 0, 0);
+  let src = Rgb24Frame::try_new(&pix, 16, 4, 48).unwrap();
+
+  let mut h = std::vec![0u8; 16 * 4];
+  let mut s = std::vec![0u8; 16 * 4];
+  let mut v = std::vec![0u8; 16 * 4];
+  let mut sink = MixedSinker::<Rgb24>::new(16, 4)
+    .with_hsv(&mut h, &mut s, &mut v)
+    .unwrap();
+  rgb24_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+
+  for i in 0..16 * 4 {
+    assert_eq!(h[i], 0, "px {i}");
+    assert_eq!(s[i], 255, "px {i}");
+    assert_eq!(v[i], 255, "px {i}");
+  }
+}
+
+// ---- Bgr24 ---------------------------------------------------------
+
+fn solid_bgr24_frame(width: u32, height: u32, b: u8, g: u8, r: u8) -> Vec<u8> {
+  // Stored byte order is B, G, R per pixel.
+  let w = width as usize;
+  let h = height as usize;
+  let mut buf = std::vec![0u8; w * h * 3];
+  for px in buf.chunks_mut(3) {
+    px[0] = b;
+    px[1] = g;
+    px[2] = r;
+  }
+  buf
+}
+
+#[test]
+fn bgr24_with_rgb_swaps_channel_order() {
+  // Source byte order B=50, G=100, R=200 → expected RGB output:
+  // R=200, G=100, B=50.
+  let pix = solid_bgr24_frame(16, 4, 50, 100, 200);
+  let src = Bgr24Frame::try_new(&pix, 16, 4, 48).unwrap();
+
+  let mut rgb_out = std::vec![0u8; 16 * 4 * 3];
+  let mut sink = MixedSinker::<Bgr24>::new(16, 4)
+    .with_rgb(&mut rgb_out)
+    .unwrap();
+  bgr24_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+
+  for px in rgb_out.chunks(3) {
+    assert_eq!(px, [200, 100, 50]);
+  }
+}
+
+#[test]
+fn bgr24_with_rgba_swaps_then_appends_opaque_alpha() {
+  let pix = solid_bgr24_frame(16, 4, 50, 100, 200);
+  let src = Bgr24Frame::try_new(&pix, 16, 4, 48).unwrap();
+
+  let mut rgba = std::vec![0u8; 16 * 4 * 4];
+  let mut sink = MixedSinker::<Bgr24>::new(16, 4)
+    .with_rgba(&mut rgba)
+    .unwrap();
+  bgr24_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+
+  for px in rgba.chunks(4) {
+    assert_eq!(px, [200, 100, 50, 0xFF]);
+  }
+}
+
+#[test]
+fn bgr24_luma_matches_rgb24_after_swap() {
+  // Same pixel data interpreted as Rgb24 vs Bgr24 should produce the
+  // same luma values (the BGR sinker swaps to RGB before deriving Y).
+  let bgr_pix = solid_bgr24_frame(16, 4, 50, 100, 200); // B, G, R
+  let rgb_pix = solid_rgb24_frame(16, 4, 200, 100, 50); // R, G, B
+  let bgr_src = Bgr24Frame::try_new(&bgr_pix, 16, 4, 48).unwrap();
+  let rgb_src = Rgb24Frame::try_new(&rgb_pix, 16, 4, 48).unwrap();
+
+  let mut bgr_luma = std::vec![0u8; 16 * 4];
+  let mut s_bgr = MixedSinker::<Bgr24>::new(16, 4)
+    .with_luma(&mut bgr_luma)
+    .unwrap();
+  bgr24_to(&bgr_src, true, ColorMatrix::Bt709, &mut s_bgr).unwrap();
+
+  let mut rgb_luma = std::vec![0u8; 16 * 4];
+  let mut s_rgb = MixedSinker::<Rgb24>::new(16, 4)
+    .with_luma(&mut rgb_luma)
+    .unwrap();
+  rgb24_to(&rgb_src, true, ColorMatrix::Bt709, &mut s_rgb).unwrap();
+
+  assert_eq!(bgr_luma, rgb_luma);
+}
+
+#[test]
+fn rgb24_random_input_produces_stable_output() {
+  // Smoke test that non-uniform input doesn't crash and produces
+  // well-formed output across all sinks.
+  let w = 31usize;
+  let h = 5usize;
+  let mut pix = std::vec![0u8; w * h * 3];
+  pseudo_random_u8(&mut pix, 0xC001_C0DE);
+  let src = Rgb24Frame::try_new(&pix, w as u32, h as u32, (w * 3) as u32).unwrap();
+
+  let mut rgb = std::vec![0u8; w * h * 3];
+  let mut rgba = std::vec![0u8; w * h * 4];
+  let mut luma = std::vec![0u8; w * h];
+  let mut hh = std::vec![0u8; w * h];
+  let mut ss = std::vec![0u8; w * h];
+  let mut vv = std::vec![0u8; w * h];
+  let mut sink = MixedSinker::<Rgb24>::new(w, h)
+    .with_rgb(&mut rgb)
+    .unwrap()
+    .with_rgba(&mut rgba)
+    .unwrap()
+    .with_luma(&mut luma)
+    .unwrap()
+    .with_hsv(&mut hh, &mut ss, &mut vv)
+    .unwrap();
+  rgb24_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+
+  // RGB is identity-copied.
+  assert_eq!(rgb, pix);
+  // RGBA's RGB channels match RGB output, and alpha is 0xFF.
+  for (i, px) in rgba.chunks(4).enumerate() {
+    assert_eq!(px[0], pix[i * 3]);
+    assert_eq!(px[1], pix[i * 3 + 1]);
+    assert_eq!(px[2], pix[i * 3 + 2]);
+    assert_eq!(px[3], 0xFF);
+  }
+}
