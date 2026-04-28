@@ -58,6 +58,13 @@
 //!   [`Xbgr`](crate::yuv::Xbgr) / [`Bgrx`](crate::yuv::Bgrx)
 //!   (4-byte packed RGB with one ignored padding byte at the leading
 //!   or trailing position).
+//! - **10‑bit packed RGB sources** (Tier 6 — Ship 9e):
+//!   [`X2Rgb10`](crate::yuv::X2Rgb10) and
+//!   [`X2Bgr10`](crate::yuv::X2Bgr10). Each pixel is a 32-bit LE word
+//!   with `(MSB) 2X | 10c2 | 10c1 | 10c0 (LSB)` (R/G/B for X2RGB10,
+//!   B/G/R for X2BGR10). Both u8 outputs (down-shifted 10→8) and
+//!   native u16 outputs (`with_rgb_u16`, value range `[0, 1023]`)
+//!   are supported.
 //!   The source row is already RGB — `with_rgb` is an identity copy /
 //!   channel swap / drop-alpha-or-padding, `with_rgba` is a memcpy /
 //!   channel reorder (alpha passed through for the alpha-bearing
@@ -564,6 +571,18 @@ pub enum RowSlice {
   /// + reversed RGB order vs [`RgbxPacked`](Self::RgbxPacked).
   #[display("BGRX packed")]
   BgrxPacked,
+  /// Packed `X2RGB10` LE row of an
+  /// [`X2Rgb10`](crate::yuv::X2Rgb10) source. `4 * width` `u8` bytes
+  /// (one little-endian `u32` per pixel with `(MSB) 2X | 10R | 10G |
+  /// 10B (LSB)` packing).
+  #[display("X2RGB10 packed")]
+  X2Rgb10Packed,
+  /// Packed `X2BGR10` LE row of an
+  /// [`X2Bgr10`](crate::yuv::X2Bgr10) source. `4 * width` `u8` bytes
+  /// — channel positions reversed relative to
+  /// [`X2Rgb10Packed`](Self::X2Rgb10Packed).
+  #[display("X2BGR10 packed")]
+  X2Bgr10Packed,
 }
 
 /// A sink that writes any subset of `{RGB, Luma, HSV}` into
@@ -1361,6 +1380,7 @@ pub(super) fn rgb_row_to_luma_row(rgb: &[u8], luma: &mut [u8], coeffs_q8: (u32, 
 // and `PixelSink` impls live in the child modules below.
 
 mod bayer;
+mod packed_rgb_10bit;
 mod packed_rgb_8bit;
 mod planar_8bit;
 mod semi_planar_8bit;

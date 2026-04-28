@@ -139,16 +139,22 @@
 //!   position (FFmpeg `0rgb` / `rgb0` / `0bgr` / `bgr0`). The padding
 //!   byte's value is undefined on read; `with_rgba` output forces
 //!   alpha to `0xFF` rather than passing through (Ship 9d).
+//! - [`X2Rgb10`] / [`X2Bgr10`] — 10-bit packed RGB (FFmpeg
+//!   `X2RGB10LE` / `X2BGR10LE`). Each pixel is a 32-bit
+//!   little-endian word with `(MSB) 2X | 10R | 10G | 10B (LSB)`
+//!   (or BGR-ordered). The 2-bit field is **padding**, not real
+//!   alpha — `with_rgba` forces alpha to `0xFF`. Both u8 outputs
+//!   (down-shifted 10→8) and native u16 outputs (`with_rgb_u16`,
+//!   value range `[0, 1023]`) are supported (Ship 9e — closes
+//!   Tier 6).
 //!
 //! # Not yet shipped
 //!
 //! - **Legacy planar** (`Yuv411p`, `Yuv410p`) — DV / Cinepak only;
 //!   uncommon enough that adding them would be speculative.
-//! - **10-bit packed RGB** (`Rgba1010102` / `X2RGB10` / `X2BGR10`
-//!   variants — 10 bits per channel + 2-bit alpha or padding packed
-//!   into a `u32`) — bit-level extraction kernel, structurally
-//!   different from the 8-bit byte-shuffle family; deferred to a
-//!   follow-up.
+//! - **Big-endian 10-bit packed RGB** (`X2RGB10BE` / `X2BGR10BE`).
+//!   Most modern systems are LE; BE can be added as a thin wrapper
+//!   over the LE kernel (byte-swap on read) when a caller needs it.
 //!
 //! # Tracked refactor (no behavior change)
 //!
@@ -189,6 +195,8 @@ mod p416;
 mod rgb24;
 mod rgba;
 mod rgbx;
+mod x2bgr10;
+mod x2rgb10;
 mod xbgr;
 mod xrgb;
 mod yuv420p;
@@ -250,6 +258,8 @@ pub use p416::{P416, P416Row, P416Sink, p416_to};
 pub use rgb24::{Rgb24, Rgb24Row, Rgb24Sink, rgb24_to};
 pub use rgba::{Rgba, RgbaRow, RgbaSink, rgba_to};
 pub use rgbx::{Rgbx, RgbxRow, RgbxSink, rgbx_to};
+pub use x2bgr10::{X2Bgr10, X2Bgr10Row, X2Bgr10Sink, x2bgr10_to};
+pub use x2rgb10::{X2Rgb10, X2Rgb10Row, X2Rgb10Sink, x2rgb10_to};
 pub use xbgr::{Xbgr, XbgrRow, XbgrSink, xbgr_to};
 pub use xrgb::{Xrgb, XrgbRow, XrgbSink, xrgb_to};
 pub use yuv420p::{Yuv420p, Yuv420pRow, Yuv420pSink, yuv420p_to};

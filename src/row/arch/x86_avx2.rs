@@ -47,7 +47,9 @@ use crate::{
       abgr_to_rgb_16_pixels, abgr_to_rgba_4_pixels, argb_to_rgb_16_pixels, argb_to_rgba_4_pixels,
       bgra_to_rgb_16_pixels, bgrx_to_rgba_4_pixels, drop_alpha_16_pixels, rgb_to_hsv_16_pixels,
       rgbx_to_rgba_4_pixels, swap_rb_16_pixels, swap_rb_alpha_4_pixels, write_rgb_16,
-      write_rgb_u16_8, write_rgba_16, write_rgba_u16_8, xbgr_to_rgba_4_pixels,
+      write_rgb_u16_8, write_rgba_16, write_rgba_u16_8, x2bgr10_to_rgb_16_pixels,
+      x2bgr10_to_rgb_u16_8_pixels, x2bgr10_to_rgba_16_pixels, x2rgb10_to_rgb_16_pixels,
+      x2rgb10_to_rgb_u16_8_pixels, x2rgb10_to_rgba_16_pixels, xbgr_to_rgba_4_pixels,
       xrgb_to_rgba_4_pixels,
     },
     scalar,
@@ -5991,6 +5993,165 @@ pub(crate) unsafe fn bgrx_to_rgba_row(bgrx: &[u8], rgba_out: &mut [u8], width: u
       scalar::bgrx_to_rgba_row(
         &bgrx[x * 4..width * 4],
         &mut rgba_out[x * 4..width * 4],
+        width - x,
+      );
+    }
+  }
+}
+
+// ===== 10-bit packed RGB shuffles (Ship 9e) ==============================
+
+/// AVX2 X2RGB10→RGB. 32 pixels per iteration via two calls to
+/// [`super::x86_common::x2rgb10_to_rgb_16_pixels`].
+#[inline]
+#[target_feature(enable = "avx2")]
+pub(crate) unsafe fn x2rgb10_to_rgb_row(x2rgb10: &[u8], rgb_out: &mut [u8], width: usize) {
+  debug_assert!(x2rgb10.len() >= width * 4, "x2rgb10 row too short");
+  debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
+
+  unsafe {
+    let mut x = 0usize;
+    while x + 32 <= width {
+      let base_in = x2rgb10.as_ptr().add(x * 4);
+      let base_out = rgb_out.as_mut_ptr().add(x * 3);
+      x2rgb10_to_rgb_16_pixels(base_in, base_out);
+      x2rgb10_to_rgb_16_pixels(base_in.add(64), base_out.add(48));
+      x += 32;
+    }
+    if x < width {
+      scalar::x2rgb10_to_rgb_row(
+        &x2rgb10[x * 4..width * 4],
+        &mut rgb_out[x * 3..width * 3],
+        width - x,
+      );
+    }
+  }
+}
+
+/// AVX2 X2RGB10→RGBA. 32 pixels per iteration.
+#[inline]
+#[target_feature(enable = "avx2")]
+pub(crate) unsafe fn x2rgb10_to_rgba_row(x2rgb10: &[u8], rgba_out: &mut [u8], width: usize) {
+  debug_assert!(x2rgb10.len() >= width * 4, "x2rgb10 row too short");
+  debug_assert!(rgba_out.len() >= width * 4, "rgba_out row too short");
+
+  unsafe {
+    let mut x = 0usize;
+    while x + 32 <= width {
+      let base_in = x2rgb10.as_ptr().add(x * 4);
+      let base_out = rgba_out.as_mut_ptr().add(x * 4);
+      x2rgb10_to_rgba_16_pixels(base_in, base_out);
+      x2rgb10_to_rgba_16_pixels(base_in.add(64), base_out.add(64));
+      x += 32;
+    }
+    if x < width {
+      scalar::x2rgb10_to_rgba_row(
+        &x2rgb10[x * 4..width * 4],
+        &mut rgba_out[x * 4..width * 4],
+        width - x,
+      );
+    }
+  }
+}
+
+/// AVX2 X2RGB10→u16 RGB native. 16 pixels per iteration.
+#[inline]
+#[target_feature(enable = "avx2")]
+pub(crate) unsafe fn x2rgb10_to_rgb_u16_row(x2rgb10: &[u8], rgb_out: &mut [u16], width: usize) {
+  debug_assert!(x2rgb10.len() >= width * 4, "x2rgb10 row too short");
+  debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
+
+  unsafe {
+    let mut x = 0usize;
+    while x + 16 <= width {
+      let base_in = x2rgb10.as_ptr().add(x * 4);
+      let base_out = rgb_out.as_mut_ptr().add(x * 3).cast::<u8>();
+      x2rgb10_to_rgb_u16_8_pixels(base_in, base_out);
+      x2rgb10_to_rgb_u16_8_pixels(base_in.add(32), base_out.add(48));
+      x += 16;
+    }
+    if x < width {
+      scalar::x2rgb10_to_rgb_u16_row(
+        &x2rgb10[x * 4..width * 4],
+        &mut rgb_out[x * 3..width * 3],
+        width - x,
+      );
+    }
+  }
+}
+
+/// AVX2 X2BGR10→RGB. 32 pixels per iteration.
+#[inline]
+#[target_feature(enable = "avx2")]
+pub(crate) unsafe fn x2bgr10_to_rgb_row(x2bgr10: &[u8], rgb_out: &mut [u8], width: usize) {
+  debug_assert!(x2bgr10.len() >= width * 4, "x2bgr10 row too short");
+  debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
+
+  unsafe {
+    let mut x = 0usize;
+    while x + 32 <= width {
+      let base_in = x2bgr10.as_ptr().add(x * 4);
+      let base_out = rgb_out.as_mut_ptr().add(x * 3);
+      x2bgr10_to_rgb_16_pixels(base_in, base_out);
+      x2bgr10_to_rgb_16_pixels(base_in.add(64), base_out.add(48));
+      x += 32;
+    }
+    if x < width {
+      scalar::x2bgr10_to_rgb_row(
+        &x2bgr10[x * 4..width * 4],
+        &mut rgb_out[x * 3..width * 3],
+        width - x,
+      );
+    }
+  }
+}
+
+/// AVX2 X2BGR10→RGBA. 32 pixels per iteration.
+#[inline]
+#[target_feature(enable = "avx2")]
+pub(crate) unsafe fn x2bgr10_to_rgba_row(x2bgr10: &[u8], rgba_out: &mut [u8], width: usize) {
+  debug_assert!(x2bgr10.len() >= width * 4, "x2bgr10 row too short");
+  debug_assert!(rgba_out.len() >= width * 4, "rgba_out row too short");
+
+  unsafe {
+    let mut x = 0usize;
+    while x + 32 <= width {
+      let base_in = x2bgr10.as_ptr().add(x * 4);
+      let base_out = rgba_out.as_mut_ptr().add(x * 4);
+      x2bgr10_to_rgba_16_pixels(base_in, base_out);
+      x2bgr10_to_rgba_16_pixels(base_in.add(64), base_out.add(64));
+      x += 32;
+    }
+    if x < width {
+      scalar::x2bgr10_to_rgba_row(
+        &x2bgr10[x * 4..width * 4],
+        &mut rgba_out[x * 4..width * 4],
+        width - x,
+      );
+    }
+  }
+}
+
+/// AVX2 X2BGR10→u16 RGB native. 16 pixels per iteration.
+#[inline]
+#[target_feature(enable = "avx2")]
+pub(crate) unsafe fn x2bgr10_to_rgb_u16_row(x2bgr10: &[u8], rgb_out: &mut [u16], width: usize) {
+  debug_assert!(x2bgr10.len() >= width * 4, "x2bgr10 row too short");
+  debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
+
+  unsafe {
+    let mut x = 0usize;
+    while x + 16 <= width {
+      let base_in = x2bgr10.as_ptr().add(x * 4);
+      let base_out = rgb_out.as_mut_ptr().add(x * 3).cast::<u8>();
+      x2bgr10_to_rgb_u16_8_pixels(base_in, base_out);
+      x2bgr10_to_rgb_u16_8_pixels(base_in.add(32), base_out.add(48));
+      x += 16;
+    }
+    if x < width {
+      scalar::x2bgr10_to_rgb_u16_row(
+        &x2bgr10[x * 4..width * 4],
+        &mut rgb_out[x * 3..width * 3],
         width - x,
       );
     }

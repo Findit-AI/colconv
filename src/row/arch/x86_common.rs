@@ -659,6 +659,277 @@ pub(super) unsafe fn bgra_to_rgb_16_pixels(input_ptr: *const u8, output_ptr: *mu
   }
 }
 
+// ===== 10-bit packed RGB (Ship 9e) =======================================
+//
+// Each 4-byte input pixel is a `u32` LE word with packing
+// `(MSB) 2X | 10c2 | 10c1 | 10c0 (LSB)` — c2/c1/c0 are R/G/B for
+// X2RGB10 and B/G/R for X2BGR10. The helpers below extract the three
+// 10-bit channels via `_mm_srli_epi32` + `_mm_and_si128`, narrow the
+// `u32` lanes to `u8` (or keep `u16`), and call `write_rgb_16` /
+// `write_rgba_16` / `write_rgb_u16_8` to interleave into the packed
+// output.
+//
+// Down-shift to `u8` uses an extra `>> 2` on the channel bits — i.e.
+// `(pix >> 22) & 0xFF` extracts the top 8 of the 10-bit R10 channel
+// at bits 20..29 directly, skipping a separate masking step.
+
+/// Extracts a 10-bit channel as a `u8` (top 8 bits) from each of 4
+/// `u32` pixels in a `__m128i`. The returned vector holds the `u8`
+/// value in the low byte of each `u32` lane (high 24 bits zero).
+///
+/// `SHIFT` selects which channel: 22 for the bits at 20..29, 12 for
+/// 10..19, 2 for 0..9.
+///
+/// # Safety
+///
+/// Caller's `target_feature` must include SSE2 or higher; SSE4.1 and
+/// up include this.
+#[inline(always)]
+unsafe fn extract_10bit_to_u8_lane<const SHIFT: i32>(pix: __m128i) -> __m128i {
+  unsafe {
+    let mask_ff = _mm_set1_epi32(0xFF);
+    _mm_and_si128(_mm_srli_epi32::<SHIFT>(pix), mask_ff)
+  }
+}
+
+/// Extracts a 10-bit channel as a `u16` from each of 4 `u32`
+/// pixels. Returned vector holds the 10-bit value (range `[0, 1023]`)
+/// in the low `u16` half of each `u32` lane.
+#[inline(always)]
+unsafe fn extract_10bit_to_u16_lane<const SHIFT: i32>(pix: __m128i) -> __m128i {
+  unsafe {
+    let mask_3ff = _mm_set1_epi32(0x3FF);
+    _mm_and_si128(_mm_srli_epi32::<SHIFT>(pix), mask_3ff)
+  }
+}
+
+/// Packs 4× `u32x4` channel vectors (16 `u8` values laid out one per
+/// `u32` lane) into a single contiguous `u8x16` channel vector.
+/// Two-stage saturating narrow: `_mm_packus_epi32` for u32→u16,
+/// then `_mm_packus_epi16` for u16→u8.
+///
+/// Values are bounded to `[0, 255]` upstream, so saturation never
+/// triggers.
+#[inline(always)]
+unsafe fn pack_u32x4_quad_to_u8x16(
+  v0: __m128i,
+  v1: __m128i,
+  v2: __m128i,
+  v3: __m128i,
+) -> __m128i {
+  unsafe {
+    let lo = _mm_packus_epi32(v0, v1);
+    let hi = _mm_packus_epi32(v2, v3);
+    _mm_packus_epi16(lo, hi)
+  }
+}
+
+/// Drops the 2-bit padding and down-shifts each 10-bit channel to
+/// 8 bits, producing 16 packed RGB pixels (48 output bytes) from 16
+/// X2RGB10 LE pixels (64 input bytes).
+///
+/// # Safety
+///
+/// - `input_ptr` must point to at least 64 readable bytes.
+/// - `output_ptr` must point to at least 48 writable bytes.
+/// - `input_ptr` / `output_ptr` ranges must not alias.
+/// - SSSE3 must be available (caller's `target_feature`).
+#[inline(always)]
+pub(super) unsafe fn x2rgb10_to_rgb_16_pixels(input_ptr: *const u8, output_ptr: *mut u8) {
+  unsafe {
+    let p0 = _mm_loadu_si128(input_ptr.cast());
+    let p1 = _mm_loadu_si128(input_ptr.add(16).cast());
+    let p2 = _mm_loadu_si128(input_ptr.add(32).cast());
+    let p3 = _mm_loadu_si128(input_ptr.add(48).cast());
+
+    // X2RGB10: R at bits 20..29, G at 10..19, B at 0..9.
+    // Down-shift by 2 → u8 channel value lives in bits 22..29 / 12..19 / 2..9.
+    let r = pack_u32x4_quad_to_u8x16(
+      extract_10bit_to_u8_lane::<22>(p0),
+      extract_10bit_to_u8_lane::<22>(p1),
+      extract_10bit_to_u8_lane::<22>(p2),
+      extract_10bit_to_u8_lane::<22>(p3),
+    );
+    let g = pack_u32x4_quad_to_u8x16(
+      extract_10bit_to_u8_lane::<12>(p0),
+      extract_10bit_to_u8_lane::<12>(p1),
+      extract_10bit_to_u8_lane::<12>(p2),
+      extract_10bit_to_u8_lane::<12>(p3),
+    );
+    let b = pack_u32x4_quad_to_u8x16(
+      extract_10bit_to_u8_lane::<2>(p0),
+      extract_10bit_to_u8_lane::<2>(p1),
+      extract_10bit_to_u8_lane::<2>(p2),
+      extract_10bit_to_u8_lane::<2>(p3),
+    );
+
+    write_rgb_16(r, g, b, output_ptr);
+  }
+}
+
+/// Drops the 2-bit padding, down-shifts each 10-bit channel to 8
+/// bits, and forces alpha to `0xFF`. 16 input pixels → 16 output
+/// RGBA pixels (64 output bytes).
+///
+/// # Safety
+///
+/// - `input_ptr` must point to at least 64 readable bytes.
+/// - `output_ptr` must point to at least 64 writable bytes.
+/// - `input_ptr` / `output_ptr` ranges must not alias.
+/// - SSSE3 must be available (caller's `target_feature`).
+#[inline(always)]
+pub(super) unsafe fn x2rgb10_to_rgba_16_pixels(input_ptr: *const u8, output_ptr: *mut u8) {
+  unsafe {
+    let p0 = _mm_loadu_si128(input_ptr.cast());
+    let p1 = _mm_loadu_si128(input_ptr.add(16).cast());
+    let p2 = _mm_loadu_si128(input_ptr.add(32).cast());
+    let p3 = _mm_loadu_si128(input_ptr.add(48).cast());
+
+    let r = pack_u32x4_quad_to_u8x16(
+      extract_10bit_to_u8_lane::<22>(p0),
+      extract_10bit_to_u8_lane::<22>(p1),
+      extract_10bit_to_u8_lane::<22>(p2),
+      extract_10bit_to_u8_lane::<22>(p3),
+    );
+    let g = pack_u32x4_quad_to_u8x16(
+      extract_10bit_to_u8_lane::<12>(p0),
+      extract_10bit_to_u8_lane::<12>(p1),
+      extract_10bit_to_u8_lane::<12>(p2),
+      extract_10bit_to_u8_lane::<12>(p3),
+    );
+    let b = pack_u32x4_quad_to_u8x16(
+      extract_10bit_to_u8_lane::<2>(p0),
+      extract_10bit_to_u8_lane::<2>(p1),
+      extract_10bit_to_u8_lane::<2>(p2),
+      extract_10bit_to_u8_lane::<2>(p3),
+    );
+    let alpha = _mm_set1_epi8(-1i8);
+    write_rgba_16(r, g, b, alpha, output_ptr);
+  }
+}
+
+/// Extracts each 10-bit channel into native-depth `u16` (low-bit
+/// aligned, max value `1023`), producing 8 packed RGB pixels (24
+/// `u16` elements = 48 output bytes) from 8 X2RGB10 LE pixels (32
+/// input bytes).
+///
+/// # Safety
+///
+/// - `input_ptr` must point to at least 32 readable bytes.
+/// - `output_ptr` must point to at least 48 writable bytes.
+/// - `input_ptr` / `output_ptr` ranges must not alias.
+/// - SSSE3 must be available.
+#[inline(always)]
+pub(super) unsafe fn x2rgb10_to_rgb_u16_8_pixels(input_ptr: *const u8, output_ptr: *mut u8) {
+  unsafe {
+    let p0 = _mm_loadu_si128(input_ptr.cast());
+    let p1 = _mm_loadu_si128(input_ptr.add(16).cast());
+
+    // Two-stage narrow u32x4×2 → u16x8 (no second narrow needed —
+    // u16 is already the destination element type).
+    let r = _mm_packus_epi32(
+      extract_10bit_to_u16_lane::<20>(p0),
+      extract_10bit_to_u16_lane::<20>(p1),
+    );
+    let g = _mm_packus_epi32(
+      extract_10bit_to_u16_lane::<10>(p0),
+      extract_10bit_to_u16_lane::<10>(p1),
+    );
+    let b = _mm_packus_epi32(
+      extract_10bit_to_u16_lane::<0>(p0),
+      extract_10bit_to_u16_lane::<0>(p1),
+    );
+    write_rgb_u16_8(r, g, b, output_ptr.cast::<u16>());
+  }
+}
+
+/// X2BGR10 LE counterpart of [`x2rgb10_to_rgb_16_pixels`]. Channel
+/// shift positions are swapped: R at bits 0..9, B at 20..29.
+#[inline(always)]
+pub(super) unsafe fn x2bgr10_to_rgb_16_pixels(input_ptr: *const u8, output_ptr: *mut u8) {
+  unsafe {
+    let p0 = _mm_loadu_si128(input_ptr.cast());
+    let p1 = _mm_loadu_si128(input_ptr.add(16).cast());
+    let p2 = _mm_loadu_si128(input_ptr.add(32).cast());
+    let p3 = _mm_loadu_si128(input_ptr.add(48).cast());
+
+    let r = pack_u32x4_quad_to_u8x16(
+      extract_10bit_to_u8_lane::<2>(p0),
+      extract_10bit_to_u8_lane::<2>(p1),
+      extract_10bit_to_u8_lane::<2>(p2),
+      extract_10bit_to_u8_lane::<2>(p3),
+    );
+    let g = pack_u32x4_quad_to_u8x16(
+      extract_10bit_to_u8_lane::<12>(p0),
+      extract_10bit_to_u8_lane::<12>(p1),
+      extract_10bit_to_u8_lane::<12>(p2),
+      extract_10bit_to_u8_lane::<12>(p3),
+    );
+    let b = pack_u32x4_quad_to_u8x16(
+      extract_10bit_to_u8_lane::<22>(p0),
+      extract_10bit_to_u8_lane::<22>(p1),
+      extract_10bit_to_u8_lane::<22>(p2),
+      extract_10bit_to_u8_lane::<22>(p3),
+    );
+    write_rgb_16(r, g, b, output_ptr);
+  }
+}
+
+/// X2BGR10 LE counterpart of [`x2rgb10_to_rgba_16_pixels`].
+#[inline(always)]
+pub(super) unsafe fn x2bgr10_to_rgba_16_pixels(input_ptr: *const u8, output_ptr: *mut u8) {
+  unsafe {
+    let p0 = _mm_loadu_si128(input_ptr.cast());
+    let p1 = _mm_loadu_si128(input_ptr.add(16).cast());
+    let p2 = _mm_loadu_si128(input_ptr.add(32).cast());
+    let p3 = _mm_loadu_si128(input_ptr.add(48).cast());
+
+    let r = pack_u32x4_quad_to_u8x16(
+      extract_10bit_to_u8_lane::<2>(p0),
+      extract_10bit_to_u8_lane::<2>(p1),
+      extract_10bit_to_u8_lane::<2>(p2),
+      extract_10bit_to_u8_lane::<2>(p3),
+    );
+    let g = pack_u32x4_quad_to_u8x16(
+      extract_10bit_to_u8_lane::<12>(p0),
+      extract_10bit_to_u8_lane::<12>(p1),
+      extract_10bit_to_u8_lane::<12>(p2),
+      extract_10bit_to_u8_lane::<12>(p3),
+    );
+    let b = pack_u32x4_quad_to_u8x16(
+      extract_10bit_to_u8_lane::<22>(p0),
+      extract_10bit_to_u8_lane::<22>(p1),
+      extract_10bit_to_u8_lane::<22>(p2),
+      extract_10bit_to_u8_lane::<22>(p3),
+    );
+    let alpha = _mm_set1_epi8(-1i8);
+    write_rgba_16(r, g, b, alpha, output_ptr);
+  }
+}
+
+/// X2BGR10 LE counterpart of [`x2rgb10_to_rgb_u16_8_pixels`].
+#[inline(always)]
+pub(super) unsafe fn x2bgr10_to_rgb_u16_8_pixels(input_ptr: *const u8, output_ptr: *mut u8) {
+  unsafe {
+    let p0 = _mm_loadu_si128(input_ptr.cast());
+    let p1 = _mm_loadu_si128(input_ptr.add(16).cast());
+
+    let r = _mm_packus_epi32(
+      extract_10bit_to_u16_lane::<0>(p0),
+      extract_10bit_to_u16_lane::<0>(p1),
+    );
+    let g = _mm_packus_epi32(
+      extract_10bit_to_u16_lane::<10>(p0),
+      extract_10bit_to_u16_lane::<10>(p1),
+    );
+    let b = _mm_packus_epi32(
+      extract_10bit_to_u16_lane::<20>(p0),
+      extract_10bit_to_u16_lane::<20>(p1),
+    );
+    write_rgb_u16_8(r, g, b, output_ptr.cast::<u16>());
+  }
+}
+
 // ---- RGB → HSV support --------------------------------------------------
 //
 // Matches the scalar `rgb_to_hsv_row` within ±1 LSB. Every op mirrors
