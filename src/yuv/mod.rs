@@ -186,6 +186,7 @@ mod yuva422p9;
 mod yuva444p10;
 mod yuva444p12;
 mod yuva444p14;
+mod yuva444p16;
 mod yuva444p9;
 
 pub use nv12::{Nv12, Nv12Row, Nv12Sink, nv12_to};
@@ -236,3 +237,4 @@ pub use yuva444p9::{Yuva444p9, Yuva444p9Row, Yuva444p9Sink, yuva444p9_to};
 pub use yuva444p10::{Yuva444p10, Yuva444p10Row, Yuva444p10Sink, yuva444p10_to};
 pub use yuva444p12::{Yuva444p12, Yuva444p12Row, Yuva444p12Sink, yuva444p12_to};
 pub use yuva444p14::{Yuva444p14, Yuva444p14Row, Yuva444p14Sink, yuva444p14_to};
+pub use yuva444p16::{Yuva444p16, Yuva444p16Row, Yuva444p16Sink, yuva444p16_to};

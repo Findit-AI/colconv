@@ -1,10 +1,11 @@
 //! YUVA dispatchers — the Yuva444p family (`Yuva444p9` / `p10` /
-//! `p12` / `p14`) and the Yuva420p family (`Yuva420p` / `p9` / `p10`
-//! / `p12` / `p16`), for both 8-bit RGBA and native-depth `u16` RGBA
-//! outputs. The 12-bit and 14-bit dispatchers ride the same
-//! BITS-generic kernel templates (`yuv_444p_n_*` / `yuv_420p_n_*`)
+//! `p12` / `p14` / `p16`) and the Yuva420p family (`Yuva420p` / `p9`
+//! / `p10` / `p12` / `p16`), for both 8-bit RGBA and native-depth
+//! `u16` RGBA outputs. The 12-bit and 14-bit dispatchers ride the
+//! same BITS-generic kernel templates (`yuv_444p_n_*` / `yuv_420p_n_*`)
 //! that already cover the lower depths, so per-arch SIMD comes free.
-//! Extracted from `row::mod` for organization.
+//! 16-bit goes through the dedicated i64 4:4:4 / 4:2:0 kernel
+//! family. Extracted from `row::mod` for organization.
 //!
 //! The Yuva422p family does not have its own row dispatcher: per-row
 //! the chroma layout is identical to 4:2:0 (half-width U / V), so
@@ -1579,5 +1580,81 @@ pub fn yuva420p16_to_rgba_u16_row(
 
   scalar::yuv_420p16_to_rgba_u16_with_alpha_src_row(
     y, u_half, v_half, a, rgba_out, width, matrix, full_range,
+  );
+}
+
+// ---- YUVA 4:4:4 16-bit RGBA dispatchers (Ship 8b-5a) ------------------
+//
+// Yuva444p16 uses dedicated 16-bit kernels rather than the
+// BITS-generic Q15 i32 template (which only covers {9,10,12,14}). The
+// 8-bit RGBA path routes through the scalar 16-bit kernel with the
+// i32 chroma pipeline (output-target scaling keeps `coeff × u_d`
+// inside i32); the native-depth `u16` RGBA path is the one that
+// needs the widened i64 handling. Ship 8b-5a wires the scalar-only
+// path; per-arch SIMD for the alpha-source variant lands in 8b-5b
+// (u8 RGBA) and 8b-5c (u16 RGBA) — until then the dispatcher silently
+// falls through to the scalar reference path even when `use_simd` is
+// true.
+
+/// Converts one row of **16-bit** YUVA 4:4:4 to packed **8-bit**
+/// **RGBA**. R / G / B are produced by the same i32 kernel that backs
+/// [`yuv444p16_to_rgba_row`]; the per-pixel alpha byte is **sourced
+/// from `a`** (depth-converted via `a >> 8` to fit `u8`).
+///
+/// `use_simd` is currently a no-op for this format pending Ship 8b-5b
+/// — every call routes through the scalar 16-bit kernel
+/// (`scalar::yuv_444p16_to_rgba_with_alpha_src_row`).
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn yuva444p16_to_rgba_row(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  a: &[u16],
+  rgba_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  _use_simd: bool,
+) {
+  let rgba_min = rgba_row_bytes(width);
+  assert!(y.len() >= width, "y row too short");
+  assert!(u.len() >= width, "u row too short");
+  assert!(v.len() >= width, "v row too short");
+  assert!(a.len() >= width, "a row too short");
+  assert!(rgba_out.len() >= rgba_min, "rgba_out row too short");
+
+  scalar::yuv_444p16_to_rgba_with_alpha_src_row(y, u, v, a, rgba_out, width, matrix, full_range);
+}
+
+/// Converts one row of **16-bit** YUVA 4:4:4 to **native-depth `u16`**
+/// packed **RGBA** — full-range output in `[0, 65535]`; the per-pixel
+/// alpha element is **sourced from `a`** at native depth (no shift).
+///
+/// `use_simd` is currently a no-op for this format pending Ship 8b-5c
+/// — every call routes through the scalar 16-bit kernel
+/// (`scalar::yuv_444p16_to_rgba_u16_with_alpha_src_row`).
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn yuva444p16_to_rgba_u16_row(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  a: &[u16],
+  rgba_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  _use_simd: bool,
+) {
+  let rgba_min = rgba_row_elems(width);
+  assert!(y.len() >= width, "y row too short");
+  assert!(u.len() >= width, "u row too short");
+  assert!(v.len() >= width, "v row too short");
+  assert!(a.len() >= width, "a row too short");
+  assert!(rgba_out.len() >= rgba_min, "rgba_out row too short");
+
+  scalar::yuv_444p16_to_rgba_u16_with_alpha_src_row(
+    y, u, v, a, rgba_out, width, matrix, full_range,
   );
 }

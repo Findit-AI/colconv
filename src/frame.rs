@@ -4099,11 +4099,10 @@ pub type Yuv444p16Frame<'a> = Yuv444pFrame16<'a, 16>;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Error)]
 #[non_exhaustive]
 pub enum Yuva444pFrame16Error {
-  /// `BITS` was not one of the supported depths. Yuva444p Tranche 1
-  /// shipped `BITS == 10`; subsequent tranches widened the set —
-  /// 8b‑3 added 9, and 8b‑4 adds 12 / 14. 16 lands once its SIMD
-  /// tranche ships.
-  #[error("unsupported BITS ({bits}) for Yuva444pFrame16; must be 9, 10, 12, or 14")]
+  /// `BITS` was not one of the supported depths. Yuva444p shipped
+  /// progressively — 8b‑1 (10), 8b‑3 (9), 8b‑4 (12 / 14), 8b‑5a (16,
+  /// scalar; SIMD lands in 8b‑5b/c).
+  #[error("unsupported BITS ({bits}) for Yuva444pFrame16; must be 9, 10, 12, 14, or 16")]
   UnsupportedBits {
     /// The unsupported value of the `BITS` const parameter.
     bits: u32,
@@ -4257,10 +4256,11 @@ impl<'a, const BITS: u32> Yuva444pFrame16<'a, BITS> {
     v_stride: u32,
     a_stride: u32,
   ) -> Result<Self, Yuva444pFrame16Error> {
-    // Ship 8b‑1 shipped 10-bit; Ship 8b‑3 added 9; Ship 8b‑4 adds
-    // 12 / 14 (wiring-only — the 4:4:4 BITS-generic kernels already
-    // cover {9,10,12,14}). 16 lands once its SIMD tranche ships.
-    if BITS != 9 && BITS != 10 && BITS != 12 && BITS != 14 {
+    // Ship 8b‑1 shipped 10-bit; 8b‑3 added 9; 8b‑4 added 12/14;
+    // 8b‑5a opens 16. The 16-bit path uses the dedicated i64 4:4:4
+    // kernel family (separate from the BITS-generic Q15 i32
+    // template that covers {9,10,12,14}).
+    if BITS != 9 && BITS != 10 && BITS != 12 && BITS != 14 && BITS != 16 {
       return Err(Yuva444pFrame16Error::UnsupportedBits { bits: BITS });
     }
     if width == 0 || height == 0 {
@@ -4543,6 +4543,10 @@ pub type Yuva444p12Frame<'a> = Yuva444pFrame16<'a, 12>;
 /// FFmpeg does not ship this depth, but the colconv 4:4:4 BITS-generic
 /// kernel templates already cover it for symmetry with [`Yuv444p14Frame`].
 pub type Yuva444p14Frame<'a> = Yuva444pFrame16<'a, 14>;
+/// 4:4:4 planar with alpha, 16-bit (`AV_PIX_FMT_YUVA444P16LE`). Alias
+/// over [`Yuva444pFrame16`]`<16>`. Uses the dedicated i64 4:4:4
+/// 16-bit kernel family (mirrors [`Yuva420p16Frame`]).
+pub type Yuva444p16Frame<'a> = Yuva444pFrame16<'a, 16>;
 
 /// Errors returned by [`Yuva420pFrame::try_new`].
 ///
