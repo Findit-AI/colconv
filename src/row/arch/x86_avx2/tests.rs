@@ -3524,7 +3524,10 @@ fn avx2_argb_to_rgba_matches_scalar() {
     unsafe {
       argb_to_rgba_row(&input, &mut out_avx, w);
     }
-    assert_eq!(out_scalar, out_avx, "AVX2 argb_to_rgba diverges (width={w})");
+    assert_eq!(
+      out_scalar, out_avx,
+      "AVX2 argb_to_rgba diverges (width={w})"
+    );
   }
 }
 
@@ -3541,6 +3544,9 @@ fn avx2_abgr_to_rgba_matches_scalar() {
     unsafe {
       abgr_to_rgba_row(&input, &mut out_avx, w);
     }
-    assert_eq!(out_scalar, out_avx, "AVX2 abgr_to_rgba diverges (width={w})");
+    assert_eq!(
+      out_scalar, out_avx,
+      "AVX2 abgr_to_rgba diverges (width={w})"
+    );
   }
 }

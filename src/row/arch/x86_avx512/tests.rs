@@ -3588,7 +3588,10 @@ fn avx512_argb_to_rgb_matches_scalar() {
     unsafe {
       argb_to_rgb_row(&input, &mut out_avx, w);
     }
-    assert_eq!(out_scalar, out_avx, "AVX-512 argb_to_rgb diverges (width={w})");
+    assert_eq!(
+      out_scalar, out_avx,
+      "AVX-512 argb_to_rgb diverges (width={w})"
+    );
   }
 }
 
@@ -3605,7 +3608,10 @@ fn avx512_abgr_to_rgb_matches_scalar() {
     unsafe {
       abgr_to_rgb_row(&input, &mut out_avx, w);
     }
-    assert_eq!(out_scalar, out_avx, "AVX-512 abgr_to_rgb diverges (width={w})");
+    assert_eq!(
+      out_scalar, out_avx,
+      "AVX-512 abgr_to_rgb diverges (width={w})"
+    );
   }
 }
 
@@ -3622,7 +3628,10 @@ fn avx512_argb_to_rgba_matches_scalar() {
     unsafe {
       argb_to_rgba_row(&input, &mut out_avx, w);
     }
-    assert_eq!(out_scalar, out_avx, "AVX-512 argb_to_rgba diverges (width={w})");
+    assert_eq!(
+      out_scalar, out_avx,
+      "AVX-512 argb_to_rgba diverges (width={w})"
+    );
   }
 }
 
@@ -3639,6 +3648,9 @@ fn avx512_abgr_to_rgba_matches_scalar() {
     unsafe {
       abgr_to_rgba_row(&input, &mut out_avx, w);
     }
-    assert_eq!(out_scalar, out_avx, "AVX-512 abgr_to_rgba diverges (width={w})");
+    assert_eq!(
+      out_scalar, out_avx,
+      "AVX-512 abgr_to_rgba diverges (width={w})"
+    );
   }
 }

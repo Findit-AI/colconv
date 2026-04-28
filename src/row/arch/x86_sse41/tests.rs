@@ -3575,7 +3575,10 @@ fn sse41_argb_to_rgb_matches_scalar() {
     unsafe {
       argb_to_rgb_row(&input, &mut out_sse, w);
     }
-    assert_eq!(out_scalar, out_sse, "SSE4.1 argb_to_rgb diverges (width={w})");
+    assert_eq!(
+      out_scalar, out_sse,
+      "SSE4.1 argb_to_rgb diverges (width={w})"
+    );
   }
 }
 
@@ -3592,7 +3595,10 @@ fn sse41_abgr_to_rgb_matches_scalar() {
     unsafe {
       abgr_to_rgb_row(&input, &mut out_sse, w);
     }
-    assert_eq!(out_scalar, out_sse, "SSE4.1 abgr_to_rgb diverges (width={w})");
+    assert_eq!(
+      out_scalar, out_sse,
+      "SSE4.1 abgr_to_rgb diverges (width={w})"
+    );
   }
 }
 
@@ -3609,7 +3615,10 @@ fn sse41_argb_to_rgba_matches_scalar() {
     unsafe {
       argb_to_rgba_row(&input, &mut out_sse, w);
     }
-    assert_eq!(out_scalar, out_sse, "SSE4.1 argb_to_rgba diverges (width={w})");
+    assert_eq!(
+      out_scalar, out_sse,
+      "SSE4.1 argb_to_rgba diverges (width={w})"
+    );
   }
 }
 
@@ -3626,6 +3635,9 @@ fn sse41_abgr_to_rgba_matches_scalar() {
     unsafe {
       abgr_to_rgba_row(&input, &mut out_sse, w);
     }
-    assert_eq!(out_scalar, out_sse, "SSE4.1 abgr_to_rgba diverges (width={w})");
+    assert_eq!(
+      out_scalar, out_sse,
+      "SSE4.1 abgr_to_rgba diverges (width={w})"
+    );
   }
 }
