@@ -14,8 +14,10 @@ use crate::row::neon_available;
 use crate::row::simd128_available;
 #[cfg(target_arch = "x86_64")]
 use crate::row::{avx2_available, avx512_available, sse41_available};
-use crate::ColorMatrix;
-use crate::row::{rgb_row_bytes, scalar};
+use crate::{
+  ColorMatrix,
+  row::{rgb_row_bytes, scalar},
+};
 
 /// Converts one row of packed RGB to planar HSV (OpenCV 8‑bit
 /// encoding). See `scalar::rgb_to_hsv_row` for semantics.

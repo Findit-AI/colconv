@@ -25,11 +25,9 @@ use super::{
   MixedSinker, MixedSinkerError, RowSlice, check_dimensions_match, rgb_row_buf_or_scratch,
   rgba_plane_row_slice,
 };
-use crate::row::{
-  bgr_to_rgb_row, expand_rgb_to_rgba_row, rgb_to_hsv_row, rgb_to_luma_row,
-};
 use crate::{
   PixelSink,
+  row::{bgr_to_rgb_row, expand_rgb_to_rgba_row, rgb_to_hsv_row, rgb_to_luma_row},
   yuv::{Bgr24, Bgr24Row, Bgr24Sink, Rgb24, Rgb24Row, Rgb24Sink},
 };
 
