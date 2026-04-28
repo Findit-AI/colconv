@@ -330,6 +330,110 @@ pub(super) unsafe fn swap_rb_16_pixels(input_ptr: *const u8, output_ptr: *mut u8
   }
 }
 
+/// Swaps R↔B in 4 packed BGRA pixels (16 bytes), preserving alpha.
+/// One `_mm_shuffle_epi8` per 16-byte vector — within each 4-byte
+/// pixel, byte 0 ↔ byte 2 (alpha at byte 3 unchanged). Self-inverse,
+/// so the same helper can be used for `RGBA→BGRA` (not currently
+/// wired, but the semantics are identical).
+///
+/// # Safety
+///
+/// - `input_ptr` must point to at least 16 readable bytes.
+/// - `output_ptr` must point to at least 16 writable bytes.
+/// - `input_ptr` / `output_ptr` ranges must not alias.
+/// - The calling function must have SSSE3 available (via
+///   `#[target_feature(enable = "ssse3")]` or a superset feature
+///   like `"sse4.1"` / `"avx2"` / `"avx512bw"`, or the target's
+///   defaults).
+#[inline(always)]
+pub(super) unsafe fn swap_rb_alpha_4_pixels(input_ptr: *const u8, output_ptr: *mut u8) {
+  unsafe {
+    let mask = _mm_setr_epi8(2, 1, 0, 3, 6, 5, 4, 7, 10, 9, 8, 11, 14, 13, 12, 15);
+    let in_v = _mm_loadu_si128(input_ptr.cast());
+    let out_v = _mm_shuffle_epi8(in_v, mask);
+    _mm_storeu_si128(output_ptr.cast(), out_v);
+  }
+}
+
+/// Drops the alpha byte from 16 packed RGBA pixels (64 input bytes,
+/// 48 output bytes). Four input vectors of 4 pixels each compact into
+/// three output vectors. Each output block ORs two shuffles drawing
+/// from neighbouring input vectors — the same "lane straddle" pattern
+/// as [`swap_rb_16_pixels`] for the 3-channel target.
+///
+/// # Safety
+///
+/// - `input_ptr` must point to at least 64 readable bytes.
+/// - `output_ptr` must point to at least 48 writable bytes.
+/// - `input_ptr` / `output_ptr` ranges must not alias.
+/// - SSSE3 must be available in the caller's `target_feature` context.
+#[inline(always)]
+pub(super) unsafe fn drop_alpha_16_pixels(input_ptr: *const u8, output_ptr: *mut u8) {
+  unsafe {
+    let in0 = _mm_loadu_si128(input_ptr.cast());
+    let in1 = _mm_loadu_si128(input_ptr.add(16).cast());
+    let in2 = _mm_loadu_si128(input_ptr.add(32).cast());
+    let in3 = _mm_loadu_si128(input_ptr.add(48).cast());
+
+    // out0 (bytes 0..16): pixels 0..3 from in0, pixel 4 + R5 from in1.
+    let m00 = _mm_setr_epi8(0, 1, 2, 4, 5, 6, 8, 9, 10, 12, 13, 14, -1, -1, -1, -1);
+    let m01 = _mm_setr_epi8(-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 0, 1, 2, 4);
+    let out0 = _mm_or_si128(_mm_shuffle_epi8(in0, m00), _mm_shuffle_epi8(in1, m01));
+
+    // out1 (bytes 16..32): G5 B5 R6..R9 G9 B9 R10 G10 from in1+in2.
+    let m11 = _mm_setr_epi8(5, 6, 8, 9, 10, 12, 13, 14, -1, -1, -1, -1, -1, -1, -1, -1);
+    let m12 = _mm_setr_epi8(-1, -1, -1, -1, -1, -1, -1, -1, 0, 1, 2, 4, 5, 6, 8, 9);
+    let out1 = _mm_or_si128(_mm_shuffle_epi8(in1, m11), _mm_shuffle_epi8(in2, m12));
+
+    // out2 (bytes 32..48): B10 + pixel 11 from in2, pixels 12..15 from in3.
+    let m22 = _mm_setr_epi8(10, 12, 13, 14, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
+    let m23 = _mm_setr_epi8(-1, -1, -1, -1, 0, 1, 2, 4, 5, 6, 8, 9, 10, 12, 13, 14);
+    let out2 = _mm_or_si128(_mm_shuffle_epi8(in2, m22), _mm_shuffle_epi8(in3, m23));
+
+    _mm_storeu_si128(output_ptr.cast(), out0);
+    _mm_storeu_si128(output_ptr.add(16).cast(), out1);
+    _mm_storeu_si128(output_ptr.add(32).cast(), out2);
+  }
+}
+
+/// Swaps R↔B and drops alpha for 16 packed BGRA pixels (64 input
+/// bytes → 48 output bytes). Same shape as [`drop_alpha_16_pixels`]
+/// but each pixel triple is read with the channel order reversed
+/// (`B, G, R, A` → `R, G, B`). Within each 4-byte input pixel:
+/// R is at offset +2, G at +1, B at +0; A at +3 is discarded.
+///
+/// # Safety
+///
+/// - `input_ptr` must point to at least 64 readable bytes.
+/// - `output_ptr` must point to at least 48 writable bytes.
+/// - `input_ptr` / `output_ptr` ranges must not alias.
+/// - SSSE3 must be available in the caller's `target_feature` context.
+#[inline(always)]
+pub(super) unsafe fn bgra_to_rgb_16_pixels(input_ptr: *const u8, output_ptr: *mut u8) {
+  unsafe {
+    let in0 = _mm_loadu_si128(input_ptr.cast());
+    let in1 = _mm_loadu_si128(input_ptr.add(16).cast());
+    let in2 = _mm_loadu_si128(input_ptr.add(32).cast());
+    let in3 = _mm_loadu_si128(input_ptr.add(48).cast());
+
+    let m00 = _mm_setr_epi8(2, 1, 0, 6, 5, 4, 10, 9, 8, 14, 13, 12, -1, -1, -1, -1);
+    let m01 = _mm_setr_epi8(-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 2, 1, 0, 6);
+    let out0 = _mm_or_si128(_mm_shuffle_epi8(in0, m00), _mm_shuffle_epi8(in1, m01));
+
+    let m11 = _mm_setr_epi8(5, 4, 10, 9, 8, 14, 13, 12, -1, -1, -1, -1, -1, -1, -1, -1);
+    let m12 = _mm_setr_epi8(-1, -1, -1, -1, -1, -1, -1, -1, 2, 1, 0, 6, 5, 4, 10, 9);
+    let out1 = _mm_or_si128(_mm_shuffle_epi8(in1, m11), _mm_shuffle_epi8(in2, m12));
+
+    let m22 = _mm_setr_epi8(8, 14, 13, 12, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
+    let m23 = _mm_setr_epi8(-1, -1, -1, -1, 2, 1, 0, 6, 5, 4, 10, 9, 8, 14, 13, 12);
+    let out2 = _mm_or_si128(_mm_shuffle_epi8(in2, m22), _mm_shuffle_epi8(in3, m23));
+
+    _mm_storeu_si128(output_ptr.cast(), out0);
+    _mm_storeu_si128(output_ptr.add(16).cast(), out1);
+    _mm_storeu_si128(output_ptr.add(32).cast(), out2);
+  }
+}
+
 // ---- RGB → HSV support --------------------------------------------------
 //
 // Matches the scalar `rgb_to_hsv_row` within ±1 LSB. Every op mirrors

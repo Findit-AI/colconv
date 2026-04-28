@@ -126,14 +126,63 @@ pub fn rgb_to_luma_row(
 /// by [`Rgba`](crate::yuv::Rgba) sinker's RGB / luma / HSV paths
 /// (Ship 9b).
 ///
-/// `use_simd` is currently a no-op — scalar is the only available
-/// path today.
+/// `use_simd = false` forces the scalar reference path.
 #[cfg_attr(not(tarpaulin), inline(always))]
-pub fn rgba_to_rgb_row(rgba: &[u8], rgb_out: &mut [u8], width: usize, _use_simd: bool) {
+pub fn rgba_to_rgb_row(rgba: &[u8], rgb_out: &mut [u8], width: usize, use_simd: bool) {
   let rgba_min = rgba_row_bytes(width);
   let rgb_min = rgb_row_bytes(width);
   assert!(rgba.len() >= rgba_min, "rgba row too short");
   assert!(rgb_out.len() >= rgb_min, "rgb_out row too short");
+
+  if use_simd {
+    cfg_select! {
+      target_arch = "aarch64" => {
+        if neon_available() {
+          // SAFETY: `neon_available()` verified NEON is present.
+          unsafe {
+            arch::neon::rgba_to_rgb_row(rgba, rgb_out, width);
+          }
+          return;
+        }
+      },
+      target_arch = "x86_64" => {
+        if avx512_available() {
+          // SAFETY: AVX-512BW verified.
+          unsafe {
+            arch::x86_avx512::rgba_to_rgb_row(rgba, rgb_out, width);
+          }
+          return;
+        }
+        if avx2_available() {
+          // SAFETY: AVX2 verified.
+          unsafe {
+            arch::x86_avx2::rgba_to_rgb_row(rgba, rgb_out, width);
+          }
+          return;
+        }
+        if sse41_available() {
+          // SAFETY: SSE4.1 verified.
+          unsafe {
+            arch::x86_sse41::rgba_to_rgb_row(rgba, rgb_out, width);
+          }
+          return;
+        }
+      },
+      target_arch = "wasm32" => {
+        if simd128_available() {
+          // SAFETY: simd128 compile-time verified.
+          unsafe {
+            arch::wasm_simd128::rgba_to_rgb_row(rgba, rgb_out, width);
+          }
+          return;
+        }
+      },
+      _ => {
+        // Targets without a SIMD backend fall through to scalar.
+      }
+    }
+  }
+
   scalar::rgba_to_rgb_row(rgba, rgb_out, width);
 }
 
@@ -142,13 +191,62 @@ pub fn rgba_to_rgb_row(rgba: &[u8], rgb_out: &mut [u8], width: usize, _use_simd:
 /// dispatcher can be called for either direction. Used by
 /// [`Bgra`](crate::yuv::Bgra) sinker's RGBA-output path.
 ///
-/// `use_simd` is currently a no-op — scalar is the only available
-/// path today.
+/// `use_simd = false` forces the scalar reference path.
 #[cfg_attr(not(tarpaulin), inline(always))]
-pub fn bgra_to_rgba_row(bgra: &[u8], rgba_out: &mut [u8], width: usize, _use_simd: bool) {
+pub fn bgra_to_rgba_row(bgra: &[u8], rgba_out: &mut [u8], width: usize, use_simd: bool) {
   let rgba_min = rgba_row_bytes(width);
   assert!(bgra.len() >= rgba_min, "bgra row too short");
   assert!(rgba_out.len() >= rgba_min, "rgba_out row too short");
+
+  if use_simd {
+    cfg_select! {
+      target_arch = "aarch64" => {
+        if neon_available() {
+          // SAFETY: `neon_available()` verified NEON is present.
+          unsafe {
+            arch::neon::bgra_to_rgba_row(bgra, rgba_out, width);
+          }
+          return;
+        }
+      },
+      target_arch = "x86_64" => {
+        if avx512_available() {
+          // SAFETY: AVX-512BW verified.
+          unsafe {
+            arch::x86_avx512::bgra_to_rgba_row(bgra, rgba_out, width);
+          }
+          return;
+        }
+        if avx2_available() {
+          // SAFETY: AVX2 verified.
+          unsafe {
+            arch::x86_avx2::bgra_to_rgba_row(bgra, rgba_out, width);
+          }
+          return;
+        }
+        if sse41_available() {
+          // SAFETY: SSE4.1 verified.
+          unsafe {
+            arch::x86_sse41::bgra_to_rgba_row(bgra, rgba_out, width);
+          }
+          return;
+        }
+      },
+      target_arch = "wasm32" => {
+        if simd128_available() {
+          // SAFETY: simd128 compile-time verified.
+          unsafe {
+            arch::wasm_simd128::bgra_to_rgba_row(bgra, rgba_out, width);
+          }
+          return;
+        }
+      },
+      _ => {
+        // Targets without a SIMD backend fall through to scalar.
+      }
+    }
+  }
+
   scalar::bgra_to_rgba_row(bgra, rgba_out, width);
 }
 
@@ -157,14 +255,63 @@ pub fn bgra_to_rgba_row(bgra: &[u8], rgba_out: &mut [u8], width: usize, _use_sim
 /// Used by [`Bgra`](crate::yuv::Bgra) sinker's RGB / luma / HSV
 /// paths.
 ///
-/// `use_simd` is currently a no-op — scalar is the only available
-/// path today.
+/// `use_simd = false` forces the scalar reference path.
 #[cfg_attr(not(tarpaulin), inline(always))]
-pub fn bgra_to_rgb_row(bgra: &[u8], rgb_out: &mut [u8], width: usize, _use_simd: bool) {
+pub fn bgra_to_rgb_row(bgra: &[u8], rgb_out: &mut [u8], width: usize, use_simd: bool) {
   let rgba_min = rgba_row_bytes(width);
   let rgb_min = rgb_row_bytes(width);
   assert!(bgra.len() >= rgba_min, "bgra row too short");
   assert!(rgb_out.len() >= rgb_min, "rgb_out row too short");
+
+  if use_simd {
+    cfg_select! {
+      target_arch = "aarch64" => {
+        if neon_available() {
+          // SAFETY: `neon_available()` verified NEON is present.
+          unsafe {
+            arch::neon::bgra_to_rgb_row(bgra, rgb_out, width);
+          }
+          return;
+        }
+      },
+      target_arch = "x86_64" => {
+        if avx512_available() {
+          // SAFETY: AVX-512BW verified.
+          unsafe {
+            arch::x86_avx512::bgra_to_rgb_row(bgra, rgb_out, width);
+          }
+          return;
+        }
+        if avx2_available() {
+          // SAFETY: AVX2 verified.
+          unsafe {
+            arch::x86_avx2::bgra_to_rgb_row(bgra, rgb_out, width);
+          }
+          return;
+        }
+        if sse41_available() {
+          // SAFETY: SSE4.1 verified.
+          unsafe {
+            arch::x86_sse41::bgra_to_rgb_row(bgra, rgb_out, width);
+          }
+          return;
+        }
+      },
+      target_arch = "wasm32" => {
+        if simd128_available() {
+          // SAFETY: simd128 compile-time verified.
+          unsafe {
+            arch::wasm_simd128::bgra_to_rgb_row(bgra, rgb_out, width);
+          }
+          return;
+        }
+      },
+      _ => {
+        // Targets without a SIMD backend fall through to scalar.
+      }
+    }
+  }
+
   scalar::bgra_to_rgb_row(bgra, rgb_out, width);
 }
 

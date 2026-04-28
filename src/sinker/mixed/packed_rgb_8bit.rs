@@ -18,6 +18,14 @@
 //! - `with_hsv` — `rgb_to_hsv_row` (existing kernel); same scratch
 //!   pattern for `Bgr24`.
 //!
+//! The 4-byte packed sources ([`Rgba`], [`Bgra`]) added in Ship 9b
+//! follow the same rgb_scratch-staging pattern but use the alpha-
+//! aware row primitives `rgba_to_rgb_row`, `bgra_to_rgba_row`, and
+//! `bgra_to_rgb_row`. RGBA output is alpha pass-through (not forced
+//! to `0xFF`). All three new kernels dispatch to NEON / SSE4.1 /
+//! AVX2 / AVX-512 / wasm-simd128 alongside the existing 3-byte
+//! `bgr_to_rgb_row`.
+//!
 //! 8-bit packed RGB has no `u16` output flavor — `with_rgb_u16` /
 //! `with_rgba_u16` are not declared on these source impls.
 

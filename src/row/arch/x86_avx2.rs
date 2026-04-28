@@ -44,8 +44,8 @@ use crate::{
   ColorMatrix,
   row::{
     arch::x86_common::{
-      rgb_to_hsv_16_pixels, swap_rb_16_pixels, write_rgb_16, write_rgb_u16_8, write_rgba_16,
-      write_rgba_u16_8,
+      bgra_to_rgb_16_pixels, drop_alpha_16_pixels, rgb_to_hsv_16_pixels, swap_rb_16_pixels,
+      swap_rb_alpha_4_pixels, write_rgb_16, write_rgb_u16_8, write_rgba_16, write_rgba_u16_8,
     },
     scalar,
   },
@@ -5589,6 +5589,119 @@ pub(crate) unsafe fn bgr_rgb_swap_row(input: &[u8], output: &mut [u8], width: us
       scalar::bgr_rgb_swap_row(
         &input[x * 3..width * 3],
         &mut output[x * 3..width * 3],
+        width - x,
+      );
+    }
+  }
+}
+
+// ===== Packed-RGBA shuffles (Ship 9b) ====================================
+
+/// AVX2 RGBA→RGB drop-alpha. 32 pixels per iteration via two calls
+/// to [`super::x86_common::drop_alpha_16_pixels`] — memory-bandwidth
+/// bound, so wider registers wouldn't change practical throughput.
+///
+/// # Safety
+///
+/// 1. AVX2 must be available (dispatcher obligation) — AVX2 is a
+///    superset of SSSE3, which the helper requires.
+/// 2. `rgba.len() >= 4 * width`; `rgb_out.len() >= 3 * width`.
+/// 3. `rgba` / `rgb_out` must not alias.
+#[inline]
+#[target_feature(enable = "avx2")]
+pub(crate) unsafe fn rgba_to_rgb_row(rgba: &[u8], rgb_out: &mut [u8], width: usize) {
+  debug_assert!(rgba.len() >= width * 4, "rgba row too short");
+  debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
+
+  unsafe {
+    let mut x = 0usize;
+    while x + 32 <= width {
+      drop_alpha_16_pixels(rgba.as_ptr().add(x * 4), rgb_out.as_mut_ptr().add(x * 3));
+      drop_alpha_16_pixels(
+        rgba.as_ptr().add(x * 4 + 64),
+        rgb_out.as_mut_ptr().add(x * 3 + 48),
+      );
+      x += 32;
+    }
+    if x < width {
+      scalar::rgba_to_rgb_row(
+        &rgba[x * 4..width * 4],
+        &mut rgb_out[x * 3..width * 3],
+        width - x,
+      );
+    }
+  }
+}
+
+/// AVX2 BGRA→RGBA R↔B swap with alpha pass-through. 32 pixels per
+/// iteration via 8 calls to
+/// [`super::x86_common::swap_rb_alpha_4_pixels`].
+///
+/// # Safety
+///
+/// 1. AVX2 must be available.
+/// 2. `bgra.len() >= 4 * width`; `rgba_out.len() >= 4 * width`.
+/// 3. `bgra` / `rgba_out` must not alias.
+#[inline]
+#[target_feature(enable = "avx2")]
+pub(crate) unsafe fn bgra_to_rgba_row(bgra: &[u8], rgba_out: &mut [u8], width: usize) {
+  debug_assert!(bgra.len() >= width * 4, "bgra row too short");
+  debug_assert!(rgba_out.len() >= width * 4, "rgba_out row too short");
+
+  unsafe {
+    let mut x = 0usize;
+    while x + 32 <= width {
+      let base_in = bgra.as_ptr().add(x * 4);
+      let base_out = rgba_out.as_mut_ptr().add(x * 4);
+      swap_rb_alpha_4_pixels(base_in, base_out);
+      swap_rb_alpha_4_pixels(base_in.add(16), base_out.add(16));
+      swap_rb_alpha_4_pixels(base_in.add(32), base_out.add(32));
+      swap_rb_alpha_4_pixels(base_in.add(48), base_out.add(48));
+      swap_rb_alpha_4_pixels(base_in.add(64), base_out.add(64));
+      swap_rb_alpha_4_pixels(base_in.add(80), base_out.add(80));
+      swap_rb_alpha_4_pixels(base_in.add(96), base_out.add(96));
+      swap_rb_alpha_4_pixels(base_in.add(112), base_out.add(112));
+      x += 32;
+    }
+    if x < width {
+      scalar::bgra_to_rgba_row(
+        &bgra[x * 4..width * 4],
+        &mut rgba_out[x * 4..width * 4],
+        width - x,
+      );
+    }
+  }
+}
+
+/// AVX2 BGRA→RGB combined R↔B swap and alpha drop. 32 pixels per
+/// iteration via two calls to
+/// [`super::x86_common::bgra_to_rgb_16_pixels`].
+///
+/// # Safety
+///
+/// 1. AVX2 must be available.
+/// 2. `bgra.len() >= 4 * width`; `rgb_out.len() >= 3 * width`.
+/// 3. `bgra` / `rgb_out` must not alias.
+#[inline]
+#[target_feature(enable = "avx2")]
+pub(crate) unsafe fn bgra_to_rgb_row(bgra: &[u8], rgb_out: &mut [u8], width: usize) {
+  debug_assert!(bgra.len() >= width * 4, "bgra row too short");
+  debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
+
+  unsafe {
+    let mut x = 0usize;
+    while x + 32 <= width {
+      bgra_to_rgb_16_pixels(bgra.as_ptr().add(x * 4), rgb_out.as_mut_ptr().add(x * 3));
+      bgra_to_rgb_16_pixels(
+        bgra.as_ptr().add(x * 4 + 64),
+        rgb_out.as_mut_ptr().add(x * 3 + 48),
+      );
+      x += 32;
+    }
+    if x < width {
+      scalar::bgra_to_rgb_row(
+        &bgra[x * 4..width * 4],
+        &mut rgb_out[x * 3..width * 3],
         width - x,
       );
     }

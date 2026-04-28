@@ -9983,3 +9983,118 @@ fn bgra_random_input_produces_stable_output() {
     assert_eq!(px[3], pix[i * 4 + 3]);
   }
 }
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn rgba_simd_matches_scalar_with_random_input() {
+  // Width 1921 forces both the SIMD main loop AND a scalar tail
+  // across every backend block size (16 / 32 / 64). Per-pixel random
+  // R/G/B/A means a bad shuffle in any backend produces a measurable
+  // diff vs scalar.
+  //
+  // HSV is intentionally **not** part of the parity check —
+  // `rgb_to_hsv_row` uses `_mm_rcp_ps` + Newton-Raphson refinement
+  // and is documented to differ ±1 LSB from scalar. The new Ship 9b
+  // RGBA shuffle kernels are byte-exact, so RGB / RGBA / luma cover
+  // their parity.
+  let w = 1921usize;
+  let h = 4usize;
+  let mut pix = std::vec![0u8; w * h * 4];
+  pseudo_random_u8(&mut pix, 0xBEEF_F00D);
+  let src = RgbaFrame::try_new(&pix, w as u32, h as u32, (w * 4) as u32).unwrap();
+
+  let mut rgb_simd = std::vec![0u8; w * h * 3];
+  let mut rgb_scalar = std::vec![0u8; w * h * 3];
+  let mut rgba_simd = std::vec![0u8; w * h * 4];
+  let mut rgba_scalar = std::vec![0u8; w * h * 4];
+  let mut luma_simd = std::vec![0u8; w * h];
+  let mut luma_scalar = std::vec![0u8; w * h];
+
+  let mut s_simd = MixedSinker::<Rgba>::new(w, h)
+    .with_rgb(&mut rgb_simd)
+    .unwrap()
+    .with_rgba(&mut rgba_simd)
+    .unwrap()
+    .with_luma(&mut luma_simd)
+    .unwrap();
+  rgba_to(&src, true, ColorMatrix::Bt709, &mut s_simd).unwrap();
+
+  let mut s_scalar = MixedSinker::<Rgba>::new(w, h)
+    .with_rgb(&mut rgb_scalar)
+    .unwrap()
+    .with_rgba(&mut rgba_scalar)
+    .unwrap()
+    .with_luma(&mut luma_scalar)
+    .unwrap();
+  s_scalar.set_simd(false);
+  rgba_to(&src, true, ColorMatrix::Bt709, &mut s_scalar).unwrap();
+
+  assert_eq!(
+    rgb_simd, rgb_scalar,
+    "RGB output diverges between SIMD and scalar"
+  );
+  assert_eq!(
+    rgba_simd, rgba_scalar,
+    "RGBA output diverges between SIMD and scalar"
+  );
+  assert_eq!(
+    luma_simd, luma_scalar,
+    "Luma output diverges between SIMD and scalar"
+  );
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn bgra_simd_matches_scalar_with_random_input() {
+  // See `rgba_simd_matches_scalar_with_random_input` for rationale.
+  let w = 1921usize;
+  let h = 4usize;
+  let mut pix = std::vec![0u8; w * h * 4];
+  pseudo_random_u8(&mut pix, 0xFEED_FACE);
+  let src = BgraFrame::try_new(&pix, w as u32, h as u32, (w * 4) as u32).unwrap();
+
+  let mut rgb_simd = std::vec![0u8; w * h * 3];
+  let mut rgb_scalar = std::vec![0u8; w * h * 3];
+  let mut rgba_simd = std::vec![0u8; w * h * 4];
+  let mut rgba_scalar = std::vec![0u8; w * h * 4];
+  let mut luma_simd = std::vec![0u8; w * h];
+  let mut luma_scalar = std::vec![0u8; w * h];
+
+  let mut s_simd = MixedSinker::<Bgra>::new(w, h)
+    .with_rgb(&mut rgb_simd)
+    .unwrap()
+    .with_rgba(&mut rgba_simd)
+    .unwrap()
+    .with_luma(&mut luma_simd)
+    .unwrap();
+  bgra_to(&src, true, ColorMatrix::Bt709, &mut s_simd).unwrap();
+
+  let mut s_scalar = MixedSinker::<Bgra>::new(w, h)
+    .with_rgb(&mut rgb_scalar)
+    .unwrap()
+    .with_rgba(&mut rgba_scalar)
+    .unwrap()
+    .with_luma(&mut luma_scalar)
+    .unwrap();
+  s_scalar.set_simd(false);
+  bgra_to(&src, true, ColorMatrix::Bt709, &mut s_scalar).unwrap();
+
+  assert_eq!(
+    rgb_simd, rgb_scalar,
+    "RGB output diverges between SIMD and scalar"
+  );
+  assert_eq!(
+    rgba_simd, rgba_scalar,
+    "RGBA output diverges between SIMD and scalar"
+  );
+  assert_eq!(
+    luma_simd, luma_scalar,
+    "Luma output diverges between SIMD and scalar"
+  );
+}

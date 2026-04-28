@@ -3412,3 +3412,62 @@ fn avx2_yuva420p16_rgba_u16_matches_scalar_widths_and_alpha() {
     check_yuv420p16_u16_avx2_rgba_with_alpha_src_equivalence(16, ColorMatrix::Bt601, true, seed);
   }
 }
+
+// ---- Ship 9b RGBA/BGRA shuffles -----------------------------------------
+
+fn pseudo_random_rgba(width: usize) -> std::vec::Vec<u8> {
+  (0..width * 4)
+    .map(|i| ((i * 17 + 41) & 0xFF) as u8)
+    .collect()
+}
+
+#[test]
+fn avx2_rgba_to_rgb_matches_scalar() {
+  if !std::arch::is_x86_feature_detected!("avx2") {
+    return;
+  }
+  for w in [1usize, 15, 31, 32, 33, 63, 64, 65, 1920, 1921] {
+    let input = pseudo_random_rgba(w);
+    let mut out_scalar = std::vec![0u8; w * 3];
+    let mut out_avx = std::vec![0u8; w * 3];
+    scalar::rgba_to_rgb_row(&input, &mut out_scalar, w);
+    unsafe {
+      rgba_to_rgb_row(&input, &mut out_avx, w);
+    }
+    assert_eq!(out_scalar, out_avx, "AVX2 rgba_to_rgb diverges (width={w})");
+  }
+}
+
+#[test]
+fn avx2_bgra_to_rgba_matches_scalar() {
+  if !std::arch::is_x86_feature_detected!("avx2") {
+    return;
+  }
+  for w in [1usize, 15, 31, 32, 33, 63, 64, 65, 1920, 1921] {
+    let input = pseudo_random_rgba(w);
+    let mut out_scalar = std::vec![0u8; w * 4];
+    let mut out_avx = std::vec![0u8; w * 4];
+    scalar::bgra_to_rgba_row(&input, &mut out_scalar, w);
+    unsafe {
+      bgra_to_rgba_row(&input, &mut out_avx, w);
+    }
+    assert_eq!(out_scalar, out_avx, "AVX2 bgra_to_rgba diverges (width={w})");
+  }
+}
+
+#[test]
+fn avx2_bgra_to_rgb_matches_scalar() {
+  if !std::arch::is_x86_feature_detected!("avx2") {
+    return;
+  }
+  for w in [1usize, 15, 31, 32, 33, 63, 64, 65, 1920, 1921] {
+    let input = pseudo_random_rgba(w);
+    let mut out_scalar = std::vec![0u8; w * 3];
+    let mut out_avx = std::vec![0u8; w * 3];
+    scalar::bgra_to_rgb_row(&input, &mut out_scalar, w);
+    unsafe {
+      bgra_to_rgb_row(&input, &mut out_avx, w);
+    }
+    assert_eq!(out_scalar, out_avx, "AVX2 bgra_to_rgb diverges (width={w})");
+  }
+}
