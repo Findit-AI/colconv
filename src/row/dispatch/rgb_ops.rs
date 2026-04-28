@@ -636,3 +636,231 @@ pub fn abgr_to_rgba_row(abgr: &[u8], rgba_out: &mut [u8], width: usize, use_simd
 
   scalar::abgr_to_rgba_row(abgr, rgba_out, width);
 }
+
+/// Drops the leading padding byte from packed `X, R, G, B` input,
+/// producing packed `R, G, B, A` with `A = 0xFF` (Ship 9d). Used by
+/// [`Xrgb`](crate::yuv::Xrgb) sinker's RGBA-output path.
+///
+/// `use_simd = false` forces the scalar reference path.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub fn xrgb_to_rgba_row(xrgb: &[u8], rgba_out: &mut [u8], width: usize, use_simd: bool) {
+  let rgba_min = rgba_row_bytes(width);
+  assert!(xrgb.len() >= rgba_min, "xrgb row too short");
+  assert!(rgba_out.len() >= rgba_min, "rgba_out row too short");
+
+  if use_simd {
+    cfg_select! {
+      target_arch = "aarch64" => {
+        if neon_available() {
+          unsafe {
+            arch::neon::xrgb_to_rgba_row(xrgb, rgba_out, width);
+          }
+          return;
+        }
+      },
+      target_arch = "x86_64" => {
+        if avx512_available() {
+          unsafe {
+            arch::x86_avx512::xrgb_to_rgba_row(xrgb, rgba_out, width);
+          }
+          return;
+        }
+        if avx2_available() {
+          unsafe {
+            arch::x86_avx2::xrgb_to_rgba_row(xrgb, rgba_out, width);
+          }
+          return;
+        }
+        if sse41_available() {
+          unsafe {
+            arch::x86_sse41::xrgb_to_rgba_row(xrgb, rgba_out, width);
+          }
+          return;
+        }
+      },
+      target_arch = "wasm32" => {
+        if simd128_available() {
+          unsafe {
+            arch::wasm_simd128::xrgb_to_rgba_row(xrgb, rgba_out, width);
+          }
+          return;
+        }
+      },
+      _ => {
+      }
+    }
+  }
+
+  scalar::xrgb_to_rgba_row(xrgb, rgba_out, width);
+}
+
+/// Drops the trailing padding byte from packed `R, G, B, X` input,
+/// producing packed `R, G, B, A` with `A = 0xFF`. Used by
+/// [`Rgbx`](crate::yuv::Rgbx) sinker's RGBA-output path.
+///
+/// `use_simd = false` forces the scalar reference path.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub fn rgbx_to_rgba_row(rgbx: &[u8], rgba_out: &mut [u8], width: usize, use_simd: bool) {
+  let rgba_min = rgba_row_bytes(width);
+  assert!(rgbx.len() >= rgba_min, "rgbx row too short");
+  assert!(rgba_out.len() >= rgba_min, "rgba_out row too short");
+
+  if use_simd {
+    cfg_select! {
+      target_arch = "aarch64" => {
+        if neon_available() {
+          unsafe {
+            arch::neon::rgbx_to_rgba_row(rgbx, rgba_out, width);
+          }
+          return;
+        }
+      },
+      target_arch = "x86_64" => {
+        if avx512_available() {
+          unsafe {
+            arch::x86_avx512::rgbx_to_rgba_row(rgbx, rgba_out, width);
+          }
+          return;
+        }
+        if avx2_available() {
+          unsafe {
+            arch::x86_avx2::rgbx_to_rgba_row(rgbx, rgba_out, width);
+          }
+          return;
+        }
+        if sse41_available() {
+          unsafe {
+            arch::x86_sse41::rgbx_to_rgba_row(rgbx, rgba_out, width);
+          }
+          return;
+        }
+      },
+      target_arch = "wasm32" => {
+        if simd128_available() {
+          unsafe {
+            arch::wasm_simd128::rgbx_to_rgba_row(rgbx, rgba_out, width);
+          }
+          return;
+        }
+      },
+      _ => {
+      }
+    }
+  }
+
+  scalar::rgbx_to_rgba_row(rgbx, rgba_out, width);
+}
+
+/// Reverses RGB and drops leading padding from packed `X, B, G, R`
+/// input, producing packed `R, G, B, A` with `A = 0xFF`. Used by
+/// [`Xbgr`](crate::yuv::Xbgr) sinker's RGBA-output path.
+///
+/// `use_simd = false` forces the scalar reference path.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub fn xbgr_to_rgba_row(xbgr: &[u8], rgba_out: &mut [u8], width: usize, use_simd: bool) {
+  let rgba_min = rgba_row_bytes(width);
+  assert!(xbgr.len() >= rgba_min, "xbgr row too short");
+  assert!(rgba_out.len() >= rgba_min, "rgba_out row too short");
+
+  if use_simd {
+    cfg_select! {
+      target_arch = "aarch64" => {
+        if neon_available() {
+          unsafe {
+            arch::neon::xbgr_to_rgba_row(xbgr, rgba_out, width);
+          }
+          return;
+        }
+      },
+      target_arch = "x86_64" => {
+        if avx512_available() {
+          unsafe {
+            arch::x86_avx512::xbgr_to_rgba_row(xbgr, rgba_out, width);
+          }
+          return;
+        }
+        if avx2_available() {
+          unsafe {
+            arch::x86_avx2::xbgr_to_rgba_row(xbgr, rgba_out, width);
+          }
+          return;
+        }
+        if sse41_available() {
+          unsafe {
+            arch::x86_sse41::xbgr_to_rgba_row(xbgr, rgba_out, width);
+          }
+          return;
+        }
+      },
+      target_arch = "wasm32" => {
+        if simd128_available() {
+          unsafe {
+            arch::wasm_simd128::xbgr_to_rgba_row(xbgr, rgba_out, width);
+          }
+          return;
+        }
+      },
+      _ => {
+      }
+    }
+  }
+
+  scalar::xbgr_to_rgba_row(xbgr, rgba_out, width);
+}
+
+/// Reverses RGB and drops trailing padding from packed `B, G, R, X`
+/// input, producing packed `R, G, B, A` with `A = 0xFF`. Used by
+/// [`Bgrx`](crate::yuv::Bgrx) sinker's RGBA-output path.
+///
+/// `use_simd = false` forces the scalar reference path.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub fn bgrx_to_rgba_row(bgrx: &[u8], rgba_out: &mut [u8], width: usize, use_simd: bool) {
+  let rgba_min = rgba_row_bytes(width);
+  assert!(bgrx.len() >= rgba_min, "bgrx row too short");
+  assert!(rgba_out.len() >= rgba_min, "rgba_out row too short");
+
+  if use_simd {
+    cfg_select! {
+      target_arch = "aarch64" => {
+        if neon_available() {
+          unsafe {
+            arch::neon::bgrx_to_rgba_row(bgrx, rgba_out, width);
+          }
+          return;
+        }
+      },
+      target_arch = "x86_64" => {
+        if avx512_available() {
+          unsafe {
+            arch::x86_avx512::bgrx_to_rgba_row(bgrx, rgba_out, width);
+          }
+          return;
+        }
+        if avx2_available() {
+          unsafe {
+            arch::x86_avx2::bgrx_to_rgba_row(bgrx, rgba_out, width);
+          }
+          return;
+        }
+        if sse41_available() {
+          unsafe {
+            arch::x86_sse41::bgrx_to_rgba_row(bgrx, rgba_out, width);
+          }
+          return;
+        }
+      },
+      target_arch = "wasm32" => {
+        if simd128_available() {
+          unsafe {
+            arch::wasm_simd128::bgrx_to_rgba_row(bgrx, rgba_out, width);
+          }
+          return;
+        }
+      },
+      _ => {
+      }
+    }
+  }
+
+  scalar::bgrx_to_rgba_row(bgrx, rgba_out, width);
+}

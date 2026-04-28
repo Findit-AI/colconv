@@ -3264,3 +3264,73 @@ fn simd128_abgr_to_rgba_matches_scalar() {
     );
   }
 }
+
+// ---- Ship 9d padding-byte shuffles -----------------------------------
+
+#[test]
+fn simd128_xrgb_to_rgba_matches_scalar() {
+  for w in [1usize, 7, 15, 16, 17, 31, 32, 33, 1920, 1921] {
+    let input = pseudo_random_rgba(w);
+    let mut out_scalar = std::vec![0u8; w * 4];
+    let mut out_wasm = std::vec![0u8; w * 4];
+    scalar::xrgb_to_rgba_row(&input, &mut out_scalar, w);
+    unsafe {
+      xrgb_to_rgba_row(&input, &mut out_wasm, w);
+    }
+    assert_eq!(
+      out_scalar, out_wasm,
+      "simd128 xrgb_to_rgba diverges (width={w})"
+    );
+  }
+}
+
+#[test]
+fn simd128_rgbx_to_rgba_matches_scalar() {
+  for w in [1usize, 7, 15, 16, 17, 31, 32, 33, 1920, 1921] {
+    let input = pseudo_random_rgba(w);
+    let mut out_scalar = std::vec![0u8; w * 4];
+    let mut out_wasm = std::vec![0u8; w * 4];
+    scalar::rgbx_to_rgba_row(&input, &mut out_scalar, w);
+    unsafe {
+      rgbx_to_rgba_row(&input, &mut out_wasm, w);
+    }
+    assert_eq!(
+      out_scalar, out_wasm,
+      "simd128 rgbx_to_rgba diverges (width={w})"
+    );
+  }
+}
+
+#[test]
+fn simd128_xbgr_to_rgba_matches_scalar() {
+  for w in [1usize, 7, 15, 16, 17, 31, 32, 33, 1920, 1921] {
+    let input = pseudo_random_rgba(w);
+    let mut out_scalar = std::vec![0u8; w * 4];
+    let mut out_wasm = std::vec![0u8; w * 4];
+    scalar::xbgr_to_rgba_row(&input, &mut out_scalar, w);
+    unsafe {
+      xbgr_to_rgba_row(&input, &mut out_wasm, w);
+    }
+    assert_eq!(
+      out_scalar, out_wasm,
+      "simd128 xbgr_to_rgba diverges (width={w})"
+    );
+  }
+}
+
+#[test]
+fn simd128_bgrx_to_rgba_matches_scalar() {
+  for w in [1usize, 7, 15, 16, 17, 31, 32, 33, 1920, 1921] {
+    let input = pseudo_random_rgba(w);
+    let mut out_scalar = std::vec![0u8; w * 4];
+    let mut out_wasm = std::vec![0u8; w * 4];
+    scalar::bgrx_to_rgba_row(&input, &mut out_scalar, w);
+    unsafe {
+      bgrx_to_rgba_row(&input, &mut out_wasm, w);
+    }
+    assert_eq!(
+      out_scalar, out_wasm,
+      "simd128 bgrx_to_rgba diverges (width={w})"
+    );
+  }
+}
