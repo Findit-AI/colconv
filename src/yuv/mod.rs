@@ -128,15 +128,21 @@
 //!   output (Ship 9b).
 //! - [`Bgra`] — packed `B, G, R, A` 8‑bit. Channel order swapped on
 //!   the first three bytes vs [`Rgba`]; alpha lane preserved (Ship 9b).
+//! - [`Argb`] — packed `A, R, G, B` 8‑bit. Same payload as [`Rgba`]
+//!   with alpha at the **leading** position; sinker rotates alpha to
+//!   trailing for `with_rgba` output (Ship 9c).
+//! - [`Abgr`] — packed `A, B, G, R` 8‑bit. Leading alpha + reversed
+//!   RGB order vs [`Argb`]; sinker performs a full byte reverse for
+//!   `with_rgba` output (Ship 9c).
 //!
 //! # Not yet shipped
 //!
 //! - **Legacy planar** (`Yuv411p`, `Yuv410p`) — DV / Cinepak only;
 //!   uncommon enough that adding them would be speculative.
-//! - **Packed RGB sources with leading alpha / padding** (`Argb`,
-//!   `Abgr`, the `0rgb` / `rgb0` / `0bgr` / `bgr0` variants,
-//!   `Rgba1010102`) — queued for Ship 9c‑9d as the follow‑up
-//!   tranches to Ship 9b.
+//! - **Packed RGB sources with padding bytes** (the `0rgb` / `rgb0` /
+//!   `0bgr` / `bgr0` variants where the 4th byte is ignored padding,
+//!   not real alpha; `Rgba1010102`) — queued for Ship 9d as the
+//!   follow‑up tranche to Ship 9c.
 //!
 //! # Tracked refactor (no behavior change)
 //!
@@ -155,6 +161,8 @@
 //! § "Cleanup follow‑ups → Walker module deduplication" for the full
 //! discussion (originated from PR #14 review).
 
+mod abgr;
+mod argb;
 mod bgr24;
 mod bgra;
 mod nv12;
@@ -210,6 +218,8 @@ mod yuva444p14;
 mod yuva444p16;
 mod yuva444p9;
 
+pub use abgr::{Abgr, AbgrRow, AbgrSink, abgr_to};
+pub use argb::{Argb, ArgbRow, ArgbSink, argb_to};
 pub use bgr24::{Bgr24, Bgr24Row, Bgr24Sink, bgr24_to};
 pub use bgra::{Bgra, BgraRow, BgraSink, bgra_to};
 pub use nv12::{Nv12, Nv12Row, Nv12Sink, nv12_to};

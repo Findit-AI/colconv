@@ -26,6 +26,13 @@
 //! AVX2 / AVX-512 / wasm-simd128 alongside the existing 3-byte
 //! `bgr_to_rgb_row`.
 //!
+//! Ship 9c adds the **leading-alpha** family ([`Argb`], [`Abgr`])
+//! using the row primitives `argb_to_rgb_row`, `abgr_to_rgb_row`,
+//! `argb_to_rgba_row`, `abgr_to_rgba_row` — same scratch-staging
+//! pattern, alpha is rotated from the leading byte to the trailing
+//! byte for `with_rgba` output. All four kernels also dispatch to
+//! the full SIMD backend matrix.
+//!
 //! 8-bit packed RGB has no `u16` output flavor — `with_rgb_u16` /
 //! `with_rgba_u16` are not declared on these source impls.
 
@@ -36,12 +43,13 @@ use super::{
 use crate::{
   PixelSink,
   row::{
-    bgr_to_rgb_row, bgra_to_rgb_row, bgra_to_rgba_row, expand_rgb_to_rgba_row, rgb_to_hsv_row,
-    rgb_to_luma_row, rgba_to_rgb_row,
+    abgr_to_rgb_row, abgr_to_rgba_row, argb_to_rgb_row, argb_to_rgba_row, bgr_to_rgb_row,
+    bgra_to_rgb_row, bgra_to_rgba_row, expand_rgb_to_rgba_row, rgb_to_hsv_row, rgb_to_luma_row,
+    rgba_to_rgb_row,
   },
   yuv::{
-    Bgr24, Bgr24Row, Bgr24Sink, Bgra, BgraRow, BgraSink, Rgb24, Rgb24Row, Rgb24Sink, Rgba, RgbaRow,
-    RgbaSink,
+    Abgr, AbgrRow, AbgrSink, Argb, ArgbRow, ArgbSink, Bgr24, Bgr24Row, Bgr24Sink, Bgra, BgraRow,
+    BgraSink, Rgb24, Rgb24Row, Rgb24Sink, Rgba, RgbaRow, RgbaSink,
   },
 };
 
@@ -517,6 +525,248 @@ impl PixelSink for MixedSinker<'_, Bgra> {
     if let Some(buf) = rgba.as_deref_mut() {
       let rgba_row = rgba_plane_row_slice(buf, one_plane_start, one_plane_end, w, h)?;
       bgra_to_rgba_row(bgra_in, rgba_row, w, use_simd);
+    }
+
+    Ok(())
+  }
+}
+
+// ---- Argb impl (Ship 9c) -----------------------------------------------
+
+impl<'a> MixedSinker<'a, Argb> {
+  /// Attaches a packed **8-bit** RGBA output buffer. Channel layout
+  /// is rotated on output (input is `A, R, G, B`; output is
+  /// `R, G, B, A`). Alpha is **passed through** from the source,
+  /// not forced to `0xFF`.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn with_rgba(mut self, buf: &'a mut [u8]) -> Result<Self, MixedSinkerError> {
+    self.set_rgba(buf)?;
+    Ok(self)
+  }
+  /// In-place variant of [`with_rgba`](Self::with_rgba).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn set_rgba(&mut self, buf: &'a mut [u8]) -> Result<&mut Self, MixedSinkerError> {
+    let expected = self.frame_bytes(4)?;
+    if buf.len() < expected {
+      return Err(MixedSinkerError::RgbaBufferTooShort {
+        expected,
+        actual: buf.len(),
+      });
+    }
+    self.rgba = Some(buf);
+    Ok(self)
+  }
+}
+
+impl ArgbSink for MixedSinker<'_, Argb> {}
+
+impl PixelSink for MixedSinker<'_, Argb> {
+  type Input<'r> = ArgbRow<'r>;
+  type Error = MixedSinkerError;
+
+  fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
+    check_dimensions_match(self.width, self.height, width, height)
+  }
+
+  fn process(&mut self, row: ArgbRow<'_>) -> Result<(), Self::Error> {
+    let w = self.width;
+    let h = self.height;
+    let idx = row.row();
+    let use_simd = self.simd;
+
+    if row.argb().len() != w * 4 {
+      return Err(MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::ArgbPacked,
+        row: idx,
+        expected: w * 4,
+        actual: row.argb().len(),
+      });
+    }
+    if idx >= self.height {
+      return Err(MixedSinkerError::RowIndexOutOfRange {
+        row: idx,
+        configured_height: self.height,
+      });
+    }
+
+    let Self {
+      rgb,
+      rgba,
+      luma,
+      hsv,
+      rgb_scratch,
+      ..
+    } = self;
+    let one_plane_start = idx * w;
+    let one_plane_end = one_plane_start + w;
+    let argb_in = row.argb();
+
+    let want_rgb = rgb.is_some();
+    let want_luma = luma.is_some();
+    let want_hsv = hsv.is_some();
+    let need_rgb_buffer = want_rgb || want_luma || want_hsv;
+
+    // Stage drop-leading-alpha RGB once into the user's RGB buffer
+    // (if attached) or `rgb_scratch`. Reused for luma + HSV.
+    if need_rgb_buffer {
+      let rgb_row = rgb_row_buf_or_scratch(
+        rgb.as_deref_mut(),
+        rgb_scratch,
+        one_plane_start,
+        one_plane_end,
+        w,
+        h,
+      )?;
+      argb_to_rgb_row(argb_in, rgb_row, w, use_simd);
+
+      if let Some(luma) = luma.as_deref_mut() {
+        rgb_to_luma_row(
+          rgb_row,
+          &mut luma[one_plane_start..one_plane_end],
+          w,
+          row.matrix(),
+          row.full_range(),
+          use_simd,
+        );
+      }
+
+      if let Some(hsv) = hsv.as_mut() {
+        rgb_to_hsv_row(
+          rgb_row,
+          &mut hsv.h[one_plane_start..one_plane_end],
+          &mut hsv.s[one_plane_start..one_plane_end],
+          &mut hsv.v[one_plane_start..one_plane_end],
+          w,
+          use_simd,
+        );
+      }
+    }
+
+    // RGBA output — rotate alpha to trailing position.
+    if let Some(buf) = rgba.as_deref_mut() {
+      let rgba_row = rgba_plane_row_slice(buf, one_plane_start, one_plane_end, w, h)?;
+      argb_to_rgba_row(argb_in, rgba_row, w, use_simd);
+    }
+
+    Ok(())
+  }
+}
+
+// ---- Abgr impl (Ship 9c) -----------------------------------------------
+
+impl<'a> MixedSinker<'a, Abgr> {
+  /// Attaches a packed **8-bit** RGBA output buffer. Channel layout
+  /// is fully reversed on output (input is `A, B, G, R`; output is
+  /// `R, G, B, A`). Alpha is **passed through** from the source,
+  /// not forced to `0xFF`.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn with_rgba(mut self, buf: &'a mut [u8]) -> Result<Self, MixedSinkerError> {
+    self.set_rgba(buf)?;
+    Ok(self)
+  }
+  /// In-place variant of [`with_rgba`](Self::with_rgba).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn set_rgba(&mut self, buf: &'a mut [u8]) -> Result<&mut Self, MixedSinkerError> {
+    let expected = self.frame_bytes(4)?;
+    if buf.len() < expected {
+      return Err(MixedSinkerError::RgbaBufferTooShort {
+        expected,
+        actual: buf.len(),
+      });
+    }
+    self.rgba = Some(buf);
+    Ok(self)
+  }
+}
+
+impl AbgrSink for MixedSinker<'_, Abgr> {}
+
+impl PixelSink for MixedSinker<'_, Abgr> {
+  type Input<'r> = AbgrRow<'r>;
+  type Error = MixedSinkerError;
+
+  fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
+    check_dimensions_match(self.width, self.height, width, height)
+  }
+
+  fn process(&mut self, row: AbgrRow<'_>) -> Result<(), Self::Error> {
+    let w = self.width;
+    let h = self.height;
+    let idx = row.row();
+    let use_simd = self.simd;
+
+    if row.abgr().len() != w * 4 {
+      return Err(MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::AbgrPacked,
+        row: idx,
+        expected: w * 4,
+        actual: row.abgr().len(),
+      });
+    }
+    if idx >= self.height {
+      return Err(MixedSinkerError::RowIndexOutOfRange {
+        row: idx,
+        configured_height: self.height,
+      });
+    }
+
+    let Self {
+      rgb,
+      rgba,
+      luma,
+      hsv,
+      rgb_scratch,
+      ..
+    } = self;
+    let one_plane_start = idx * w;
+    let one_plane_end = one_plane_start + w;
+    let abgr_in = row.abgr();
+
+    let want_rgb = rgb.is_some();
+    let want_luma = luma.is_some();
+    let want_hsv = hsv.is_some();
+    let need_rgb_buffer = want_rgb || want_luma || want_hsv;
+
+    // Stage swap+drop into `rgb_scratch` (or the user's RGB buffer
+    // if attached) once — reused for luma / HSV / RGB output.
+    if need_rgb_buffer {
+      let rgb_row = rgb_row_buf_or_scratch(
+        rgb.as_deref_mut(),
+        rgb_scratch,
+        one_plane_start,
+        one_plane_end,
+        w,
+        h,
+      )?;
+      abgr_to_rgb_row(abgr_in, rgb_row, w, use_simd);
+
+      if let Some(luma) = luma.as_deref_mut() {
+        rgb_to_luma_row(
+          rgb_row,
+          &mut luma[one_plane_start..one_plane_end],
+          w,
+          row.matrix(),
+          row.full_range(),
+          use_simd,
+        );
+      }
+
+      if let Some(hsv) = hsv.as_mut() {
+        rgb_to_hsv_row(
+          rgb_row,
+          &mut hsv.h[one_plane_start..one_plane_end],
+          &mut hsv.s[one_plane_start..one_plane_end],
+          &mut hsv.v[one_plane_start..one_plane_end],
+          w,
+          use_simd,
+        );
+      }
+    }
+
+    // RGBA output — full byte reverse.
+    if let Some(buf) = rgba.as_deref_mut() {
+      let rgba_row = rgba_plane_row_slice(buf, one_plane_start, one_plane_end, w, h)?;
+      abgr_to_rgba_row(abgr_in, rgba_row, w, use_simd);
     }
 
     Ok(())

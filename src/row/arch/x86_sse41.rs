@@ -41,6 +41,7 @@ use crate::{
   ColorMatrix,
   row::{
     arch::x86_common::{
+      abgr_to_rgb_16_pixels, abgr_to_rgba_4_pixels, argb_to_rgb_16_pixels, argb_to_rgba_4_pixels,
       bgra_to_rgb_16_pixels, drop_alpha_16_pixels, rgb_to_hsv_16_pixels, swap_rb_16_pixels,
       swap_rb_alpha_4_pixels, write_rgb_16, write_rgb_u16_8, write_rgba_16, write_rgba_u16_8,
     },
@@ -5040,6 +5041,140 @@ pub(crate) unsafe fn bgra_to_rgb_row(bgra: &[u8], rgb_out: &mut [u8], width: usi
       scalar::bgra_to_rgb_row(
         &bgra[x * 4..width * 4],
         &mut rgb_out[x * 3..width * 3],
+        width - x,
+      );
+    }
+  }
+}
+
+// ===== Leading-alpha shuffles (Ship 9c) ==================================
+
+/// SSE4.1 ARGB→RGB drop-leading-alpha. 16 pixels per iteration via
+/// the shared [`super::x86_common::argb_to_rgb_16_pixels`] helper.
+///
+/// # Safety
+///
+/// 1. SSE4.1 must be available (dispatcher obligation).
+/// 2. `argb.len() >= 4 * width`; `rgb_out.len() >= 3 * width`.
+/// 3. `argb` / `rgb_out` must not alias.
+#[inline]
+#[target_feature(enable = "sse4.1")]
+pub(crate) unsafe fn argb_to_rgb_row(argb: &[u8], rgb_out: &mut [u8], width: usize) {
+  debug_assert!(argb.len() >= width * 4, "argb row too short");
+  debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
+
+  unsafe {
+    let mut x = 0usize;
+    while x + 16 <= width {
+      argb_to_rgb_16_pixels(argb.as_ptr().add(x * 4), rgb_out.as_mut_ptr().add(x * 3));
+      x += 16;
+    }
+    if x < width {
+      scalar::argb_to_rgb_row(
+        &argb[x * 4..width * 4],
+        &mut rgb_out[x * 3..width * 3],
+        width - x,
+      );
+    }
+  }
+}
+
+/// SSE4.1 ABGR→RGB combined drop-leading-alpha + R↔B swap. 16 pixels
+/// per iteration via the shared
+/// [`super::x86_common::abgr_to_rgb_16_pixels`] helper.
+///
+/// # Safety
+///
+/// 1. SSE4.1 must be available (dispatcher obligation).
+/// 2. `abgr.len() >= 4 * width`; `rgb_out.len() >= 3 * width`.
+/// 3. `abgr` / `rgb_out` must not alias.
+#[inline]
+#[target_feature(enable = "sse4.1")]
+pub(crate) unsafe fn abgr_to_rgb_row(abgr: &[u8], rgb_out: &mut [u8], width: usize) {
+  debug_assert!(abgr.len() >= width * 4, "abgr row too short");
+  debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
+
+  unsafe {
+    let mut x = 0usize;
+    while x + 16 <= width {
+      abgr_to_rgb_16_pixels(abgr.as_ptr().add(x * 4), rgb_out.as_mut_ptr().add(x * 3));
+      x += 16;
+    }
+    if x < width {
+      scalar::abgr_to_rgb_row(
+        &abgr[x * 4..width * 4],
+        &mut rgb_out[x * 3..width * 3],
+        width - x,
+      );
+    }
+  }
+}
+
+/// SSE4.1 ARGB→RGBA leading-alpha rotation. 16 pixels per iteration
+/// via four `_mm_shuffle_epi8` calls (one per 16-byte vector, four
+/// pixels each).
+///
+/// # Safety
+///
+/// 1. SSE4.1 must be available (dispatcher obligation).
+/// 2. `argb.len() >= 4 * width`; `rgba_out.len() >= 4 * width`.
+/// 3. `argb` / `rgba_out` must not alias.
+#[inline]
+#[target_feature(enable = "sse4.1")]
+pub(crate) unsafe fn argb_to_rgba_row(argb: &[u8], rgba_out: &mut [u8], width: usize) {
+  debug_assert!(argb.len() >= width * 4, "argb row too short");
+  debug_assert!(rgba_out.len() >= width * 4, "rgba_out row too short");
+
+  unsafe {
+    let mut x = 0usize;
+    while x + 16 <= width {
+      let base_in = argb.as_ptr().add(x * 4);
+      let base_out = rgba_out.as_mut_ptr().add(x * 4);
+      argb_to_rgba_4_pixels(base_in, base_out);
+      argb_to_rgba_4_pixels(base_in.add(16), base_out.add(16));
+      argb_to_rgba_4_pixels(base_in.add(32), base_out.add(32));
+      argb_to_rgba_4_pixels(base_in.add(48), base_out.add(48));
+      x += 16;
+    }
+    if x < width {
+      scalar::argb_to_rgba_row(
+        &argb[x * 4..width * 4],
+        &mut rgba_out[x * 4..width * 4],
+        width - x,
+      );
+    }
+  }
+}
+
+/// SSE4.1 ABGR→RGBA full byte reverse. 16 pixels per iteration via
+/// four `_mm_shuffle_epi8` calls.
+///
+/// # Safety
+///
+/// 1. SSE4.1 must be available (dispatcher obligation).
+/// 2. `abgr.len() >= 4 * width`; `rgba_out.len() >= 4 * width`.
+/// 3. `abgr` / `rgba_out` must not alias.
+#[inline]
+#[target_feature(enable = "sse4.1")]
+pub(crate) unsafe fn abgr_to_rgba_row(abgr: &[u8], rgba_out: &mut [u8], width: usize) {
+  debug_assert!(abgr.len() >= width * 4, "abgr row too short");
+  debug_assert!(rgba_out.len() >= width * 4, "rgba_out row too short");
+
+  unsafe {
+    let mut x = 0usize;
+    while x + 16 <= width {
+      let base_in = abgr.as_ptr().add(x * 4);
+      let base_out = rgba_out.as_mut_ptr().add(x * 4);
+      abgr_to_rgba_4_pixels(base_in, base_out);
+      abgr_to_rgba_4_pixels(base_in.add(16), base_out.add(16));
+      abgr_to_rgba_4_pixels(base_in.add(32), base_out.add(32));
+      abgr_to_rgba_4_pixels(base_in.add(48), base_out.add(48));
+      x += 16;
+    }
+    if x < width {
+      scalar::abgr_to_rgba_row(
+        &abgr[x * 4..width * 4],
+        &mut rgba_out[x * 4..width * 4],
         width - x,
       );
     }
