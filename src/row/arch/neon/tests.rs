@@ -3781,3 +3781,90 @@ fn abgr_to_rgba_neon_matches_scalar_widths() {
     }
   }
 }
+
+// ---- Ship 9d padding-byte shuffles -----------------------------------
+
+#[test]
+#[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
+fn xrgb_to_rgba_neon_matches_scalar_widths() {
+  for w in [1usize, 7, 15, 16, 17, 31, 32, 33, 1920, 1921] {
+    let input = pseudo_random_rgba(w);
+    let mut out_scalar = std::vec![0u8; w * 4];
+    let mut out_neon = std::vec![0u8; w * 4];
+    scalar::xrgb_to_rgba_row(&input, &mut out_scalar, w);
+    unsafe {
+      xrgb_to_rgba_row(&input, &mut out_neon, w);
+    }
+    assert_eq!(out_scalar, out_neon, "width {w}");
+    // Drop leading byte; alpha forced to 0xFF.
+    for x in 0..w {
+      assert_eq!(out_neon[x * 4], input[x * 4 + 1], "R width {w} px {x}");
+      assert_eq!(out_neon[x * 4 + 1], input[x * 4 + 2], "G width {w} px {x}");
+      assert_eq!(out_neon[x * 4 + 2], input[x * 4 + 3], "B width {w} px {x}");
+      assert_eq!(out_neon[x * 4 + 3], 0xFF, "A width {w} px {x}");
+    }
+  }
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
+fn rgbx_to_rgba_neon_matches_scalar_widths() {
+  for w in [1usize, 7, 15, 16, 17, 31, 32, 33, 1920, 1921] {
+    let input = pseudo_random_rgba(w);
+    let mut out_scalar = std::vec![0u8; w * 4];
+    let mut out_neon = std::vec![0u8; w * 4];
+    scalar::rgbx_to_rgba_row(&input, &mut out_scalar, w);
+    unsafe {
+      rgbx_to_rgba_row(&input, &mut out_neon, w);
+    }
+    assert_eq!(out_scalar, out_neon, "width {w}");
+    for x in 0..w {
+      assert_eq!(out_neon[x * 4], input[x * 4], "R width {w} px {x}");
+      assert_eq!(out_neon[x * 4 + 1], input[x * 4 + 1], "G width {w} px {x}");
+      assert_eq!(out_neon[x * 4 + 2], input[x * 4 + 2], "B width {w} px {x}");
+      assert_eq!(out_neon[x * 4 + 3], 0xFF, "A width {w} px {x}");
+    }
+  }
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
+fn xbgr_to_rgba_neon_matches_scalar_widths() {
+  for w in [1usize, 7, 15, 16, 17, 31, 32, 33, 1920, 1921] {
+    let input = pseudo_random_rgba(w);
+    let mut out_scalar = std::vec![0u8; w * 4];
+    let mut out_neon = std::vec![0u8; w * 4];
+    scalar::xbgr_to_rgba_row(&input, &mut out_scalar, w);
+    unsafe {
+      xbgr_to_rgba_row(&input, &mut out_neon, w);
+    }
+    assert_eq!(out_scalar, out_neon, "width {w}");
+    for x in 0..w {
+      assert_eq!(out_neon[x * 4], input[x * 4 + 3], "R width {w} px {x}");
+      assert_eq!(out_neon[x * 4 + 1], input[x * 4 + 2], "G width {w} px {x}");
+      assert_eq!(out_neon[x * 4 + 2], input[x * 4 + 1], "B width {w} px {x}");
+      assert_eq!(out_neon[x * 4 + 3], 0xFF, "A width {w} px {x}");
+    }
+  }
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
+fn bgrx_to_rgba_neon_matches_scalar_widths() {
+  for w in [1usize, 7, 15, 16, 17, 31, 32, 33, 1920, 1921] {
+    let input = pseudo_random_rgba(w);
+    let mut out_scalar = std::vec![0u8; w * 4];
+    let mut out_neon = std::vec![0u8; w * 4];
+    scalar::bgrx_to_rgba_row(&input, &mut out_scalar, w);
+    unsafe {
+      bgrx_to_rgba_row(&input, &mut out_neon, w);
+    }
+    assert_eq!(out_scalar, out_neon, "width {w}");
+    for x in 0..w {
+      assert_eq!(out_neon[x * 4], input[x * 4 + 2], "R width {w} px {x}");
+      assert_eq!(out_neon[x * 4 + 1], input[x * 4 + 1], "G width {w} px {x}");
+      assert_eq!(out_neon[x * 4 + 2], input[x * 4], "B width {w} px {x}");
+      assert_eq!(out_neon[x * 4 + 3], 0xFF, "A width {w} px {x}");
+    }
+  }
+}

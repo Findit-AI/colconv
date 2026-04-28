@@ -3654,3 +3654,73 @@ fn avx512_abgr_to_rgba_matches_scalar() {
     );
   }
 }
+
+// ---- Ship 9d padding-byte shuffles -----------------------------------
+
+#[test]
+fn avx512_xrgb_to_rgba_matches_scalar() {
+  if !std::arch::is_x86_feature_detected!("avx512bw") {
+    return;
+  }
+  for w in [1usize, 31, 63, 64, 65, 127, 128, 129, 1920, 1921] {
+    let input = pseudo_random_rgba(w);
+    let mut out_scalar = std::vec![0u8; w * 4];
+    let mut out_avx = std::vec![0u8; w * 4];
+    scalar::xrgb_to_rgba_row(&input, &mut out_scalar, w);
+    unsafe {
+      xrgb_to_rgba_row(&input, &mut out_avx, w);
+    }
+    assert_eq!(out_scalar, out_avx, "AVX-512 xrgb_to_rgba diverges (width={w})");
+  }
+}
+
+#[test]
+fn avx512_rgbx_to_rgba_matches_scalar() {
+  if !std::arch::is_x86_feature_detected!("avx512bw") {
+    return;
+  }
+  for w in [1usize, 31, 63, 64, 65, 127, 128, 129, 1920, 1921] {
+    let input = pseudo_random_rgba(w);
+    let mut out_scalar = std::vec![0u8; w * 4];
+    let mut out_avx = std::vec![0u8; w * 4];
+    scalar::rgbx_to_rgba_row(&input, &mut out_scalar, w);
+    unsafe {
+      rgbx_to_rgba_row(&input, &mut out_avx, w);
+    }
+    assert_eq!(out_scalar, out_avx, "AVX-512 rgbx_to_rgba diverges (width={w})");
+  }
+}
+
+#[test]
+fn avx512_xbgr_to_rgba_matches_scalar() {
+  if !std::arch::is_x86_feature_detected!("avx512bw") {
+    return;
+  }
+  for w in [1usize, 31, 63, 64, 65, 127, 128, 129, 1920, 1921] {
+    let input = pseudo_random_rgba(w);
+    let mut out_scalar = std::vec![0u8; w * 4];
+    let mut out_avx = std::vec![0u8; w * 4];
+    scalar::xbgr_to_rgba_row(&input, &mut out_scalar, w);
+    unsafe {
+      xbgr_to_rgba_row(&input, &mut out_avx, w);
+    }
+    assert_eq!(out_scalar, out_avx, "AVX-512 xbgr_to_rgba diverges (width={w})");
+  }
+}
+
+#[test]
+fn avx512_bgrx_to_rgba_matches_scalar() {
+  if !std::arch::is_x86_feature_detected!("avx512bw") {
+    return;
+  }
+  for w in [1usize, 31, 63, 64, 65, 127, 128, 129, 1920, 1921] {
+    let input = pseudo_random_rgba(w);
+    let mut out_scalar = std::vec![0u8; w * 4];
+    let mut out_avx = std::vec![0u8; w * 4];
+    scalar::bgrx_to_rgba_row(&input, &mut out_scalar, w);
+    unsafe {
+      bgrx_to_rgba_row(&input, &mut out_avx, w);
+    }
+    assert_eq!(out_scalar, out_avx, "AVX-512 bgrx_to_rgba diverges (width={w})");
+  }
+}

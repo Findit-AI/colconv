@@ -53,12 +53,17 @@
 //!   [`Rgba`](crate::yuv::Rgba) (`R, G, B, A` bytes),
 //!   [`Bgra`](crate::yuv::Bgra) (`B, G, R, A` bytes),
 //!   [`Argb`](crate::yuv::Argb) (`A, R, G, B` bytes — leading alpha),
-//!   [`Abgr`](crate::yuv::Abgr) (`A, B, G, R` bytes — leading alpha).
+//!   [`Abgr`](crate::yuv::Abgr) (`A, B, G, R` bytes — leading alpha),
+//!   [`Xrgb`](crate::yuv::Xrgb) / [`Rgbx`](crate::yuv::Rgbx) /
+//!   [`Xbgr`](crate::yuv::Xbgr) / [`Bgrx`](crate::yuv::Bgrx)
+//!   (4-byte packed RGB with one ignored padding byte at the leading
+//!   or trailing position).
 //!   The source row is already RGB — `with_rgb` is an identity copy /
-//!   channel swap / drop-alpha, `with_rgba` is a memcpy / channel
-//!   reorder (alpha passed through for 4-byte sources, forced to
-//!   `0xFF` for the 3-byte sources), `with_luma` derives Y' from
-//!   R/G/B, `with_hsv` reuses the existing kernel.
+//!   channel swap / drop-alpha-or-padding, `with_rgba` is a memcpy /
+//!   channel reorder (alpha passed through for the alpha-bearing
+//!   4-byte sources, forced to `0xFF` for the 3-byte sources and the
+//!   padding-byte family), `with_luma` derives Y' from R/G/B,
+//!   `with_hsv` reuses the existing kernel.
 //!
 //! High‑bit‑depth source impls expose both `with_rgb` (u8 output) and
 //! `with_rgb_u16` (native‑depth u16 output). Calling `with_rgb_u16` on
@@ -540,6 +545,25 @@ pub enum RowSlice {
   /// [`ArgbPacked`](Self::ArgbPacked).
   #[display("ABGR packed")]
   AbgrPacked,
+  /// Packed `X, R, G, B` row of an [`Xrgb`](crate::yuv::Xrgb) source
+  /// (FFmpeg `0rgb`). `4 * width` `u8` bytes — leading **padding**
+  /// byte (not alpha).
+  #[display("XRGB packed")]
+  XrgbPacked,
+  /// Packed `R, G, B, X` row of an [`Rgbx`](crate::yuv::Rgbx) source
+  /// (FFmpeg `rgb0`). `4 * width` `u8` bytes — trailing padding byte.
+  #[display("RGBX packed")]
+  RgbxPacked,
+  /// Packed `X, B, G, R` row of an [`Xbgr`](crate::yuv::Xbgr) source
+  /// (FFmpeg `0bgr`). `4 * width` `u8` bytes — leading padding byte
+  /// + reversed RGB order vs [`XrgbPacked`](Self::XrgbPacked).
+  #[display("XBGR packed")]
+  XbgrPacked,
+  /// Packed `B, G, R, X` row of a [`Bgrx`](crate::yuv::Bgrx) source
+  /// (FFmpeg `bgr0`). `4 * width` `u8` bytes — trailing padding byte
+  /// + reversed RGB order vs [`RgbxPacked`](Self::RgbxPacked).
+  #[display("BGRX packed")]
+  BgrxPacked,
 }
 
 /// A sink that writes any subset of `{RGB, Luma, HSV}` into

@@ -42,8 +42,10 @@ use crate::{
   row::{
     arch::x86_common::{
       abgr_to_rgb_16_pixels, abgr_to_rgba_4_pixels, argb_to_rgb_16_pixels, argb_to_rgba_4_pixels,
-      bgra_to_rgb_16_pixels, drop_alpha_16_pixels, rgb_to_hsv_16_pixels, swap_rb_16_pixels,
-      swap_rb_alpha_4_pixels, write_rgb_16, write_rgb_u16_8, write_rgba_16, write_rgba_u16_8,
+      bgra_to_rgb_16_pixels, bgrx_to_rgba_4_pixels, drop_alpha_16_pixels, rgb_to_hsv_16_pixels,
+      rgbx_to_rgba_4_pixels, swap_rb_16_pixels, swap_rb_alpha_4_pixels, write_rgb_16,
+      write_rgb_u16_8, write_rgba_16, write_rgba_u16_8, xbgr_to_rgba_4_pixels,
+      xrgb_to_rgba_4_pixels,
     },
     scalar,
   },
@@ -5174,6 +5176,149 @@ pub(crate) unsafe fn abgr_to_rgba_row(abgr: &[u8], rgba_out: &mut [u8], width: u
     if x < width {
       scalar::abgr_to_rgba_row(
         &abgr[x * 4..width * 4],
+        &mut rgba_out[x * 4..width * 4],
+        width - x,
+      );
+    }
+  }
+}
+
+// ===== Padding-byte to RGBA shuffles (Ship 9d) ===========================
+
+/// SSE4.1 XRGB→RGBA drop-leading-padding + force `A = 0xFF`. 16
+/// pixels per iteration via four
+/// [`super::x86_common::xrgb_to_rgba_4_pixels`] calls.
+///
+/// # Safety
+///
+/// 1. SSE4.1 must be available (dispatcher obligation).
+/// 2. `xrgb.len() >= 4 * width`; `rgba_out.len() >= 4 * width`.
+/// 3. `xrgb` / `rgba_out` must not alias.
+#[inline]
+#[target_feature(enable = "sse4.1")]
+pub(crate) unsafe fn xrgb_to_rgba_row(xrgb: &[u8], rgba_out: &mut [u8], width: usize) {
+  debug_assert!(xrgb.len() >= width * 4, "xrgb row too short");
+  debug_assert!(rgba_out.len() >= width * 4, "rgba_out row too short");
+
+  unsafe {
+    let mut x = 0usize;
+    while x + 16 <= width {
+      let base_in = xrgb.as_ptr().add(x * 4);
+      let base_out = rgba_out.as_mut_ptr().add(x * 4);
+      xrgb_to_rgba_4_pixels(base_in, base_out);
+      xrgb_to_rgba_4_pixels(base_in.add(16), base_out.add(16));
+      xrgb_to_rgba_4_pixels(base_in.add(32), base_out.add(32));
+      xrgb_to_rgba_4_pixels(base_in.add(48), base_out.add(48));
+      x += 16;
+    }
+    if x < width {
+      scalar::xrgb_to_rgba_row(
+        &xrgb[x * 4..width * 4],
+        &mut rgba_out[x * 4..width * 4],
+        width - x,
+      );
+    }
+  }
+}
+
+/// SSE4.1 RGBX→RGBA drop-trailing-padding + force `A = 0xFF`. 16
+/// pixels per iteration.
+///
+/// # Safety
+///
+/// 1. SSE4.1 must be available.
+/// 2. `rgbx.len() >= 4 * width`; `rgba_out.len() >= 4 * width`.
+/// 3. `rgbx` / `rgba_out` must not alias.
+#[inline]
+#[target_feature(enable = "sse4.1")]
+pub(crate) unsafe fn rgbx_to_rgba_row(rgbx: &[u8], rgba_out: &mut [u8], width: usize) {
+  debug_assert!(rgbx.len() >= width * 4, "rgbx row too short");
+  debug_assert!(rgba_out.len() >= width * 4, "rgba_out row too short");
+
+  unsafe {
+    let mut x = 0usize;
+    while x + 16 <= width {
+      let base_in = rgbx.as_ptr().add(x * 4);
+      let base_out = rgba_out.as_mut_ptr().add(x * 4);
+      rgbx_to_rgba_4_pixels(base_in, base_out);
+      rgbx_to_rgba_4_pixels(base_in.add(16), base_out.add(16));
+      rgbx_to_rgba_4_pixels(base_in.add(32), base_out.add(32));
+      rgbx_to_rgba_4_pixels(base_in.add(48), base_out.add(48));
+      x += 16;
+    }
+    if x < width {
+      scalar::rgbx_to_rgba_row(
+        &rgbx[x * 4..width * 4],
+        &mut rgba_out[x * 4..width * 4],
+        width - x,
+      );
+    }
+  }
+}
+
+/// SSE4.1 XBGR→RGBA reverse-and-drop-leading-padding + force
+/// `A = 0xFF`. 16 pixels per iteration.
+///
+/// # Safety
+///
+/// 1. SSE4.1 must be available.
+/// 2. `xbgr.len() >= 4 * width`; `rgba_out.len() >= 4 * width`.
+/// 3. `xbgr` / `rgba_out` must not alias.
+#[inline]
+#[target_feature(enable = "sse4.1")]
+pub(crate) unsafe fn xbgr_to_rgba_row(xbgr: &[u8], rgba_out: &mut [u8], width: usize) {
+  debug_assert!(xbgr.len() >= width * 4, "xbgr row too short");
+  debug_assert!(rgba_out.len() >= width * 4, "rgba_out row too short");
+
+  unsafe {
+    let mut x = 0usize;
+    while x + 16 <= width {
+      let base_in = xbgr.as_ptr().add(x * 4);
+      let base_out = rgba_out.as_mut_ptr().add(x * 4);
+      xbgr_to_rgba_4_pixels(base_in, base_out);
+      xbgr_to_rgba_4_pixels(base_in.add(16), base_out.add(16));
+      xbgr_to_rgba_4_pixels(base_in.add(32), base_out.add(32));
+      xbgr_to_rgba_4_pixels(base_in.add(48), base_out.add(48));
+      x += 16;
+    }
+    if x < width {
+      scalar::xbgr_to_rgba_row(
+        &xbgr[x * 4..width * 4],
+        &mut rgba_out[x * 4..width * 4],
+        width - x,
+      );
+    }
+  }
+}
+
+/// SSE4.1 BGRX→RGBA reverse-and-drop-trailing-padding + force
+/// `A = 0xFF`. 16 pixels per iteration.
+///
+/// # Safety
+///
+/// 1. SSE4.1 must be available.
+/// 2. `bgrx.len() >= 4 * width`; `rgba_out.len() >= 4 * width`.
+/// 3. `bgrx` / `rgba_out` must not alias.
+#[inline]
+#[target_feature(enable = "sse4.1")]
+pub(crate) unsafe fn bgrx_to_rgba_row(bgrx: &[u8], rgba_out: &mut [u8], width: usize) {
+  debug_assert!(bgrx.len() >= width * 4, "bgrx row too short");
+  debug_assert!(rgba_out.len() >= width * 4, "rgba_out row too short");
+
+  unsafe {
+    let mut x = 0usize;
+    while x + 16 <= width {
+      let base_in = bgrx.as_ptr().add(x * 4);
+      let base_out = rgba_out.as_mut_ptr().add(x * 4);
+      bgrx_to_rgba_4_pixels(base_in, base_out);
+      bgrx_to_rgba_4_pixels(base_in.add(16), base_out.add(16));
+      bgrx_to_rgba_4_pixels(base_in.add(32), base_out.add(32));
+      bgrx_to_rgba_4_pixels(base_in.add(48), base_out.add(48));
+      x += 16;
+    }
+    if x < width {
+      scalar::bgrx_to_rgba_row(
+        &bgrx[x * 4..width * 4],
         &mut rgba_out[x * 4..width * 4],
         width - x,
       );

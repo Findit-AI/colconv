@@ -520,6 +520,105 @@ pub(super) unsafe fn abgr_to_rgba_4_pixels(input_ptr: *const u8, output_ptr: *mu
   }
 }
 
+// ===== Padding-byte helpers (Ship 9d) ====================================
+//
+// Used by the [`Xrgb`](crate::yuv::Xrgb) / [`Rgbx`](crate::yuv::Rgbx) /
+// [`Xbgr`](crate::yuv::Xbgr) / [`Bgrx`](crate::yuv::Bgrx) source-side
+// `with_rgba` paths. Each helper takes 4 input pixels (16 bytes), pulls
+// R/G/B from the appropriate byte offsets, and forces the alpha lane
+// to `0xFF` via OR with a constant. The padding byte's value is
+// discarded — the shuffle mask uses `-1` (0x80) on the alpha lane to
+// zero it before the OR.
+
+/// Drops the **leading** padding byte from 4 packed XRGB pixels (16
+/// bytes), producing 4 packed RGBA pixels with `A = 0xFF`. One
+/// `_mm_shuffle_epi8` + one `_mm_or_si128` per 16-byte vector.
+///
+/// # Safety
+///
+/// - `input_ptr` must point to at least 16 readable bytes.
+/// - `output_ptr` must point to at least 16 writable bytes.
+/// - `input_ptr` / `output_ptr` ranges must not alias.
+/// - SSSE3 must be available in the caller's `target_feature` context.
+#[inline(always)]
+pub(super) unsafe fn xrgb_to_rgba_4_pixels(input_ptr: *const u8, output_ptr: *mut u8) {
+  unsafe {
+    // Pull bytes 1,2,3 of each input pixel into the first three output
+    // lanes; -1 zeros the alpha lane (filled in by the OR below).
+    let mask = _mm_setr_epi8(1, 2, 3, -1, 5, 6, 7, -1, 9, 10, 11, -1, 13, 14, 15, -1);
+    // 0xFF in every alpha lane; 0 elsewhere.
+    let alpha = _mm_set1_epi32(0xFF00_0000_u32 as i32);
+    let in_v = _mm_loadu_si128(input_ptr.cast());
+    let shuffled = _mm_shuffle_epi8(in_v, mask);
+    let out_v = _mm_or_si128(shuffled, alpha);
+    _mm_storeu_si128(output_ptr.cast(), out_v);
+  }
+}
+
+/// Drops the **trailing** padding byte from 4 packed RGBX pixels (16
+/// bytes), producing 4 packed RGBA pixels with `A = 0xFF`. One
+/// `_mm_shuffle_epi8` + one `_mm_or_si128` per 16-byte vector.
+///
+/// # Safety
+///
+/// - `input_ptr` must point to at least 16 readable bytes.
+/// - `output_ptr` must point to at least 16 writable bytes.
+/// - `input_ptr` / `output_ptr` ranges must not alias.
+/// - SSSE3 must be available in the caller's `target_feature` context.
+#[inline(always)]
+pub(super) unsafe fn rgbx_to_rgba_4_pixels(input_ptr: *const u8, output_ptr: *mut u8) {
+  unsafe {
+    let mask = _mm_setr_epi8(0, 1, 2, -1, 4, 5, 6, -1, 8, 9, 10, -1, 12, 13, 14, -1);
+    let alpha = _mm_set1_epi32(0xFF00_0000_u32 as i32);
+    let in_v = _mm_loadu_si128(input_ptr.cast());
+    let shuffled = _mm_shuffle_epi8(in_v, mask);
+    let out_v = _mm_or_si128(shuffled, alpha);
+    _mm_storeu_si128(output_ptr.cast(), out_v);
+  }
+}
+
+/// Reverses RGB and drops **leading** padding from 4 packed XBGR
+/// pixels (16 bytes), producing 4 packed RGBA pixels with `A = 0xFF`.
+///
+/// # Safety
+///
+/// - `input_ptr` must point to at least 16 readable bytes.
+/// - `output_ptr` must point to at least 16 writable bytes.
+/// - `input_ptr` / `output_ptr` ranges must not alias.
+/// - SSSE3 must be available in the caller's `target_feature` context.
+#[inline(always)]
+pub(super) unsafe fn xbgr_to_rgba_4_pixels(input_ptr: *const u8, output_ptr: *mut u8) {
+  unsafe {
+    let mask = _mm_setr_epi8(3, 2, 1, -1, 7, 6, 5, -1, 11, 10, 9, -1, 15, 14, 13, -1);
+    let alpha = _mm_set1_epi32(0xFF00_0000_u32 as i32);
+    let in_v = _mm_loadu_si128(input_ptr.cast());
+    let shuffled = _mm_shuffle_epi8(in_v, mask);
+    let out_v = _mm_or_si128(shuffled, alpha);
+    _mm_storeu_si128(output_ptr.cast(), out_v);
+  }
+}
+
+/// Reverses RGB and drops **trailing** padding from 4 packed BGRX
+/// pixels (16 bytes), producing 4 packed RGBA pixels with `A = 0xFF`.
+///
+/// # Safety
+///
+/// - `input_ptr` must point to at least 16 readable bytes.
+/// - `output_ptr` must point to at least 16 writable bytes.
+/// - `input_ptr` / `output_ptr` ranges must not alias.
+/// - SSSE3 must be available in the caller's `target_feature` context.
+#[inline(always)]
+pub(super) unsafe fn bgrx_to_rgba_4_pixels(input_ptr: *const u8, output_ptr: *mut u8) {
+  unsafe {
+    let mask = _mm_setr_epi8(2, 1, 0, -1, 6, 5, 4, -1, 10, 9, 8, -1, 14, 13, 12, -1);
+    let alpha = _mm_set1_epi32(0xFF00_0000_u32 as i32);
+    let in_v = _mm_loadu_si128(input_ptr.cast());
+    let shuffled = _mm_shuffle_epi8(in_v, mask);
+    let out_v = _mm_or_si128(shuffled, alpha);
+    _mm_storeu_si128(output_ptr.cast(), out_v);
+  }
+}
+
 /// Swaps R↔B and drops alpha for 16 packed BGRA pixels (64 input
 /// bytes → 48 output bytes). Same shape as [`drop_alpha_16_pixels`]
 /// but each pixel triple is read with the channel order reversed

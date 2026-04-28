@@ -134,15 +134,21 @@
 //! - [`Abgr`] — packed `A, B, G, R` 8‑bit. Leading alpha + reversed
 //!   RGB order vs [`Argb`]; sinker performs a full byte reverse for
 //!   `with_rgba` output (Ship 9c).
+//! - [`Xrgb`] / [`Rgbx`] / [`Xbgr`] / [`Bgrx`] — 4-byte packed RGB
+//!   with one **ignored padding byte** at the leading or trailing
+//!   position (FFmpeg `0rgb` / `rgb0` / `0bgr` / `bgr0`). The padding
+//!   byte's value is undefined on read; `with_rgba` output forces
+//!   alpha to `0xFF` rather than passing through (Ship 9d).
 //!
 //! # Not yet shipped
 //!
 //! - **Legacy planar** (`Yuv411p`, `Yuv410p`) — DV / Cinepak only;
 //!   uncommon enough that adding them would be speculative.
-//! - **Packed RGB sources with padding bytes** (the `0rgb` / `rgb0` /
-//!   `0bgr` / `bgr0` variants where the 4th byte is ignored padding,
-//!   not real alpha; `Rgba1010102`) — queued for Ship 9d as the
-//!   follow‑up tranche to Ship 9c.
+//! - **10-bit packed RGB** (`Rgba1010102` / `X2RGB10` / `X2BGR10`
+//!   variants — 10 bits per channel + 2-bit alpha or padding packed
+//!   into a `u32`) — bit-level extraction kernel, structurally
+//!   different from the 8-bit byte-shuffle family; deferred to a
+//!   follow-up.
 //!
 //! # Tracked refactor (no behavior change)
 //!
@@ -165,6 +171,7 @@ mod abgr;
 mod argb;
 mod bgr24;
 mod bgra;
+mod bgrx;
 mod nv12;
 mod nv16;
 mod nv21;
@@ -181,6 +188,9 @@ mod p412;
 mod p416;
 mod rgb24;
 mod rgba;
+mod rgbx;
+mod xbgr;
+mod xrgb;
 mod yuv420p;
 mod yuv420p10;
 mod yuv420p12;
@@ -222,6 +232,7 @@ pub use abgr::{Abgr, AbgrRow, AbgrSink, abgr_to};
 pub use argb::{Argb, ArgbRow, ArgbSink, argb_to};
 pub use bgr24::{Bgr24, Bgr24Row, Bgr24Sink, bgr24_to};
 pub use bgra::{Bgra, BgraRow, BgraSink, bgra_to};
+pub use bgrx::{Bgrx, BgrxRow, BgrxSink, bgrx_to};
 pub use nv12::{Nv12, Nv12Row, Nv12Sink, nv12_to};
 pub use nv16::{Nv16, Nv16Row, Nv16Sink, nv16_to};
 pub use nv21::{Nv21, Nv21Row, Nv21Sink, nv21_to};
@@ -238,6 +249,9 @@ pub use p412::{P412, P412Row, P412Sink, p412_to};
 pub use p416::{P416, P416Row, P416Sink, p416_to};
 pub use rgb24::{Rgb24, Rgb24Row, Rgb24Sink, rgb24_to};
 pub use rgba::{Rgba, RgbaRow, RgbaSink, rgba_to};
+pub use rgbx::{Rgbx, RgbxRow, RgbxSink, rgbx_to};
+pub use xbgr::{Xbgr, XbgrRow, XbgrSink, xbgr_to};
+pub use xrgb::{Xrgb, XrgbRow, XrgbSink, xrgb_to};
 pub use yuv420p::{Yuv420p, Yuv420pRow, Yuv420pSink, yuv420p_to};
 pub use yuv420p9::{Yuv420p9, Yuv420p9Row, Yuv420p9Sink, yuv420p9_to};
 pub use yuv420p10::{Yuv420p10, Yuv420p10Row, Yuv420p10Sink, yuv420p10_to};

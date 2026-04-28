@@ -1918,3 +1918,121 @@ fn abgr_frame_new_panics_on_invalid() {
   let buf = std::vec![0u8; 10];
   let _ = AbgrFrame::new(&buf, 16, 4, 64);
 }
+
+// ---- Padding-byte family (Ship 9d) -----------------------------------
+//
+// 4-byte single-plane formats with one ignored padding byte. Frame
+// validation is the same shape as RgbaFrame/BgraFrame (4 bpp); each
+// variant tested for at least one rejection path to catch typos.
+
+#[test]
+fn xrgb_frame_try_new_accepts_valid_tight() {
+  let buf = std::vec![0u8; 16 * 4 * 4];
+  XrgbFrame::try_new(&buf, 16, 4, 64).expect("valid");
+}
+
+#[test]
+fn xrgb_frame_try_new_rejects_short_plane() {
+  let small = std::vec![0u8; 16 * 4];
+  assert!(matches!(
+    XrgbFrame::try_new(&small, 16, 4, 64),
+    Err(XrgbFrameError::PlaneTooShort {
+      expected: 256,
+      actual: 64,
+    })
+  ));
+}
+
+#[test]
+fn xrgb_frame_try_new_rejects_zero_dimension() {
+  let buf = std::vec![0u8; 16 * 4 * 4];
+  assert!(matches!(
+    XrgbFrame::try_new(&buf, 0, 4, 64),
+    Err(XrgbFrameError::ZeroDimension { .. })
+  ));
+}
+
+#[test]
+fn xrgb_frame_try_new_rejects_stride_too_small() {
+  let buf = std::vec![0u8; 16 * 4 * 4];
+  assert!(matches!(
+    XrgbFrame::try_new(&buf, 16, 4, 63),
+    Err(XrgbFrameError::StrideTooSmall {
+      min_stride: 64,
+      stride: 63,
+    })
+  ));
+}
+
+#[test]
+#[should_panic(expected = "invalid XrgbFrame")]
+fn xrgb_frame_new_panics_on_invalid() {
+  let buf = std::vec![0u8; 10];
+  let _ = XrgbFrame::new(&buf, 16, 4, 64);
+}
+
+#[test]
+fn rgbx_frame_try_new_accepts_valid_tight() {
+  let buf = std::vec![0u8; 16 * 4 * 4];
+  RgbxFrame::try_new(&buf, 16, 4, 64).expect("valid");
+}
+
+#[test]
+fn rgbx_frame_try_new_rejects_short_plane() {
+  let small = std::vec![0u8; 16 * 4];
+  assert!(matches!(
+    RgbxFrame::try_new(&small, 16, 4, 64),
+    Err(RgbxFrameError::PlaneTooShort { .. })
+  ));
+}
+
+#[test]
+#[should_panic(expected = "invalid RgbxFrame")]
+fn rgbx_frame_new_panics_on_invalid() {
+  let buf = std::vec![0u8; 10];
+  let _ = RgbxFrame::new(&buf, 16, 4, 64);
+}
+
+#[test]
+fn xbgr_frame_try_new_accepts_valid_tight() {
+  let buf = std::vec![0u8; 16 * 4 * 4];
+  XbgrFrame::try_new(&buf, 16, 4, 64).expect("valid");
+}
+
+#[test]
+fn xbgr_frame_try_new_rejects_short_plane() {
+  let small = std::vec![0u8; 16 * 4];
+  assert!(matches!(
+    XbgrFrame::try_new(&small, 16, 4, 64),
+    Err(XbgrFrameError::PlaneTooShort { .. })
+  ));
+}
+
+#[test]
+#[should_panic(expected = "invalid XbgrFrame")]
+fn xbgr_frame_new_panics_on_invalid() {
+  let buf = std::vec![0u8; 10];
+  let _ = XbgrFrame::new(&buf, 16, 4, 64);
+}
+
+#[test]
+fn bgrx_frame_try_new_accepts_valid_tight() {
+  let buf = std::vec![0u8; 16 * 4 * 4];
+  BgrxFrame::try_new(&buf, 16, 4, 64).expect("valid");
+}
+
+#[test]
+fn bgrx_frame_try_new_rejects_short_plane() {
+  let small = std::vec![0u8; 16 * 4];
+  assert!(matches!(
+    BgrxFrame::try_new(&small, 16, 4, 64),
+    Err(BgrxFrameError::PlaneTooShort { .. })
+  ));
+}
+
+#[test]
+#[should_panic(expected = "invalid BgrxFrame")]
+fn bgrx_frame_new_panics_on_invalid() {
+  let buf = std::vec![0u8; 10];
+  let _ = BgrxFrame::new(&buf, 16, 4, 64);
+}

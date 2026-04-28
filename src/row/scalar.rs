@@ -3561,6 +3561,106 @@ pub(crate) fn abgr_to_rgba_row(abgr: &[u8], rgba_out: &mut [u8], width: usize) {
   }
 }
 
+// ---- Tier 6 padding-byte helpers (Ship 9d) -----------------------------
+//
+// Compact byte-rearrangement kernels behind the [`Xrgb`] / [`Rgbx`] /
+// [`Xbgr`] / [`Bgrx`] source-side sinker family. The 4th byte position
+// (leading or trailing) is **ignored padding** — its value is undefined,
+// so the `*_to_rgba` kernels force alpha to `0xFF` rather than passing
+// through.
+//
+// `*_to_rgb` paths reuse the Ship 9b/9c kernels (`argb_to_rgb_row`,
+// `rgba_to_rgb_row`, `abgr_to_rgb_row`, `bgra_to_rgb_row`) — at the byte
+// level, "drop alpha" and "drop padding" are identical operations
+// because both ignore the same byte position.
+//
+// As with Ships 9b/9c, this file holds the scalar reference / fallback
+// implementations; SIMD dispatch lives in `row::dispatch::rgb_ops`
+// and the per-arch backends in `row::arch::*`.
+
+/// Drops the leading padding byte from packed `X, R, G, B` input,
+/// producing packed `R, G, B, A` with `A = 0xFF` (the source has no
+/// real alpha — `X` is undefined padding).
+///
+/// # Panics
+///
+/// Panics (any build profile) if `xrgb.len() < 4 * width` or
+/// `rgba_out.len() < 4 * width`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn xrgb_to_rgba_row(xrgb: &[u8], rgba_out: &mut [u8], width: usize) {
+  debug_assert!(xrgb.len() >= width * 4, "xrgb row too short");
+  debug_assert!(rgba_out.len() >= width * 4, "rgba_out row too short");
+  for x in 0..width {
+    let i = x * 4;
+    rgba_out[i] = xrgb[i + 1];
+    rgba_out[i + 1] = xrgb[i + 2];
+    rgba_out[i + 2] = xrgb[i + 3];
+    rgba_out[i + 3] = 0xFF;
+  }
+}
+
+/// Drops the trailing padding byte from packed `R, G, B, X` input,
+/// producing packed `R, G, B, A` with `A = 0xFF`.
+///
+/// # Panics
+///
+/// Panics (any build profile) if `rgbx.len() < 4 * width` or
+/// `rgba_out.len() < 4 * width`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn rgbx_to_rgba_row(rgbx: &[u8], rgba_out: &mut [u8], width: usize) {
+  debug_assert!(rgbx.len() >= width * 4, "rgbx row too short");
+  debug_assert!(rgba_out.len() >= width * 4, "rgba_out row too short");
+  for x in 0..width {
+    let i = x * 4;
+    rgba_out[i] = rgbx[i];
+    rgba_out[i + 1] = rgbx[i + 1];
+    rgba_out[i + 2] = rgbx[i + 2];
+    rgba_out[i + 3] = 0xFF;
+  }
+}
+
+/// Reverses the inner three bytes and drops the leading padding byte
+/// from packed `X, B, G, R` input, producing packed `R, G, B, A` with
+/// `A = 0xFF`.
+///
+/// # Panics
+///
+/// Panics (any build profile) if `xbgr.len() < 4 * width` or
+/// `rgba_out.len() < 4 * width`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn xbgr_to_rgba_row(xbgr: &[u8], rgba_out: &mut [u8], width: usize) {
+  debug_assert!(xbgr.len() >= width * 4, "xbgr row too short");
+  debug_assert!(rgba_out.len() >= width * 4, "rgba_out row too short");
+  for x in 0..width {
+    let i = x * 4;
+    rgba_out[i] = xbgr[i + 3];
+    rgba_out[i + 1] = xbgr[i + 2];
+    rgba_out[i + 2] = xbgr[i + 1];
+    rgba_out[i + 3] = 0xFF;
+  }
+}
+
+/// Reverses the inner three bytes and drops the trailing padding
+/// byte from packed `B, G, R, X` input, producing packed `R, G, B, A`
+/// with `A = 0xFF`.
+///
+/// # Panics
+///
+/// Panics (any build profile) if `bgrx.len() < 4 * width` or
+/// `rgba_out.len() < 4 * width`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn bgrx_to_rgba_row(bgrx: &[u8], rgba_out: &mut [u8], width: usize) {
+  debug_assert!(bgrx.len() >= width * 4, "bgrx row too short");
+  debug_assert!(rgba_out.len() >= width * 4, "rgba_out row too short");
+  for x in 0..width {
+    let i = x * 4;
+    rgba_out[i] = bgrx[i + 2];
+    rgba_out[i + 1] = bgrx[i + 1];
+    rgba_out[i + 2] = bgrx[i];
+    rgba_out[i + 3] = 0xFF;
+  }
+}
+
 // =============================================================================
 // Bayer demosaic + WB + CCM
 // =============================================================================
