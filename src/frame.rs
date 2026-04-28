@@ -4548,6 +4548,307 @@ pub type Yuva444p14Frame<'a> = Yuva444pFrame16<'a, 14>;
 /// 16-bit kernel family (mirrors [`Yuva420p16Frame`]).
 pub type Yuva444p16Frame<'a> = Yuva444pFrame16<'a, 16>;
 
+/// Errors returned by [`Yuva444pFrame::try_new`].
+///
+/// Variant shape mirrors [`Yuva420pFrameError`] (geometry, plane-too-short,
+/// `AStrideTooSmall` / `APlaneTooShort` for the alpha plane) but
+/// without `OddWidth` because 4:4:4 has no chroma subsampling, so any
+/// width is valid.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Error)]
+#[non_exhaustive]
+pub enum Yuva444pFrameError {
+  /// `width` or `height` was zero.
+  #[error("width ({width}) or height ({height}) is zero")]
+  ZeroDimension {
+    /// The supplied width.
+    width: u32,
+    /// The supplied height.
+    height: u32,
+  },
+  /// `y_stride < width`.
+  #[error("y_stride ({y_stride}) is smaller than width ({width})")]
+  YStrideTooSmall {
+    /// Declared frame width in pixels.
+    width: u32,
+    /// The supplied Y-plane stride.
+    y_stride: u32,
+  },
+  /// `u_stride < width`. 4:4:4 chroma is full-width.
+  #[error("u_stride ({u_stride}) is smaller than width ({width})")]
+  UStrideTooSmall {
+    /// Declared frame width in pixels.
+    width: u32,
+    /// The supplied U-plane stride.
+    u_stride: u32,
+  },
+  /// `v_stride < width`. 4:4:4 chroma is full-width.
+  #[error("v_stride ({v_stride}) is smaller than width ({width})")]
+  VStrideTooSmall {
+    /// Declared frame width in pixels.
+    width: u32,
+    /// The supplied V-plane stride.
+    v_stride: u32,
+  },
+  /// `a_stride < width`. The alpha plane is full-width × full-height
+  /// (1:1 with Y).
+  #[error("a_stride ({a_stride}) is smaller than width ({width})")]
+  AStrideTooSmall {
+    /// Declared frame width in pixels.
+    width: u32,
+    /// The supplied A-plane stride.
+    a_stride: u32,
+  },
+  /// Y plane is shorter than `y_stride * height` bytes.
+  #[error("Y plane has {actual} bytes but at least {expected} are required")]
+  YPlaneTooShort {
+    /// Minimum bytes required.
+    expected: usize,
+    /// Actual bytes supplied.
+    actual: usize,
+  },
+  /// U plane is shorter than `u_stride * height` bytes.
+  #[error("U plane has {actual} bytes but at least {expected} are required")]
+  UPlaneTooShort {
+    /// Minimum bytes required.
+    expected: usize,
+    /// Actual bytes supplied.
+    actual: usize,
+  },
+  /// V plane is shorter than `v_stride * height` bytes.
+  #[error("V plane has {actual} bytes but at least {expected} are required")]
+  VPlaneTooShort {
+    /// Minimum bytes required.
+    expected: usize,
+    /// Actual bytes supplied.
+    actual: usize,
+  },
+  /// A plane is shorter than `a_stride * height` bytes.
+  #[error("A plane has {actual} bytes but at least {expected} are required")]
+  APlaneTooShort {
+    /// Minimum bytes required.
+    expected: usize,
+    /// Actual bytes supplied.
+    actual: usize,
+  },
+  /// `stride * rows` overflows `usize` (32-bit targets only).
+  #[error("declared geometry overflows usize: stride={stride} * rows={rows}")]
+  GeometryOverflow {
+    /// Stride of the plane whose size overflowed.
+    stride: u32,
+    /// Row count that overflowed against the stride.
+    rows: u32,
+  },
+}
+
+/// A validated YUVA 4:4:4 planar frame at 8 bits per sample
+/// (`AV_PIX_FMT_YUVA444P`).
+///
+/// Four planes — all full-width × full-height (4:4:4 has no chroma
+/// subsampling): Y, U, V, and A. Mirrors [`Yuv444pFrame`] plus the
+/// alpha plane.
+#[derive(Debug, Clone, Copy)]
+pub struct Yuva444pFrame<'a> {
+  y: &'a [u8],
+  u: &'a [u8],
+  v: &'a [u8],
+  a: &'a [u8],
+  width: u32,
+  height: u32,
+  y_stride: u32,
+  u_stride: u32,
+  v_stride: u32,
+  a_stride: u32,
+}
+
+impl<'a> Yuva444pFrame<'a> {
+  /// Constructs a new [`Yuva444pFrame`], validating dimensions and
+  /// plane lengths.
+  ///
+  /// Returns [`Yuva444pFrameError`] if any of:
+  /// - `width` or `height` is zero,
+  /// - any stride is smaller than `width`,
+  /// - any plane is too short to cover its declared rows.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  #[allow(clippy::too_many_arguments)]
+  pub const fn try_new(
+    y: &'a [u8],
+    u: &'a [u8],
+    v: &'a [u8],
+    a: &'a [u8],
+    width: u32,
+    height: u32,
+    y_stride: u32,
+    u_stride: u32,
+    v_stride: u32,
+    a_stride: u32,
+  ) -> Result<Self, Yuva444pFrameError> {
+    if width == 0 || height == 0 {
+      return Err(Yuva444pFrameError::ZeroDimension { width, height });
+    }
+    if y_stride < width {
+      return Err(Yuva444pFrameError::YStrideTooSmall { width, y_stride });
+    }
+    if u_stride < width {
+      return Err(Yuva444pFrameError::UStrideTooSmall { width, u_stride });
+    }
+    if v_stride < width {
+      return Err(Yuva444pFrameError::VStrideTooSmall { width, v_stride });
+    }
+    if a_stride < width {
+      return Err(Yuva444pFrameError::AStrideTooSmall { width, a_stride });
+    }
+
+    let y_min = match (y_stride as usize).checked_mul(height as usize) {
+      Some(v) => v,
+      None => {
+        return Err(Yuva444pFrameError::GeometryOverflow {
+          stride: y_stride,
+          rows: height,
+        });
+      }
+    };
+    if y.len() < y_min {
+      return Err(Yuva444pFrameError::YPlaneTooShort {
+        expected: y_min,
+        actual: y.len(),
+      });
+    }
+    let u_min = match (u_stride as usize).checked_mul(height as usize) {
+      Some(v) => v,
+      None => {
+        return Err(Yuva444pFrameError::GeometryOverflow {
+          stride: u_stride,
+          rows: height,
+        });
+      }
+    };
+    if u.len() < u_min {
+      return Err(Yuva444pFrameError::UPlaneTooShort {
+        expected: u_min,
+        actual: u.len(),
+      });
+    }
+    let v_min = match (v_stride as usize).checked_mul(height as usize) {
+      Some(v) => v,
+      None => {
+        return Err(Yuva444pFrameError::GeometryOverflow {
+          stride: v_stride,
+          rows: height,
+        });
+      }
+    };
+    if v.len() < v_min {
+      return Err(Yuva444pFrameError::VPlaneTooShort {
+        expected: v_min,
+        actual: v.len(),
+      });
+    }
+    let a_min = match (a_stride as usize).checked_mul(height as usize) {
+      Some(v) => v,
+      None => {
+        return Err(Yuva444pFrameError::GeometryOverflow {
+          stride: a_stride,
+          rows: height,
+        });
+      }
+    };
+    if a.len() < a_min {
+      return Err(Yuva444pFrameError::APlaneTooShort {
+        expected: a_min,
+        actual: a.len(),
+      });
+    }
+
+    Ok(Self {
+      y,
+      u,
+      v,
+      a,
+      width,
+      height,
+      y_stride,
+      u_stride,
+      v_stride,
+      a_stride,
+    })
+  }
+
+  /// Constructs a new [`Yuva444pFrame`], panicking on invalid inputs.
+  /// Prefer [`Self::try_new`] when inputs may be invalid at runtime.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  #[allow(clippy::too_many_arguments)]
+  pub const fn new(
+    y: &'a [u8],
+    u: &'a [u8],
+    v: &'a [u8],
+    a: &'a [u8],
+    width: u32,
+    height: u32,
+    y_stride: u32,
+    u_stride: u32,
+    v_stride: u32,
+    a_stride: u32,
+  ) -> Self {
+    match Self::try_new(
+      y, u, v, a, width, height, y_stride, u_stride, v_stride, a_stride,
+    ) {
+      Ok(frame) => frame,
+      Err(_) => panic!("invalid Yuva444pFrame dimensions or plane lengths"),
+    }
+  }
+
+  /// Y (luma) plane bytes.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn y(&self) -> &'a [u8] {
+    self.y
+  }
+  /// U (Cb) plane bytes — full-width × full-height.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn u(&self) -> &'a [u8] {
+    self.u
+  }
+  /// V (Cr) plane bytes — full-width × full-height.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn v(&self) -> &'a [u8] {
+    self.v
+  }
+  /// A (alpha) plane bytes — full-width × full-height (1:1 with Y).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn a(&self) -> &'a [u8] {
+    self.a
+  }
+  /// Frame width in pixels.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn width(&self) -> u32 {
+    self.width
+  }
+  /// Frame height in pixels.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn height(&self) -> u32 {
+    self.height
+  }
+  /// Byte stride of the Y plane.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn y_stride(&self) -> u32 {
+    self.y_stride
+  }
+  /// Byte stride of the U plane.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn u_stride(&self) -> u32 {
+    self.u_stride
+  }
+  /// Byte stride of the V plane.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn v_stride(&self) -> u32 {
+    self.v_stride
+  }
+  /// Byte stride of the A plane.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn a_stride(&self) -> u32 {
+    self.a_stride
+  }
+}
+
 /// Errors returned by [`Yuva420pFrame::try_new`].
 ///
 /// Variant shape mirrors [`Yuv420pFrameError`] (geometry, plane-too-short)

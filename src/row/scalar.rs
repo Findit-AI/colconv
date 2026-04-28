@@ -488,7 +488,9 @@ pub(crate) fn yuv_444_to_rgb_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  yuv_444_to_rgb_or_rgba_row::<false>(y, u, v, rgb_out, width, matrix, full_range);
+  yuv_444_to_rgb_or_rgba_row::<false, false>(
+    y, u, v, None, rgb_out, width, matrix, full_range,
+  );
 }
 
 /// YUV 4:4:4 planar → packed `R, G, B, A` quadruplets with constant
@@ -504,34 +506,88 @@ pub(crate) fn yuv_444_to_rgba_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  yuv_444_to_rgb_or_rgba_row::<true>(y, u, v, rgba_out, width, matrix, full_range);
+  yuv_444_to_rgb_or_rgba_row::<true, false>(
+    y, u, v, None, rgba_out, width, matrix, full_range,
+  );
 }
 
-/// Shared scalar kernel for [`yuv_444_to_rgb_row`] (`ALPHA = false`,
-/// 3 bpp) and [`yuv_444_to_rgba_row`] (`ALPHA = true`, 4 bpp + opaque
-/// alpha). Math is identical; only the per-pixel store stride
-/// differs. `const` generic monomorphizes per call site, so the
-/// `if ALPHA` branches are eliminated.
+/// YUVA 4:4:4 planar → packed `R, G, B, A` quadruplets with the
+/// per-pixel alpha byte sourced from `a_src` instead of constant
+/// `0xFF`. R/G/B are byte-identical to [`yuv_444_to_rgb_row`]. Used
+/// by the YUVA 4:4:4 source family ([`crate::yuv::Yuva444p`]).
+///
+/// Thin wrapper over [`yuv_444_to_rgb_or_rgba_row`] with
+/// `ALPHA = true, ALPHA_SRC = true`.
+///
+/// # Panics (debug builds)
+///
+/// - `y.len() >= width`, `u.len() >= width`, `v.len() >= width`,
+///   `a_src.len() >= width`, `rgba_out.len() >= 4 * width`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn yuv_444_to_rgba_with_alpha_src_row(
+  y: &[u8],
+  u: &[u8],
+  v: &[u8],
+  a_src: &[u8],
+  rgba_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  yuv_444_to_rgb_or_rgba_row::<true, true>(
+    y,
+    u,
+    v,
+    Some(a_src),
+    rgba_out,
+    width,
+    matrix,
+    full_range,
+  );
+}
+
+/// Shared scalar kernel for [`yuv_444_to_rgb_row`] (`ALPHA = false,
+/// ALPHA_SRC = false`, 3 bpp), [`yuv_444_to_rgba_row`] (`ALPHA = true,
+/// ALPHA_SRC = false`, 4 bpp + opaque alpha) and
+/// [`yuv_444_to_rgba_with_alpha_src_row`] (`ALPHA = true,
+/// ALPHA_SRC = true`, 4 bpp + source-derived alpha). Math is
+/// identical; only the per-pixel store stride and alpha byte differ.
+/// `const` generic monomorphizes per call site, so the `if ALPHA` /
+/// `if ALPHA_SRC` branches are eliminated.
 ///
 /// # Panics (debug builds)
 ///
 /// - `y.len() >= width`, `u.len() >= width`, `v.len() >= width`,
 ///   `out.len() >= width * (if ALPHA { 4 } else { 3 })`.
+/// - When `ALPHA_SRC = true`: `a_src` must be `Some(_)` and
+///   `a_src.unwrap().len() >= width`.
 #[cfg_attr(not(tarpaulin), inline(always))]
-fn yuv_444_to_rgb_or_rgba_row<const ALPHA: bool>(
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn yuv_444_to_rgb_or_rgba_row<const ALPHA: bool, const ALPHA_SRC: bool>(
   y: &[u8],
   u: &[u8],
   v: &[u8],
+  a_src: Option<&[u8]>,
   out: &mut [u8],
   width: usize,
   matrix: ColorMatrix,
   full_range: bool,
 ) {
+  // Source alpha requires RGBA output — there is no 3 bpp store with
+  // alpha to put it in.
+  const { assert!(!ALPHA_SRC || ALPHA) };
   debug_assert!(y.len() >= width, "y row too short");
   debug_assert!(u.len() >= width, "u row too short");
   debug_assert!(v.len() >= width, "v row too short");
   let bpp: usize = if ALPHA { 4 } else { 3 };
   debug_assert!(out.len() >= width * bpp, "out row too short for {bpp}bpp");
+  if ALPHA_SRC {
+    debug_assert!(
+      a_src.as_ref().is_some_and(|s| s.len() >= width),
+      "a_src row too short"
+    );
+  }
 
   let coeffs = Coefficients::for_matrix(matrix);
   let (y_off, y_scale, c_scale) = range_params(full_range);
@@ -550,7 +606,11 @@ fn yuv_444_to_rgb_or_rgba_row<const ALPHA: bool>(
     out[x * bpp] = clamp_u8(y0 + r_chroma);
     out[x * bpp + 1] = clamp_u8(y0 + g_chroma);
     out[x * bpp + 2] = clamp_u8(y0 + b_chroma);
-    if ALPHA {
+    if ALPHA_SRC {
+      // SAFETY (const-checked): ALPHA_SRC = true implies Some(_).
+      // 8-bit alpha already fits u8 — no shift, no mask.
+      out[x * bpp + 3] = a_src.as_ref().unwrap()[x];
+    } else if ALPHA {
       out[x * bpp + 3] = 0xFF;
     }
   }

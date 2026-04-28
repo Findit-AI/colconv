@@ -32,6 +32,182 @@ use super::{
 };
 use crate::{PixelSink, row::*, yuv::*};
 
+// ---- Yuva444p impl (8-bit) ---------------------------------------------
+
+impl<'a> MixedSinker<'a, Yuva444p> {
+  /// Attaches a packed **8-bit** RGBA output buffer. The 8-bit YUVA
+  /// 4:4:4 source is converted to 8-bit RGBA via the same Q15 i32
+  /// 8-bit kernel that backs [`MixedSinker<Yuv444p>::with_rgba`]; the
+  /// per-pixel alpha byte is **sourced from the alpha plane** — not
+  /// constant `0xFF`.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn with_rgba(mut self, buf: &'a mut [u8]) -> Result<Self, MixedSinkerError> {
+    self.set_rgba(buf)?;
+    Ok(self)
+  }
+  /// In-place variant of [`with_rgba`](Self::with_rgba).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn set_rgba(&mut self, buf: &'a mut [u8]) -> Result<&mut Self, MixedSinkerError> {
+    let expected = self.frame_bytes(4)?;
+    if buf.len() < expected {
+      return Err(MixedSinkerError::RgbaBufferTooShort {
+        expected,
+        actual: buf.len(),
+      });
+    }
+    self.rgba = Some(buf);
+    Ok(self)
+  }
+}
+
+impl Yuva444pSink for MixedSinker<'_, Yuva444p> {}
+
+impl PixelSink for MixedSinker<'_, Yuva444p> {
+  type Input<'r> = Yuva444pRow<'r>;
+  type Error = MixedSinkerError;
+
+  fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
+    check_dimensions_match(self.width, self.height, width, height)
+  }
+
+  fn process(&mut self, row: Yuva444pRow<'_>) -> Result<(), Self::Error> {
+    let w = self.width;
+    let h = self.height;
+    let idx = row.row();
+    let use_simd = self.simd;
+
+    if row.y().len() != w {
+      return Err(MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::Y,
+        row: idx,
+        expected: w,
+        actual: row.y().len(),
+      });
+    }
+    if row.u().len() != w {
+      return Err(MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::UFull,
+        row: idx,
+        expected: w,
+        actual: row.u().len(),
+      });
+    }
+    if row.v().len() != w {
+      return Err(MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::VFull,
+        row: idx,
+        expected: w,
+        actual: row.v().len(),
+      });
+    }
+    if row.a().len() != w {
+      return Err(MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::AFull,
+        row: idx,
+        expected: w,
+        actual: row.a().len(),
+      });
+    }
+    if idx >= self.height {
+      return Err(MixedSinkerError::RowIndexOutOfRange {
+        row: idx,
+        configured_height: self.height,
+      });
+    }
+
+    let Self {
+      rgb,
+      rgba,
+      luma,
+      hsv,
+      rgb_scratch,
+      ..
+    } = self;
+    let one_plane_start = idx * w;
+    let one_plane_end = one_plane_start + w;
+
+    // Luma — Y plane is already u8.
+    if let Some(luma) = luma.as_deref_mut() {
+      luma[one_plane_start..one_plane_end].copy_from_slice(&row.y()[..w]);
+    }
+
+    let want_rgb = rgb.is_some();
+    let want_rgba = rgba.is_some();
+    let want_hsv = hsv.is_some();
+    let need_rgb_kernel = want_rgb || want_hsv;
+
+    if want_rgba && !need_rgb_kernel {
+      let rgba_buf = rgba.as_deref_mut().unwrap();
+      let rgba_row = rgba_plane_row_slice(rgba_buf, one_plane_start, one_plane_end, w, h)?;
+      yuva444p_to_rgba_row(
+        row.y(),
+        row.u(),
+        row.v(),
+        row.a(),
+        rgba_row,
+        w,
+        row.matrix(),
+        row.full_range(),
+        use_simd,
+      );
+      return Ok(());
+    }
+
+    if !need_rgb_kernel {
+      return Ok(());
+    }
+
+    // RGB kernel — alpha-drop reuses the existing 4:4:4 row dispatcher.
+    let rgb_row = rgb_row_buf_or_scratch(
+      rgb.as_deref_mut(),
+      rgb_scratch,
+      one_plane_start,
+      one_plane_end,
+      w,
+      h,
+    )?;
+    yuv_444_to_rgb_row(
+      row.y(),
+      row.u(),
+      row.v(),
+      rgb_row,
+      w,
+      row.matrix(),
+      row.full_range(),
+      use_simd,
+    );
+
+    if let Some(hsv) = hsv.as_mut() {
+      rgb_to_hsv_row(
+        rgb_row,
+        &mut hsv.h[one_plane_start..one_plane_end],
+        &mut hsv.s[one_plane_start..one_plane_end],
+        &mut hsv.v[one_plane_start..one_plane_end],
+        w,
+        use_simd,
+      );
+    }
+
+    if want_rgba {
+      let rgba_buf = rgba.as_deref_mut().unwrap();
+      let rgba_row = rgba_plane_row_slice(rgba_buf, one_plane_start, one_plane_end, w, h)?;
+      yuva444p_to_rgba_row(
+        row.y(),
+        row.u(),
+        row.v(),
+        row.a(),
+        rgba_row,
+        w,
+        row.matrix(),
+        row.full_range(),
+        use_simd,
+      );
+    }
+
+    Ok(())
+  }
+}
+
 // ---- Yuva444p9 impl ---------------------------------------------------
 
 impl<'a> MixedSinker<'a, Yuva444p9> {
