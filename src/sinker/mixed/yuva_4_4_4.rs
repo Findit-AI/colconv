@@ -378,7 +378,15 @@ fn yuva444p_high_bit_process<
   if let Some(buf) = rgba_u16.as_deref_mut() {
     let rgba_u16_row = rgba_u16_plane_row_slice(buf, one_plane_start, one_plane_end, w, h)?;
     rgba_u16_dispatch(
-      y_row, u_row, v_row, a_row, rgba_u16_row, w, matrix, full_range, use_simd,
+      y_row,
+      u_row,
+      v_row,
+      a_row,
+      rgba_u16_row,
+      w,
+      matrix,
+      full_range,
+      use_simd,
     );
   }
 
