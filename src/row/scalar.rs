@@ -488,9 +488,7 @@ pub(crate) fn yuv_444_to_rgb_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  yuv_444_to_rgb_or_rgba_row::<false, false>(
-    y, u, v, None, rgb_out, width, matrix, full_range,
-  );
+  yuv_444_to_rgb_or_rgba_row::<false, false>(y, u, v, None, rgb_out, width, matrix, full_range);
 }
 
 /// YUV 4:4:4 planar → packed `R, G, B, A` quadruplets with constant
@@ -506,9 +504,7 @@ pub(crate) fn yuv_444_to_rgba_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  yuv_444_to_rgb_or_rgba_row::<true, false>(
-    y, u, v, None, rgba_out, width, matrix, full_range,
-  );
+  yuv_444_to_rgb_or_rgba_row::<true, false>(y, u, v, None, rgba_out, width, matrix, full_range);
 }
 
 /// YUVA 4:4:4 planar → packed `R, G, B, A` quadruplets with the

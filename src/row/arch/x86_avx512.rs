@@ -3347,9 +3347,7 @@ pub(crate) unsafe fn yuv_444_to_rgb_row(
   // SAFETY: caller-checked AVX-512BW availability + slice bounds —
   // see [`yuv_444_to_rgb_or_rgba_row`] safety contract.
   unsafe {
-    yuv_444_to_rgb_or_rgba_row::<false, false>(
-      y, u, v, None, rgb_out, width, matrix, full_range,
-    );
+    yuv_444_to_rgb_or_rgba_row::<false, false>(y, u, v, None, rgb_out, width, matrix, full_range);
   }
 }
 
@@ -3375,9 +3373,7 @@ pub(crate) unsafe fn yuv_444_to_rgba_row(
   // SAFETY: caller-checked AVX-512BW availability + slice bounds —
   // see [`yuv_444_to_rgb_or_rgba_row`] safety contract.
   unsafe {
-    yuv_444_to_rgb_or_rgba_row::<true, false>(
-      y, u, v, None, rgba_out, width, matrix, full_range,
-    );
+    yuv_444_to_rgb_or_rgba_row::<true, false>(y, u, v, None, rgba_out, width, matrix, full_range);
   }
 }
 
