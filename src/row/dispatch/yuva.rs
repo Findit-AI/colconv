@@ -1585,12 +1585,16 @@ pub fn yuva420p16_to_rgba_u16_row(
 
 // ---- YUVA 4:4:4 16-bit RGBA dispatchers (Ship 8b-5a) ------------------
 //
-// Yuva444p16 uses the dedicated i64 4:4:4 16-bit kernel family rather
-// than the BITS-generic Q15 i32 template (which only covers
-// {9,10,12,14}). Ship 8b-5a wires the scalar-only path; per-arch SIMD
-// for the alpha-source variant lands in 8b-5b (u8 RGBA) and 8b-5c
-// (u16 RGBA) — until then the dispatcher silently falls through to
-// the scalar reference path even when `use_simd` is true.
+// Yuva444p16 uses dedicated 16-bit kernels rather than the
+// BITS-generic Q15 i32 template (which only covers {9,10,12,14}). The
+// 8-bit RGBA path routes through the scalar 16-bit kernel with the
+// i32 chroma pipeline (output-target scaling keeps `coeff × u_d`
+// inside i32); the native-depth `u16` RGBA path is the one that
+// needs the widened i64 handling. Ship 8b-5a wires the scalar-only
+// path; per-arch SIMD for the alpha-source variant lands in 8b-5b
+// (u8 RGBA) and 8b-5c (u16 RGBA) — until then the dispatcher silently
+// falls through to the scalar reference path even when `use_simd` is
+// true.
 
 /// Converts one row of **16-bit** YUVA 4:4:4 to packed **8-bit**
 /// **RGBA**. R / G / B are produced by the same i32 kernel that backs

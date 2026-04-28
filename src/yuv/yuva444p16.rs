@@ -5,10 +5,13 @@
 //! full `u16` range is active) plus a fourth full-resolution alpha
 //! plane (1:1 with Y).
 //!
-//! Runs on the **dedicated i64 4:4:4 kernel family** (Q15 chroma sum
-//! overflows i32 at 16 bits), separate from the BITS-generic Q15 i32
-//! template that covers `BITS ∈ {9, 10, 12, 14}`. Mirrors the 4:2:0
-//! sibling [`super::Yuva420p16`].
+//! For the native-depth `u16` output path, this uses the **dedicated
+//! i64 4:4:4 kernel family** because the Q15 chroma sum overflows
+//! i32 at 16 bits. The `u8` output path stays on the scaled Q15 i32
+//! route (output-target scaling keeps `coeff × u_d` inside i32).
+//! Either way it sits separate from the BITS-generic Q15 i32 template
+//! that covers `BITS ∈ {9, 10, 12, 14}`. Mirrors the 4:2:0 sibling
+//! [`super::Yuva420p16`].
 //!
 //! Tranche 8b‑5a ships the scalar prep — the per‑row dispatcher hands
 //! the alpha source straight through to the
