@@ -9555,6 +9555,10 @@ fn rgb24_with_luma_limited_range_falls_in_studio_band() {
 }
 
 #[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
 fn rgb24_with_hsv_matches_existing_kernel() {
   // Pure red → H=0, S=255, V=255 (OpenCV 8-bit HSV uses H ∈ [0, 179]).
   let pix = solid_rgb24_frame(16, 4, 255, 0, 0);
@@ -9591,6 +9595,10 @@ fn solid_bgr24_frame(width: u32, height: u32, b: u8, g: u8, r: u8) -> Vec<u8> {
 }
 
 #[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
 fn bgr24_with_rgb_swaps_channel_order() {
   // Source byte order B=50, G=100, R=200 → expected RGB output:
   // R=200, G=100, B=50.
@@ -9609,6 +9617,10 @@ fn bgr24_with_rgb_swaps_channel_order() {
 }
 
 #[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
 fn bgr24_with_rgba_swaps_then_appends_opaque_alpha() {
   let pix = solid_bgr24_frame(16, 4, 50, 100, 200);
   let src = Bgr24Frame::try_new(&pix, 16, 4, 48).unwrap();
@@ -9625,6 +9637,10 @@ fn bgr24_with_rgba_swaps_then_appends_opaque_alpha() {
 }
 
 #[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
 fn bgr24_luma_matches_rgb24_after_swap() {
   // Same pixel data interpreted as Rgb24 vs Bgr24 should produce the
   // same luma values (the BGR sinker swaps to RGB before deriving Y).
@@ -9649,6 +9665,10 @@ fn bgr24_luma_matches_rgb24_after_swap() {
 }
 
 #[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
 fn rgb24_random_input_produces_stable_output() {
   // Smoke test that non-uniform input doesn't crash and produces
   // well-formed output across all sinks.

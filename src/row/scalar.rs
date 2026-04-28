@@ -3290,9 +3290,14 @@ pub(super) const fn luma_coefficients_q15(matrix: ColorMatrix) -> (i32, i32, i32
 /// `full_range = false` produces limited-range Y' in `[16, 235]`
 /// (the standard YUV studio range).
 ///
-/// # Panics (debug builds)
+/// # Panics
 ///
-/// `rgb.len() >= 3 * width`, `luma_out.len() >= width`.
+/// Panics (in any build profile, not just debug) if
+/// `rgb.len() < 3 * width` or `luma_out.len() < width` — the inner
+/// loop indexes `rgb[x * 3 + i]` and `luma_out[x]` directly, so
+/// undersized slices fault on bounds-check rather than producing
+/// undefined output. The `debug_assert!`s below add a clearer
+/// message in debug builds; the bounds check is unconditional.
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn rgb_to_luma_row(
   rgb: &[u8],
@@ -3318,8 +3323,9 @@ pub(crate) fn rgb_to_luma_row(
     }
   } else {
     // Limited range: Y_lim = 16 + (Y_full * 219 / 255).
-    // 219 / 255 ≈ 0.85882; * 2^15 ≈ 28147 (Q15).
-    const LIMITED_SCALE_Q15: i32 = 28147;
+    // 219 / 255 ≈ 0.85882; * 2^15 ≈ 28142 (Q15).
+    // (`round(219 * 32768 / 255)` evaluates to 28142.)
+    const LIMITED_SCALE_Q15: i32 = 28142;
     for x in 0..width {
       let r = rgb[x * 3] as i32;
       let g = rgb[x * 3 + 1] as i32;

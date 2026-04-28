@@ -3,9 +3,9 @@
 //! [`super::Rgb24`]; only the channel order at the row level differs.
 //!
 //! Outputs:
-//! - `with_rgb` — `bgr_rgb_swap_row` (B↔R swap during the copy).
+//! - `with_rgb` — `bgr_to_rgb_row` (B↔R swap during the copy).
 //! - `with_rgba` — swap then append `0xFF` alpha (sinker calls
-//!   `bgr_rgb_swap_row` into a scratch buffer first).
+//!   `bgr_to_rgb_row` into a scratch buffer first).
 //! - `with_luma` — swap then `rgb_to_luma_row` (RGB-input kernel).
 //! - `with_hsv` — swap then `rgb_to_hsv_row`.
 
