@@ -7534,9 +7534,10 @@ pub enum RgbaFrameError {
 /// `R, G, B, A`.
 ///
 /// `stride` is in **bytes** (≥ `4 * width`). No width parity
-/// constraint. The 4th byte is real alpha — see
-/// [`RgbPaddingFrame`](crate::yuv) for the `0rgb` / `rgb0` /
-/// `0bgr` / `bgr0` padding-byte family (planned Ship 9d).
+/// constraint. The 4th byte is real alpha — for the `0rgb` / `rgb0`
+/// / `0bgr` / `bgr0` padding-byte family (where the 4th byte is
+/// ignored padding, not alpha) see the planned Ship 9d
+/// `RgbPaddingFrame` type.
 #[derive(Debug, Clone, Copy)]
 pub struct RgbaFrame<'a> {
   rgba: &'a [u8],

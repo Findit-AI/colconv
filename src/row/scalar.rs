@@ -3417,8 +3417,9 @@ pub(crate) fn rgba_to_rgb_row(rgba: &[u8], rgb_out: &mut [u8], width: usize) {
 }
 
 /// Swaps R↔B in packed `B, G, R, A` input, producing packed
-/// `R, G, B, A` (alpha lane preserved). Equivalent to
-/// `rgba_to_bgra_row` since the transformation is self‑inverse.
+/// `R, G, B, A` (alpha lane preserved). The transformation is
+/// self‑inverse, so the same routine can be used for
+/// `BGRA → RGBA` and `RGBA → BGRA`.
 ///
 /// # Panics
 ///
