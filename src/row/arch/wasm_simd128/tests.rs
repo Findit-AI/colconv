@@ -3277,7 +3277,10 @@ fn simd128_xrgb_to_rgba_matches_scalar() {
     unsafe {
       xrgb_to_rgba_row(&input, &mut out_wasm, w);
     }
-    assert_eq!(out_scalar, out_wasm, "simd128 xrgb_to_rgba diverges (width={w})");
+    assert_eq!(
+      out_scalar, out_wasm,
+      "simd128 xrgb_to_rgba diverges (width={w})"
+    );
   }
 }
 
@@ -3291,7 +3294,10 @@ fn simd128_rgbx_to_rgba_matches_scalar() {
     unsafe {
       rgbx_to_rgba_row(&input, &mut out_wasm, w);
     }
-    assert_eq!(out_scalar, out_wasm, "simd128 rgbx_to_rgba diverges (width={w})");
+    assert_eq!(
+      out_scalar, out_wasm,
+      "simd128 rgbx_to_rgba diverges (width={w})"
+    );
   }
 }
 
@@ -3305,7 +3311,10 @@ fn simd128_xbgr_to_rgba_matches_scalar() {
     unsafe {
       xbgr_to_rgba_row(&input, &mut out_wasm, w);
     }
-    assert_eq!(out_scalar, out_wasm, "simd128 xbgr_to_rgba diverges (width={w})");
+    assert_eq!(
+      out_scalar, out_wasm,
+      "simd128 xbgr_to_rgba diverges (width={w})"
+    );
   }
 }
 
@@ -3319,6 +3328,9 @@ fn simd128_bgrx_to_rgba_matches_scalar() {
     unsafe {
       bgrx_to_rgba_row(&input, &mut out_wasm, w);
     }
-    assert_eq!(out_scalar, out_wasm, "simd128 bgrx_to_rgba diverges (width={w})");
+    assert_eq!(
+      out_scalar, out_wasm,
+      "simd128 bgrx_to_rgba diverges (width={w})"
+    );
   }
 }

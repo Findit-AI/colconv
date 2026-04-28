@@ -5466,9 +5466,18 @@ pub(crate) unsafe fn xrgb_to_rgba_row(xrgb: &[u8], rgba_out: &mut [u8], width: u
       let v2 = v128_load(base_in.add(32).cast());
       let v3 = v128_load(base_in.add(48).cast());
       v128_store(base_out.cast(), v128_or(u8x16_swizzle(v0, mask), alpha));
-      v128_store(base_out.add(16).cast(), v128_or(u8x16_swizzle(v1, mask), alpha));
-      v128_store(base_out.add(32).cast(), v128_or(u8x16_swizzle(v2, mask), alpha));
-      v128_store(base_out.add(48).cast(), v128_or(u8x16_swizzle(v3, mask), alpha));
+      v128_store(
+        base_out.add(16).cast(),
+        v128_or(u8x16_swizzle(v1, mask), alpha),
+      );
+      v128_store(
+        base_out.add(32).cast(),
+        v128_or(u8x16_swizzle(v2, mask), alpha),
+      );
+      v128_store(
+        base_out.add(48).cast(),
+        v128_or(u8x16_swizzle(v3, mask), alpha),
+      );
       x += 16;
     }
     if x < width {
@@ -5506,9 +5515,18 @@ pub(crate) unsafe fn rgbx_to_rgba_row(rgbx: &[u8], rgba_out: &mut [u8], width: u
       let v2 = v128_load(base_in.add(32).cast());
       let v3 = v128_load(base_in.add(48).cast());
       v128_store(base_out.cast(), v128_or(u8x16_swizzle(v0, mask), alpha));
-      v128_store(base_out.add(16).cast(), v128_or(u8x16_swizzle(v1, mask), alpha));
-      v128_store(base_out.add(32).cast(), v128_or(u8x16_swizzle(v2, mask), alpha));
-      v128_store(base_out.add(48).cast(), v128_or(u8x16_swizzle(v3, mask), alpha));
+      v128_store(
+        base_out.add(16).cast(),
+        v128_or(u8x16_swizzle(v1, mask), alpha),
+      );
+      v128_store(
+        base_out.add(32).cast(),
+        v128_or(u8x16_swizzle(v2, mask), alpha),
+      );
+      v128_store(
+        base_out.add(48).cast(),
+        v128_or(u8x16_swizzle(v3, mask), alpha),
+      );
       x += 16;
     }
     if x < width {
@@ -5546,9 +5564,18 @@ pub(crate) unsafe fn xbgr_to_rgba_row(xbgr: &[u8], rgba_out: &mut [u8], width: u
       let v2 = v128_load(base_in.add(32).cast());
       let v3 = v128_load(base_in.add(48).cast());
       v128_store(base_out.cast(), v128_or(u8x16_swizzle(v0, mask), alpha));
-      v128_store(base_out.add(16).cast(), v128_or(u8x16_swizzle(v1, mask), alpha));
-      v128_store(base_out.add(32).cast(), v128_or(u8x16_swizzle(v2, mask), alpha));
-      v128_store(base_out.add(48).cast(), v128_or(u8x16_swizzle(v3, mask), alpha));
+      v128_store(
+        base_out.add(16).cast(),
+        v128_or(u8x16_swizzle(v1, mask), alpha),
+      );
+      v128_store(
+        base_out.add(32).cast(),
+        v128_or(u8x16_swizzle(v2, mask), alpha),
+      );
+      v128_store(
+        base_out.add(48).cast(),
+        v128_or(u8x16_swizzle(v3, mask), alpha),
+      );
       x += 16;
     }
     if x < width {
@@ -5586,9 +5613,18 @@ pub(crate) unsafe fn bgrx_to_rgba_row(bgrx: &[u8], rgba_out: &mut [u8], width: u
       let v2 = v128_load(base_in.add(32).cast());
       let v3 = v128_load(base_in.add(48).cast());
       v128_store(base_out.cast(), v128_or(u8x16_swizzle(v0, mask), alpha));
-      v128_store(base_out.add(16).cast(), v128_or(u8x16_swizzle(v1, mask), alpha));
-      v128_store(base_out.add(32).cast(), v128_or(u8x16_swizzle(v2, mask), alpha));
-      v128_store(base_out.add(48).cast(), v128_or(u8x16_swizzle(v3, mask), alpha));
+      v128_store(
+        base_out.add(16).cast(),
+        v128_or(u8x16_swizzle(v1, mask), alpha),
+      );
+      v128_store(
+        base_out.add(32).cast(),
+        v128_or(u8x16_swizzle(v2, mask), alpha),
+      );
+      v128_store(
+        base_out.add(48).cast(),
+        v128_or(u8x16_swizzle(v3, mask), alpha),
+      );
       x += 16;
     }
     if x < width {
