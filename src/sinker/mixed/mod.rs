@@ -51,12 +51,14 @@
 //!   [`Rgb24`](crate::yuv::Rgb24) (`R, G, B` bytes),
 //!   [`Bgr24`](crate::yuv::Bgr24) (`B, G, R` bytes),
 //!   [`Rgba`](crate::yuv::Rgba) (`R, G, B, A` bytes),
-//!   [`Bgra`](crate::yuv::Bgra) (`B, G, R, A` bytes). The source row
-//!   is already RGB — `with_rgb` is an identity copy / channel
-//!   swap / drop-alpha, `with_rgba` is a memcpy / R↔B swap (alpha
-//!   passed through for 4-byte sources, forced to `0xFF` for the
-//!   3-byte sources), `with_luma` derives Y' from R/G/B, `with_hsv`
-//!   reuses the existing kernel.
+//!   [`Bgra`](crate::yuv::Bgra) (`B, G, R, A` bytes),
+//!   [`Argb`](crate::yuv::Argb) (`A, R, G, B` bytes — leading alpha),
+//!   [`Abgr`](crate::yuv::Abgr) (`A, B, G, R` bytes — leading alpha).
+//!   The source row is already RGB — `with_rgb` is an identity copy /
+//!   channel swap / drop-alpha, `with_rgba` is a memcpy / channel
+//!   reorder (alpha passed through for 4-byte sources, forced to
+//!   `0xFF` for the 3-byte sources), `with_luma` derives Y' from
+//!   R/G/B, `with_hsv` reuses the existing kernel.
 //!
 //! High‑bit‑depth source impls expose both `with_rgb` (u8 output) and
 //! `with_rgb_u16` (native‑depth u16 output). Calling `with_rgb_u16` on
@@ -528,6 +530,16 @@ pub enum RowSlice {
   /// [`RgbaPacked`](Self::RgbaPacked).
   #[display("BGRA packed")]
   BgraPacked,
+  /// Packed `A, R, G, B` row of an [`Argb`](crate::yuv::Argb) source.
+  /// `4 * width` `u8` bytes — alpha at the **leading** position vs
+  /// [`RgbaPacked`](Self::RgbaPacked).
+  #[display("ARGB packed")]
+  ArgbPacked,
+  /// Packed `A, B, G, R` row of an [`Abgr`](crate::yuv::Abgr) source.
+  /// `4 * width` `u8` bytes — leading alpha + reversed RGB order vs
+  /// [`ArgbPacked`](Self::ArgbPacked).
+  #[display("ABGR packed")]
+  AbgrPacked,
 }
 
 /// A sink that writes any subset of `{RGB, Luma, HSV}` into

@@ -3559,3 +3559,73 @@ fn sse41_bgra_to_rgb_matches_scalar() {
     );
   }
 }
+
+// ---- Ship 9c leading-alpha shuffles -----------------------------------
+
+#[test]
+fn sse41_argb_to_rgb_matches_scalar() {
+  if !std::arch::is_x86_feature_detected!("sse4.1") {
+    return;
+  }
+  for w in [1usize, 7, 15, 16, 17, 31, 32, 33, 1920, 1921] {
+    let input = pseudo_random_rgba(w);
+    let mut out_scalar = std::vec![0u8; w * 3];
+    let mut out_sse = std::vec![0u8; w * 3];
+    scalar::argb_to_rgb_row(&input, &mut out_scalar, w);
+    unsafe {
+      argb_to_rgb_row(&input, &mut out_sse, w);
+    }
+    assert_eq!(out_scalar, out_sse, "SSE4.1 argb_to_rgb diverges (width={w})");
+  }
+}
+
+#[test]
+fn sse41_abgr_to_rgb_matches_scalar() {
+  if !std::arch::is_x86_feature_detected!("sse4.1") {
+    return;
+  }
+  for w in [1usize, 7, 15, 16, 17, 31, 32, 33, 1920, 1921] {
+    let input = pseudo_random_rgba(w);
+    let mut out_scalar = std::vec![0u8; w * 3];
+    let mut out_sse = std::vec![0u8; w * 3];
+    scalar::abgr_to_rgb_row(&input, &mut out_scalar, w);
+    unsafe {
+      abgr_to_rgb_row(&input, &mut out_sse, w);
+    }
+    assert_eq!(out_scalar, out_sse, "SSE4.1 abgr_to_rgb diverges (width={w})");
+  }
+}
+
+#[test]
+fn sse41_argb_to_rgba_matches_scalar() {
+  if !std::arch::is_x86_feature_detected!("sse4.1") {
+    return;
+  }
+  for w in [1usize, 7, 15, 16, 17, 31, 32, 33, 1920, 1921] {
+    let input = pseudo_random_rgba(w);
+    let mut out_scalar = std::vec![0u8; w * 4];
+    let mut out_sse = std::vec![0u8; w * 4];
+    scalar::argb_to_rgba_row(&input, &mut out_scalar, w);
+    unsafe {
+      argb_to_rgba_row(&input, &mut out_sse, w);
+    }
+    assert_eq!(out_scalar, out_sse, "SSE4.1 argb_to_rgba diverges (width={w})");
+  }
+}
+
+#[test]
+fn sse41_abgr_to_rgba_matches_scalar() {
+  if !std::arch::is_x86_feature_detected!("sse4.1") {
+    return;
+  }
+  for w in [1usize, 7, 15, 16, 17, 31, 32, 33, 1920, 1921] {
+    let input = pseudo_random_rgba(w);
+    let mut out_scalar = std::vec![0u8; w * 4];
+    let mut out_sse = std::vec![0u8; w * 4];
+    scalar::abgr_to_rgba_row(&input, &mut out_scalar, w);
+    unsafe {
+      abgr_to_rgba_row(&input, &mut out_sse, w);
+    }
+    assert_eq!(out_scalar, out_sse, "SSE4.1 abgr_to_rgba diverges (width={w})");
+  }
+}

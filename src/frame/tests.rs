@@ -1806,3 +1806,115 @@ fn bgra_frame_new_panics_on_invalid() {
   let buf = std::vec![0u8; 10];
   let _ = BgraFrame::new(&buf, 16, 4, 64);
 }
+
+// ---- ArgbFrame --------------------------------------------------------
+//
+// Single-plane 8-bit packed ARGB. `stride` is in bytes (≥ 4 * width);
+// `plane.len() >= stride * height`. No width parity constraint.
+
+#[test]
+fn argb_frame_try_new_accepts_valid_tight() {
+  let buf = std::vec![0u8; 16 * 4 * 4];
+  ArgbFrame::try_new(&buf, 16, 4, 64).expect("valid");
+}
+
+#[test]
+fn argb_frame_try_new_accepts_oversized_stride() {
+  let buf = std::vec![0u8; 96 * 4];
+  ArgbFrame::try_new(&buf, 16, 4, 96).expect("padded stride is valid");
+}
+
+#[test]
+fn argb_frame_try_new_rejects_zero_dimension() {
+  let buf = std::vec![0u8; 16 * 4 * 4];
+  assert!(matches!(
+    ArgbFrame::try_new(&buf, 0, 4, 64),
+    Err(ArgbFrameError::ZeroDimension {
+      width: 0,
+      height: 4
+    })
+  ));
+  assert!(matches!(
+    ArgbFrame::try_new(&buf, 16, 0, 64),
+    Err(ArgbFrameError::ZeroDimension {
+      width: 16,
+      height: 0
+    })
+  ));
+}
+
+#[test]
+fn argb_frame_try_new_rejects_stride_too_small() {
+  let buf = std::vec![0u8; 16 * 4 * 4];
+  assert!(matches!(
+    ArgbFrame::try_new(&buf, 16, 4, 63),
+    Err(ArgbFrameError::StrideTooSmall {
+      min_stride: 64,
+      stride: 63,
+    })
+  ));
+}
+
+#[test]
+fn argb_frame_try_new_rejects_short_plane() {
+  let small = std::vec![0u8; 16 * 4];
+  assert!(matches!(
+    ArgbFrame::try_new(&small, 16, 4, 64),
+    Err(ArgbFrameError::PlaneTooShort {
+      expected: 256,
+      actual: 64,
+    })
+  ));
+}
+
+#[test]
+#[should_panic(expected = "invalid ArgbFrame")]
+fn argb_frame_new_panics_on_invalid() {
+  let buf = std::vec![0u8; 10];
+  let _ = ArgbFrame::new(&buf, 16, 4, 64);
+}
+
+// ---- AbgrFrame --------------------------------------------------------
+
+#[test]
+fn abgr_frame_try_new_accepts_valid_tight() {
+  let buf = std::vec![0u8; 16 * 4 * 4];
+  AbgrFrame::try_new(&buf, 16, 4, 64).expect("valid");
+}
+
+#[test]
+fn abgr_frame_try_new_rejects_zero_dimension() {
+  let buf = std::vec![0u8; 16 * 4 * 4];
+  assert!(matches!(
+    AbgrFrame::try_new(&buf, 0, 4, 64),
+    Err(AbgrFrameError::ZeroDimension { .. })
+  ));
+}
+
+#[test]
+fn abgr_frame_try_new_rejects_stride_too_small() {
+  let buf = std::vec![0u8; 16 * 4 * 4];
+  assert!(matches!(
+    AbgrFrame::try_new(&buf, 16, 4, 63),
+    Err(AbgrFrameError::StrideTooSmall {
+      min_stride: 64,
+      stride: 63,
+    })
+  ));
+}
+
+#[test]
+fn abgr_frame_try_new_rejects_short_plane() {
+  let small = std::vec![0u8; 16 * 4];
+  assert!(matches!(
+    AbgrFrame::try_new(&small, 16, 4, 64),
+    Err(AbgrFrameError::PlaneTooShort { .. })
+  ));
+}
+
+#[test]
+#[should_panic(expected = "invalid AbgrFrame")]
+fn abgr_frame_new_panics_on_invalid() {
+  let buf = std::vec![0u8; 10];
+  let _ = AbgrFrame::new(&buf, 16, 4, 64);
+}

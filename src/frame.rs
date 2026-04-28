@@ -7754,6 +7754,278 @@ impl<'a> BgraFrame<'a> {
   }
 }
 
+/// Errors returned by [`ArgbFrame::try_new`]. Variant shape mirrors
+/// [`RgbaFrameError`] — only the channel order on the four bytes
+/// per pixel differs at the kernel level.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Error)]
+#[non_exhaustive]
+pub enum ArgbFrameError {
+  /// `width` or `height` was zero.
+  #[error("width ({width}) or height ({height}) is zero")]
+  ZeroDimension {
+    /// The supplied width.
+    width: u32,
+    /// The supplied height.
+    height: u32,
+  },
+  /// `stride < 4 * width`.
+  #[error("stride ({stride}) is smaller than 4 * width ({min_stride})")]
+  StrideTooSmall {
+    /// Required minimum stride.
+    min_stride: u32,
+    /// The supplied stride.
+    stride: u32,
+  },
+  /// Plane is shorter than `stride * height` bytes.
+  #[error("ARGB plane has {actual} bytes but at least {expected} are required")]
+  PlaneTooShort {
+    /// Minimum bytes required.
+    expected: usize,
+    /// Actual bytes supplied.
+    actual: usize,
+  },
+  /// `stride * height` overflows `usize`.
+  #[error("declared geometry overflows usize: stride={stride} * rows={rows}")]
+  GeometryOverflow {
+    /// Stride that overflowed.
+    stride: u32,
+    /// Row count that overflowed against the stride.
+    rows: u32,
+  },
+  /// `4 * width` overflows `u32`.
+  #[error("4 * width overflows u32 ({width} too large)")]
+  WidthOverflow {
+    /// The supplied width.
+    width: u32,
+  },
+}
+
+/// A validated packed **ARGB** frame at 8 bits per channel
+/// (`AV_PIX_FMT_ARGB`). One plane, 4 bytes per pixel, byte order
+/// `A, R, G, B` — alpha is at the **leading** position (byte 0),
+/// vs trailing for [`RgbaFrame`].
+///
+/// `stride` is in **bytes** (≥ `4 * width`). No width parity
+/// constraint. The 1st byte is real alpha — for the `0rgb` / `rgb0`
+/// / `0bgr` / `bgr0` padding-byte family (where the alpha-position
+/// byte is ignored padding, not alpha) see the planned Ship 9d
+/// `RgbPaddingFrame` type.
+#[derive(Debug, Clone, Copy)]
+pub struct ArgbFrame<'a> {
+  argb: &'a [u8],
+  width: u32,
+  height: u32,
+  stride: u32,
+}
+
+impl<'a> ArgbFrame<'a> {
+  /// Constructs a new [`ArgbFrame`], validating dimensions and
+  /// plane length.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn try_new(
+    argb: &'a [u8],
+    width: u32,
+    height: u32,
+    stride: u32,
+  ) -> Result<Self, ArgbFrameError> {
+    if width == 0 || height == 0 {
+      return Err(ArgbFrameError::ZeroDimension { width, height });
+    }
+    let min_stride = match width.checked_mul(4) {
+      Some(v) => v,
+      None => return Err(ArgbFrameError::WidthOverflow { width }),
+    };
+    if stride < min_stride {
+      return Err(ArgbFrameError::StrideTooSmall { min_stride, stride });
+    }
+    let plane_min = match (stride as usize).checked_mul(height as usize) {
+      Some(v) => v,
+      None => {
+        return Err(ArgbFrameError::GeometryOverflow {
+          stride,
+          rows: height,
+        });
+      }
+    };
+    if argb.len() < plane_min {
+      return Err(ArgbFrameError::PlaneTooShort {
+        expected: plane_min,
+        actual: argb.len(),
+      });
+    }
+    Ok(Self {
+      argb,
+      width,
+      height,
+      stride,
+    })
+  }
+
+  /// Constructs a new [`ArgbFrame`], panicking on invalid inputs.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn new(argb: &'a [u8], width: u32, height: u32, stride: u32) -> Self {
+    match Self::try_new(argb, width, height, stride) {
+      Ok(frame) => frame,
+      Err(_) => panic!("invalid ArgbFrame dimensions or plane length"),
+    }
+  }
+
+  /// Packed ARGB plane bytes (`A, R, G, B` per pixel).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn argb(&self) -> &'a [u8] {
+    self.argb
+  }
+  /// Frame width in pixels.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn width(&self) -> u32 {
+    self.width
+  }
+  /// Frame height in pixels.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn height(&self) -> u32 {
+    self.height
+  }
+  /// Byte stride (`>= 4 * width`).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn stride(&self) -> u32 {
+    self.stride
+  }
+}
+
+/// Errors returned by [`AbgrFrame::try_new`]. Variant shape mirrors
+/// [`ArgbFrameError`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Error)]
+#[non_exhaustive]
+pub enum AbgrFrameError {
+  /// `width` or `height` was zero.
+  #[error("width ({width}) or height ({height}) is zero")]
+  ZeroDimension {
+    /// The supplied width.
+    width: u32,
+    /// The supplied height.
+    height: u32,
+  },
+  /// `stride < 4 * width`.
+  #[error("stride ({stride}) is smaller than 4 * width ({min_stride})")]
+  StrideTooSmall {
+    /// Required minimum stride.
+    min_stride: u32,
+    /// The supplied stride.
+    stride: u32,
+  },
+  /// Plane is shorter than `stride * height` bytes.
+  #[error("ABGR plane has {actual} bytes but at least {expected} are required")]
+  PlaneTooShort {
+    /// Minimum bytes required.
+    expected: usize,
+    /// Actual bytes supplied.
+    actual: usize,
+  },
+  /// `stride * height` overflows `usize`.
+  #[error("declared geometry overflows usize: stride={stride} * rows={rows}")]
+  GeometryOverflow {
+    /// Stride that overflowed.
+    stride: u32,
+    /// Row count that overflowed against the stride.
+    rows: u32,
+  },
+  /// `4 * width` overflows `u32`.
+  #[error("4 * width overflows u32 ({width} too large)")]
+  WidthOverflow {
+    /// The supplied width.
+    width: u32,
+  },
+}
+
+/// A validated packed **ABGR** frame at 8 bits per channel
+/// (`AV_PIX_FMT_ABGR`). One plane, 4 bytes per pixel, byte order
+/// `A, B, G, R` — leading alpha + reversed RGB order vs
+/// [`ArgbFrame`].
+///
+/// `stride` is in **bytes** (≥ `4 * width`). No width parity
+/// constraint.
+#[derive(Debug, Clone, Copy)]
+pub struct AbgrFrame<'a> {
+  abgr: &'a [u8],
+  width: u32,
+  height: u32,
+  stride: u32,
+}
+
+impl<'a> AbgrFrame<'a> {
+  /// Constructs a new [`AbgrFrame`], validating dimensions and
+  /// plane length.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn try_new(
+    abgr: &'a [u8],
+    width: u32,
+    height: u32,
+    stride: u32,
+  ) -> Result<Self, AbgrFrameError> {
+    if width == 0 || height == 0 {
+      return Err(AbgrFrameError::ZeroDimension { width, height });
+    }
+    let min_stride = match width.checked_mul(4) {
+      Some(v) => v,
+      None => return Err(AbgrFrameError::WidthOverflow { width }),
+    };
+    if stride < min_stride {
+      return Err(AbgrFrameError::StrideTooSmall { min_stride, stride });
+    }
+    let plane_min = match (stride as usize).checked_mul(height as usize) {
+      Some(v) => v,
+      None => {
+        return Err(AbgrFrameError::GeometryOverflow {
+          stride,
+          rows: height,
+        });
+      }
+    };
+    if abgr.len() < plane_min {
+      return Err(AbgrFrameError::PlaneTooShort {
+        expected: plane_min,
+        actual: abgr.len(),
+      });
+    }
+    Ok(Self {
+      abgr,
+      width,
+      height,
+      stride,
+    })
+  }
+
+  /// Constructs a new [`AbgrFrame`], panicking on invalid inputs.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn new(abgr: &'a [u8], width: u32, height: u32, stride: u32) -> Self {
+    match Self::try_new(abgr, width, height, stride) {
+      Ok(frame) => frame,
+      Err(_) => panic!("invalid AbgrFrame dimensions or plane length"),
+    }
+  }
+
+  /// Packed ABGR plane bytes (`A, B, G, R` per pixel).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn abgr(&self) -> &'a [u8] {
+    self.abgr
+  }
+  /// Frame width in pixels.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn width(&self) -> u32 {
+    self.width
+  }
+  /// Frame height in pixels.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn height(&self) -> u32 {
+    self.height
+  }
+  /// Byte stride (`>= 4 * width`).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn stride(&self) -> u32 {
+    self.stride
+  }
+}
+
 #[cfg(all(test, feature = "std"))]
 #[cfg(any(feature = "std", feature = "alloc"))]
 mod tests;

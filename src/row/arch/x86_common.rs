@@ -398,6 +398,124 @@ pub(super) unsafe fn drop_alpha_16_pixels(input_ptr: *const u8, output_ptr: *mut
   }
 }
 
+/// Drops the leading alpha byte from 16 packed ARGB pixels (64
+/// input bytes → 48 output bytes). Same compaction shape as
+/// [`drop_alpha_16_pixels`], but each pixel triple is read at
+/// offsets `(+1, +2, +3)` (R, G, B) since alpha is at the **leading**
+/// position. Used by the Ship 9c [`Argb`](crate::yuv::Argb)
+/// `with_rgb` / `with_luma` / `with_hsv` paths.
+///
+/// # Safety
+///
+/// - `input_ptr` must point to at least 64 readable bytes.
+/// - `output_ptr` must point to at least 48 writable bytes.
+/// - `input_ptr` / `output_ptr` ranges must not alias.
+/// - SSSE3 must be available in the caller's `target_feature` context.
+#[inline(always)]
+pub(super) unsafe fn argb_to_rgb_16_pixels(input_ptr: *const u8, output_ptr: *mut u8) {
+  unsafe {
+    let in0 = _mm_loadu_si128(input_ptr.cast());
+    let in1 = _mm_loadu_si128(input_ptr.add(16).cast());
+    let in2 = _mm_loadu_si128(input_ptr.add(32).cast());
+    let in3 = _mm_loadu_si128(input_ptr.add(48).cast());
+
+    let m00 = _mm_setr_epi8(1, 2, 3, 5, 6, 7, 9, 10, 11, 13, 14, 15, -1, -1, -1, -1);
+    let m01 = _mm_setr_epi8(-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 1, 2, 3, 5);
+    let out0 = _mm_or_si128(_mm_shuffle_epi8(in0, m00), _mm_shuffle_epi8(in1, m01));
+
+    let m11 = _mm_setr_epi8(6, 7, 9, 10, 11, 13, 14, 15, -1, -1, -1, -1, -1, -1, -1, -1);
+    let m12 = _mm_setr_epi8(-1, -1, -1, -1, -1, -1, -1, -1, 1, 2, 3, 5, 6, 7, 9, 10);
+    let out1 = _mm_or_si128(_mm_shuffle_epi8(in1, m11), _mm_shuffle_epi8(in2, m12));
+
+    let m22 = _mm_setr_epi8(11, 13, 14, 15, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
+    let m23 = _mm_setr_epi8(-1, -1, -1, -1, 1, 2, 3, 5, 6, 7, 9, 10, 11, 13, 14, 15);
+    let out2 = _mm_or_si128(_mm_shuffle_epi8(in2, m22), _mm_shuffle_epi8(in3, m23));
+
+    _mm_storeu_si128(output_ptr.cast(), out0);
+    _mm_storeu_si128(output_ptr.add(16).cast(), out1);
+    _mm_storeu_si128(output_ptr.add(32).cast(), out2);
+  }
+}
+
+/// Drops leading alpha and reverses the inner three bytes for 16
+/// packed ABGR pixels (64 input bytes → 48 output bytes). Each
+/// pixel triple is read at offsets `(+3, +2, +1)` (R, G, B from
+/// `A, B, G, R` input). Used by the Ship 9c
+/// [`Abgr`](crate::yuv::Abgr) `with_rgb` / `with_luma` / `with_hsv`
+/// paths.
+///
+/// # Safety
+///
+/// - `input_ptr` must point to at least 64 readable bytes.
+/// - `output_ptr` must point to at least 48 writable bytes.
+/// - `input_ptr` / `output_ptr` ranges must not alias.
+/// - SSSE3 must be available in the caller's `target_feature` context.
+#[inline(always)]
+pub(super) unsafe fn abgr_to_rgb_16_pixels(input_ptr: *const u8, output_ptr: *mut u8) {
+  unsafe {
+    let in0 = _mm_loadu_si128(input_ptr.cast());
+    let in1 = _mm_loadu_si128(input_ptr.add(16).cast());
+    let in2 = _mm_loadu_si128(input_ptr.add(32).cast());
+    let in3 = _mm_loadu_si128(input_ptr.add(48).cast());
+
+    let m00 = _mm_setr_epi8(3, 2, 1, 7, 6, 5, 11, 10, 9, 15, 14, 13, -1, -1, -1, -1);
+    let m01 = _mm_setr_epi8(-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 3, 2, 1, 7);
+    let out0 = _mm_or_si128(_mm_shuffle_epi8(in0, m00), _mm_shuffle_epi8(in1, m01));
+
+    let m11 = _mm_setr_epi8(6, 5, 11, 10, 9, 15, 14, 13, -1, -1, -1, -1, -1, -1, -1, -1);
+    let m12 = _mm_setr_epi8(-1, -1, -1, -1, -1, -1, -1, -1, 3, 2, 1, 7, 6, 5, 11, 10);
+    let out1 = _mm_or_si128(_mm_shuffle_epi8(in1, m11), _mm_shuffle_epi8(in2, m12));
+
+    let m22 = _mm_setr_epi8(9, 15, 14, 13, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
+    let m23 = _mm_setr_epi8(-1, -1, -1, -1, 3, 2, 1, 7, 6, 5, 11, 10, 9, 15, 14, 13);
+    let out2 = _mm_or_si128(_mm_shuffle_epi8(in2, m22), _mm_shuffle_epi8(in3, m23));
+
+    _mm_storeu_si128(output_ptr.cast(), out0);
+    _mm_storeu_si128(output_ptr.add(16).cast(), out1);
+    _mm_storeu_si128(output_ptr.add(32).cast(), out2);
+  }
+}
+
+/// Rotates leading alpha to trailing position in 4 packed ARGB
+/// pixels (16 bytes). One `_mm_shuffle_epi8` per 16-byte vector —
+/// within each 4-byte pixel: `(A, R, G, B) → (R, G, B, A)`.
+///
+/// # Safety
+///
+/// - `input_ptr` must point to at least 16 readable bytes.
+/// - `output_ptr` must point to at least 16 writable bytes.
+/// - `input_ptr` / `output_ptr` ranges must not alias.
+/// - SSSE3 must be available in the caller's `target_feature` context.
+#[inline(always)]
+pub(super) unsafe fn argb_to_rgba_4_pixels(input_ptr: *const u8, output_ptr: *mut u8) {
+  unsafe {
+    let mask = _mm_setr_epi8(1, 2, 3, 0, 5, 6, 7, 4, 9, 10, 11, 8, 13, 14, 15, 12);
+    let in_v = _mm_loadu_si128(input_ptr.cast());
+    let out_v = _mm_shuffle_epi8(in_v, mask);
+    _mm_storeu_si128(output_ptr.cast(), out_v);
+  }
+}
+
+/// Reverses byte order in 4 packed ABGR pixels (16 bytes). One
+/// `_mm_shuffle_epi8` per 16-byte vector — within each 4-byte
+/// pixel: `(A, B, G, R) → (R, G, B, A)`. Self-inverse.
+///
+/// # Safety
+///
+/// - `input_ptr` must point to at least 16 readable bytes.
+/// - `output_ptr` must point to at least 16 writable bytes.
+/// - `input_ptr` / `output_ptr` ranges must not alias.
+/// - SSSE3 must be available in the caller's `target_feature` context.
+#[inline(always)]
+pub(super) unsafe fn abgr_to_rgba_4_pixels(input_ptr: *const u8, output_ptr: *mut u8) {
+  unsafe {
+    let mask = _mm_setr_epi8(3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8, 15, 14, 13, 12);
+    let in_v = _mm_loadu_si128(input_ptr.cast());
+    let out_v = _mm_shuffle_epi8(in_v, mask);
+    _mm_storeu_si128(output_ptr.cast(), out_v);
+  }
+}
+
 /// Swaps R↔B and drops alpha for 16 packed BGRA pixels (64 input
 /// bytes → 48 output bytes). Same shape as [`drop_alpha_16_pixels`]
 /// but each pixel triple is read with the channel order reversed

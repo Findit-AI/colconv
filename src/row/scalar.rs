@@ -3462,6 +3462,105 @@ pub(crate) fn bgra_to_rgb_row(bgra: &[u8], rgb_out: &mut [u8], width: usize) {
   }
 }
 
+// ---- Tier 6 leading-alpha helpers (Ship 9c) ----------------------------
+//
+// Compact byte-rearrangement kernels behind the [`Argb`] / [`Abgr`]
+// source-side sinker family. Like Ship 9b, this file provides the
+// scalar reference / fallback implementations; SIMD dispatch and the
+// per-arch backends live in `row::dispatch::rgb_ops` and
+// `row::arch::*`.
+//
+// `Argb` and `Abgr` differ from `Rgba` / `Bgra` only in alpha
+// position — the 4th byte for the trailing-alpha pair, the **0th**
+// byte for the leading-alpha pair. The inner three RGB bytes still
+// follow each format's marker name.
+
+/// Drops the leading alpha byte from packed `A, R, G, B` input,
+/// producing packed `R, G, B` output (`4 * width` → `3 * width`
+/// bytes).
+///
+/// # Panics
+///
+/// Panics (any build profile) if `argb.len() < 4 * width` or
+/// `rgb_out.len() < 3 * width`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn argb_to_rgb_row(argb: &[u8], rgb_out: &mut [u8], width: usize) {
+  debug_assert!(argb.len() >= width * 4, "argb row too short");
+  debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
+  for x in 0..width {
+    let src = x * 4;
+    let dst = x * 3;
+    rgb_out[dst] = argb[src + 1];
+    rgb_out[dst + 1] = argb[src + 2];
+    rgb_out[dst + 2] = argb[src + 3];
+  }
+}
+
+/// Swaps R↔B and drops the leading alpha byte from packed
+/// `A, B, G, R` input, producing packed `R, G, B`. Used by
+/// [`Abgr`](crate::yuv::Abgr) sinker's RGB / luma / HSV paths —
+/// stages a single RGB scratch row that all three reuse.
+///
+/// # Panics
+///
+/// Panics (any build profile) if `abgr.len() < 4 * width` or
+/// `rgb_out.len() < 3 * width`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn abgr_to_rgb_row(abgr: &[u8], rgb_out: &mut [u8], width: usize) {
+  debug_assert!(abgr.len() >= width * 4, "abgr row too short");
+  debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
+  for x in 0..width {
+    let src = x * 4;
+    let dst = x * 3;
+    rgb_out[dst] = abgr[src + 3];
+    rgb_out[dst + 1] = abgr[src + 2];
+    rgb_out[dst + 2] = abgr[src + 1];
+  }
+}
+
+/// Rotates the alpha byte from leading position to trailing position
+/// in packed `A, R, G, B` input, producing packed `R, G, B, A`.
+/// Alpha pass-through — the rotation is the only mutation per pixel.
+///
+/// # Panics
+///
+/// Panics (any build profile) if `argb.len() < 4 * width` or
+/// `rgba_out.len() < 4 * width`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn argb_to_rgba_row(argb: &[u8], rgba_out: &mut [u8], width: usize) {
+  debug_assert!(argb.len() >= width * 4, "argb row too short");
+  debug_assert!(rgba_out.len() >= width * 4, "rgba_out row too short");
+  for x in 0..width {
+    let i = x * 4;
+    rgba_out[i] = argb[i + 1];
+    rgba_out[i + 1] = argb[i + 2];
+    rgba_out[i + 2] = argb[i + 3];
+    rgba_out[i + 3] = argb[i];
+  }
+}
+
+/// Reverses byte order in packed `A, B, G, R` input, producing
+/// packed `R, G, B, A`. Combines the leading-alpha → trailing-alpha
+/// rotation with an R↔B swap. Self-inverse: the same routine
+/// converts `RGBA → ABGR`.
+///
+/// # Panics
+///
+/// Panics (any build profile) if `abgr.len() < 4 * width` or
+/// `rgba_out.len() < 4 * width`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn abgr_to_rgba_row(abgr: &[u8], rgba_out: &mut [u8], width: usize) {
+  debug_assert!(abgr.len() >= width * 4, "abgr row too short");
+  debug_assert!(rgba_out.len() >= width * 4, "rgba_out row too short");
+  for x in 0..width {
+    let i = x * 4;
+    rgba_out[i] = abgr[i + 3];
+    rgba_out[i + 1] = abgr[i + 2];
+    rgba_out[i + 2] = abgr[i + 1];
+    rgba_out[i + 3] = abgr[i];
+  }
+}
+
 // =============================================================================
 // Bayer demosaic + WB + CCM
 // =============================================================================
