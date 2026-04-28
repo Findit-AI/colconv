@@ -49,10 +49,14 @@
 //!   `with_rgba_u16`, with native SIMD on every backend.
 //! - **8‑bit packed RGB sources** (Tier 6):
 //!   [`Rgb24`](crate::yuv::Rgb24) (`R, G, B` bytes),
-//!   [`Bgr24`](crate::yuv::Bgr24) (`B, G, R` bytes). The source row
+//!   [`Bgr24`](crate::yuv::Bgr24) (`B, G, R` bytes),
+//!   [`Rgba`](crate::yuv::Rgba) (`R, G, B, A` bytes),
+//!   [`Bgra`](crate::yuv::Bgra) (`B, G, R, A` bytes). The source row
 //!   is already RGB — `with_rgb` is an identity copy / channel
-//!   swap, `with_rgba` appends opaque alpha, `with_luma` derives
-//!   Y' from R/G/B, `with_hsv` reuses the existing kernel.
+//!   swap / drop-alpha, `with_rgba` is a memcpy / R↔B swap (alpha
+//!   passed through for 4-byte sources, forced to `0xFF` for the
+//!   3-byte sources), `with_luma` derives Y' from R/G/B, `with_hsv`
+//!   reuses the existing kernel.
 //!
 //! High‑bit‑depth source impls expose both `with_rgb` (u8 output) and
 //! `with_rgb_u16` (native‑depth u16 output). Calling `with_rgb_u16` on
@@ -514,6 +518,16 @@ pub enum RowSlice {
   /// [`RgbPacked`](Self::RgbPacked)).
   #[display("BGR packed")]
   BgrPacked,
+  /// Packed `R, G, B, A` row of an [`Rgba`](crate::yuv::Rgba) source.
+  /// `4 * width` `u8` bytes — alpha is real (not padding).
+  #[display("RGBA packed")]
+  RgbaPacked,
+  /// Packed `B, G, R, A` row of a [`Bgra`](crate::yuv::Bgra) source.
+  /// `4 * width` `u8` bytes — alpha lane preserved, channel order
+  /// swapped on the first three bytes relative to
+  /// [`RgbaPacked`](Self::RgbaPacked).
+  #[display("BGRA packed")]
+  BgraPacked,
 }
 
 /// A sink that writes any subset of `{RGB, Luma, HSV}` into

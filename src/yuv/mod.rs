@@ -123,15 +123,20 @@
 //! - [`Bgr24`](crate::yuv::Bgr24) — packed `B, G, R` 8‑bit. Reuses
 //!   [`Rgb24`](crate::yuv::Rgb24)'s sink pipeline behind a
 //!   `bgr_to_rgb_row` swap into the existing `rgb_scratch` buffer.
+//! - [`Rgba`] — packed `R, G, B, A` 8‑bit (4 bytes per pixel), single
+//!   plane; alpha is real (not padding) and is passed through to RGBA
+//!   output (Ship 9b).
+//! - [`Bgra`] — packed `B, G, R, A` 8‑bit. Channel order swapped on
+//!   the first three bytes vs [`Rgba`]; alpha lane preserved (Ship 9b).
 //!
 //! # Not yet shipped
 //!
 //! - **Legacy planar** (`Yuv411p`, `Yuv410p`) — DV / Cinepak only;
 //!   uncommon enough that adding them would be speculative.
-//! - **Packed RGB sources with alpha / padding** (`Rgba`, `Bgra`,
-//!   `Argb`, `Abgr`, the `0rgb` / `rgb0` / `0bgr` / `bgr0`
-//!   variants, `Rgba1010102`) — queued for Ship 9b‑9d as the
-//!   follow‑up tranches to Ship 9a.
+//! - **Packed RGB sources with leading alpha / padding** (`Argb`,
+//!   `Abgr`, the `0rgb` / `rgb0` / `0bgr` / `bgr0` variants,
+//!   `Rgba1010102`) — queued for Ship 9c‑9d as the follow‑up
+//!   tranches to Ship 9b.
 //!
 //! # Tracked refactor (no behavior change)
 //!
@@ -151,6 +156,7 @@
 //! discussion (originated from PR #14 review).
 
 mod bgr24;
+mod bgra;
 mod nv12;
 mod nv16;
 mod nv21;
@@ -166,6 +172,7 @@ mod p410;
 mod p412;
 mod p416;
 mod rgb24;
+mod rgba;
 mod yuv420p;
 mod yuv420p10;
 mod yuv420p12;
@@ -204,6 +211,7 @@ mod yuva444p16;
 mod yuva444p9;
 
 pub use bgr24::{Bgr24, Bgr24Row, Bgr24Sink, bgr24_to};
+pub use bgra::{Bgra, BgraRow, BgraSink, bgra_to};
 pub use nv12::{Nv12, Nv12Row, Nv12Sink, nv12_to};
 pub use nv16::{Nv16, Nv16Row, Nv16Sink, nv16_to};
 pub use nv21::{Nv21, Nv21Row, Nv21Sink, nv21_to};
@@ -219,6 +227,7 @@ pub use p410::{P410, P410Row, P410Sink, p410_to};
 pub use p412::{P412, P412Row, P412Sink, p412_to};
 pub use p416::{P416, P416Row, P416Sink, p416_to};
 pub use rgb24::{Rgb24, Rgb24Row, Rgb24Sink, rgb24_to};
+pub use rgba::{Rgba, RgbaRow, RgbaSink, rgba_to};
 pub use yuv420p::{Yuv420p, Yuv420pRow, Yuv420pSink, yuv420p_to};
 pub use yuv420p9::{Yuv420p9, Yuv420p9Row, Yuv420p9Sink, yuv420p9_to};
 pub use yuv420p10::{Yuv420p10, Yuv420p10Row, Yuv420p10Sink, yuv420p10_to};

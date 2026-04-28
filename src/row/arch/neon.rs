@@ -5361,5 +5361,120 @@ pub(crate) unsafe fn bgr_rgb_swap_row(input: &[u8], output: &mut [u8], width: us
   }
 }
 
+// ===== Packed-RGBA shuffles (Ship 9b) ====================================
+
+/// Drops the alpha byte from packed `R, G, B, A` input, producing
+/// packed `R, G, B` output. NEON makes this nearly free: `vld4q_u8`
+/// deinterleaves 16 RGBA pixels into four u8x16 channel vectors
+/// `(R, G, B, A)`, and `vst3q_u8` re-interleaves three of them as
+/// RGB triples — the alpha vector is simply discarded.
+///
+/// # Safety
+///
+/// 1. NEON must be available (caller obligation, same as the other
+///    NEON kernels).
+/// 2. `rgba.len() >= 4 * width`.
+/// 3. `rgb_out.len() >= 3 * width`.
+/// 4. `rgba` / `rgb_out` must not alias.
+#[inline]
+#[target_feature(enable = "neon")]
+pub(crate) unsafe fn rgba_to_rgb_row(rgba: &[u8], rgb_out: &mut [u8], width: usize) {
+  debug_assert!(rgba.len() >= width * 4, "rgba row too short");
+  debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
+
+  // SAFETY: NEON availability is the caller's obligation. All pointer
+  // adds are bounded by the `while x + 16 <= width` condition and the
+  // caller-promised slice lengths.
+  unsafe {
+    let mut x = 0usize;
+    while x + 16 <= width {
+      let quad = vld4q_u8(rgba.as_ptr().add(x * 4));
+      let triple = uint8x16x3_t(quad.0, quad.1, quad.2);
+      vst3q_u8(rgb_out.as_mut_ptr().add(x * 3), triple);
+      x += 16;
+    }
+    if x < width {
+      scalar::rgba_to_rgb_row(
+        &rgba[x * 4..width * 4],
+        &mut rgb_out[x * 3..width * 3],
+        width - x,
+      );
+    }
+  }
+}
+
+/// Swaps R↔B in packed `B, G, R, A` input, producing packed
+/// `R, G, B, A` (alpha lane preserved). `vld4q_u8` deinterleaves
+/// 16 BGRA pixels into channel vectors `(B, G, R, A)`; `vst4q_u8`
+/// interleaves them back as `(R, G, B, A)` simply by reordering
+/// the channel-vector tuple.
+///
+/// # Safety
+///
+/// 1. NEON must be available.
+/// 2. `bgra.len() >= 4 * width`.
+/// 3. `rgba_out.len() >= 4 * width`.
+/// 4. `bgra` / `rgba_out` must not alias.
+#[inline]
+#[target_feature(enable = "neon")]
+pub(crate) unsafe fn bgra_to_rgba_row(bgra: &[u8], rgba_out: &mut [u8], width: usize) {
+  debug_assert!(bgra.len() >= width * 4, "bgra row too short");
+  debug_assert!(rgba_out.len() >= width * 4, "rgba_out row too short");
+
+  // SAFETY: NEON availability is the caller's obligation.
+  unsafe {
+    let mut x = 0usize;
+    while x + 16 <= width {
+      let quad = vld4q_u8(bgra.as_ptr().add(x * 4));
+      let swapped = uint8x16x4_t(quad.2, quad.1, quad.0, quad.3);
+      vst4q_u8(rgba_out.as_mut_ptr().add(x * 4), swapped);
+      x += 16;
+    }
+    if x < width {
+      scalar::bgra_to_rgba_row(
+        &bgra[x * 4..width * 4],
+        &mut rgba_out[x * 4..width * 4],
+        width - x,
+      );
+    }
+  }
+}
+
+/// Swaps R↔B and drops alpha from packed `B, G, R, A` input,
+/// producing packed `R, G, B`. Combines [`rgba_to_rgb_row`]'s
+/// alpha drop with [`bgra_to_rgba_row`]'s channel swap in one pass:
+/// `vld4q_u8` → reorder vectors → `vst3q_u8` (alpha discarded).
+///
+/// # Safety
+///
+/// 1. NEON must be available.
+/// 2. `bgra.len() >= 4 * width`.
+/// 3. `rgb_out.len() >= 3 * width`.
+/// 4. `bgra` / `rgb_out` must not alias.
+#[inline]
+#[target_feature(enable = "neon")]
+pub(crate) unsafe fn bgra_to_rgb_row(bgra: &[u8], rgb_out: &mut [u8], width: usize) {
+  debug_assert!(bgra.len() >= width * 4, "bgra row too short");
+  debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
+
+  // SAFETY: NEON availability is the caller's obligation.
+  unsafe {
+    let mut x = 0usize;
+    while x + 16 <= width {
+      let quad = vld4q_u8(bgra.as_ptr().add(x * 4));
+      let triple = uint8x16x3_t(quad.2, quad.1, quad.0);
+      vst3q_u8(rgb_out.as_mut_ptr().add(x * 3), triple);
+      x += 16;
+    }
+    if x < width {
+      scalar::bgra_to_rgb_row(
+        &bgra[x * 4..width * 4],
+        &mut rgb_out[x * 3..width * 3],
+        width - x,
+      );
+    }
+  }
+}
+
 #[cfg(all(test, feature = "std"))]
 mod tests;

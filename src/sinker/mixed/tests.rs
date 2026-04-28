@@ -9691,3 +9691,410 @@ fn bgr24_luma_matches_rgb24_after_swap() {
 
   assert_eq!(bgr_luma, rgb_luma);
 }
+
+// ---- Tier 6 — Rgba / Bgra (Ship 9b) -------------------------------
+
+fn solid_rgba_frame(width: u32, height: u32, r: u8, g: u8, b: u8, a: u8) -> Vec<u8> {
+  let w = width as usize;
+  let h = height as usize;
+  let mut buf = std::vec![0u8; w * h * 4];
+  for px in buf.chunks_mut(4) {
+    px[0] = r;
+    px[1] = g;
+    px[2] = b;
+    px[3] = a;
+  }
+  buf
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn rgba_with_rgb_drops_alpha() {
+  // Distinct alpha (0x80) verifies the alpha byte is dropped, not
+  // copied into one of the RGB channels.
+  let pix = solid_rgba_frame(16, 4, 200, 100, 50, 0x80);
+  let src = RgbaFrame::try_new(&pix, 16, 4, 64).unwrap();
+
+  let mut rgb_out = std::vec![0u8; 16 * 4 * 3];
+  let mut sink = MixedSinker::<Rgba>::new(16, 4)
+    .with_rgb(&mut rgb_out)
+    .unwrap();
+  rgba_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+
+  for px in rgb_out.chunks(3) {
+    assert_eq!(px, [200, 100, 50]);
+  }
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn rgba_with_rgba_passes_through_alpha() {
+  // Source alpha is 0x80, NOT 0xFF — verifies the sinker preserves
+  // caller alpha rather than overwriting with opaque.
+  let pix = solid_rgba_frame(16, 4, 200, 100, 50, 0x80);
+  let src = RgbaFrame::try_new(&pix, 16, 4, 64).unwrap();
+
+  let mut rgba_out = std::vec![0u8; 16 * 4 * 4];
+  let mut sink = MixedSinker::<Rgba>::new(16, 4)
+    .with_rgba(&mut rgba_out)
+    .unwrap();
+  rgba_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+
+  for px in rgba_out.chunks(4) {
+    assert_eq!(px, [200, 100, 50, 0x80]);
+  }
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn rgba_luma_matches_rgb24_after_alpha_drop() {
+  // RGBA luma must equal Rgb24 luma on the same RGB triple — alpha
+  // never participates in Y'.
+  let rgba_pix = solid_rgba_frame(16, 4, 200, 100, 50, 0x80);
+  let rgb_pix = solid_rgb24_frame(16, 4, 200, 100, 50);
+  let rgba_src = RgbaFrame::try_new(&rgba_pix, 16, 4, 64).unwrap();
+  let rgb_src = Rgb24Frame::try_new(&rgb_pix, 16, 4, 48).unwrap();
+
+  let mut rgba_luma = std::vec![0u8; 16 * 4];
+  let mut s_rgba = MixedSinker::<Rgba>::new(16, 4)
+    .with_luma(&mut rgba_luma)
+    .unwrap();
+  rgba_to(&rgba_src, true, ColorMatrix::Bt709, &mut s_rgba).unwrap();
+
+  let mut rgb_luma = std::vec![0u8; 16 * 4];
+  let mut s_rgb = MixedSinker::<Rgb24>::new(16, 4)
+    .with_luma(&mut rgb_luma)
+    .unwrap();
+  rgb24_to(&rgb_src, true, ColorMatrix::Bt709, &mut s_rgb).unwrap();
+
+  assert_eq!(rgba_luma, rgb_luma);
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn rgba_with_hsv_matches_rgb24_kernel() {
+  // HSV from RGBA must equal HSV from the matching RGB triple.
+  let rgba_pix = solid_rgba_frame(16, 4, 255, 0, 0, 0x40);
+  let rgb_pix = solid_rgb24_frame(16, 4, 255, 0, 0);
+  let rgba_src = RgbaFrame::try_new(&rgba_pix, 16, 4, 64).unwrap();
+  let rgb_src = Rgb24Frame::try_new(&rgb_pix, 16, 4, 48).unwrap();
+
+  let (mut h1, mut s1, mut v1) = (
+    std::vec![0u8; 16 * 4],
+    std::vec![0u8; 16 * 4],
+    std::vec![0u8; 16 * 4],
+  );
+  let mut sink_rgba = MixedSinker::<Rgba>::new(16, 4)
+    .with_hsv(&mut h1, &mut s1, &mut v1)
+    .unwrap();
+  rgba_to(&rgba_src, true, ColorMatrix::Bt709, &mut sink_rgba).unwrap();
+
+  let (mut h2, mut s2, mut v2) = (
+    std::vec![0u8; 16 * 4],
+    std::vec![0u8; 16 * 4],
+    std::vec![0u8; 16 * 4],
+  );
+  let mut sink_rgb = MixedSinker::<Rgb24>::new(16, 4)
+    .with_hsv(&mut h2, &mut s2, &mut v2)
+    .unwrap();
+  rgb24_to(&rgb_src, true, ColorMatrix::Bt709, &mut sink_rgb).unwrap();
+
+  assert_eq!(h1, h2);
+  assert_eq!(s1, s2);
+  assert_eq!(v1, v2);
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn rgba_random_input_produces_stable_output() {
+  let w = 31usize;
+  let h = 5usize;
+  let mut pix = std::vec![0u8; w * h * 4];
+  pseudo_random_u8(&mut pix, 0xBEEF_F00D);
+  let src = RgbaFrame::try_new(&pix, w as u32, h as u32, (w * 4) as u32).unwrap();
+
+  let mut rgb = std::vec![0u8; w * h * 3];
+  let mut rgba = std::vec![0u8; w * h * 4];
+  let mut luma = std::vec![0u8; w * h];
+  let mut hh = std::vec![0u8; w * h];
+  let mut ss = std::vec![0u8; w * h];
+  let mut vv = std::vec![0u8; w * h];
+  let mut sink = MixedSinker::<Rgba>::new(w, h)
+    .with_rgb(&mut rgb)
+    .unwrap()
+    .with_rgba(&mut rgba)
+    .unwrap()
+    .with_luma(&mut luma)
+    .unwrap()
+    .with_hsv(&mut hh, &mut ss, &mut vv)
+    .unwrap();
+  rgba_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+
+  // RGB drops alpha (per-pixel R, G, B copied verbatim).
+  for (i, px) in rgb.chunks(3).enumerate() {
+    assert_eq!(px[0], pix[i * 4]);
+    assert_eq!(px[1], pix[i * 4 + 1]);
+    assert_eq!(px[2], pix[i * 4 + 2]);
+  }
+  // RGBA is an identity copy (alpha pass-through).
+  assert_eq!(rgba, pix);
+}
+
+// ---- Bgra ----------------------------------------------------------
+
+fn solid_bgra_frame(width: u32, height: u32, b: u8, g: u8, r: u8, a: u8) -> Vec<u8> {
+  let w = width as usize;
+  let h = height as usize;
+  let mut buf = std::vec![0u8; w * h * 4];
+  for px in buf.chunks_mut(4) {
+    px[0] = b;
+    px[1] = g;
+    px[2] = r;
+    px[3] = a;
+  }
+  buf
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn bgra_with_rgb_swaps_and_drops_alpha() {
+  // Source byte order B=50, G=100, R=200, A=0x80 → expected RGB:
+  // R=200, G=100, B=50 (alpha dropped).
+  let pix = solid_bgra_frame(16, 4, 50, 100, 200, 0x80);
+  let src = BgraFrame::try_new(&pix, 16, 4, 64).unwrap();
+
+  let mut rgb_out = std::vec![0u8; 16 * 4 * 3];
+  let mut sink = MixedSinker::<Bgra>::new(16, 4)
+    .with_rgb(&mut rgb_out)
+    .unwrap();
+  bgra_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+
+  for px in rgb_out.chunks(3) {
+    assert_eq!(px, [200, 100, 50]);
+  }
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn bgra_with_rgba_swaps_with_alpha_passthrough() {
+  let pix = solid_bgra_frame(16, 4, 50, 100, 200, 0x80);
+  let src = BgraFrame::try_new(&pix, 16, 4, 64).unwrap();
+
+  let mut rgba_out = std::vec![0u8; 16 * 4 * 4];
+  let mut sink = MixedSinker::<Bgra>::new(16, 4)
+    .with_rgba(&mut rgba_out)
+    .unwrap();
+  bgra_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+
+  for px in rgba_out.chunks(4) {
+    assert_eq!(px, [200, 100, 50, 0x80]);
+  }
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn bgra_luma_matches_rgba_after_swap() {
+  // Same RGB triple, opposite channel order — luma must agree.
+  let bgra_pix = solid_bgra_frame(16, 4, 50, 100, 200, 0x80); // B, G, R, A
+  let rgba_pix = solid_rgba_frame(16, 4, 200, 100, 50, 0x80); // R, G, B, A
+  let bgra_src = BgraFrame::try_new(&bgra_pix, 16, 4, 64).unwrap();
+  let rgba_src = RgbaFrame::try_new(&rgba_pix, 16, 4, 64).unwrap();
+
+  let mut bgra_luma = std::vec![0u8; 16 * 4];
+  let mut s_bgra = MixedSinker::<Bgra>::new(16, 4)
+    .with_luma(&mut bgra_luma)
+    .unwrap();
+  bgra_to(&bgra_src, true, ColorMatrix::Bt709, &mut s_bgra).unwrap();
+
+  let mut rgba_luma = std::vec![0u8; 16 * 4];
+  let mut s_rgba = MixedSinker::<Rgba>::new(16, 4)
+    .with_luma(&mut rgba_luma)
+    .unwrap();
+  rgba_to(&rgba_src, true, ColorMatrix::Bt709, &mut s_rgba).unwrap();
+
+  assert_eq!(bgra_luma, rgba_luma);
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn bgra_random_input_produces_stable_output() {
+  let w = 31usize;
+  let h = 5usize;
+  let mut pix = std::vec![0u8; w * h * 4];
+  pseudo_random_u8(&mut pix, 0xFEED_FACE);
+  let src = BgraFrame::try_new(&pix, w as u32, h as u32, (w * 4) as u32).unwrap();
+
+  let mut rgb = std::vec![0u8; w * h * 3];
+  let mut rgba = std::vec![0u8; w * h * 4];
+  let mut luma = std::vec![0u8; w * h];
+  let mut hh = std::vec![0u8; w * h];
+  let mut ss = std::vec![0u8; w * h];
+  let mut vv = std::vec![0u8; w * h];
+  let mut sink = MixedSinker::<Bgra>::new(w, h)
+    .with_rgb(&mut rgb)
+    .unwrap()
+    .with_rgba(&mut rgba)
+    .unwrap()
+    .with_luma(&mut luma)
+    .unwrap()
+    .with_hsv(&mut hh, &mut ss, &mut vv)
+    .unwrap();
+  bgra_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+
+  // RGB output: R/G/B come from BGRA byte-2 / byte-1 / byte-0
+  // (R↔B swap); alpha dropped.
+  for (i, px) in rgb.chunks(3).enumerate() {
+    assert_eq!(px[0], pix[i * 4 + 2]);
+    assert_eq!(px[1], pix[i * 4 + 1]);
+    assert_eq!(px[2], pix[i * 4]);
+  }
+  // RGBA output: R↔B swap, alpha pass-through.
+  for (i, px) in rgba.chunks(4).enumerate() {
+    assert_eq!(px[0], pix[i * 4 + 2]);
+    assert_eq!(px[1], pix[i * 4 + 1]);
+    assert_eq!(px[2], pix[i * 4]);
+    assert_eq!(px[3], pix[i * 4 + 3]);
+  }
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn rgba_simd_matches_scalar_with_random_input() {
+  // Width 1921 forces both the SIMD main loop AND a scalar tail
+  // across every backend block size (16 / 32 / 64). Per-pixel random
+  // R/G/B/A means a bad shuffle in any backend produces a measurable
+  // diff vs scalar.
+  //
+  // HSV is intentionally **not** part of the parity check —
+  // `rgb_to_hsv_row` uses `_mm_rcp_ps` + Newton-Raphson refinement
+  // and is documented to differ ±1 LSB from scalar. The new Ship 9b
+  // RGBA shuffle kernels are byte-exact, so RGB / RGBA / luma cover
+  // their parity.
+  let w = 1921usize;
+  let h = 4usize;
+  let mut pix = std::vec![0u8; w * h * 4];
+  pseudo_random_u8(&mut pix, 0xBEEF_F00D);
+  let src = RgbaFrame::try_new(&pix, w as u32, h as u32, (w * 4) as u32).unwrap();
+
+  let mut rgb_simd = std::vec![0u8; w * h * 3];
+  let mut rgb_scalar = std::vec![0u8; w * h * 3];
+  let mut rgba_simd = std::vec![0u8; w * h * 4];
+  let mut rgba_scalar = std::vec![0u8; w * h * 4];
+  let mut luma_simd = std::vec![0u8; w * h];
+  let mut luma_scalar = std::vec![0u8; w * h];
+
+  let mut s_simd = MixedSinker::<Rgba>::new(w, h)
+    .with_rgb(&mut rgb_simd)
+    .unwrap()
+    .with_rgba(&mut rgba_simd)
+    .unwrap()
+    .with_luma(&mut luma_simd)
+    .unwrap();
+  rgba_to(&src, true, ColorMatrix::Bt709, &mut s_simd).unwrap();
+
+  let mut s_scalar = MixedSinker::<Rgba>::new(w, h)
+    .with_rgb(&mut rgb_scalar)
+    .unwrap()
+    .with_rgba(&mut rgba_scalar)
+    .unwrap()
+    .with_luma(&mut luma_scalar)
+    .unwrap();
+  s_scalar.set_simd(false);
+  rgba_to(&src, true, ColorMatrix::Bt709, &mut s_scalar).unwrap();
+
+  assert_eq!(
+    rgb_simd, rgb_scalar,
+    "RGB output diverges between SIMD and scalar"
+  );
+  assert_eq!(
+    rgba_simd, rgba_scalar,
+    "RGBA output diverges between SIMD and scalar"
+  );
+  assert_eq!(
+    luma_simd, luma_scalar,
+    "Luma output diverges between SIMD and scalar"
+  );
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn bgra_simd_matches_scalar_with_random_input() {
+  // See `rgba_simd_matches_scalar_with_random_input` for rationale.
+  let w = 1921usize;
+  let h = 4usize;
+  let mut pix = std::vec![0u8; w * h * 4];
+  pseudo_random_u8(&mut pix, 0xFEED_FACE);
+  let src = BgraFrame::try_new(&pix, w as u32, h as u32, (w * 4) as u32).unwrap();
+
+  let mut rgb_simd = std::vec![0u8; w * h * 3];
+  let mut rgb_scalar = std::vec![0u8; w * h * 3];
+  let mut rgba_simd = std::vec![0u8; w * h * 4];
+  let mut rgba_scalar = std::vec![0u8; w * h * 4];
+  let mut luma_simd = std::vec![0u8; w * h];
+  let mut luma_scalar = std::vec![0u8; w * h];
+
+  let mut s_simd = MixedSinker::<Bgra>::new(w, h)
+    .with_rgb(&mut rgb_simd)
+    .unwrap()
+    .with_rgba(&mut rgba_simd)
+    .unwrap()
+    .with_luma(&mut luma_simd)
+    .unwrap();
+  bgra_to(&src, true, ColorMatrix::Bt709, &mut s_simd).unwrap();
+
+  let mut s_scalar = MixedSinker::<Bgra>::new(w, h)
+    .with_rgb(&mut rgb_scalar)
+    .unwrap()
+    .with_rgba(&mut rgba_scalar)
+    .unwrap()
+    .with_luma(&mut luma_scalar)
+    .unwrap();
+  s_scalar.set_simd(false);
+  bgra_to(&src, true, ColorMatrix::Bt709, &mut s_scalar).unwrap();
+
+  assert_eq!(
+    rgb_simd, rgb_scalar,
+    "RGB output diverges between SIMD and scalar"
+  );
+  assert_eq!(
+    rgba_simd, rgba_scalar,
+    "RGBA output diverges between SIMD and scalar"
+  );
+  assert_eq!(
+    luma_simd, luma_scalar,
+    "Luma output diverges between SIMD and scalar"
+  );
+}
