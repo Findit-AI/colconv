@@ -13,10 +13,11 @@
 //!   `yuva420p*_to_rgba*_with_alpha_src_row` dispatchers. The 8-bit
 //!   `Yuva422p` has no native `u16` RGBA output (mirrors `Yuva420p`).
 //! - **RGB / RGB-u16 / luma / HSV alpha-drop paths** — these reuse the
-//!   existing non-alpha 4:2:2 row dispatchers
-//!   (`yuv422p*_to_rgb*` → which themselves delegate to
-//!   `yuv_420*` row kernels at the row level). The alpha plane is
-//!   ignored; output bytes / elements match what the corresponding
+//!   existing 4:2:0 row dispatchers
+//!   (`yuv420p*_to_rgb*` / `yuv420p_to_rgb_row`) directly, since the
+//!   per-row chroma layout is identical between 4:2:0 and 4:2:2 (the
+//!   YUV 4:2:2 sinkers do the same). The alpha plane is ignored;
+//!   output bytes / elements match what the corresponding
 //!   `Yuv422p<BITS>` source would produce given the same Y/U/V data.
 
 use super::{

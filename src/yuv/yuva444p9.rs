@@ -4,11 +4,13 @@
 //! [`super::Yuv444p9`] but additionally carries a per‑row alpha slice
 //! (also `width` `u16` samples, low‑bit‑packed at 9 bits).
 //!
-//! Ship 8b‑3 ships the scalar prep — the per‑row dispatcher hands
-//! the alpha source straight through to the
-//! `yuv_444p_n_to_rgba*_with_alpha_src_row::<9>` scalar path. Per‑arch
-//! SIMD wiring lands already in place because the BITS-generic
-//! template covers BITS={9,10,12,14}, so Yuva444p9 SIMD comes free.
+//! Ship 8b‑3 wires this format end to end. The per‑row dispatcher
+//! hands the alpha source straight through to the
+//! `yuv_444p_n_to_rgba*_with_alpha_src_row::<9>` SIMD/scalar path —
+//! per‑arch SIMD comes free because the BITS-generic template
+//! already covers `BITS ∈ {9, 10, 12, 14}` for the existing 4:4:4
+//! kernels, so the dispatcher selects SIMD when `use_simd` is true
+//! and falls back to scalar otherwise.
 
 use crate::{ColorMatrix, PixelSink, SourceFormat, frame::Yuva444p9Frame, sealed::Sealed};
 
@@ -69,7 +71,7 @@ impl<'a> Yuva444p9Row<'a> {
     self.v
   }
   /// Full‑width alpha row — `width` `u16` samples, low‑bit‑packed at
-  /// 10 bits. 1:1 with Y / U / V.
+  /// 9 bits. 1:1 with Y / U / V.
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub fn a(&self) -> &'a [u16] {
     self.a

@@ -5952,6 +5952,99 @@ impl<'a, const BITS: u32> Yuva422pFrame16<'a, BITS> {
     }
   }
 
+  /// Like [`Self::try_new`] but additionally scans every sample of
+  /// every plane and rejects values above `(1 << BITS) - 1`. Use this
+  /// on untrusted input where accepting out-of-range samples would
+  /// silently corrupt the conversion via the kernels' bit-mask.
+  ///
+  /// Returns [`Yuva422pFrame16Error::SampleOutOfRange`] on the first
+  /// offending sample. All of [`Self::try_new`]'s geometry errors are
+  /// still possible.
+  ///
+  /// 4:2:2 geometry: Y and A are full-width × full-height; U and V
+  /// are half-width × full-height (chroma subsamples horizontally
+  /// only).
+  ///
+  /// Cost: one O(plane_size) linear scan per plane (Y, U, V, A —
+  /// four planes total). The default [`Self::try_new`] skips this so
+  /// the hot path (decoder output, already-conforming buffers) stays
+  /// O(1).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  #[allow(clippy::too_many_arguments)]
+  pub fn try_new_checked(
+    y: &'a [u16],
+    u: &'a [u16],
+    v: &'a [u16],
+    a: &'a [u16],
+    width: u32,
+    height: u32,
+    y_stride: u32,
+    u_stride: u32,
+    v_stride: u32,
+    a_stride: u32,
+  ) -> Result<Self, Yuva422pFrame16Error> {
+    let frame = Self::try_new(
+      y, u, v, a, width, height, y_stride, u_stride, v_stride, a_stride,
+    )?;
+    let max_valid: u16 = ((1u32 << BITS) - 1) as u16;
+    let w = width as usize;
+    let h = height as usize;
+    let chroma_w = w / 2;
+    for row in 0..h {
+      let start = row * y_stride as usize;
+      for (col, &s) in y[start..start + w].iter().enumerate() {
+        if s > max_valid {
+          return Err(Yuva422pFrame16Error::SampleOutOfRange {
+            plane: Yuva422pFrame16Plane::Y,
+            index: start + col,
+            value: s,
+            max_valid,
+          });
+        }
+      }
+    }
+    for row in 0..h {
+      let start = row * u_stride as usize;
+      for (col, &s) in u[start..start + chroma_w].iter().enumerate() {
+        if s > max_valid {
+          return Err(Yuva422pFrame16Error::SampleOutOfRange {
+            plane: Yuva422pFrame16Plane::U,
+            index: start + col,
+            value: s,
+            max_valid,
+          });
+        }
+      }
+    }
+    for row in 0..h {
+      let start = row * v_stride as usize;
+      for (col, &s) in v[start..start + chroma_w].iter().enumerate() {
+        if s > max_valid {
+          return Err(Yuva422pFrame16Error::SampleOutOfRange {
+            plane: Yuva422pFrame16Plane::V,
+            index: start + col,
+            value: s,
+            max_valid,
+          });
+        }
+      }
+    }
+    for row in 0..h {
+      let start = row * a_stride as usize;
+      for (col, &s) in a[start..start + w].iter().enumerate() {
+        if s > max_valid {
+          return Err(Yuva422pFrame16Error::SampleOutOfRange {
+            plane: Yuva422pFrame16Plane::A,
+            index: start + col,
+            value: s,
+            max_valid,
+          });
+        }
+      }
+    }
+    Ok(frame)
+  }
+
   /// Y (luma) plane samples.
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn y(&self) -> &'a [u16] {
