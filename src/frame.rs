@@ -7475,6 +7475,284 @@ impl<'a> Bgr24Frame<'a> {
   }
 }
 
+// ============================================================
+// Tier 6 — Packed RGBA / BGRA 8-bit source-side frames (Ship 9b)
+// ============================================================
+//
+// Both formats are single-plane 8 bits per channel, 4 bytes per
+// pixel. The 4th byte is real alpha (not padding) — for the
+// `0rgb` / `rgb0` / `0bgr` / `bgr0` family where the 4th byte is
+// padding, the planned `RgbPaddingFrame` (Ship 9d) handles that
+// case so callers can't accidentally treat padding as alpha.
+
+/// Errors returned by [`RgbaFrame::try_new`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Error)]
+#[non_exhaustive]
+pub enum RgbaFrameError {
+  /// `width` or `height` was zero.
+  #[error("width ({width}) or height ({height}) is zero")]
+  ZeroDimension {
+    /// The supplied width.
+    width: u32,
+    /// The supplied height.
+    height: u32,
+  },
+  /// `stride < 4 * width`. Each row needs `4 * width` bytes for packed RGBA.
+  #[error("stride ({stride}) is smaller than 4 * width ({min_stride})")]
+  StrideTooSmall {
+    /// Required minimum stride (`4 * width`).
+    min_stride: u32,
+    /// The supplied stride.
+    stride: u32,
+  },
+  /// Plane is shorter than `stride * height` bytes.
+  #[error("RGBA plane has {actual} bytes but at least {expected} are required")]
+  PlaneTooShort {
+    /// Minimum bytes required.
+    expected: usize,
+    /// Actual bytes supplied.
+    actual: usize,
+  },
+  /// `stride * height` overflows `usize`.
+  #[error("declared geometry overflows usize: stride={stride} * rows={rows}")]
+  GeometryOverflow {
+    /// Stride that overflowed.
+    stride: u32,
+    /// Row count that overflowed against the stride.
+    rows: u32,
+  },
+  /// `4 * width` overflows `u32`.
+  #[error("4 * width overflows u32 ({width} too large)")]
+  WidthOverflow {
+    /// The supplied width.
+    width: u32,
+  },
+}
+
+/// A validated packed **RGBA** frame at 8 bits per channel
+/// (`AV_PIX_FMT_RGBA`). One plane, 4 bytes per pixel, byte order
+/// `R, G, B, A`.
+///
+/// `stride` is in **bytes** (≥ `4 * width`). No width parity
+/// constraint. The 4th byte is real alpha — see
+/// [`RgbPaddingFrame`](crate::yuv) for the `0rgb` / `rgb0` /
+/// `0bgr` / `bgr0` padding-byte family (planned Ship 9d).
+#[derive(Debug, Clone, Copy)]
+pub struct RgbaFrame<'a> {
+  rgba: &'a [u8],
+  width: u32,
+  height: u32,
+  stride: u32,
+}
+
+impl<'a> RgbaFrame<'a> {
+  /// Constructs a new [`RgbaFrame`], validating dimensions and
+  /// plane length.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn try_new(
+    rgba: &'a [u8],
+    width: u32,
+    height: u32,
+    stride: u32,
+  ) -> Result<Self, RgbaFrameError> {
+    if width == 0 || height == 0 {
+      return Err(RgbaFrameError::ZeroDimension { width, height });
+    }
+    let min_stride = match width.checked_mul(4) {
+      Some(v) => v,
+      None => return Err(RgbaFrameError::WidthOverflow { width }),
+    };
+    if stride < min_stride {
+      return Err(RgbaFrameError::StrideTooSmall { min_stride, stride });
+    }
+    let plane_min = match (stride as usize).checked_mul(height as usize) {
+      Some(v) => v,
+      None => {
+        return Err(RgbaFrameError::GeometryOverflow {
+          stride,
+          rows: height,
+        });
+      }
+    };
+    if rgba.len() < plane_min {
+      return Err(RgbaFrameError::PlaneTooShort {
+        expected: plane_min,
+        actual: rgba.len(),
+      });
+    }
+    Ok(Self {
+      rgba,
+      width,
+      height,
+      stride,
+    })
+  }
+
+  /// Constructs a new [`RgbaFrame`], panicking on invalid inputs.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn new(rgba: &'a [u8], width: u32, height: u32, stride: u32) -> Self {
+    match Self::try_new(rgba, width, height, stride) {
+      Ok(frame) => frame,
+      Err(_) => panic!("invalid RgbaFrame dimensions or plane length"),
+    }
+  }
+
+  /// Packed RGBA plane bytes (`R, G, B, A` per pixel).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn rgba(&self) -> &'a [u8] {
+    self.rgba
+  }
+  /// Frame width in pixels.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn width(&self) -> u32 {
+    self.width
+  }
+  /// Frame height in pixels.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn height(&self) -> u32 {
+    self.height
+  }
+  /// Byte stride (`>= 4 * width`).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn stride(&self) -> u32 {
+    self.stride
+  }
+}
+
+/// Errors returned by [`BgraFrame::try_new`]. Variant shape mirrors
+/// [`RgbaFrameError`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Error)]
+#[non_exhaustive]
+pub enum BgraFrameError {
+  /// `width` or `height` was zero.
+  #[error("width ({width}) or height ({height}) is zero")]
+  ZeroDimension {
+    /// The supplied width.
+    width: u32,
+    /// The supplied height.
+    height: u32,
+  },
+  /// `stride < 4 * width`.
+  #[error("stride ({stride}) is smaller than 4 * width ({min_stride})")]
+  StrideTooSmall {
+    /// Required minimum stride.
+    min_stride: u32,
+    /// The supplied stride.
+    stride: u32,
+  },
+  /// Plane is shorter than `stride * height` bytes.
+  #[error("BGRA plane has {actual} bytes but at least {expected} are required")]
+  PlaneTooShort {
+    /// Minimum bytes required.
+    expected: usize,
+    /// Actual bytes supplied.
+    actual: usize,
+  },
+  /// `stride * height` overflows `usize`.
+  #[error("declared geometry overflows usize: stride={stride} * rows={rows}")]
+  GeometryOverflow {
+    /// Stride that overflowed.
+    stride: u32,
+    /// Row count that overflowed against the stride.
+    rows: u32,
+  },
+  /// `4 * width` overflows `u32`.
+  #[error("4 * width overflows u32 ({width} too large)")]
+  WidthOverflow {
+    /// The supplied width.
+    width: u32,
+  },
+}
+
+/// A validated packed **BGRA** frame at 8 bits per channel
+/// (`AV_PIX_FMT_BGRA`). One plane, 4 bytes per pixel, byte order
+/// `B, G, R, A` — channel-order distinction from [`RgbaFrame`]
+/// is at the kernel level (sinker swaps `R↔B` while keeping `A`).
+///
+/// `stride` is in **bytes** (≥ `4 * width`). No width parity
+/// constraint.
+#[derive(Debug, Clone, Copy)]
+pub struct BgraFrame<'a> {
+  bgra: &'a [u8],
+  width: u32,
+  height: u32,
+  stride: u32,
+}
+
+impl<'a> BgraFrame<'a> {
+  /// Constructs a new [`BgraFrame`], validating dimensions and
+  /// plane length.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn try_new(
+    bgra: &'a [u8],
+    width: u32,
+    height: u32,
+    stride: u32,
+  ) -> Result<Self, BgraFrameError> {
+    if width == 0 || height == 0 {
+      return Err(BgraFrameError::ZeroDimension { width, height });
+    }
+    let min_stride = match width.checked_mul(4) {
+      Some(v) => v,
+      None => return Err(BgraFrameError::WidthOverflow { width }),
+    };
+    if stride < min_stride {
+      return Err(BgraFrameError::StrideTooSmall { min_stride, stride });
+    }
+    let plane_min = match (stride as usize).checked_mul(height as usize) {
+      Some(v) => v,
+      None => {
+        return Err(BgraFrameError::GeometryOverflow {
+          stride,
+          rows: height,
+        });
+      }
+    };
+    if bgra.len() < plane_min {
+      return Err(BgraFrameError::PlaneTooShort {
+        expected: plane_min,
+        actual: bgra.len(),
+      });
+    }
+    Ok(Self {
+      bgra,
+      width,
+      height,
+      stride,
+    })
+  }
+
+  /// Constructs a new [`BgraFrame`], panicking on invalid inputs.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn new(bgra: &'a [u8], width: u32, height: u32, stride: u32) -> Self {
+    match Self::try_new(bgra, width, height, stride) {
+      Ok(frame) => frame,
+      Err(_) => panic!("invalid BgraFrame dimensions or plane length"),
+    }
+  }
+
+  /// Packed BGRA plane bytes (`B, G, R, A` per pixel).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn bgra(&self) -> &'a [u8] {
+    self.bgra
+  }
+  /// Frame width in pixels.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn width(&self) -> u32 {
+    self.width
+  }
+  /// Frame height in pixels.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn height(&self) -> u32 {
+    self.height
+  }
+  /// Byte stride (`>= 4 * width`).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn stride(&self) -> u32 {
+    self.stride
+  }
+}
+
 #[cfg(all(test, feature = "std"))]
 #[cfg(any(feature = "std", feature = "alloc"))]
 mod tests;

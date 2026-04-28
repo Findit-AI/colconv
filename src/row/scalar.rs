@@ -3390,6 +3390,75 @@ pub(crate) fn bgr_rgb_swap_row(input: &[u8], output: &mut [u8], width: usize) {
   }
 }
 
+// ---- Tier 6 packed-RGBA helpers (Ship 9b) ------------------------------
+//
+// Compact byte-rearrangement kernels behind the [`Rgba`] / [`Bgra`]
+// source-side sinker family. All scalar; SIMD wiring deferred until
+// callers exist (the cadence matches `rgb_to_luma_row`).
+
+/// Drops the alpha byte from packed `R, G, B, A` input, producing
+/// packed `R, G, B` output (`4 * width` → `3 * width` bytes).
+///
+/// # Panics
+///
+/// Panics (any build profile) if `rgba.len() < 4 * width` or
+/// `rgb_out.len() < 3 * width`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn rgba_to_rgb_row(rgba: &[u8], rgb_out: &mut [u8], width: usize) {
+  debug_assert!(rgba.len() >= width * 4, "rgba row too short");
+  debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
+  for x in 0..width {
+    let src = x * 4;
+    let dst = x * 3;
+    rgb_out[dst] = rgba[src];
+    rgb_out[dst + 1] = rgba[src + 1];
+    rgb_out[dst + 2] = rgba[src + 2];
+  }
+}
+
+/// Swaps R↔B in packed `B, G, R, A` input, producing packed
+/// `R, G, B, A` (alpha lane preserved). Equivalent to
+/// `rgba_to_bgra_row` since the transformation is self‑inverse.
+///
+/// # Panics
+///
+/// Panics (any build profile) if `bgra.len() < 4 * width` or
+/// `rgba_out.len() < 4 * width`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn bgra_to_rgba_row(bgra: &[u8], rgba_out: &mut [u8], width: usize) {
+  debug_assert!(bgra.len() >= width * 4, "bgra row too short");
+  debug_assert!(rgba_out.len() >= width * 4, "rgba_out row too short");
+  for x in 0..width {
+    let i = x * 4;
+    rgba_out[i] = bgra[i + 2];
+    rgba_out[i + 1] = bgra[i + 1];
+    rgba_out[i + 2] = bgra[i];
+    rgba_out[i + 3] = bgra[i + 3];
+  }
+}
+
+/// Swaps R↔B and drops alpha from packed `B, G, R, A` input,
+/// producing packed `R, G, B` (`4 * width` → `3 * width` bytes).
+/// Used by [`Bgra`](crate::yuv::Bgra) sinker's RGB / luma / HSV
+/// paths — stages a single RGB scratch row that all three reuse.
+///
+/// # Panics
+///
+/// Panics (any build profile) if `bgra.len() < 4 * width` or
+/// `rgb_out.len() < 3 * width`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn bgra_to_rgb_row(bgra: &[u8], rgb_out: &mut [u8], width: usize) {
+  debug_assert!(bgra.len() >= width * 4, "bgra row too short");
+  debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
+  for x in 0..width {
+    let src = x * 4;
+    let dst = x * 3;
+    rgb_out[dst] = bgra[src + 2];
+    rgb_out[dst + 1] = bgra[src + 1];
+    rgb_out[dst + 2] = bgra[src];
+  }
+}
+
 // =============================================================================
 // Bayer demosaic + WB + CCM
 // =============================================================================

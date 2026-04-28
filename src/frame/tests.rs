@@ -1688,3 +1688,121 @@ fn bgr24_frame_new_panics_on_invalid() {
   let buf = std::vec![0u8; 10];
   let _ = Bgr24Frame::new(&buf, 16, 4, 48);
 }
+
+// ---- RgbaFrame --------------------------------------------------------
+//
+// Single-plane 8-bit packed RGBA. `stride` is in bytes (≥ 4 * width);
+// `plane.len() >= stride * height`. No width parity constraint.
+
+#[test]
+fn rgba_frame_try_new_accepts_valid_tight() {
+  let buf = std::vec![0u8; 16 * 4 * 4];
+  RgbaFrame::try_new(&buf, 16, 4, 64).expect("valid");
+}
+
+#[test]
+fn rgba_frame_try_new_accepts_oversized_stride() {
+  // stride > 4 * width (row padding) is allowed.
+  let buf = std::vec![0u8; 96 * 4];
+  RgbaFrame::try_new(&buf, 16, 4, 96).expect("padded stride is valid");
+}
+
+#[test]
+fn rgba_frame_try_new_rejects_zero_dimension() {
+  let buf = std::vec![0u8; 16 * 4 * 4];
+  assert!(matches!(
+    RgbaFrame::try_new(&buf, 0, 4, 64),
+    Err(RgbaFrameError::ZeroDimension {
+      width: 0,
+      height: 4
+    })
+  ));
+  assert!(matches!(
+    RgbaFrame::try_new(&buf, 16, 0, 64),
+    Err(RgbaFrameError::ZeroDimension {
+      width: 16,
+      height: 0
+    })
+  ));
+}
+
+#[test]
+fn rgba_frame_try_new_rejects_stride_too_small() {
+  let buf = std::vec![0u8; 16 * 4 * 4];
+  assert!(matches!(
+    RgbaFrame::try_new(&buf, 16, 4, 63),
+    Err(RgbaFrameError::StrideTooSmall {
+      min_stride: 64,
+      stride: 63,
+    })
+  ));
+}
+
+#[test]
+fn rgba_frame_try_new_rejects_short_plane() {
+  let small = std::vec![0u8; 16 * 4];
+  assert!(matches!(
+    RgbaFrame::try_new(&small, 16, 4, 64),
+    Err(RgbaFrameError::PlaneTooShort {
+      expected: 256,
+      actual: 64,
+    })
+  ));
+}
+
+#[test]
+#[should_panic(expected = "invalid RgbaFrame")]
+fn rgba_frame_new_panics_on_invalid() {
+  let buf = std::vec![0u8; 10];
+  let _ = RgbaFrame::new(&buf, 16, 4, 64);
+}
+
+// ---- BgraFrame --------------------------------------------------------
+//
+// Mirrors RgbaFrame: same single-plane layout, channel order is
+// purely a marker / accessor distinction. Validation is identical in
+// shape so we re-test the variants to catch typos in the parallel
+// implementation.
+
+#[test]
+fn bgra_frame_try_new_accepts_valid_tight() {
+  let buf = std::vec![0u8; 16 * 4 * 4];
+  BgraFrame::try_new(&buf, 16, 4, 64).expect("valid");
+}
+
+#[test]
+fn bgra_frame_try_new_rejects_zero_dimension() {
+  let buf = std::vec![0u8; 16 * 4 * 4];
+  assert!(matches!(
+    BgraFrame::try_new(&buf, 0, 4, 64),
+    Err(BgraFrameError::ZeroDimension { .. })
+  ));
+}
+
+#[test]
+fn bgra_frame_try_new_rejects_stride_too_small() {
+  let buf = std::vec![0u8; 16 * 4 * 4];
+  assert!(matches!(
+    BgraFrame::try_new(&buf, 16, 4, 63),
+    Err(BgraFrameError::StrideTooSmall {
+      min_stride: 64,
+      stride: 63,
+    })
+  ));
+}
+
+#[test]
+fn bgra_frame_try_new_rejects_short_plane() {
+  let small = std::vec![0u8; 16 * 4];
+  assert!(matches!(
+    BgraFrame::try_new(&small, 16, 4, 64),
+    Err(BgraFrameError::PlaneTooShort { .. })
+  ));
+}
+
+#[test]
+#[should_panic(expected = "invalid BgraFrame")]
+fn bgra_frame_new_panics_on_invalid() {
+  let buf = std::vec![0u8; 10];
+  let _ = BgraFrame::new(&buf, 16, 4, 64);
+}

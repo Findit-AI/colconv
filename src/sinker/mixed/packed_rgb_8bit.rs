@@ -27,8 +27,14 @@ use super::{
 };
 use crate::{
   PixelSink,
-  row::{bgr_to_rgb_row, expand_rgb_to_rgba_row, rgb_to_hsv_row, rgb_to_luma_row},
-  yuv::{Bgr24, Bgr24Row, Bgr24Sink, Rgb24, Rgb24Row, Rgb24Sink},
+  row::{
+    bgr_to_rgb_row, bgra_to_rgb_row, bgra_to_rgba_row, expand_rgb_to_rgba_row, rgb_to_hsv_row,
+    rgb_to_luma_row, rgba_to_rgb_row,
+  },
+  yuv::{
+    Bgr24, Bgr24Row, Bgr24Sink, Bgra, BgraRow, BgraSink, Rgb24, Rgb24Row, Rgb24Sink, Rgba, RgbaRow,
+    RgbaSink,
+  },
 };
 
 // ---- Rgb24 impl --------------------------------------------------------
@@ -261,6 +267,248 @@ impl PixelSink for MixedSinker<'_, Bgr24> {
     if let Some(buf) = rgba.as_deref_mut() {
       let rgba_row = rgba_plane_row_slice(buf, one_plane_start, one_plane_end, w, h)?;
       expand_rgb_to_rgba_row(rgb_row, rgba_row, w);
+    }
+
+    Ok(())
+  }
+}
+
+// ---- Rgba impl (Ship 9b) -----------------------------------------------
+
+impl<'a> MixedSinker<'a, Rgba> {
+  /// Attaches a packed **8-bit** RGBA output buffer. The source row
+  /// is already RGBA — the per-pixel write is a memcpy of the
+  /// source bytes (alpha is **passed through**, not forced to
+  /// `0xFF`).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn with_rgba(mut self, buf: &'a mut [u8]) -> Result<Self, MixedSinkerError> {
+    self.set_rgba(buf)?;
+    Ok(self)
+  }
+  /// In-place variant of [`with_rgba`](Self::with_rgba).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn set_rgba(&mut self, buf: &'a mut [u8]) -> Result<&mut Self, MixedSinkerError> {
+    let expected = self.frame_bytes(4)?;
+    if buf.len() < expected {
+      return Err(MixedSinkerError::RgbaBufferTooShort {
+        expected,
+        actual: buf.len(),
+      });
+    }
+    self.rgba = Some(buf);
+    Ok(self)
+  }
+}
+
+impl RgbaSink for MixedSinker<'_, Rgba> {}
+
+impl PixelSink for MixedSinker<'_, Rgba> {
+  type Input<'r> = RgbaRow<'r>;
+  type Error = MixedSinkerError;
+
+  fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
+    check_dimensions_match(self.width, self.height, width, height)
+  }
+
+  fn process(&mut self, row: RgbaRow<'_>) -> Result<(), Self::Error> {
+    let w = self.width;
+    let h = self.height;
+    let idx = row.row();
+    let use_simd = self.simd;
+
+    if row.rgba().len() != w * 4 {
+      return Err(MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::RgbaPacked,
+        row: idx,
+        expected: w * 4,
+        actual: row.rgba().len(),
+      });
+    }
+    if idx >= self.height {
+      return Err(MixedSinkerError::RowIndexOutOfRange {
+        row: idx,
+        configured_height: self.height,
+      });
+    }
+
+    let Self {
+      rgb,
+      rgba,
+      luma,
+      hsv,
+      rgb_scratch,
+      ..
+    } = self;
+    let one_plane_start = idx * w;
+    let one_plane_end = one_plane_start + w;
+    let rgba_in = row.rgba();
+
+    let want_rgb = rgb.is_some();
+    let want_luma = luma.is_some();
+    let want_hsv = hsv.is_some();
+    let need_rgb_buffer = want_rgb || want_luma || want_hsv;
+
+    // Stage drop-alpha RGB once into the user's RGB buffer (if
+    // attached) or `rgb_scratch`. Reused for luma + HSV.
+    if need_rgb_buffer {
+      let rgb_row = rgb_row_buf_or_scratch(
+        rgb.as_deref_mut(),
+        rgb_scratch,
+        one_plane_start,
+        one_plane_end,
+        w,
+        h,
+      )?;
+      rgba_to_rgb_row(rgba_in, rgb_row, w, use_simd);
+
+      if let Some(luma) = luma.as_deref_mut() {
+        rgb_to_luma_row(
+          rgb_row,
+          &mut luma[one_plane_start..one_plane_end],
+          w,
+          row.matrix(),
+          row.full_range(),
+          use_simd,
+        );
+      }
+
+      if let Some(hsv) = hsv.as_mut() {
+        rgb_to_hsv_row(
+          rgb_row,
+          &mut hsv.h[one_plane_start..one_plane_end],
+          &mut hsv.s[one_plane_start..one_plane_end],
+          &mut hsv.v[one_plane_start..one_plane_end],
+          w,
+          use_simd,
+        );
+      }
+    }
+
+    // RGBA output — identity copy (source layout matches output).
+    if let Some(buf) = rgba.as_deref_mut() {
+      let rgba_row = rgba_plane_row_slice(buf, one_plane_start, one_plane_end, w, h)?;
+      rgba_row.copy_from_slice(rgba_in);
+    }
+
+    Ok(())
+  }
+}
+
+// ---- Bgra impl (Ship 9b) -----------------------------------------------
+
+impl<'a> MixedSinker<'a, Bgra> {
+  /// Attaches a packed **8-bit** RGBA output buffer. Channel order
+  /// is swapped on output (input is `B, G, R, A`; output is
+  /// `R, G, B, A`). Alpha is **passed through** from the source,
+  /// not forced to `0xFF`.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn with_rgba(mut self, buf: &'a mut [u8]) -> Result<Self, MixedSinkerError> {
+    self.set_rgba(buf)?;
+    Ok(self)
+  }
+  /// In-place variant of [`with_rgba`](Self::with_rgba).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn set_rgba(&mut self, buf: &'a mut [u8]) -> Result<&mut Self, MixedSinkerError> {
+    let expected = self.frame_bytes(4)?;
+    if buf.len() < expected {
+      return Err(MixedSinkerError::RgbaBufferTooShort {
+        expected,
+        actual: buf.len(),
+      });
+    }
+    self.rgba = Some(buf);
+    Ok(self)
+  }
+}
+
+impl BgraSink for MixedSinker<'_, Bgra> {}
+
+impl PixelSink for MixedSinker<'_, Bgra> {
+  type Input<'r> = BgraRow<'r>;
+  type Error = MixedSinkerError;
+
+  fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
+    check_dimensions_match(self.width, self.height, width, height)
+  }
+
+  fn process(&mut self, row: BgraRow<'_>) -> Result<(), Self::Error> {
+    let w = self.width;
+    let h = self.height;
+    let idx = row.row();
+    let use_simd = self.simd;
+
+    if row.bgra().len() != w * 4 {
+      return Err(MixedSinkerError::RowShapeMismatch {
+        which: RowSlice::BgraPacked,
+        row: idx,
+        expected: w * 4,
+        actual: row.bgra().len(),
+      });
+    }
+    if idx >= self.height {
+      return Err(MixedSinkerError::RowIndexOutOfRange {
+        row: idx,
+        configured_height: self.height,
+      });
+    }
+
+    let Self {
+      rgb,
+      rgba,
+      luma,
+      hsv,
+      rgb_scratch,
+      ..
+    } = self;
+    let one_plane_start = idx * w;
+    let one_plane_end = one_plane_start + w;
+    let bgra_in = row.bgra();
+
+    let want_rgb = rgb.is_some();
+    let want_luma = luma.is_some();
+    let want_hsv = hsv.is_some();
+    let need_rgb_buffer = want_rgb || want_luma || want_hsv;
+
+    // Stage swap+drop into `rgb_scratch` (or the user's RGB buffer
+    // if attached) once — reused for luma / HSV / RGB output.
+    if need_rgb_buffer {
+      let rgb_row = rgb_row_buf_or_scratch(
+        rgb.as_deref_mut(),
+        rgb_scratch,
+        one_plane_start,
+        one_plane_end,
+        w,
+        h,
+      )?;
+      bgra_to_rgb_row(bgra_in, rgb_row, w, use_simd);
+
+      if let Some(luma) = luma.as_deref_mut() {
+        rgb_to_luma_row(
+          rgb_row,
+          &mut luma[one_plane_start..one_plane_end],
+          w,
+          row.matrix(),
+          row.full_range(),
+          use_simd,
+        );
+      }
+
+      if let Some(hsv) = hsv.as_mut() {
+        rgb_to_hsv_row(
+          rgb_row,
+          &mut hsv.h[one_plane_start..one_plane_end],
+          &mut hsv.s[one_plane_start..one_plane_end],
+          &mut hsv.v[one_plane_start..one_plane_end],
+          w,
+          use_simd,
+        );
+      }
+    }
+
+    // RGBA output — swap R↔B, alpha pass-through.
+    if let Some(buf) = rgba.as_deref_mut() {
+      let rgba_row = rgba_plane_row_slice(buf, one_plane_start, one_plane_end, w, h)?;
+      bgra_to_rgba_row(bgra_in, rgba_row, w, use_simd);
     }
 
     Ok(())

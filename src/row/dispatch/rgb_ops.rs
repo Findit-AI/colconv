@@ -16,7 +16,7 @@ use crate::row::simd128_available;
 use crate::row::{avx2_available, avx512_available, sse41_available};
 use crate::{
   ColorMatrix,
-  row::{rgb_row_bytes, scalar},
+  row::{rgb_row_bytes, rgba_row_bytes, scalar},
 };
 
 /// Converts one row of packed RGB to planar HSV (OpenCV 8‑bit
@@ -119,6 +119,53 @@ pub fn rgb_to_luma_row(
   assert!(luma_out.len() >= width, "luma row too short");
 
   scalar::rgb_to_luma_row(rgb, luma_out, width, matrix, full_range);
+}
+
+/// Drops the alpha byte from packed `R, G, B, A` input, producing
+/// packed `R, G, B` output (`4 * width` → `3 * width` bytes). Used
+/// by [`Rgba`](crate::yuv::Rgba) sinker's RGB / luma / HSV paths
+/// (Ship 9b).
+///
+/// `use_simd` is currently a no-op — scalar is the only available
+/// path today.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub fn rgba_to_rgb_row(rgba: &[u8], rgb_out: &mut [u8], width: usize, _use_simd: bool) {
+  let rgba_min = rgba_row_bytes(width);
+  let rgb_min = rgb_row_bytes(width);
+  assert!(rgba.len() >= rgba_min, "rgba row too short");
+  assert!(rgb_out.len() >= rgb_min, "rgb_out row too short");
+  scalar::rgba_to_rgb_row(rgba, rgb_out, width);
+}
+
+/// Swaps R↔B in packed `B, G, R, A` input, producing packed
+/// `R, G, B, A` (alpha preserved). Self-inverse, so the same
+/// dispatcher can be called for either direction. Used by
+/// [`Bgra`](crate::yuv::Bgra) sinker's RGBA-output path.
+///
+/// `use_simd` is currently a no-op — scalar is the only available
+/// path today.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub fn bgra_to_rgba_row(bgra: &[u8], rgba_out: &mut [u8], width: usize, _use_simd: bool) {
+  let rgba_min = rgba_row_bytes(width);
+  assert!(bgra.len() >= rgba_min, "bgra row too short");
+  assert!(rgba_out.len() >= rgba_min, "rgba_out row too short");
+  scalar::bgra_to_rgba_row(bgra, rgba_out, width);
+}
+
+/// Swaps R↔B and drops alpha from packed `B, G, R, A` input,
+/// producing packed `R, G, B` (`4 * width` → `3 * width` bytes).
+/// Used by [`Bgra`](crate::yuv::Bgra) sinker's RGB / luma / HSV
+/// paths.
+///
+/// `use_simd` is currently a no-op — scalar is the only available
+/// path today.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub fn bgra_to_rgb_row(bgra: &[u8], rgb_out: &mut [u8], width: usize, _use_simd: bool) {
+  let rgba_min = rgba_row_bytes(width);
+  let rgb_min = rgb_row_bytes(width);
+  assert!(bgra.len() >= rgba_min, "bgra row too short");
+  assert!(rgb_out.len() >= rgb_min, "rgb_out row too short");
+  scalar::bgra_to_rgb_row(bgra, rgb_out, width);
 }
 
 /// Rewrites a row of packed BGR to packed RGB by swapping the outer
