@@ -1044,8 +1044,8 @@ pub(crate) unsafe fn yuv_420p_n_to_rgb_u16_row<const BITS: u32>(
   full_range: bool,
 ) {
   unsafe {
-    yuv_420p_n_to_rgb_or_rgba_u16_row::<BITS, false>(
-      y, u_half, v_half, rgb_out, width, matrix, full_range,
+    yuv_420p_n_to_rgb_or_rgba_u16_row::<BITS, false, false>(
+      y, u_half, v_half, None, rgb_out, width, matrix, full_range,
     );
   }
 }
@@ -1069,16 +1069,57 @@ pub(crate) unsafe fn yuv_420p_n_to_rgba_u16_row<const BITS: u32>(
   full_range: bool,
 ) {
   unsafe {
-    yuv_420p_n_to_rgb_or_rgba_u16_row::<BITS, true>(
-      y, u_half, v_half, rgba_out, width, matrix, full_range,
+    yuv_420p_n_to_rgb_or_rgba_u16_row::<BITS, true, false>(
+      y, u_half, v_half, None, rgba_out, width, matrix, full_range,
+    );
+  }
+}
+
+/// SSE4.1 YUVA 4:2:0 high-bit-depth → **native-depth `u16`** packed
+/// RGBA with the per-pixel alpha element **sourced from `a_src`**
+/// (already at the source's native bit depth — masked to BITS, no
+/// shift) instead of being the opaque maximum `(1 << BITS) - 1`.
+///
+/// Thin wrapper over [`yuv_420p_n_to_rgb_or_rgba_u16_row`] with
+/// `ALPHA = true, ALPHA_SRC = true`.
+///
+/// # Safety
+///
+/// Same as [`yuv_420p_n_to_rgba_u16_row`] plus `a_src.len() >= width`.
+#[inline]
+#[target_feature(enable = "sse4.1")]
+#[allow(clippy::too_many_arguments)]
+pub(crate) unsafe fn yuv_420p_n_to_rgba_u16_with_alpha_src_row<const BITS: u32>(
+  y: &[u16],
+  u_half: &[u16],
+  v_half: &[u16],
+  a_src: &[u16],
+  rgba_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  // SAFETY: caller obligations forwarded to the shared impl.
+  unsafe {
+    yuv_420p_n_to_rgb_or_rgba_u16_row::<BITS, true, true>(
+      y,
+      u_half,
+      v_half,
+      Some(a_src),
+      rgba_out,
+      width,
+      matrix,
+      full_range,
     );
   }
 }
 
 /// Shared SSE4.1 high-bit YUV 4:2:0 → native-depth `u16` kernel.
-/// `ALPHA = false` writes RGB triples via `write_rgb_u16_8`;
-/// `ALPHA = true` writes RGBA quads via `write_rgba_u16_8` with
-/// constant alpha `(1 << BITS) - 1`.
+/// - `ALPHA = false, ALPHA_SRC = false`: `write_rgb_u16_8`.
+/// - `ALPHA = true, ALPHA_SRC = false`: `write_rgba_u16_8` with
+///   constant alpha `(1 << BITS) - 1`.
+/// - `ALPHA = true, ALPHA_SRC = true`: `write_rgba_u16_8` with the
+///   alpha lane loaded from `a_src` and masked to BITS.
 ///
 /// # Safety
 ///
@@ -1087,25 +1128,38 @@ pub(crate) unsafe fn yuv_420p_n_to_rgba_u16_row<const BITS: u32>(
 /// 3. `y.len() >= width`, `u_half.len() >= width / 2`,
 ///    `v_half.len() >= width / 2`,
 ///    `out.len() >= width * if ALPHA { 4 } else { 3 }`.
-/// 4. `BITS` ∈ `{9, 10, 12, 14}`.
+/// 4. When `ALPHA_SRC = true`: `a_src` must be `Some(_)` and
+///    `a_src.unwrap().len() >= width`.
+/// 5. `BITS` ∈ `{9, 10, 12, 14}`.
 #[inline]
 #[target_feature(enable = "sse4.1")]
-pub(crate) unsafe fn yuv_420p_n_to_rgb_or_rgba_u16_row<const BITS: u32, const ALPHA: bool>(
+#[allow(clippy::too_many_arguments)]
+pub(crate) unsafe fn yuv_420p_n_to_rgb_or_rgba_u16_row<
+  const BITS: u32,
+  const ALPHA: bool,
+  const ALPHA_SRC: bool,
+>(
   y: &[u16],
   u_half: &[u16],
   v_half: &[u16],
+  a_src: Option<&[u16]>,
   out: &mut [u16],
   width: usize,
   matrix: ColorMatrix,
   full_range: bool,
 ) {
   const { assert!(BITS == 9 || BITS == 10 || BITS == 12 || BITS == 14) };
+  // Source alpha requires RGBA output.
+  const { assert!(!ALPHA_SRC || ALPHA) };
   let bpp: usize = if ALPHA { 4 } else { 3 };
   debug_assert_eq!(width & 1, 0);
   debug_assert!(y.len() >= width);
   debug_assert!(u_half.len() >= width / 2);
   debug_assert!(v_half.len() >= width / 2);
   debug_assert!(out.len() >= width * bpp);
+  if ALPHA_SRC {
+    debug_assert!(a_src.as_ref().is_some_and(|s| s.len() >= width));
+  }
 
   let coeffs = scalar::Coefficients::for_matrix(matrix);
   let (y_off, y_scale, c_scale) = scalar::range_params_n::<BITS, BITS>(full_range);
@@ -1181,14 +1235,20 @@ pub(crate) unsafe fn yuv_420p_n_to_rgb_or_rgba_u16_row<const BITS: u32, const AL
 
       // Two 8‑pixel u16 writes cover the 16‑pixel block.
       if ALPHA {
-        write_rgba_u16_8(r_lo, g_lo, b_lo, alpha_u16, out.as_mut_ptr().add(x * 4));
-        write_rgba_u16_8(
-          r_hi,
-          g_hi,
-          b_hi,
-          alpha_u16,
-          out.as_mut_ptr().add(x * 4 + 32),
-        );
+        let (a_lo_v, a_hi_v) = if ALPHA_SRC {
+          // SAFETY (const-checked): ALPHA_SRC = true implies the
+          // wrapper passed Some(_), validated by debug_assert above.
+          // No depth conversion — both source alpha and u16 output are
+          // at the same native bit depth (BITS), so just mask.
+          let a_ptr = a_src.as_ref().unwrap_unchecked().as_ptr();
+          let lo = _mm_and_si128(_mm_loadu_si128(a_ptr.add(x).cast()), mask_v);
+          let hi = _mm_and_si128(_mm_loadu_si128(a_ptr.add(x + 8).cast()), mask_v);
+          (lo, hi)
+        } else {
+          (alpha_u16, alpha_u16)
+        };
+        write_rgba_u16_8(r_lo, g_lo, b_lo, a_lo_v, out.as_mut_ptr().add(x * 4));
+        write_rgba_u16_8(r_hi, g_hi, b_hi, a_hi_v, out.as_mut_ptr().add(x * 4 + 32));
       } else {
         write_rgb_u16_8(r_lo, g_lo, b_lo, out.as_mut_ptr().add(x * 3));
         write_rgb_u16_8(r_hi, g_hi, b_hi, out.as_mut_ptr().add(x * 3 + 24));
@@ -1203,7 +1263,13 @@ pub(crate) unsafe fn yuv_420p_n_to_rgb_or_rgba_u16_row<const BITS: u32, const AL
       let tail_v = &v_half[x / 2..width / 2];
       let tail_out = &mut out[x * bpp..width * bpp];
       let tail_w = width - x;
-      if ALPHA {
+      if ALPHA_SRC {
+        // SAFETY (const-checked): ALPHA_SRC = true implies Some(_).
+        let tail_a = &a_src.as_ref().unwrap_unchecked()[x..width];
+        scalar::yuv_420p_n_to_rgba_u16_with_alpha_src_row::<BITS>(
+          tail_y, tail_u, tail_v, tail_a, tail_out, tail_w, matrix, full_range,
+        );
+      } else if ALPHA {
         scalar::yuv_420p_n_to_rgba_u16_row::<BITS>(
           tail_y, tail_u, tail_v, tail_out, tail_w, matrix, full_range,
         );
@@ -3255,8 +3321,8 @@ pub(crate) unsafe fn yuv_420p16_to_rgb_u16_row(
   full_range: bool,
 ) {
   unsafe {
-    yuv_420p16_to_rgb_or_rgba_u16_row::<false>(
-      y, u_half, v_half, rgb_out, width, matrix, full_range,
+    yuv_420p16_to_rgb_or_rgba_u16_row::<false, false>(
+      y, u_half, v_half, None, rgb_out, width, matrix, full_range,
     );
   }
 }
@@ -3279,15 +3345,56 @@ pub(crate) unsafe fn yuv_420p16_to_rgba_u16_row(
   full_range: bool,
 ) {
   unsafe {
-    yuv_420p16_to_rgb_or_rgba_u16_row::<true>(
-      y, u_half, v_half, rgba_out, width, matrix, full_range,
+    yuv_420p16_to_rgb_or_rgba_u16_row::<true, false>(
+      y, u_half, v_half, None, rgba_out, width, matrix, full_range,
+    );
+  }
+}
+
+/// SSE4.1 16-bit YUVA 4:2:0 → **native-depth `u16`** packed RGBA with
+/// the per-pixel alpha element **sourced from `a_src`** (full-range
+/// u16, no mask, no shift) instead of being constant `0xFFFF`.
+///
+/// Thin wrapper over [`yuv_420p16_to_rgb_or_rgba_u16_row`] with
+/// `ALPHA = true, ALPHA_SRC = true`.
+///
+/// # Safety
+///
+/// Same as [`yuv_420p16_to_rgba_u16_row`] plus `a_src.len() >= width`.
+#[inline]
+#[target_feature(enable = "sse4.1")]
+#[allow(clippy::too_many_arguments)]
+pub(crate) unsafe fn yuv_420p16_to_rgba_u16_with_alpha_src_row(
+  y: &[u16],
+  u_half: &[u16],
+  v_half: &[u16],
+  a_src: &[u16],
+  rgba_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  // SAFETY: caller obligations forwarded to the shared impl.
+  unsafe {
+    yuv_420p16_to_rgb_or_rgba_u16_row::<true, true>(
+      y,
+      u_half,
+      v_half,
+      Some(a_src),
+      rgba_out,
+      width,
+      matrix,
+      full_range,
     );
   }
 }
 
 /// Shared SSE4.1 16-bit YUV 4:2:0 → native-depth `u16` kernel.
-/// `ALPHA = false` writes RGB triples; `ALPHA = true` writes RGBA
-/// quads with constant alpha `0xFFFF`.
+/// - `ALPHA = false, ALPHA_SRC = false`: `write_rgb_u16_8`.
+/// - `ALPHA = true, ALPHA_SRC = false`: `write_rgba_u16_8` with
+///   constant alpha `0xFFFF`.
+/// - `ALPHA = true, ALPHA_SRC = true`: `write_rgba_u16_8` with the
+///   alpha lane loaded from `a_src` (full-range u16).
 ///
 /// # Safety
 ///
@@ -3296,23 +3403,32 @@ pub(crate) unsafe fn yuv_420p16_to_rgba_u16_row(
 /// 3. `y.len() >= width`, `u_half.len() >= width / 2`,
 ///    `v_half.len() >= width / 2`,
 ///    `out.len() >= width * if ALPHA { 4 } else { 3 }`.
+/// 4. When `ALPHA_SRC = true`: `a_src` must be `Some(_)` and
+///    `a_src.unwrap().len() >= width`.
 #[inline]
 #[target_feature(enable = "sse4.1")]
-pub(crate) unsafe fn yuv_420p16_to_rgb_or_rgba_u16_row<const ALPHA: bool>(
+#[allow(clippy::too_many_arguments)]
+pub(crate) unsafe fn yuv_420p16_to_rgb_or_rgba_u16_row<const ALPHA: bool, const ALPHA_SRC: bool>(
   y: &[u16],
   u_half: &[u16],
   v_half: &[u16],
+  a_src: Option<&[u16]>,
   out: &mut [u16],
   width: usize,
   matrix: ColorMatrix,
   full_range: bool,
 ) {
+  // Source alpha requires RGBA output.
+  const { assert!(!ALPHA_SRC || ALPHA) };
   let bpp: usize = if ALPHA { 4 } else { 3 };
   debug_assert_eq!(width & 1, 0);
   debug_assert!(y.len() >= width);
   debug_assert!(u_half.len() >= width / 2);
   debug_assert!(v_half.len() >= width / 2);
   debug_assert!(out.len() >= width * bpp);
+  if ALPHA_SRC {
+    debug_assert!(a_src.as_ref().is_some_and(|s| s.len() >= width));
+  }
 
   let coeffs = scalar::Coefficients::for_matrix(matrix);
   let (y_off, y_scale, c_scale) = scalar::range_params_n::<16, 16>(full_range);
@@ -3430,11 +3546,20 @@ pub(crate) unsafe fn yuv_420p16_to_rgb_or_rgba_u16_row<const ALPHA: bool>(
       );
 
       if ALPHA {
+        let a_v = if ALPHA_SRC {
+          // SAFETY (const-checked): ALPHA_SRC = true implies the
+          // wrapper passed Some(_), validated by debug_assert above.
+          // 16-bit alpha is full-range u16 — load 8 lanes (16 bytes)
+          // directly, no mask or shift.
+          _mm_loadu_si128(a_src.as_ref().unwrap_unchecked().as_ptr().add(x).cast())
+        } else {
+          alpha_u16
+        };
         write_rgba_u16_8(
           r_lo_u16,
           g_lo_u16,
           b_lo_u16,
-          alpha_u16,
+          a_v,
           out.as_mut_ptr().add(x * 4),
         );
       } else {
@@ -3449,7 +3574,13 @@ pub(crate) unsafe fn yuv_420p16_to_rgb_or_rgba_u16_row<const ALPHA: bool>(
       let tail_v = &v_half[x / 2..width / 2];
       let tail_out = &mut out[x * bpp..width * bpp];
       let tail_w = width - x;
-      if ALPHA {
+      if ALPHA_SRC {
+        // SAFETY (const-checked): ALPHA_SRC = true implies Some(_).
+        let tail_a = &a_src.as_ref().unwrap_unchecked()[x..width];
+        scalar::yuv_420p16_to_rgba_u16_with_alpha_src_row(
+          tail_y, tail_u, tail_v, tail_a, tail_out, tail_w, matrix, full_range,
+        );
+      } else if ALPHA {
         scalar::yuv_420p16_to_rgba_u16_row(
           tail_y, tail_u, tail_v, tail_out, tail_w, matrix, full_range,
         );

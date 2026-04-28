@@ -2777,3 +2777,146 @@ fn simd128_yuva444p_n_rgba_u16_matches_scalar_all_bits_widths() {
     );
   }
 }
+
+// ---- YUVA 4:2:0 native-depth `u16` RGBA equivalence (Ship 8b‑2c) ----
+
+fn check_yuv420p_n_u16_simd128_rgba_with_alpha_src_equivalence<const BITS: u32>(
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  alpha_seed: usize,
+) {
+  let y = planar_n_plane::<BITS>(width, 37);
+  let u = planar_n_plane::<BITS>(width / 2, 53);
+  let v = planar_n_plane::<BITS>(width / 2, 71);
+  let a_src = planar_n_plane::<BITS>(width, alpha_seed);
+  let mut rgba_scalar = std::vec![0u16; width * 4];
+  let mut rgba_wasm = std::vec![0u16; width * 4];
+  scalar::yuv_420p_n_to_rgba_u16_with_alpha_src_row::<BITS>(
+    &y,
+    &u,
+    &v,
+    &a_src,
+    &mut rgba_scalar,
+    width,
+    matrix,
+    full_range,
+  );
+  unsafe {
+    yuv_420p_n_to_rgba_u16_with_alpha_src_row::<BITS>(
+      &y,
+      &u,
+      &v,
+      &a_src,
+      &mut rgba_wasm,
+      width,
+      matrix,
+      full_range,
+    );
+  }
+  assert_eq!(
+    rgba_scalar, rgba_wasm,
+    "wasm simd128 Yuva420p<{BITS}> → RGBA u16 diverges (width={width}, matrix={matrix:?}, full_range={full_range}, alpha_seed={alpha_seed})"
+  );
+}
+
+fn check_yuv420p16_u16_simd128_rgba_with_alpha_src_equivalence(
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+  alpha_seed: usize,
+) {
+  let y = p16_plane_wasm(width, 37);
+  let u = p16_plane_wasm(width / 2, 53);
+  let v = p16_plane_wasm(width / 2, 71);
+  let a_src = p16_plane_wasm(width, alpha_seed);
+  let mut rgba_scalar = std::vec![0u16; width * 4];
+  let mut rgba_wasm = std::vec![0u16; width * 4];
+  scalar::yuv_420p16_to_rgba_u16_with_alpha_src_row(
+    &y,
+    &u,
+    &v,
+    &a_src,
+    &mut rgba_scalar,
+    width,
+    matrix,
+    full_range,
+  );
+  unsafe {
+    yuv_420p16_to_rgba_u16_with_alpha_src_row(
+      &y,
+      &u,
+      &v,
+      &a_src,
+      &mut rgba_wasm,
+      width,
+      matrix,
+      full_range,
+    );
+  }
+  assert_eq!(
+    rgba_scalar, rgba_wasm,
+    "wasm simd128 Yuva420p16 → RGBA u16 diverges (width={width}, matrix={matrix:?}, full_range={full_range}, alpha_seed={alpha_seed})"
+  );
+}
+
+#[test]
+fn simd128_yuva420p_n_rgba_u16_matches_scalar_all_bits() {
+  for m in [
+    ColorMatrix::Bt601,
+    ColorMatrix::Bt709,
+    ColorMatrix::Bt2020Ncl,
+    ColorMatrix::Smpte240m,
+    ColorMatrix::Fcc,
+    ColorMatrix::YCgCo,
+  ] {
+    for full in [true, false] {
+      check_yuv420p_n_u16_simd128_rgba_with_alpha_src_equivalence::<9>(16, m, full, 89);
+      check_yuv420p_n_u16_simd128_rgba_with_alpha_src_equivalence::<10>(16, m, full, 89);
+    }
+  }
+}
+
+#[test]
+fn simd128_yuva420p_n_rgba_u16_matches_scalar_widths() {
+  for w in [16usize, 18, 30, 34, 1920, 1922] {
+    check_yuv420p_n_u16_simd128_rgba_with_alpha_src_equivalence::<9>(
+      w,
+      ColorMatrix::Bt601,
+      false,
+      89,
+    );
+    check_yuv420p_n_u16_simd128_rgba_with_alpha_src_equivalence::<10>(
+      w,
+      ColorMatrix::Bt709,
+      true,
+      89,
+    );
+  }
+}
+
+#[test]
+fn simd128_yuva420p16_rgba_u16_matches_scalar_all_matrices() {
+  for m in [
+    ColorMatrix::Bt601,
+    ColorMatrix::Bt709,
+    ColorMatrix::Bt2020Ncl,
+    ColorMatrix::Smpte240m,
+    ColorMatrix::Fcc,
+    ColorMatrix::YCgCo,
+  ] {
+    for full in [true, false] {
+      check_yuv420p16_u16_simd128_rgba_with_alpha_src_equivalence(16, m, full, 89);
+    }
+  }
+}
+
+#[test]
+fn simd128_yuva420p16_rgba_u16_matches_scalar_widths_and_alpha() {
+  for w in [16usize, 18, 30, 34, 1920, 1922] {
+    check_yuv420p16_u16_simd128_rgba_with_alpha_src_equivalence(w, ColorMatrix::Bt709, false, 89);
+  }
+  for seed in [13usize, 41, 127, 211] {
+    check_yuv420p16_u16_simd128_rgba_with_alpha_src_equivalence(16, ColorMatrix::Bt601, true, seed);
+  }
+}
