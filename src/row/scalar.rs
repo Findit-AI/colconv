@@ -1867,9 +1867,7 @@ pub(crate) fn yuv_444p16_to_rgb_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  yuv_444p16_to_rgb_or_rgba_row::<false, false>(
-    y, u, v, None, rgb_out, width, matrix, full_range,
-  );
+  yuv_444p16_to_rgb_or_rgba_row::<false, false>(y, u, v, None, rgb_out, width, matrix, full_range);
 }
 
 /// YUV 4:4:4 planar **16‑bit** → packed **8‑bit** **RGBA**. Same
@@ -1888,9 +1886,7 @@ pub(crate) fn yuv_444p16_to_rgba_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  yuv_444p16_to_rgb_or_rgba_row::<true, false>(
-    y, u, v, None, rgba_out, width, matrix, full_range,
-  );
+  yuv_444p16_to_rgb_or_rgba_row::<true, false>(y, u, v, None, rgba_out, width, matrix, full_range);
 }
 
 /// YUVA 4:4:4 16‑bit → packed **8‑bit** **RGBA**. Same numerical
