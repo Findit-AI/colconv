@@ -3344,8 +3344,13 @@ fn simd128_x2rgb10_to_rgb_matches_scalar() {
     let mut out_scalar = std::vec![0u8; w * 3];
     let mut out_wasm = std::vec![0u8; w * 3];
     scalar::x2rgb10_to_rgb_row(&input, &mut out_scalar, w);
-    unsafe { x2rgb10_to_rgb_row(&input, &mut out_wasm, w); }
-    assert_eq!(out_scalar, out_wasm, "simd128 x2rgb10_to_rgb diverges (width={w})");
+    unsafe {
+      x2rgb10_to_rgb_row(&input, &mut out_wasm, w);
+    }
+    assert_eq!(
+      out_scalar, out_wasm,
+      "simd128 x2rgb10_to_rgb diverges (width={w})"
+    );
   }
 }
 
@@ -3356,8 +3361,13 @@ fn simd128_x2rgb10_to_rgba_matches_scalar() {
     let mut out_scalar = std::vec![0u8; w * 4];
     let mut out_wasm = std::vec![0u8; w * 4];
     scalar::x2rgb10_to_rgba_row(&input, &mut out_scalar, w);
-    unsafe { x2rgb10_to_rgba_row(&input, &mut out_wasm, w); }
-    assert_eq!(out_scalar, out_wasm, "simd128 x2rgb10_to_rgba diverges (width={w})");
+    unsafe {
+      x2rgb10_to_rgba_row(&input, &mut out_wasm, w);
+    }
+    assert_eq!(
+      out_scalar, out_wasm,
+      "simd128 x2rgb10_to_rgba diverges (width={w})"
+    );
   }
 }
 
@@ -3368,8 +3378,13 @@ fn simd128_x2rgb10_to_rgb_u16_matches_scalar() {
     let mut out_scalar = std::vec![0u16; w * 3];
     let mut out_wasm = std::vec![0u16; w * 3];
     scalar::x2rgb10_to_rgb_u16_row(&input, &mut out_scalar, w);
-    unsafe { x2rgb10_to_rgb_u16_row(&input, &mut out_wasm, w); }
-    assert_eq!(out_scalar, out_wasm, "simd128 x2rgb10_to_rgb_u16 diverges (width={w})");
+    unsafe {
+      x2rgb10_to_rgb_u16_row(&input, &mut out_wasm, w);
+    }
+    assert_eq!(
+      out_scalar, out_wasm,
+      "simd128 x2rgb10_to_rgb_u16 diverges (width={w})"
+    );
   }
 }
 
@@ -3380,8 +3395,13 @@ fn simd128_x2bgr10_to_rgb_matches_scalar() {
     let mut out_scalar = std::vec![0u8; w * 3];
     let mut out_wasm = std::vec![0u8; w * 3];
     scalar::x2bgr10_to_rgb_row(&input, &mut out_scalar, w);
-    unsafe { x2bgr10_to_rgb_row(&input, &mut out_wasm, w); }
-    assert_eq!(out_scalar, out_wasm, "simd128 x2bgr10_to_rgb diverges (width={w})");
+    unsafe {
+      x2bgr10_to_rgb_row(&input, &mut out_wasm, w);
+    }
+    assert_eq!(
+      out_scalar, out_wasm,
+      "simd128 x2bgr10_to_rgb diverges (width={w})"
+    );
   }
 }
 
@@ -3392,8 +3412,13 @@ fn simd128_x2bgr10_to_rgba_matches_scalar() {
     let mut out_scalar = std::vec![0u8; w * 4];
     let mut out_wasm = std::vec![0u8; w * 4];
     scalar::x2bgr10_to_rgba_row(&input, &mut out_scalar, w);
-    unsafe { x2bgr10_to_rgba_row(&input, &mut out_wasm, w); }
-    assert_eq!(out_scalar, out_wasm, "simd128 x2bgr10_to_rgba diverges (width={w})");
+    unsafe {
+      x2bgr10_to_rgba_row(&input, &mut out_wasm, w);
+    }
+    assert_eq!(
+      out_scalar, out_wasm,
+      "simd128 x2bgr10_to_rgba diverges (width={w})"
+    );
   }
 }
 
@@ -3404,7 +3429,12 @@ fn simd128_x2bgr10_to_rgb_u16_matches_scalar() {
     let mut out_scalar = std::vec![0u16; w * 3];
     let mut out_wasm = std::vec![0u16; w * 3];
     scalar::x2bgr10_to_rgb_u16_row(&input, &mut out_scalar, w);
-    unsafe { x2bgr10_to_rgb_u16_row(&input, &mut out_wasm, w); }
-    assert_eq!(out_scalar, out_wasm, "simd128 x2bgr10_to_rgb_u16 diverges (width={w})");
+    unsafe {
+      x2bgr10_to_rgb_u16_row(&input, &mut out_wasm, w);
+    }
+    assert_eq!(
+      out_scalar, out_wasm,
+      "simd128 x2bgr10_to_rgb_u16 diverges (width={w})"
+    );
   }
 }

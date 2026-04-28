@@ -5820,12 +5820,30 @@ pub(crate) unsafe fn x2rgb10_to_rgb_row(x2rgb10: &[u8], rgb_out: &mut [u8], widt
       let p3 = vld1q_u32(x2rgb10.as_ptr().add(x * 4 + 48) as *const u32);
 
       // X2RGB10: R at >>22, G at >>12, B at >>2 (top 8 of 10-bit).
-      let r_lo = vcombine_u16(x2_extract_10bit_u8_lane(p0, 22), x2_extract_10bit_u8_lane(p1, 22));
-      let r_hi = vcombine_u16(x2_extract_10bit_u8_lane(p2, 22), x2_extract_10bit_u8_lane(p3, 22));
-      let g_lo = vcombine_u16(x2_extract_10bit_u8_lane(p0, 12), x2_extract_10bit_u8_lane(p1, 12));
-      let g_hi = vcombine_u16(x2_extract_10bit_u8_lane(p2, 12), x2_extract_10bit_u8_lane(p3, 12));
-      let b_lo = vcombine_u16(x2_extract_10bit_u8_lane(p0, 2), x2_extract_10bit_u8_lane(p1, 2));
-      let b_hi = vcombine_u16(x2_extract_10bit_u8_lane(p2, 2), x2_extract_10bit_u8_lane(p3, 2));
+      let r_lo = vcombine_u16(
+        x2_extract_10bit_u8_lane(p0, 22),
+        x2_extract_10bit_u8_lane(p1, 22),
+      );
+      let r_hi = vcombine_u16(
+        x2_extract_10bit_u8_lane(p2, 22),
+        x2_extract_10bit_u8_lane(p3, 22),
+      );
+      let g_lo = vcombine_u16(
+        x2_extract_10bit_u8_lane(p0, 12),
+        x2_extract_10bit_u8_lane(p1, 12),
+      );
+      let g_hi = vcombine_u16(
+        x2_extract_10bit_u8_lane(p2, 12),
+        x2_extract_10bit_u8_lane(p3, 12),
+      );
+      let b_lo = vcombine_u16(
+        x2_extract_10bit_u8_lane(p0, 2),
+        x2_extract_10bit_u8_lane(p1, 2),
+      );
+      let b_hi = vcombine_u16(
+        x2_extract_10bit_u8_lane(p2, 2),
+        x2_extract_10bit_u8_lane(p3, 2),
+      );
 
       let r = vcombine_u8(vqmovn_u16(r_lo), vqmovn_u16(r_hi));
       let g = vcombine_u8(vqmovn_u16(g_lo), vqmovn_u16(g_hi));
@@ -5869,12 +5887,30 @@ pub(crate) unsafe fn x2rgb10_to_rgba_row(x2rgb10: &[u8], rgba_out: &mut [u8], wi
       let p2 = vld1q_u32(x2rgb10.as_ptr().add(x * 4 + 32) as *const u32);
       let p3 = vld1q_u32(x2rgb10.as_ptr().add(x * 4 + 48) as *const u32);
 
-      let r_lo = vcombine_u16(x2_extract_10bit_u8_lane(p0, 22), x2_extract_10bit_u8_lane(p1, 22));
-      let r_hi = vcombine_u16(x2_extract_10bit_u8_lane(p2, 22), x2_extract_10bit_u8_lane(p3, 22));
-      let g_lo = vcombine_u16(x2_extract_10bit_u8_lane(p0, 12), x2_extract_10bit_u8_lane(p1, 12));
-      let g_hi = vcombine_u16(x2_extract_10bit_u8_lane(p2, 12), x2_extract_10bit_u8_lane(p3, 12));
-      let b_lo = vcombine_u16(x2_extract_10bit_u8_lane(p0, 2), x2_extract_10bit_u8_lane(p1, 2));
-      let b_hi = vcombine_u16(x2_extract_10bit_u8_lane(p2, 2), x2_extract_10bit_u8_lane(p3, 2));
+      let r_lo = vcombine_u16(
+        x2_extract_10bit_u8_lane(p0, 22),
+        x2_extract_10bit_u8_lane(p1, 22),
+      );
+      let r_hi = vcombine_u16(
+        x2_extract_10bit_u8_lane(p2, 22),
+        x2_extract_10bit_u8_lane(p3, 22),
+      );
+      let g_lo = vcombine_u16(
+        x2_extract_10bit_u8_lane(p0, 12),
+        x2_extract_10bit_u8_lane(p1, 12),
+      );
+      let g_hi = vcombine_u16(
+        x2_extract_10bit_u8_lane(p2, 12),
+        x2_extract_10bit_u8_lane(p3, 12),
+      );
+      let b_lo = vcombine_u16(
+        x2_extract_10bit_u8_lane(p0, 2),
+        x2_extract_10bit_u8_lane(p1, 2),
+      );
+      let b_hi = vcombine_u16(
+        x2_extract_10bit_u8_lane(p2, 2),
+        x2_extract_10bit_u8_lane(p3, 2),
+      );
 
       let r = vcombine_u8(vqmovn_u16(r_lo), vqmovn_u16(r_hi));
       let g = vcombine_u8(vqmovn_u16(g_lo), vqmovn_u16(g_hi));
@@ -5905,11 +5941,7 @@ pub(crate) unsafe fn x2rgb10_to_rgba_row(x2rgb10: &[u8], rgba_out: &mut [u8], wi
 /// 3. `x2rgb10` / `rgb_out` must not alias.
 #[inline]
 #[target_feature(enable = "neon")]
-pub(crate) unsafe fn x2rgb10_to_rgb_u16_row(
-  x2rgb10: &[u8],
-  rgb_out: &mut [u16],
-  width: usize,
-) {
+pub(crate) unsafe fn x2rgb10_to_rgb_u16_row(x2rgb10: &[u8], rgb_out: &mut [u16], width: usize) {
   debug_assert!(x2rgb10.len() >= width * 4, "x2rgb10 row too short");
   debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
 
@@ -5920,9 +5952,18 @@ pub(crate) unsafe fn x2rgb10_to_rgb_u16_row(
       let p1 = vld1q_u32(x2rgb10.as_ptr().add(x * 4 + 16) as *const u32);
 
       // Channel low bit positions: R at 20, G at 10, B at 0.
-      let r = vcombine_u16(x2_extract_10bit_u16_lane(p0, 20), x2_extract_10bit_u16_lane(p1, 20));
-      let g = vcombine_u16(x2_extract_10bit_u16_lane(p0, 10), x2_extract_10bit_u16_lane(p1, 10));
-      let b = vcombine_u16(x2_extract_10bit_u16_lane(p0, 0), x2_extract_10bit_u16_lane(p1, 0));
+      let r = vcombine_u16(
+        x2_extract_10bit_u16_lane(p0, 20),
+        x2_extract_10bit_u16_lane(p1, 20),
+      );
+      let g = vcombine_u16(
+        x2_extract_10bit_u16_lane(p0, 10),
+        x2_extract_10bit_u16_lane(p1, 10),
+      );
+      let b = vcombine_u16(
+        x2_extract_10bit_u16_lane(p0, 0),
+        x2_extract_10bit_u16_lane(p1, 0),
+      );
 
       let rgb = uint16x8x3_t(r, g, b);
       vst3q_u16(rgb_out.as_mut_ptr().add(x * 3), rgb);
@@ -5956,12 +5997,30 @@ pub(crate) unsafe fn x2bgr10_to_rgb_row(x2bgr10: &[u8], rgb_out: &mut [u8], widt
       let p2 = vld1q_u32(x2bgr10.as_ptr().add(x * 4 + 32) as *const u32);
       let p3 = vld1q_u32(x2bgr10.as_ptr().add(x * 4 + 48) as *const u32);
 
-      let r_lo = vcombine_u16(x2_extract_10bit_u8_lane(p0, 2), x2_extract_10bit_u8_lane(p1, 2));
-      let r_hi = vcombine_u16(x2_extract_10bit_u8_lane(p2, 2), x2_extract_10bit_u8_lane(p3, 2));
-      let g_lo = vcombine_u16(x2_extract_10bit_u8_lane(p0, 12), x2_extract_10bit_u8_lane(p1, 12));
-      let g_hi = vcombine_u16(x2_extract_10bit_u8_lane(p2, 12), x2_extract_10bit_u8_lane(p3, 12));
-      let b_lo = vcombine_u16(x2_extract_10bit_u8_lane(p0, 22), x2_extract_10bit_u8_lane(p1, 22));
-      let b_hi = vcombine_u16(x2_extract_10bit_u8_lane(p2, 22), x2_extract_10bit_u8_lane(p3, 22));
+      let r_lo = vcombine_u16(
+        x2_extract_10bit_u8_lane(p0, 2),
+        x2_extract_10bit_u8_lane(p1, 2),
+      );
+      let r_hi = vcombine_u16(
+        x2_extract_10bit_u8_lane(p2, 2),
+        x2_extract_10bit_u8_lane(p3, 2),
+      );
+      let g_lo = vcombine_u16(
+        x2_extract_10bit_u8_lane(p0, 12),
+        x2_extract_10bit_u8_lane(p1, 12),
+      );
+      let g_hi = vcombine_u16(
+        x2_extract_10bit_u8_lane(p2, 12),
+        x2_extract_10bit_u8_lane(p3, 12),
+      );
+      let b_lo = vcombine_u16(
+        x2_extract_10bit_u8_lane(p0, 22),
+        x2_extract_10bit_u8_lane(p1, 22),
+      );
+      let b_hi = vcombine_u16(
+        x2_extract_10bit_u8_lane(p2, 22),
+        x2_extract_10bit_u8_lane(p3, 22),
+      );
 
       let r = vcombine_u8(vqmovn_u16(r_lo), vqmovn_u16(r_hi));
       let g = vcombine_u8(vqmovn_u16(g_lo), vqmovn_u16(g_hi));
@@ -5998,12 +6057,30 @@ pub(crate) unsafe fn x2bgr10_to_rgba_row(x2bgr10: &[u8], rgba_out: &mut [u8], wi
       let p2 = vld1q_u32(x2bgr10.as_ptr().add(x * 4 + 32) as *const u32);
       let p3 = vld1q_u32(x2bgr10.as_ptr().add(x * 4 + 48) as *const u32);
 
-      let r_lo = vcombine_u16(x2_extract_10bit_u8_lane(p0, 2), x2_extract_10bit_u8_lane(p1, 2));
-      let r_hi = vcombine_u16(x2_extract_10bit_u8_lane(p2, 2), x2_extract_10bit_u8_lane(p3, 2));
-      let g_lo = vcombine_u16(x2_extract_10bit_u8_lane(p0, 12), x2_extract_10bit_u8_lane(p1, 12));
-      let g_hi = vcombine_u16(x2_extract_10bit_u8_lane(p2, 12), x2_extract_10bit_u8_lane(p3, 12));
-      let b_lo = vcombine_u16(x2_extract_10bit_u8_lane(p0, 22), x2_extract_10bit_u8_lane(p1, 22));
-      let b_hi = vcombine_u16(x2_extract_10bit_u8_lane(p2, 22), x2_extract_10bit_u8_lane(p3, 22));
+      let r_lo = vcombine_u16(
+        x2_extract_10bit_u8_lane(p0, 2),
+        x2_extract_10bit_u8_lane(p1, 2),
+      );
+      let r_hi = vcombine_u16(
+        x2_extract_10bit_u8_lane(p2, 2),
+        x2_extract_10bit_u8_lane(p3, 2),
+      );
+      let g_lo = vcombine_u16(
+        x2_extract_10bit_u8_lane(p0, 12),
+        x2_extract_10bit_u8_lane(p1, 12),
+      );
+      let g_hi = vcombine_u16(
+        x2_extract_10bit_u8_lane(p2, 12),
+        x2_extract_10bit_u8_lane(p3, 12),
+      );
+      let b_lo = vcombine_u16(
+        x2_extract_10bit_u8_lane(p0, 22),
+        x2_extract_10bit_u8_lane(p1, 22),
+      );
+      let b_hi = vcombine_u16(
+        x2_extract_10bit_u8_lane(p2, 22),
+        x2_extract_10bit_u8_lane(p3, 22),
+      );
 
       let r = vcombine_u8(vqmovn_u16(r_lo), vqmovn_u16(r_hi));
       let g = vcombine_u8(vqmovn_u16(g_lo), vqmovn_u16(g_hi));
@@ -6027,11 +6104,7 @@ pub(crate) unsafe fn x2bgr10_to_rgba_row(x2bgr10: &[u8], rgba_out: &mut [u8], wi
 /// NEON X2BGR10→u16 RGB native. 8 pixels per iteration.
 #[inline]
 #[target_feature(enable = "neon")]
-pub(crate) unsafe fn x2bgr10_to_rgb_u16_row(
-  x2bgr10: &[u8],
-  rgb_out: &mut [u16],
-  width: usize,
-) {
+pub(crate) unsafe fn x2bgr10_to_rgb_u16_row(x2bgr10: &[u8], rgb_out: &mut [u16], width: usize) {
   debug_assert!(x2bgr10.len() >= width * 4, "x2bgr10 row too short");
   debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
 
@@ -6042,9 +6115,18 @@ pub(crate) unsafe fn x2bgr10_to_rgb_u16_row(
       let p1 = vld1q_u32(x2bgr10.as_ptr().add(x * 4 + 16) as *const u32);
 
       // X2BGR10: R at low 10 bits, G at 10..19, B at 20..29.
-      let r = vcombine_u16(x2_extract_10bit_u16_lane(p0, 0), x2_extract_10bit_u16_lane(p1, 0));
-      let g = vcombine_u16(x2_extract_10bit_u16_lane(p0, 10), x2_extract_10bit_u16_lane(p1, 10));
-      let b = vcombine_u16(x2_extract_10bit_u16_lane(p0, 20), x2_extract_10bit_u16_lane(p1, 20));
+      let r = vcombine_u16(
+        x2_extract_10bit_u16_lane(p0, 0),
+        x2_extract_10bit_u16_lane(p1, 0),
+      );
+      let g = vcombine_u16(
+        x2_extract_10bit_u16_lane(p0, 10),
+        x2_extract_10bit_u16_lane(p1, 10),
+      );
+      let b = vcombine_u16(
+        x2_extract_10bit_u16_lane(p0, 20),
+        x2_extract_10bit_u16_lane(p1, 20),
+      );
 
       let rgb = uint16x8x3_t(r, g, b);
       vst3q_u16(rgb_out.as_mut_ptr().add(x * 3), rgb);

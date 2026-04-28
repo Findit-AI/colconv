@@ -3645,8 +3645,13 @@ fn avx2_x2rgb10_to_rgb_matches_scalar() {
     let mut out_scalar = std::vec![0u8; w * 3];
     let mut out_avx = std::vec![0u8; w * 3];
     scalar::x2rgb10_to_rgb_row(&input, &mut out_scalar, w);
-    unsafe { x2rgb10_to_rgb_row(&input, &mut out_avx, w); }
-    assert_eq!(out_scalar, out_avx, "AVX2 x2rgb10_to_rgb diverges (width={w})");
+    unsafe {
+      x2rgb10_to_rgb_row(&input, &mut out_avx, w);
+    }
+    assert_eq!(
+      out_scalar, out_avx,
+      "AVX2 x2rgb10_to_rgb diverges (width={w})"
+    );
   }
 }
 
@@ -3660,8 +3665,13 @@ fn avx2_x2rgb10_to_rgba_matches_scalar() {
     let mut out_scalar = std::vec![0u8; w * 4];
     let mut out_avx = std::vec![0u8; w * 4];
     scalar::x2rgb10_to_rgba_row(&input, &mut out_scalar, w);
-    unsafe { x2rgb10_to_rgba_row(&input, &mut out_avx, w); }
-    assert_eq!(out_scalar, out_avx, "AVX2 x2rgb10_to_rgba diverges (width={w})");
+    unsafe {
+      x2rgb10_to_rgba_row(&input, &mut out_avx, w);
+    }
+    assert_eq!(
+      out_scalar, out_avx,
+      "AVX2 x2rgb10_to_rgba diverges (width={w})"
+    );
   }
 }
 
@@ -3675,8 +3685,13 @@ fn avx2_x2rgb10_to_rgb_u16_matches_scalar() {
     let mut out_scalar = std::vec![0u16; w * 3];
     let mut out_avx = std::vec![0u16; w * 3];
     scalar::x2rgb10_to_rgb_u16_row(&input, &mut out_scalar, w);
-    unsafe { x2rgb10_to_rgb_u16_row(&input, &mut out_avx, w); }
-    assert_eq!(out_scalar, out_avx, "AVX2 x2rgb10_to_rgb_u16 diverges (width={w})");
+    unsafe {
+      x2rgb10_to_rgb_u16_row(&input, &mut out_avx, w);
+    }
+    assert_eq!(
+      out_scalar, out_avx,
+      "AVX2 x2rgb10_to_rgb_u16 diverges (width={w})"
+    );
   }
 }
 
@@ -3690,8 +3705,13 @@ fn avx2_x2bgr10_to_rgb_matches_scalar() {
     let mut out_scalar = std::vec![0u8; w * 3];
     let mut out_avx = std::vec![0u8; w * 3];
     scalar::x2bgr10_to_rgb_row(&input, &mut out_scalar, w);
-    unsafe { x2bgr10_to_rgb_row(&input, &mut out_avx, w); }
-    assert_eq!(out_scalar, out_avx, "AVX2 x2bgr10_to_rgb diverges (width={w})");
+    unsafe {
+      x2bgr10_to_rgb_row(&input, &mut out_avx, w);
+    }
+    assert_eq!(
+      out_scalar, out_avx,
+      "AVX2 x2bgr10_to_rgb diverges (width={w})"
+    );
   }
 }
 
@@ -3705,8 +3725,13 @@ fn avx2_x2bgr10_to_rgba_matches_scalar() {
     let mut out_scalar = std::vec![0u8; w * 4];
     let mut out_avx = std::vec![0u8; w * 4];
     scalar::x2bgr10_to_rgba_row(&input, &mut out_scalar, w);
-    unsafe { x2bgr10_to_rgba_row(&input, &mut out_avx, w); }
-    assert_eq!(out_scalar, out_avx, "AVX2 x2bgr10_to_rgba diverges (width={w})");
+    unsafe {
+      x2bgr10_to_rgba_row(&input, &mut out_avx, w);
+    }
+    assert_eq!(
+      out_scalar, out_avx,
+      "AVX2 x2bgr10_to_rgba diverges (width={w})"
+    );
   }
 }
 
@@ -3720,7 +3745,12 @@ fn avx2_x2bgr10_to_rgb_u16_matches_scalar() {
     let mut out_scalar = std::vec![0u16; w * 3];
     let mut out_avx = std::vec![0u16; w * 3];
     scalar::x2bgr10_to_rgb_u16_row(&input, &mut out_scalar, w);
-    unsafe { x2bgr10_to_rgb_u16_row(&input, &mut out_avx, w); }
-    assert_eq!(out_scalar, out_avx, "AVX2 x2bgr10_to_rgb_u16 diverges (width={w})");
+    unsafe {
+      x2bgr10_to_rgb_u16_row(&input, &mut out_avx, w);
+    }
+    assert_eq!(
+      out_scalar, out_avx,
+      "AVX2 x2bgr10_to_rgb_u16 diverges (width={w})"
+    );
   }
 }

@@ -5347,10 +5347,7 @@ pub(crate) unsafe fn x2rgb10_to_rgb_row(x2rgb10: &[u8], rgb_out: &mut [u8], widt
   unsafe {
     let mut x = 0usize;
     while x + 16 <= width {
-      x2rgb10_to_rgb_16_pixels(
-        x2rgb10.as_ptr().add(x * 4),
-        rgb_out.as_mut_ptr().add(x * 3),
-      );
+      x2rgb10_to_rgb_16_pixels(x2rgb10.as_ptr().add(x * 4), rgb_out.as_mut_ptr().add(x * 3));
       x += 16;
     }
     if x < width {
@@ -5426,10 +5423,7 @@ pub(crate) unsafe fn x2bgr10_to_rgb_row(x2bgr10: &[u8], rgb_out: &mut [u8], widt
   unsafe {
     let mut x = 0usize;
     while x + 16 <= width {
-      x2bgr10_to_rgb_16_pixels(
-        x2bgr10.as_ptr().add(x * 4),
-        rgb_out.as_mut_ptr().add(x * 3),
-      );
+      x2bgr10_to_rgb_16_pixels(x2bgr10.as_ptr().add(x * 4), rgb_out.as_mut_ptr().add(x * 3));
       x += 16;
     }
     if x < width {

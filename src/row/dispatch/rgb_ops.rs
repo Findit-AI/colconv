@@ -966,12 +966,7 @@ pub fn x2rgb10_to_rgba_row(x2rgb10: &[u8], rgba_out: &mut [u8], width: usize, us
 ///
 /// `use_simd = false` forces the scalar reference path.
 #[cfg_attr(not(tarpaulin), inline(always))]
-pub fn x2rgb10_to_rgb_u16_row(
-  x2rgb10: &[u8],
-  rgb_out: &mut [u16],
-  width: usize,
-  use_simd: bool,
-) {
+pub fn x2rgb10_to_rgb_u16_row(x2rgb10: &[u8], rgb_out: &mut [u16], width: usize, use_simd: bool) {
   let in_min = rgba_row_bytes(width);
   let rgb_min = rgb_row_bytes(width);
   assert!(x2rgb10.len() >= in_min, "x2rgb10 row too short");
@@ -1098,12 +1093,7 @@ pub fn x2bgr10_to_rgba_row(x2bgr10: &[u8], rgba_out: &mut [u8], width: usize, us
 
 /// `X2BGR10` LE counterpart of [`x2rgb10_to_rgb_u16_row`].
 #[cfg_attr(not(tarpaulin), inline(always))]
-pub fn x2bgr10_to_rgb_u16_row(
-  x2bgr10: &[u8],
-  rgb_out: &mut [u16],
-  width: usize,
-  use_simd: bool,
-) {
+pub fn x2bgr10_to_rgb_u16_row(x2bgr10: &[u8], rgb_out: &mut [u16], width: usize, use_simd: bool) {
   let in_min = rgba_row_bytes(width);
   let rgb_min = rgb_row_bytes(width);
   assert!(x2bgr10.len() >= in_min, "x2bgr10 row too short");

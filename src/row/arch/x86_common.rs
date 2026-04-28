@@ -711,12 +711,7 @@ unsafe fn extract_10bit_to_u16_lane<const SHIFT: i32>(pix: __m128i) -> __m128i {
 /// Values are bounded to `[0, 255]` upstream, so saturation never
 /// triggers.
 #[inline(always)]
-unsafe fn pack_u32x4_quad_to_u8x16(
-  v0: __m128i,
-  v1: __m128i,
-  v2: __m128i,
-  v3: __m128i,
-) -> __m128i {
+unsafe fn pack_u32x4_quad_to_u8x16(v0: __m128i, v1: __m128i, v2: __m128i, v3: __m128i) -> __m128i {
   unsafe {
     let lo = _mm_packus_epi32(v0, v1);
     let hi = _mm_packus_epi32(v2, v3);

@@ -5724,9 +5724,15 @@ pub(crate) unsafe fn x2rgb10_to_rgb_row(x2rgb10: &[u8], rgb_out: &mut [u8], widt
         v128_or(u8x16_swizzle(r_u8, r_mask1), u8x16_swizzle(g_u8, g_mask1)),
         u8x16_swizzle(b_u8, b_mask1),
       );
-      let r_mask2 = i8x16(-1, 11, -1, -1, 12, -1, -1, 13, -1, -1, 14, -1, -1, 15, -1, -1);
-      let g_mask2 = i8x16(-1, -1, 11, -1, -1, 12, -1, -1, 13, -1, -1, 14, -1, -1, 15, -1);
-      let b_mask2 = i8x16(10, -1, -1, 11, -1, -1, 12, -1, -1, 13, -1, -1, 14, -1, -1, 15);
+      let r_mask2 = i8x16(
+        -1, 11, -1, -1, 12, -1, -1, 13, -1, -1, 14, -1, -1, 15, -1, -1,
+      );
+      let g_mask2 = i8x16(
+        -1, -1, 11, -1, -1, 12, -1, -1, 13, -1, -1, 14, -1, -1, 15, -1,
+      );
+      let b_mask2 = i8x16(
+        10, -1, -1, 11, -1, -1, 12, -1, -1, 13, -1, -1, 14, -1, -1, 15,
+      );
       let out2 = v128_or(
         v128_or(u8x16_swizzle(r_u8, r_mask2), u8x16_swizzle(g_u8, g_mask2)),
         u8x16_swizzle(b_u8, b_mask2),
@@ -5801,11 +5807,7 @@ pub(crate) unsafe fn x2rgb10_to_rgba_row(x2rgb10: &[u8], rgba_out: &mut [u8], wi
 /// WASM simd128 X2RGB10→u16 RGB native. 8 pixels per iteration.
 #[inline]
 #[target_feature(enable = "simd128")]
-pub(crate) unsafe fn x2rgb10_to_rgb_u16_row(
-  x2rgb10: &[u8],
-  rgb_out: &mut [u16],
-  width: usize,
-) {
+pub(crate) unsafe fn x2rgb10_to_rgb_u16_row(x2rgb10: &[u8], rgb_out: &mut [u16], width: usize) {
   debug_assert!(x2rgb10.len() >= width * 4, "x2rgb10 row too short");
   debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
 
@@ -5845,9 +5847,15 @@ pub(crate) unsafe fn x2rgb10_to_rgb_u16_row(
         v128_or(u8x16_swizzle(r, r_mask1), u8x16_swizzle(g, g_mask1)),
         u8x16_swizzle(b, b_mask1),
       );
-      let r_mask2 = i8x16(10, 11, -1, -1, -1, -1, 12, 13, -1, -1, -1, -1, 14, 15, -1, -1);
-      let g_mask2 = i8x16(-1, -1, 12, 13, -1, -1, -1, -1, 14, 15, -1, -1, -1, -1, -1, -1);
-      let b_mask2 = i8x16(-1, -1, -1, -1, 10, 11, -1, -1, -1, -1, 12, 13, -1, -1, 14, 15);
+      let r_mask2 = i8x16(
+        10, 11, -1, -1, -1, -1, 12, 13, -1, -1, -1, -1, 14, 15, -1, -1,
+      );
+      let g_mask2 = i8x16(
+        -1, -1, 12, 13, -1, -1, -1, -1, 14, 15, -1, -1, -1, -1, -1, -1,
+      );
+      let b_mask2 = i8x16(
+        -1, -1, -1, -1, 10, 11, -1, -1, -1, -1, 12, 13, -1, -1, 14, 15,
+      );
       let out2 = v128_or(
         v128_or(u8x16_swizzle(r, r_mask2), u8x16_swizzle(g, g_mask2)),
         u8x16_swizzle(b, b_mask2),
@@ -5925,9 +5933,15 @@ pub(crate) unsafe fn x2bgr10_to_rgb_row(x2bgr10: &[u8], rgb_out: &mut [u8], widt
         v128_or(u8x16_swizzle(r_u8, r_mask1), u8x16_swizzle(g_u8, g_mask1)),
         u8x16_swizzle(b_u8, b_mask1),
       );
-      let r_mask2 = i8x16(-1, 11, -1, -1, 12, -1, -1, 13, -1, -1, 14, -1, -1, 15, -1, -1);
-      let g_mask2 = i8x16(-1, -1, 11, -1, -1, 12, -1, -1, 13, -1, -1, 14, -1, -1, 15, -1);
-      let b_mask2 = i8x16(10, -1, -1, 11, -1, -1, 12, -1, -1, 13, -1, -1, 14, -1, -1, 15);
+      let r_mask2 = i8x16(
+        -1, 11, -1, -1, 12, -1, -1, 13, -1, -1, 14, -1, -1, 15, -1, -1,
+      );
+      let g_mask2 = i8x16(
+        -1, -1, 11, -1, -1, 12, -1, -1, 13, -1, -1, 14, -1, -1, 15, -1,
+      );
+      let b_mask2 = i8x16(
+        10, -1, -1, 11, -1, -1, 12, -1, -1, 13, -1, -1, 14, -1, -1, 15,
+      );
       let out2 = v128_or(
         v128_or(u8x16_swizzle(r_u8, r_mask2), u8x16_swizzle(g_u8, g_mask2)),
         u8x16_swizzle(b_u8, b_mask2),
@@ -5996,11 +6010,7 @@ pub(crate) unsafe fn x2bgr10_to_rgba_row(x2bgr10: &[u8], rgba_out: &mut [u8], wi
 /// WASM simd128 X2BGR10→u16 RGB native. 8 pixels per iteration.
 #[inline]
 #[target_feature(enable = "simd128")]
-pub(crate) unsafe fn x2bgr10_to_rgb_u16_row(
-  x2bgr10: &[u8],
-  rgb_out: &mut [u16],
-  width: usize,
-) {
+pub(crate) unsafe fn x2bgr10_to_rgb_u16_row(x2bgr10: &[u8], rgb_out: &mut [u16], width: usize) {
   debug_assert!(x2bgr10.len() >= width * 4, "x2bgr10 row too short");
   debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
 
@@ -6036,9 +6046,15 @@ pub(crate) unsafe fn x2bgr10_to_rgb_u16_row(
         v128_or(u8x16_swizzle(r, r_mask1), u8x16_swizzle(g, g_mask1)),
         u8x16_swizzle(b, b_mask1),
       );
-      let r_mask2 = i8x16(10, 11, -1, -1, -1, -1, 12, 13, -1, -1, -1, -1, 14, 15, -1, -1);
-      let g_mask2 = i8x16(-1, -1, 12, 13, -1, -1, -1, -1, 14, 15, -1, -1, -1, -1, -1, -1);
-      let b_mask2 = i8x16(-1, -1, -1, -1, 10, 11, -1, -1, -1, -1, 12, 13, -1, -1, 14, 15);
+      let r_mask2 = i8x16(
+        10, 11, -1, -1, -1, -1, 12, 13, -1, -1, -1, -1, 14, 15, -1, -1,
+      );
+      let g_mask2 = i8x16(
+        -1, -1, 12, 13, -1, -1, -1, -1, 14, 15, -1, -1, -1, -1, -1, -1,
+      );
+      let b_mask2 = i8x16(
+        -1, -1, -1, -1, 10, 11, -1, -1, -1, -1, 12, 13, -1, -1, 14, 15,
+      );
       let out2 = v128_or(
         v128_or(u8x16_swizzle(r, r_mask2), u8x16_swizzle(g, g_mask2)),
         u8x16_swizzle(b, b_mask2),
