@@ -1,5 +1,8 @@
 use super::{
-  super::planar_other_8bit_9bit::{solid_yuv422p_frame, solid_yuv440p_frame, solid_yuv444p_frame},
+  super::{
+    packed_yuv_8bit::{solid_uyvy422_frame, solid_yuyv422_frame, solid_yvyu422_frame},
+    planar_other_8bit_9bit::{solid_yuv422p_frame, solid_yuv440p_frame, solid_yuv444p_frame},
+  },
   nv12::solid_nv12_frame,
   nv16::solid_nv16_frame,
   nv21::solid_nv21_frame,
@@ -716,5 +719,47 @@ fn strategy_a_rgb_and_rgba_byte_identical_for_all_wired_families() {
       .unwrap();
     yuv440p_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
     assert_match(&rgb, &rgba, "Yuv440p");
+  }
+
+  {
+    let buf = solid_yuyv422_frame(w, h, 200, 128, 128);
+    let src = Yuyv422Frame::new(&buf, w, h, 2 * w);
+    let mut rgb = std::vec![0u8; ws * hs * 3];
+    let mut rgba = std::vec![0u8; ws * hs * 4];
+    let mut sink = MixedSinker::<Yuyv422>::new(ws, hs)
+      .with_rgb(&mut rgb)
+      .unwrap()
+      .with_rgba(&mut rgba)
+      .unwrap();
+    yuyv422_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    assert_match(&rgb, &rgba, "Yuyv422");
+  }
+
+  {
+    let buf = solid_uyvy422_frame(w, h, 200, 128, 128);
+    let src = Uyvy422Frame::new(&buf, w, h, 2 * w);
+    let mut rgb = std::vec![0u8; ws * hs * 3];
+    let mut rgba = std::vec![0u8; ws * hs * 4];
+    let mut sink = MixedSinker::<Uyvy422>::new(ws, hs)
+      .with_rgb(&mut rgb)
+      .unwrap()
+      .with_rgba(&mut rgba)
+      .unwrap();
+    uyvy422_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    assert_match(&rgb, &rgba, "Uyvy422");
+  }
+
+  {
+    let buf = solid_yvyu422_frame(w, h, 200, 128, 128);
+    let src = Yvyu422Frame::new(&buf, w, h, 2 * w);
+    let mut rgb = std::vec![0u8; ws * hs * 3];
+    let mut rgba = std::vec![0u8; ws * hs * 4];
+    let mut sink = MixedSinker::<Yvyu422>::new(ws, hs)
+      .with_rgb(&mut rgb)
+      .unwrap()
+      .with_rgba(&mut rgba)
+      .unwrap();
+    yvyu422_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    assert_match(&rgb, &rgba, "Yvyu422");
   }
 }

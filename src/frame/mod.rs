@@ -11,6 +11,7 @@
 mod bayer;
 mod packed_rgb_10bit;
 mod packed_rgb_8bit;
+mod packed_yuv_8bit;
 mod planar_8bit;
 mod semi_planar_8bit;
 mod subsampled_high_bit_planar;
@@ -20,6 +21,7 @@ mod yuva;
 pub use bayer::*;
 pub use packed_rgb_8bit::*;
 pub use packed_rgb_10bit::*;
+pub use packed_yuv_8bit::*;
 pub use planar_8bit::*;
 pub use semi_planar_8bit::*;
 pub use subsampled_high_bit_planar::*;

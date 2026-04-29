@@ -3,6 +3,7 @@ use super::*;
 mod bayer;
 mod packed_rgb_10bit;
 mod packed_rgb_8bit;
+mod packed_yuv_8bit;
 mod planar_8bit;
 mod semi_planar_8bit;
 mod subsampled_4_2_0_high_bit;
