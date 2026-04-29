@@ -1,4 +1,7 @@
-use super::super::*;
+use super::{
+  super::*, high_bit_plane, interleave_uv, p_n_packed_plane, p010_uv_interleave, p16_plane_neon,
+  planar_n_plane,
+};
 
 // ---- High-bit 4:2:0 native-depth `u16` RGBA equivalence (Ship 8 Tranche 5b) ----
 //
@@ -309,12 +312,6 @@ fn neon_yuv444p_n_matches_scalar_widths() {
 
 // ---- Yuv444p16 NEON equivalence -------------------------------------
 
-fn p16_plane_neon(n: usize, seed: usize) -> std::vec::Vec<u16> {
-  (0..n)
-    .map(|i| ((i.wrapping_mul(seed).wrapping_add(seed * 3)) & 0xFFFF) as u16)
-    .collect()
-}
-
 fn check_yuv444p16_u8_neon_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
   let y = p16_plane_neon(width, 37);
   let u = p16_plane_neon(width, 53);
@@ -375,26 +372,6 @@ fn neon_yuv444p16_matches_scalar_widths() {
 }
 
 // ---- Pn 4:4:4 (P410 / P412 / P416) NEON equivalence -----------------
-
-/// Generates a high-bit-packed `u16` plane: random `BITS`-bit values
-/// shifted left by `16 - BITS` (P410/P412 convention).
-fn high_bit_plane<const BITS: u32>(n: usize, seed: usize) -> std::vec::Vec<u16> {
-  let mask = ((1u32 << BITS) - 1) as u16;
-  let shift = 16 - BITS;
-  (0..n)
-    .map(|i| (((i.wrapping_mul(seed).wrapping_add(seed * 3)) as u16) & mask) << shift)
-    .collect()
-}
-
-fn interleave_uv(u_full: &[u16], v_full: &[u16]) -> std::vec::Vec<u16> {
-  debug_assert_eq!(u_full.len(), v_full.len());
-  let mut out = std::vec::Vec::with_capacity(u_full.len() * 2);
-  for i in 0..u_full.len() {
-    out.push(u_full[i]);
-    out.push(v_full[i]);
-  }
-  out
-}
 
 fn check_p_n_444_u8_neon_equivalence<const BITS: u32>(
   width: usize,

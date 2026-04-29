@@ -1,4 +1,4 @@
-use super::super::*;
+use super::{super::*, p_n_packed_plane, p010_uv_interleave, p16_plane_neon, planar_n_plane};
 
 // ---- yuv420p10 scalar-equivalence -----------------------------------
 
@@ -282,19 +282,6 @@ fn p010_plane(n: usize, seed: usize) -> std::vec::Vec<u16> {
     .collect()
 }
 
-/// Interleaves per‑pair U, V samples into P010's semi‑planar UV
-/// layout: `[U0, V0, U1, V1, …]`.
-fn p010_uv_interleave(u: &[u16], v: &[u16]) -> std::vec::Vec<u16> {
-  let pairs = u.len();
-  debug_assert_eq!(u.len(), v.len());
-  let mut out = std::vec::Vec::with_capacity(pairs * 2);
-  for i in 0..pairs {
-    out.push(u[i]);
-    out.push(v[i]);
-  }
-  out
-}
-
 fn check_p010_u8_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
   let y = p010_plane(width, 37);
   let u_plane = p010_plane(width / 2, 53);
@@ -456,21 +443,6 @@ fn neon_p010_matches_scalar_on_mispacked_input() {
 }
 
 // ---- Generic BITS equivalence (12/14-bit coverage) ------------------
-
-fn planar_n_plane<const BITS: u32>(n: usize, seed: usize) -> std::vec::Vec<u16> {
-  let mask = (1u32 << BITS) - 1;
-  (0..n)
-    .map(|i| ((i * seed + seed * 3) as u32 & mask) as u16)
-    .collect()
-}
-
-fn p_n_packed_plane<const BITS: u32>(n: usize, seed: usize) -> std::vec::Vec<u16> {
-  let mask = (1u32 << BITS) - 1;
-  let shift = 16 - BITS;
-  (0..n)
-    .map(|i| (((i * seed + seed * 3) as u32 & mask) as u16) << shift)
-    .collect()
-}
 
 fn check_planar_u8_neon_equivalence_n<const BITS: u32>(
   width: usize,
