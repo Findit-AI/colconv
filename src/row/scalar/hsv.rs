@@ -184,4 +184,3 @@ fn rgb_to_hsv_pixel(r: i32, g: i32, b: i32) -> (u8, u8, u8) {
 
   (h.clamp(0, 179) as u8, s.clamp(0, 255) as u8, v as u8)
 }
-

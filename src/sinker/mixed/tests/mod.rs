@@ -6266,7 +6266,6 @@ fn p416_walker_simd_matches_scalar_with_random_chroma() {
   }
 }
 
-
 // ---- Ship 8 PR 5d: high-bit 4:2:2 RGBA wiring -------------------------
 //
 // Strategy A combine for the eight 4:2:2 high-bit sinker formats wired
@@ -6701,4 +6700,3 @@ fn yuv440p10_rgba_u16_only_native_depth_gray_with_opaque_alpha() {
     assert_eq!(px[3], 1023, "alpha must equal (1 << 10) - 1");
   }
 }
-

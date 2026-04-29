@@ -3618,4 +3618,3 @@ fn neon_yuva420p16_rgba_u16_matches_scalar_widths_and_alpha() {
     check_yuv420p16_u16_neon_rgba_with_alpha_src_equivalence(16, ColorMatrix::Bt601, true, seed);
   }
 }
-

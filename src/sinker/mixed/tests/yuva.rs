@@ -2044,4 +2044,3 @@ fn yuva444p_rgba_simd_matches_scalar_with_random_yuva() {
     }
   }
 }
-

@@ -435,4 +435,3 @@ pub(crate) fn x2bgr10_to_rgb_u16_row(x2bgr10: &[u8], rgb_out: &mut [u16], width:
     rgb_out[dst + 2] = ((pix >> 20) & 0x3FF) as u16;
   }
 }
-

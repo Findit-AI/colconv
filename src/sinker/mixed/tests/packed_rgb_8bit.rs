@@ -1214,4 +1214,3 @@ fn bgrx_simd_matches_scalar_with_random_input() {
   assert_eq!(rgba_simd, rgba_scalar, "RGBA output diverges");
   assert_eq!(luma_simd, luma_scalar, "Luma output diverges");
 }
-
