@@ -18,6 +18,7 @@ mod packed_yuv_8bit;
 mod rgb_expand;
 mod semi_planar_8bit;
 mod subsampled_high_bit_pn;
+mod v210;
 mod yuv_planar_16bit;
 mod yuv_planar_8bit;
 mod yuv_planar_high_bit;
@@ -30,6 +31,14 @@ pub(crate) use packed_yuv_8bit::*;
 pub(crate) use rgb_expand::*;
 pub(crate) use semi_planar_8bit::*;
 pub(crate) use subsampled_high_bit_pn::*;
+// Ship 11a prep: the v210 kernels are consumed by the per-arch SIMD
+// fallbacks and dispatcher entries that land in Tasks 4-9. Until
+// those tasks merge the glob has no caller outside `scalar::v210`'s
+// own inline tests, so CI's `-D warnings` would flag this as
+// unused. See `src/row/scalar/v210.rs` for the matching
+// `#[allow(dead_code)]` on each kernel.
+#[allow(unused_imports)]
+pub(crate) use v210::*;
 pub(crate) use yuv_planar_8bit::*;
 pub(crate) use yuv_planar_16bit::*;
 pub(crate) use yuv_planar_high_bit::*;
