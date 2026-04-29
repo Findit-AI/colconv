@@ -26,6 +26,7 @@ pub(crate) use bayer::*;
 pub(crate) use hsv::*;
 pub(crate) use packed_rgb::*;
 pub(crate) use packed_yuv_8bit::*;
+#[cfg(any(feature = "std", feature = "alloc"))]
 pub(crate) use rgb_expand::*;
 pub(crate) use semi_planar_8bit::*;
 pub(crate) use subsampled_high_bit_pn::*;
