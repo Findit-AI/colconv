@@ -43,6 +43,7 @@ mod packed_yuv_8bit;
 mod semi_planar_8bit;
 mod subsampled_high_bit_pn_4_2_0;
 mod subsampled_high_bit_pn_4_4_4;
+mod v210;
 mod yuv_planar_16bit;
 mod yuv_planar_8bit;
 mod yuv_planar_high_bit;
@@ -53,6 +54,13 @@ pub(crate) use packed_yuv_8bit::*;
 pub(crate) use semi_planar_8bit::*;
 pub(crate) use subsampled_high_bit_pn_4_2_0::*;
 pub(crate) use subsampled_high_bit_pn_4_4_4::*;
+// Ship 11a prep: the NEON v210 kernels are wired up by the dispatcher
+// in Task 9. Until then this glob has no caller outside the per-arch
+// tests, so CI's `-D warnings` would flag this as unused. See
+// `src/row/arch/neon/v210.rs` for the matching `#[allow(dead_code)]`
+// on each kernel.
+#[allow(unused_imports)]
+pub(crate) use v210::*;
 pub(crate) use yuv_planar_8bit::*;
 pub(crate) use yuv_planar_16bit::*;
 pub(crate) use yuv_planar_high_bit::*;
