@@ -56,6 +56,7 @@ pub(super) use crate::{
 
 mod hsv;
 mod packed_rgb;
+mod packed_yuv_8bit;
 mod semi_planar_8bit;
 mod subsampled_high_bit_pn_4_2_0;
 mod subsampled_high_bit_pn_4_4_4;
@@ -65,6 +66,7 @@ mod yuv_planar_high_bit;
 
 pub(crate) use hsv::*;
 pub(crate) use packed_rgb::*;
+pub(crate) use packed_yuv_8bit::*;
 pub(crate) use semi_planar_8bit::*;
 pub(crate) use subsampled_high_bit_pn_4_2_0::*;
 pub(crate) use subsampled_high_bit_pn_4_4_4::*;
@@ -113,35 +115,6 @@ pub(super) unsafe fn deinterleave_uv_u16(ptr: *const u16) -> (__m128i, __m128i) 
   }
 }
 
-/// SSE4.1 NV12 → packed RGB (UV-ordered chroma). Thin wrapper over
-/// [`nv12_or_nv21_to_rgb_row_impl`] with `SWAP_UV = false`.
-///
-/// # Safety
-///
-/// SSE4.1 YUV 4:2:0 10‑bit → packed **8‑bit** RGB.
-///
-/// Block size 16 Y pixels / 8 chroma pairs per iteration. Mirrors
-/// [`yuv_420_to_rgb_row`] with three structural differences:
-/// - Two `_mm_loadu_si128` loads for Y (each pulls 8 `u16` = 16 bytes);
-///   U/V each load 8 `u16` via one `_mm_loadu_si128`. No u8 widening —
-///   the samples already occupy 16‑bit lanes.
-/// - Chroma bias is 512 (10‑bit center).
-/// - `range_params_n::<10, 8>` calibrates `y_scale` / `c_scale` to
-///   map 10‑bit input directly to 8‑bit output in one Q15 shift.
-///
-/// # Numerical contract
-///
-/// Byte‑identical to [`scalar::yuv_420p_n_to_rgb_row::<10>`].
-///
-/// Thin wrapper over [`yuv_420p_n_to_rgb_or_rgba_row`] with `ALPHA = false`.
-///
-/// # Safety
-///
-/// 1. **SSE4.1 must be available on the current CPU.**
-/// 2. `width & 1 == 0`.
-/// 3. `y.len() >= width`, `u_half.len() >= width / 2`,
-///    `v_half.len() >= width / 2`, `rgb_out.len() >= 3 * width`.
-#[inline]
 // ---- helpers (inlined into the target_feature‑enabled caller) ----------
 
 /// `>>_a 15` shift (arithmetic, sign‑extending).

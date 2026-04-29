@@ -1,7 +1,4 @@
-use super::{
-  super::*, high_bit_plane_avx2, interleave_uv_avx2, p_n_packed_plane, p010_uv_interleave,
-  p16_plane_avx2, planar_n_plane,
-};
+use super::{super::*, high_bit_plane_avx2, interleave_uv_avx2, p16_plane_avx2, planar_n_plane};
 
 // ---- YUVA 4:4:4 u8 RGBA equivalence (Ship 8b‑1b) --------------------
 //

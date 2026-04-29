@@ -54,7 +54,9 @@ pub(crate) use scalar::expand_rgb_to_rgba_row;
 #[cfg(any(feature = "std", feature = "alloc"))]
 pub(crate) use scalar::expand_rgb_u16_to_rgba_u16_row;
 
-pub use dispatch::{bayer::*, nv::*, pn::*, rgb_ops::*, yuv420::*, yuv444::*, yuva::*};
+pub use dispatch::{
+  bayer::*, nv::*, packed_yuv422::*, pn::*, rgb_ops::*, yuv420::*, yuv444::*, yuva::*,
+};
 
 // `yuv_444p_n_to_rgb_u16_row` is consumed by the 32-bit overflow test
 // `yuv_444p_n_u16_dispatcher_rejects_width_times_3_overflow` below —
@@ -189,6 +191,22 @@ pub(crate) fn uv_full_row_elems(width: usize) -> usize {
   match width.checked_mul(2) {
     Some(n) => n,
     None => panic!("width ({width}) × 2 overflows usize (UV row)"),
+  }
+}
+
+/// Byte length of one packed YUV 4:2:2 row (`width × 2`) for
+/// `Yuyv422` / `Uyvy422` / `Yvyu422` sources. Two bytes per pixel
+/// (one `Y` + one half of an interleaved `U`/`V` pair). Same
+/// `checked_mul` rationale as [`rgb_row_bytes`] — the returned byte
+/// count feeds into the packed dispatchers' input-side `assert!`,
+/// which gates entry into unsafe SIMD loads. An unchecked
+/// multiplication on 32-bit targets could silently admit an
+/// undersized `packed` slice.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn packed_yuv422_row_bytes(width: usize) -> usize {
+  match width.checked_mul(2) {
+    Some(n) => n,
+    None => panic!("width ({width}) × 2 overflows usize (packed YUV 4:2:2 row)"),
   }
 }
 
@@ -429,6 +447,103 @@ mod overflow_tests {
       true,
       false,
     );
+  }
+
+  // ---- Packed YUV 4:2:2 dispatchers — `width × 2` overflow ----
+  //
+  // The packed Tier 3 sources (Yuyv422 / Uyvy422 / Yvyu422) consume
+  // `2 * width` bytes per row. Without the [`packed_yuv422_row_bytes`]
+  // helper a 32-bit caller could overflow `width * 2` to a small
+  // value, pass the input-side `assert!` with an undersized slice,
+  // and reach unsafe SIMD loads. Each packed RGB / RGBA / luma
+  // entry point gets its own regression so a future regression on
+  // any one of them surfaces independently.
+
+  /// Smallest even width whose `width × 2` overflows 32-bit `usize`
+  /// without first failing the `width × 3` overflow guard the
+  /// 3-channel-output dispatchers also enforce. On 32-bit
+  /// `usize::MAX / 2 == 2^31 - 1` is odd, so `+ 1` produces an
+  /// even value (`2^31`); the `+ (candidate & 1)` is a parity
+  /// safety on hypothetical platforms where this differs.
+  #[cfg(target_pointer_width = "32")]
+  const OVERFLOW_WIDTH_TIMES_2: usize = {
+    let candidate = (usize::MAX / 2) + 1;
+    candidate + (candidate & 1)
+  };
+
+  #[cfg(target_pointer_width = "32")]
+  #[test]
+  #[should_panic(expected = "overflows usize")]
+  fn yuyv422_dispatcher_rejects_width_times_2_overflow() {
+    let p: [u8; 0] = [];
+    let mut rgb: [u8; 0] = [];
+    yuyv422_to_rgb_row(
+      &p,
+      &mut rgb,
+      OVERFLOW_WIDTH_TIMES_2,
+      ColorMatrix::Bt601,
+      true,
+      false,
+    );
+  }
+
+  #[cfg(target_pointer_width = "32")]
+  #[test]
+  #[should_panic(expected = "overflows usize")]
+  fn uyvy422_dispatcher_rejects_width_times_2_overflow() {
+    let p: [u8; 0] = [];
+    let mut rgba: [u8; 0] = [];
+    uyvy422_to_rgba_row(
+      &p,
+      &mut rgba,
+      OVERFLOW_WIDTH_TIMES_2,
+      ColorMatrix::Bt601,
+      true,
+      false,
+    );
+  }
+
+  #[cfg(target_pointer_width = "32")]
+  #[test]
+  #[should_panic(expected = "overflows usize")]
+  fn yvyu422_dispatcher_rejects_width_times_2_overflow() {
+    let p: [u8; 0] = [];
+    let mut rgb: [u8; 0] = [];
+    yvyu422_to_rgb_row(
+      &p,
+      &mut rgb,
+      OVERFLOW_WIDTH_TIMES_2,
+      ColorMatrix::Bt601,
+      true,
+      false,
+    );
+  }
+
+  #[cfg(target_pointer_width = "32")]
+  #[test]
+  #[should_panic(expected = "overflows usize")]
+  fn yuyv422_luma_dispatcher_rejects_width_times_2_overflow() {
+    let p: [u8; 0] = [];
+    let mut luma: [u8; 0] = [];
+    yuyv422_to_luma_row(&p, &mut luma, OVERFLOW_WIDTH_TIMES_2, false);
+  }
+
+  #[cfg(target_pointer_width = "32")]
+  #[test]
+  #[should_panic(expected = "overflows usize")]
+  fn uyvy422_luma_dispatcher_rejects_width_times_2_overflow() {
+    let p: [u8; 0] = [];
+    let mut luma: [u8; 0] = [];
+    uyvy422_to_luma_row(&p, &mut luma, OVERFLOW_WIDTH_TIMES_2, false);
+  }
+
+  #[cfg(target_pointer_width = "32")]
+  #[test]
+  #[should_panic(expected = "overflows usize")]
+  fn yvyu422_luma_dispatcher_rejects_width_times_2_overflow() {
+    let p: [u8; 0] = [];
+    let mut luma: [u8; 0] = [];
+    yvyu422_to_luma_row(&p, &mut luma, OVERFLOW_WIDTH_TIMES_2, false);
   }
 }
 

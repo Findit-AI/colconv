@@ -590,6 +590,25 @@ pub enum RowSlice {
   /// [`X2Rgb10Packed`](Self::X2Rgb10Packed).
   #[display("X2BGR10 packed")]
   X2Bgr10Packed,
+  /// Packed `Y0, U0, Y1, V0, …` row of a
+  /// [`Yuyv422`](crate::yuv::Yuyv422) source (FFmpeg `yuyv422` /
+  /// YUY2). `2 * width` `u8` bytes — Y in even byte positions, U/V
+  /// in odd positions with U preceding V.
+  #[display("YUYV422 packed")]
+  Yuyv422Packed,
+  /// Packed `U0, Y0, V0, Y1, …` row of a
+  /// [`Uyvy422`](crate::yuv::Uyvy422) source (FFmpeg `uyvy422` /
+  /// UYVY). `2 * width` `u8` bytes — Y in odd byte positions, U/V
+  /// in even positions with U preceding V.
+  #[display("UYVY422 packed")]
+  Uyvy422Packed,
+  /// Packed `Y0, V0, Y1, U0, …` row of a
+  /// [`Yvyu422`](crate::yuv::Yvyu422) source (FFmpeg `yvyu422` /
+  /// YVYU). `2 * width` `u8` bytes — Y in even byte positions, V/U
+  /// in odd positions with V preceding U (chroma order swapped vs
+  /// [`Yuyv422Packed`](Self::Yuyv422Packed)).
+  #[display("YVYU422 packed")]
+  Yvyu422Packed,
 }
 
 /// A sink that writes any subset of `{RGB, Luma, HSV}` into
@@ -1389,6 +1408,7 @@ pub(super) fn rgb_row_to_luma_row(rgb: &[u8], luma: &mut [u8], coeffs_q8: (u32, 
 mod bayer;
 mod packed_rgb_10bit;
 mod packed_rgb_8bit;
+mod packed_yuv_8bit;
 mod planar_8bit;
 mod semi_planar_8bit;
 mod subsampled_4_2_0_high_bit;

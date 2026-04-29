@@ -555,16 +555,6 @@ pub(crate) unsafe fn yuv_444p16_to_rgb_or_rgba_u16_row<const ALPHA: bool, const 
   }
 }
 
-/// SSE4.1 NV12 → packed RGB. Thin wrapper over
-/// [`nv12_or_nv21_to_rgb_or_rgba_row_impl`] with
-/// `SWAP_UV = false, ALPHA = false`.
-///
-/// # Safety
-///
-/// Same contract as [`nv12_or_nv21_to_rgb_or_rgba_row_impl`]:
-///
-/// 1. **SSE4.1 must be available on the current CPU.** Direct
-///    callers are responsible for verifying this; the dispatcher in
 // ===== 16-bit planar (YUV420P16) → RGB ===================================
 
 /// SSE4.1 YUV 4:2:0 16-bit → packed **8-bit** RGB.
