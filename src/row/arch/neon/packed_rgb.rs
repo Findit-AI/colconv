@@ -1,8 +1,6 @@
 use core::arch::aarch64::*;
 
-use crate::{ColorMatrix, row::scalar};
-
-use super::*;
+use crate::row::scalar;
 
 // ===== BGR ↔ RGB byte swap ==============================================
 
