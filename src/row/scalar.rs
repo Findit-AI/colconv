@@ -3661,6 +3661,173 @@ pub(crate) fn bgrx_to_rgba_row(bgrx: &[u8], rgba_out: &mut [u8], width: usize) {
   }
 }
 
+// ---- Tier 6 10-bit packed-RGB helpers (Ship 9e) ------------------------
+//
+// Bit-extraction kernels behind the [`X2Rgb10`] / [`X2Bgr10`]
+// source-side sinker family. Each input pixel is a 32-bit
+// little-endian word with 2 bits of unused padding at the top and
+// three 10-bit channels packed below.
+//
+// FFmpeg layout (LE, MSB→LSB):
+// - `X2RGB10`: `2X | 10R | 10G | 10B` — read as `u32`, R is at
+//   bits 20–29, G at 10–19, B at 0–9.
+// - `X2BGR10`: `2X | 10B | 10G | 10R` — channel positions swapped;
+//   R is at bits 0–9, B at 20–29.
+//
+// Output flavours per source:
+// - **u8 RGB** — each 10-bit channel down-shifted by 2 (drop low
+//   bits) into a packed `R, G, B` triple. The dropped bits are not
+//   rounded; the existing 8-bit output path uses truncation
+//   throughout.
+// - **u8 RGBA** — same channel handling + alpha set to `0xFF` (the
+//   2-bit field is padding, not real alpha).
+// - **u16 native RGB** — channel value preserved at full 10-bit
+//   precision; emitted as `u16` in the **low 10 bits**, matching the
+//   convention used by the rest of the high-bit-depth crate (e.g.
+//   `yuv_420p_n_to_rgb_u16_row::<10>`). Max value `1023`.
+//
+// SIMD dispatch and per-arch backends live in `row::dispatch::rgb_ops`
+// and `row::arch::*`.
+
+/// Drops the 2-bit padding and down-shifts each 10-bit channel to
+/// 8 bits, producing packed `R, G, B` from packed `X2RGB10` LE
+/// input.
+///
+/// # Panics
+///
+/// Panics (any build profile) if `x2rgb10.len() < 4 * width` or
+/// `rgb_out.len() < 3 * width`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn x2rgb10_to_rgb_row(x2rgb10: &[u8], rgb_out: &mut [u8], width: usize) {
+  debug_assert!(x2rgb10.len() >= width * 4, "x2rgb10 row too short");
+  debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
+  for x in 0..width {
+    let i = x * 4;
+    let pix = u32::from_le_bytes([x2rgb10[i], x2rgb10[i + 1], x2rgb10[i + 2], x2rgb10[i + 3]]);
+    let r10 = (pix >> 20) & 0x3FF;
+    let g10 = (pix >> 10) & 0x3FF;
+    let b10 = pix & 0x3FF;
+    let dst = x * 3;
+    rgb_out[dst] = (r10 >> 2) as u8;
+    rgb_out[dst + 1] = (g10 >> 2) as u8;
+    rgb_out[dst + 2] = (b10 >> 2) as u8;
+  }
+}
+
+/// Drops the 2-bit padding, down-shifts each 10-bit channel to
+/// 8 bits, and forces alpha to `0xFF`. Output: packed `R, G, B, A`.
+///
+/// # Panics
+///
+/// Panics (any build profile) if `x2rgb10.len() < 4 * width` or
+/// `rgba_out.len() < 4 * width`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn x2rgb10_to_rgba_row(x2rgb10: &[u8], rgba_out: &mut [u8], width: usize) {
+  debug_assert!(x2rgb10.len() >= width * 4, "x2rgb10 row too short");
+  debug_assert!(rgba_out.len() >= width * 4, "rgba_out row too short");
+  for x in 0..width {
+    let i = x * 4;
+    let pix = u32::from_le_bytes([x2rgb10[i], x2rgb10[i + 1], x2rgb10[i + 2], x2rgb10[i + 3]]);
+    let r10 = (pix >> 20) & 0x3FF;
+    let g10 = (pix >> 10) & 0x3FF;
+    let b10 = pix & 0x3FF;
+    rgba_out[i] = (r10 >> 2) as u8;
+    rgba_out[i + 1] = (g10 >> 2) as u8;
+    rgba_out[i + 2] = (b10 >> 2) as u8;
+    rgba_out[i + 3] = 0xFF;
+  }
+}
+
+/// Extracts each 10-bit channel into native-depth `u16` (low-bit
+/// aligned, max value `1023`), producing packed `R, G, B` `u16`
+/// elements from packed `X2RGB10` LE input.
+///
+/// # Panics
+///
+/// Panics (any build profile) if `x2rgb10.len() < 4 * width` or
+/// `rgb_out.len() < 3 * width`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn x2rgb10_to_rgb_u16_row(x2rgb10: &[u8], rgb_out: &mut [u16], width: usize) {
+  debug_assert!(x2rgb10.len() >= width * 4, "x2rgb10 row too short");
+  debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
+  for x in 0..width {
+    let i = x * 4;
+    let pix = u32::from_le_bytes([x2rgb10[i], x2rgb10[i + 1], x2rgb10[i + 2], x2rgb10[i + 3]]);
+    let dst = x * 3;
+    rgb_out[dst] = ((pix >> 20) & 0x3FF) as u16;
+    rgb_out[dst + 1] = ((pix >> 10) & 0x3FF) as u16;
+    rgb_out[dst + 2] = (pix & 0x3FF) as u16;
+  }
+}
+
+/// `X2BGR10` LE counterpart of [`x2rgb10_to_rgb_row`]. Channel
+/// positions are swapped: R is at bits 0–9 and B at 20–29 of the
+/// `u32`. Output is still `R, G, B`.
+///
+/// # Panics
+///
+/// Panics (any build profile) if `x2bgr10.len() < 4 * width` or
+/// `rgb_out.len() < 3 * width`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn x2bgr10_to_rgb_row(x2bgr10: &[u8], rgb_out: &mut [u8], width: usize) {
+  debug_assert!(x2bgr10.len() >= width * 4, "x2bgr10 row too short");
+  debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
+  for x in 0..width {
+    let i = x * 4;
+    let pix = u32::from_le_bytes([x2bgr10[i], x2bgr10[i + 1], x2bgr10[i + 2], x2bgr10[i + 3]]);
+    let r10 = pix & 0x3FF;
+    let g10 = (pix >> 10) & 0x3FF;
+    let b10 = (pix >> 20) & 0x3FF;
+    let dst = x * 3;
+    rgb_out[dst] = (r10 >> 2) as u8;
+    rgb_out[dst + 1] = (g10 >> 2) as u8;
+    rgb_out[dst + 2] = (b10 >> 2) as u8;
+  }
+}
+
+/// `X2BGR10` LE counterpart of [`x2rgb10_to_rgba_row`].
+///
+/// # Panics
+///
+/// Panics (any build profile) if `x2bgr10.len() < 4 * width` or
+/// `rgba_out.len() < 4 * width`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn x2bgr10_to_rgba_row(x2bgr10: &[u8], rgba_out: &mut [u8], width: usize) {
+  debug_assert!(x2bgr10.len() >= width * 4, "x2bgr10 row too short");
+  debug_assert!(rgba_out.len() >= width * 4, "rgba_out row too short");
+  for x in 0..width {
+    let i = x * 4;
+    let pix = u32::from_le_bytes([x2bgr10[i], x2bgr10[i + 1], x2bgr10[i + 2], x2bgr10[i + 3]]);
+    let r10 = pix & 0x3FF;
+    let g10 = (pix >> 10) & 0x3FF;
+    let b10 = (pix >> 20) & 0x3FF;
+    rgba_out[i] = (r10 >> 2) as u8;
+    rgba_out[i + 1] = (g10 >> 2) as u8;
+    rgba_out[i + 2] = (b10 >> 2) as u8;
+    rgba_out[i + 3] = 0xFF;
+  }
+}
+
+/// `X2BGR10` LE counterpart of [`x2rgb10_to_rgb_u16_row`].
+///
+/// # Panics
+///
+/// Panics (any build profile) if `x2bgr10.len() < 4 * width` or
+/// `rgb_out.len() < 3 * width`.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn x2bgr10_to_rgb_u16_row(x2bgr10: &[u8], rgb_out: &mut [u16], width: usize) {
+  debug_assert!(x2bgr10.len() >= width * 4, "x2bgr10 row too short");
+  debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
+  for x in 0..width {
+    let i = x * 4;
+    let pix = u32::from_le_bytes([x2bgr10[i], x2bgr10[i + 1], x2bgr10[i + 2], x2bgr10[i + 3]]);
+    let dst = x * 3;
+    rgb_out[dst] = (pix & 0x3FF) as u16;
+    rgb_out[dst + 1] = ((pix >> 10) & 0x3FF) as u16;
+    rgb_out[dst + 2] = ((pix >> 20) & 0x3FF) as u16;
+  }
+}
+
 // =============================================================================
 // Bayer demosaic + WB + CCM
 // =============================================================================

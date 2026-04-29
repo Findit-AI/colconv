@@ -5758,5 +5758,415 @@ pub(crate) unsafe fn bgrx_to_rgba_row(bgrx: &[u8], rgba_out: &mut [u8], width: u
   }
 }
 
+// ===== 10-bit packed RGB shuffles (Ship 9e) ==============================
+
+/// LE-explicit `u32x4` load from a packed-X2*10 byte stream.
+///
+/// `vld1q_u32` interprets the 16 source bytes as `u32` lanes in
+/// host-endian order. The X2RGB10 / X2BGR10 source contract is
+/// documented as **little-endian** (matching the scalar's
+/// `u32::from_le_bytes`), so on big-endian aarch64 (rare —
+/// `aarch64_be-*` custom targets) the host-endian load would put
+/// the bytes in reversed positions within each lane, corrupting
+/// every subsequent shift-and-mask. The `vrev32q_u8` on the
+/// big-endian branch byte-reverses each `u32` lane back to the
+/// LE byte ordering. On every standard aarch64 target
+/// (LE) the `cfg!` evaluates to `false` at compile time and the
+/// load reduces to a plain `vld1q_u32`.
+#[inline(always)]
+unsafe fn x2_load_le_u32x4(ptr: *const u8) -> uint32x4_t {
+  unsafe {
+    let raw = vld1q_u32(ptr as *const u32);
+    if cfg!(target_endian = "big") {
+      vreinterpretq_u32_u8(vrev32q_u8(vreinterpretq_u8_u32(raw)))
+    } else {
+      raw
+    }
+  }
+}
+
+/// Extracts a 10-bit channel as a `u8` (top 8 bits) from each of 4
+/// `u32` pixels in a `uint32x4_t`. Returns 4 `u16` lanes packed in a
+/// `uint16x4_t`. The dropped low 2 bits of each 10-bit value match
+/// the scalar `>> 2` truncation.
+#[inline(always)]
+unsafe fn x2_extract_10bit_u8_lane(pix: uint32x4_t, shift: i32) -> uint16x4_t {
+  unsafe {
+    // Shift down then narrow + saturate. Values are bounded to
+    // `[0, 255]` so saturation never triggers.
+    let shifted = match shift {
+      22 => vshrq_n_u32(pix, 22),
+      12 => vshrq_n_u32(pix, 12),
+      2 => vshrq_n_u32(pix, 2),
+      _ => unreachable!(),
+    };
+    let mask = vdupq_n_u32(0xFF);
+    vqmovn_u32(vandq_u32(shifted, mask))
+  }
+}
+
+/// Extracts a 10-bit channel into the low 10 bits of a `u16`. 4
+/// pixels in → 4 `u16` lanes out.
+#[inline(always)]
+unsafe fn x2_extract_10bit_u16_lane(pix: uint32x4_t, shift: i32) -> uint16x4_t {
+  unsafe {
+    let shifted = match shift {
+      20 => vshrq_n_u32(pix, 20),
+      10 => vshrq_n_u32(pix, 10),
+      0 => pix,
+      _ => unreachable!(),
+    };
+    let mask = vdupq_n_u32(0x3FF);
+    vqmovn_u32(vandq_u32(shifted, mask))
+  }
+}
+
+/// NEON X2RGB10→RGB. 16 pixels per iteration: load 4 `u32x4`
+/// vectors, extract R/G/B channels, narrow to `u8x16` per channel,
+/// `vst3q_u8`.
+///
+/// # Safety
+///
+/// 1. NEON must be available.
+/// 2. `x2rgb10.len() >= 4 * width`; `rgb_out.len() >= 3 * width`.
+/// 3. `x2rgb10` / `rgb_out` must not alias.
+#[inline]
+#[target_feature(enable = "neon")]
+pub(crate) unsafe fn x2rgb10_to_rgb_row(x2rgb10: &[u8], rgb_out: &mut [u8], width: usize) {
+  debug_assert!(x2rgb10.len() >= width * 4, "x2rgb10 row too short");
+  debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
+
+  unsafe {
+    let mut x = 0usize;
+    while x + 16 <= width {
+      let p0 = x2_load_le_u32x4(x2rgb10.as_ptr().add(x * 4));
+      let p1 = x2_load_le_u32x4(x2rgb10.as_ptr().add(x * 4 + 16));
+      let p2 = x2_load_le_u32x4(x2rgb10.as_ptr().add(x * 4 + 32));
+      let p3 = x2_load_le_u32x4(x2rgb10.as_ptr().add(x * 4 + 48));
+
+      // X2RGB10: R at >>22, G at >>12, B at >>2 (top 8 of 10-bit).
+      let r_lo = vcombine_u16(
+        x2_extract_10bit_u8_lane(p0, 22),
+        x2_extract_10bit_u8_lane(p1, 22),
+      );
+      let r_hi = vcombine_u16(
+        x2_extract_10bit_u8_lane(p2, 22),
+        x2_extract_10bit_u8_lane(p3, 22),
+      );
+      let g_lo = vcombine_u16(
+        x2_extract_10bit_u8_lane(p0, 12),
+        x2_extract_10bit_u8_lane(p1, 12),
+      );
+      let g_hi = vcombine_u16(
+        x2_extract_10bit_u8_lane(p2, 12),
+        x2_extract_10bit_u8_lane(p3, 12),
+      );
+      let b_lo = vcombine_u16(
+        x2_extract_10bit_u8_lane(p0, 2),
+        x2_extract_10bit_u8_lane(p1, 2),
+      );
+      let b_hi = vcombine_u16(
+        x2_extract_10bit_u8_lane(p2, 2),
+        x2_extract_10bit_u8_lane(p3, 2),
+      );
+
+      let r = vcombine_u8(vqmovn_u16(r_lo), vqmovn_u16(r_hi));
+      let g = vcombine_u8(vqmovn_u16(g_lo), vqmovn_u16(g_hi));
+      let b = vcombine_u8(vqmovn_u16(b_lo), vqmovn_u16(b_hi));
+
+      let rgb = uint8x16x3_t(r, g, b);
+      vst3q_u8(rgb_out.as_mut_ptr().add(x * 3), rgb);
+
+      x += 16;
+    }
+    if x < width {
+      scalar::x2rgb10_to_rgb_row(
+        &x2rgb10[x * 4..width * 4],
+        &mut rgb_out[x * 3..width * 3],
+        width - x,
+      );
+    }
+  }
+}
+
+/// NEON X2RGB10→RGBA. 16 pixels per iteration; alpha forced to
+/// `0xFF` via `vdupq_n_u8`.
+///
+/// # Safety
+///
+/// 1. NEON must be available.
+/// 2. `x2rgb10.len() >= 4 * width`; `rgba_out.len() >= 4 * width`.
+/// 3. `x2rgb10` / `rgba_out` must not alias.
+#[inline]
+#[target_feature(enable = "neon")]
+pub(crate) unsafe fn x2rgb10_to_rgba_row(x2rgb10: &[u8], rgba_out: &mut [u8], width: usize) {
+  debug_assert!(x2rgb10.len() >= width * 4, "x2rgb10 row too short");
+  debug_assert!(rgba_out.len() >= width * 4, "rgba_out row too short");
+
+  unsafe {
+    let alpha = vdupq_n_u8(0xFF);
+    let mut x = 0usize;
+    while x + 16 <= width {
+      let p0 = x2_load_le_u32x4(x2rgb10.as_ptr().add(x * 4));
+      let p1 = x2_load_le_u32x4(x2rgb10.as_ptr().add(x * 4 + 16));
+      let p2 = x2_load_le_u32x4(x2rgb10.as_ptr().add(x * 4 + 32));
+      let p3 = x2_load_le_u32x4(x2rgb10.as_ptr().add(x * 4 + 48));
+
+      let r_lo = vcombine_u16(
+        x2_extract_10bit_u8_lane(p0, 22),
+        x2_extract_10bit_u8_lane(p1, 22),
+      );
+      let r_hi = vcombine_u16(
+        x2_extract_10bit_u8_lane(p2, 22),
+        x2_extract_10bit_u8_lane(p3, 22),
+      );
+      let g_lo = vcombine_u16(
+        x2_extract_10bit_u8_lane(p0, 12),
+        x2_extract_10bit_u8_lane(p1, 12),
+      );
+      let g_hi = vcombine_u16(
+        x2_extract_10bit_u8_lane(p2, 12),
+        x2_extract_10bit_u8_lane(p3, 12),
+      );
+      let b_lo = vcombine_u16(
+        x2_extract_10bit_u8_lane(p0, 2),
+        x2_extract_10bit_u8_lane(p1, 2),
+      );
+      let b_hi = vcombine_u16(
+        x2_extract_10bit_u8_lane(p2, 2),
+        x2_extract_10bit_u8_lane(p3, 2),
+      );
+
+      let r = vcombine_u8(vqmovn_u16(r_lo), vqmovn_u16(r_hi));
+      let g = vcombine_u8(vqmovn_u16(g_lo), vqmovn_u16(g_hi));
+      let b = vcombine_u8(vqmovn_u16(b_lo), vqmovn_u16(b_hi));
+
+      let rgba = uint8x16x4_t(r, g, b, alpha);
+      vst4q_u8(rgba_out.as_mut_ptr().add(x * 4), rgba);
+
+      x += 16;
+    }
+    if x < width {
+      scalar::x2rgb10_to_rgba_row(
+        &x2rgb10[x * 4..width * 4],
+        &mut rgba_out[x * 4..width * 4],
+        width - x,
+      );
+    }
+  }
+}
+
+/// NEON X2RGB10→u16 RGB native (10-bit, low-bit aligned). 8 pixels
+/// per iteration.
+///
+/// # Safety
+///
+/// 1. NEON must be available.
+/// 2. `x2rgb10.len() >= 4 * width`; `rgb_out.len() >= 3 * width`.
+/// 3. `x2rgb10` / `rgb_out` must not alias.
+#[inline]
+#[target_feature(enable = "neon")]
+pub(crate) unsafe fn x2rgb10_to_rgb_u16_row(x2rgb10: &[u8], rgb_out: &mut [u16], width: usize) {
+  debug_assert!(x2rgb10.len() >= width * 4, "x2rgb10 row too short");
+  debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
+
+  unsafe {
+    let mut x = 0usize;
+    while x + 8 <= width {
+      let p0 = x2_load_le_u32x4(x2rgb10.as_ptr().add(x * 4));
+      let p1 = x2_load_le_u32x4(x2rgb10.as_ptr().add(x * 4 + 16));
+
+      // Channel low bit positions: R at 20, G at 10, B at 0.
+      let r = vcombine_u16(
+        x2_extract_10bit_u16_lane(p0, 20),
+        x2_extract_10bit_u16_lane(p1, 20),
+      );
+      let g = vcombine_u16(
+        x2_extract_10bit_u16_lane(p0, 10),
+        x2_extract_10bit_u16_lane(p1, 10),
+      );
+      let b = vcombine_u16(
+        x2_extract_10bit_u16_lane(p0, 0),
+        x2_extract_10bit_u16_lane(p1, 0),
+      );
+
+      let rgb = uint16x8x3_t(r, g, b);
+      vst3q_u16(rgb_out.as_mut_ptr().add(x * 3), rgb);
+
+      x += 8;
+    }
+    if x < width {
+      scalar::x2rgb10_to_rgb_u16_row(
+        &x2rgb10[x * 4..width * 4],
+        &mut rgb_out[x * 3..width * 3],
+        width - x,
+      );
+    }
+  }
+}
+
+/// NEON X2BGR10→RGB. 16 pixels per iteration; same shape as
+/// [`x2rgb10_to_rgb_row`] but channel shifts swapped (R at >>2,
+/// B at >>22).
+#[inline]
+#[target_feature(enable = "neon")]
+pub(crate) unsafe fn x2bgr10_to_rgb_row(x2bgr10: &[u8], rgb_out: &mut [u8], width: usize) {
+  debug_assert!(x2bgr10.len() >= width * 4, "x2bgr10 row too short");
+  debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
+
+  unsafe {
+    let mut x = 0usize;
+    while x + 16 <= width {
+      let p0 = x2_load_le_u32x4(x2bgr10.as_ptr().add(x * 4));
+      let p1 = x2_load_le_u32x4(x2bgr10.as_ptr().add(x * 4 + 16));
+      let p2 = x2_load_le_u32x4(x2bgr10.as_ptr().add(x * 4 + 32));
+      let p3 = x2_load_le_u32x4(x2bgr10.as_ptr().add(x * 4 + 48));
+
+      let r_lo = vcombine_u16(
+        x2_extract_10bit_u8_lane(p0, 2),
+        x2_extract_10bit_u8_lane(p1, 2),
+      );
+      let r_hi = vcombine_u16(
+        x2_extract_10bit_u8_lane(p2, 2),
+        x2_extract_10bit_u8_lane(p3, 2),
+      );
+      let g_lo = vcombine_u16(
+        x2_extract_10bit_u8_lane(p0, 12),
+        x2_extract_10bit_u8_lane(p1, 12),
+      );
+      let g_hi = vcombine_u16(
+        x2_extract_10bit_u8_lane(p2, 12),
+        x2_extract_10bit_u8_lane(p3, 12),
+      );
+      let b_lo = vcombine_u16(
+        x2_extract_10bit_u8_lane(p0, 22),
+        x2_extract_10bit_u8_lane(p1, 22),
+      );
+      let b_hi = vcombine_u16(
+        x2_extract_10bit_u8_lane(p2, 22),
+        x2_extract_10bit_u8_lane(p3, 22),
+      );
+
+      let r = vcombine_u8(vqmovn_u16(r_lo), vqmovn_u16(r_hi));
+      let g = vcombine_u8(vqmovn_u16(g_lo), vqmovn_u16(g_hi));
+      let b = vcombine_u8(vqmovn_u16(b_lo), vqmovn_u16(b_hi));
+
+      let rgb = uint8x16x3_t(r, g, b);
+      vst3q_u8(rgb_out.as_mut_ptr().add(x * 3), rgb);
+
+      x += 16;
+    }
+    if x < width {
+      scalar::x2bgr10_to_rgb_row(
+        &x2bgr10[x * 4..width * 4],
+        &mut rgb_out[x * 3..width * 3],
+        width - x,
+      );
+    }
+  }
+}
+
+/// NEON X2BGR10→RGBA. 16 pixels per iteration.
+#[inline]
+#[target_feature(enable = "neon")]
+pub(crate) unsafe fn x2bgr10_to_rgba_row(x2bgr10: &[u8], rgba_out: &mut [u8], width: usize) {
+  debug_assert!(x2bgr10.len() >= width * 4, "x2bgr10 row too short");
+  debug_assert!(rgba_out.len() >= width * 4, "rgba_out row too short");
+
+  unsafe {
+    let alpha = vdupq_n_u8(0xFF);
+    let mut x = 0usize;
+    while x + 16 <= width {
+      let p0 = x2_load_le_u32x4(x2bgr10.as_ptr().add(x * 4));
+      let p1 = x2_load_le_u32x4(x2bgr10.as_ptr().add(x * 4 + 16));
+      let p2 = x2_load_le_u32x4(x2bgr10.as_ptr().add(x * 4 + 32));
+      let p3 = x2_load_le_u32x4(x2bgr10.as_ptr().add(x * 4 + 48));
+
+      let r_lo = vcombine_u16(
+        x2_extract_10bit_u8_lane(p0, 2),
+        x2_extract_10bit_u8_lane(p1, 2),
+      );
+      let r_hi = vcombine_u16(
+        x2_extract_10bit_u8_lane(p2, 2),
+        x2_extract_10bit_u8_lane(p3, 2),
+      );
+      let g_lo = vcombine_u16(
+        x2_extract_10bit_u8_lane(p0, 12),
+        x2_extract_10bit_u8_lane(p1, 12),
+      );
+      let g_hi = vcombine_u16(
+        x2_extract_10bit_u8_lane(p2, 12),
+        x2_extract_10bit_u8_lane(p3, 12),
+      );
+      let b_lo = vcombine_u16(
+        x2_extract_10bit_u8_lane(p0, 22),
+        x2_extract_10bit_u8_lane(p1, 22),
+      );
+      let b_hi = vcombine_u16(
+        x2_extract_10bit_u8_lane(p2, 22),
+        x2_extract_10bit_u8_lane(p3, 22),
+      );
+
+      let r = vcombine_u8(vqmovn_u16(r_lo), vqmovn_u16(r_hi));
+      let g = vcombine_u8(vqmovn_u16(g_lo), vqmovn_u16(g_hi));
+      let b = vcombine_u8(vqmovn_u16(b_lo), vqmovn_u16(b_hi));
+
+      let rgba = uint8x16x4_t(r, g, b, alpha);
+      vst4q_u8(rgba_out.as_mut_ptr().add(x * 4), rgba);
+
+      x += 16;
+    }
+    if x < width {
+      scalar::x2bgr10_to_rgba_row(
+        &x2bgr10[x * 4..width * 4],
+        &mut rgba_out[x * 4..width * 4],
+        width - x,
+      );
+    }
+  }
+}
+
+/// NEON X2BGR10→u16 RGB native. 8 pixels per iteration.
+#[inline]
+#[target_feature(enable = "neon")]
+pub(crate) unsafe fn x2bgr10_to_rgb_u16_row(x2bgr10: &[u8], rgb_out: &mut [u16], width: usize) {
+  debug_assert!(x2bgr10.len() >= width * 4, "x2bgr10 row too short");
+  debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
+
+  unsafe {
+    let mut x = 0usize;
+    while x + 8 <= width {
+      let p0 = x2_load_le_u32x4(x2bgr10.as_ptr().add(x * 4));
+      let p1 = x2_load_le_u32x4(x2bgr10.as_ptr().add(x * 4 + 16));
+
+      // X2BGR10: R at low 10 bits, G at 10..19, B at 20..29.
+      let r = vcombine_u16(
+        x2_extract_10bit_u16_lane(p0, 0),
+        x2_extract_10bit_u16_lane(p1, 0),
+      );
+      let g = vcombine_u16(
+        x2_extract_10bit_u16_lane(p0, 10),
+        x2_extract_10bit_u16_lane(p1, 10),
+      );
+      let b = vcombine_u16(
+        x2_extract_10bit_u16_lane(p0, 20),
+        x2_extract_10bit_u16_lane(p1, 20),
+      );
+
+      let rgb = uint16x8x3_t(r, g, b);
+      vst3q_u16(rgb_out.as_mut_ptr().add(x * 3), rgb);
+
+      x += 8;
+    }
+    if x < width {
+      scalar::x2bgr10_to_rgb_u16_row(
+        &x2bgr10[x * 4..width * 4],
+        &mut rgb_out[x * 3..width * 3],
+        width - x,
+      );
+    }
+  }
+}
+
 #[cfg(all(test, feature = "std"))]
 mod tests;

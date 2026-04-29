@@ -58,12 +58,26 @@
 //!   [`Xbgr`](crate::yuv::Xbgr) / [`Bgrx`](crate::yuv::Bgrx)
 //!   (4-byte packed RGB with one ignored padding byte at the leading
 //!   or trailing position).
-//!   The source row is already RGB — `with_rgb` is an identity copy /
-//!   channel swap / drop-alpha-or-padding, `with_rgba` is a memcpy /
-//!   channel reorder (alpha passed through for the alpha-bearing
-//!   4-byte sources, forced to `0xFF` for the 3-byte sources and the
+//!   The source row is already 8‑bit RGB at the byte level —
+//!   `with_rgb` is an identity copy / channel swap /
+//!   drop-alpha-or-padding, `with_rgba` is a memcpy / channel
+//!   reorder (alpha passed through for the alpha-bearing 4-byte
+//!   sources, forced to `0xFF` for the 3-byte sources and the
 //!   padding-byte family), `with_luma` derives Y' from R/G/B,
 //!   `with_hsv` reuses the existing kernel.
+//! - **10‑bit packed RGB sources** (Tier 6 — Ship 9e):
+//!   [`X2Rgb10`](crate::yuv::X2Rgb10) and
+//!   [`X2Bgr10`](crate::yuv::X2Bgr10). Each pixel is a 32-bit LE word
+//!   with `(MSB) 2X | 10c2 | 10c1 | 10c0 (LSB)` (R/G/B for X2RGB10,
+//!   B/G/R for X2BGR10). Unlike the 8‑bit byte-shuffle family above,
+//!   the source is **not** byte-aligned RGB — every output path
+//!   starts with bit-level extraction of the three 10‑bit channels:
+//!   `with_rgb` extracts and down-shifts each channel from 10→8 bits,
+//!   `with_rgba` does the same and forces alpha to `0xFF` (the 2‑bit
+//!   field is padding, not real alpha), `with_rgb_u16` preserves
+//!   native 10‑bit precision (low-bit aligned in `u16`, value range
+//!   `[0, 1023]`), and `with_luma` / `with_hsv` reuse the staged u8
+//!   RGB scratch path.
 //!
 //! High‑bit‑depth source impls expose both `with_rgb` (u8 output) and
 //! `with_rgb_u16` (native‑depth u16 output). Calling `with_rgb_u16` on
@@ -564,6 +578,18 @@ pub enum RowSlice {
   /// + reversed RGB order vs [`RgbxPacked`](Self::RgbxPacked).
   #[display("BGRX packed")]
   BgrxPacked,
+  /// Packed `X2RGB10` LE row of an
+  /// [`X2Rgb10`](crate::yuv::X2Rgb10) source. `4 * width` `u8` bytes
+  /// (one little-endian `u32` per pixel with `(MSB) 2X | 10R | 10G |
+  /// 10B (LSB)` packing).
+  #[display("X2RGB10 packed")]
+  X2Rgb10Packed,
+  /// Packed `X2BGR10` LE row of an
+  /// [`X2Bgr10`](crate::yuv::X2Bgr10) source. `4 * width` `u8` bytes
+  /// — channel positions reversed relative to
+  /// [`X2Rgb10Packed`](Self::X2Rgb10Packed).
+  #[display("X2BGR10 packed")]
+  X2Bgr10Packed,
 }
 
 /// A sink that writes any subset of `{RGB, Luma, HSV}` into
@@ -1361,6 +1387,7 @@ pub(super) fn rgb_row_to_luma_row(rgb: &[u8], luma: &mut [u8], coeffs_q8: (u32, 
 // and `PixelSink` impls live in the child modules below.
 
 mod bayer;
+mod packed_rgb_10bit;
 mod packed_rgb_8bit;
 mod planar_8bit;
 mod semi_planar_8bit;

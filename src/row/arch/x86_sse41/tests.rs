@@ -3723,3 +3723,125 @@ fn sse41_bgrx_to_rgba_matches_scalar() {
     );
   }
 }
+
+// ---- Ship 9e 10-bit packed RGB ---------------------------------------
+
+#[test]
+fn sse41_x2rgb10_to_rgb_matches_scalar() {
+  if !std::arch::is_x86_feature_detected!("sse4.1") {
+    return;
+  }
+  for w in [1usize, 7, 15, 16, 17, 31, 32, 33, 1920, 1921] {
+    let input = pseudo_random_rgba(w);
+    let mut out_scalar = std::vec![0u8; w * 3];
+    let mut out_sse = std::vec![0u8; w * 3];
+    scalar::x2rgb10_to_rgb_row(&input, &mut out_scalar, w);
+    unsafe {
+      x2rgb10_to_rgb_row(&input, &mut out_sse, w);
+    }
+    assert_eq!(
+      out_scalar, out_sse,
+      "SSE4.1 x2rgb10_to_rgb diverges (width={w})"
+    );
+  }
+}
+
+#[test]
+fn sse41_x2rgb10_to_rgba_matches_scalar() {
+  if !std::arch::is_x86_feature_detected!("sse4.1") {
+    return;
+  }
+  for w in [1usize, 7, 15, 16, 17, 31, 32, 33, 1920, 1921] {
+    let input = pseudo_random_rgba(w);
+    let mut out_scalar = std::vec![0u8; w * 4];
+    let mut out_sse = std::vec![0u8; w * 4];
+    scalar::x2rgb10_to_rgba_row(&input, &mut out_scalar, w);
+    unsafe {
+      x2rgb10_to_rgba_row(&input, &mut out_sse, w);
+    }
+    assert_eq!(
+      out_scalar, out_sse,
+      "SSE4.1 x2rgb10_to_rgba diverges (width={w})"
+    );
+  }
+}
+
+#[test]
+fn sse41_x2rgb10_to_rgb_u16_matches_scalar() {
+  if !std::arch::is_x86_feature_detected!("sse4.1") {
+    return;
+  }
+  for w in [1usize, 7, 8, 9, 15, 16, 17, 31, 32, 33, 1920, 1921] {
+    let input = pseudo_random_rgba(w);
+    let mut out_scalar = std::vec![0u16; w * 3];
+    let mut out_sse = std::vec![0u16; w * 3];
+    scalar::x2rgb10_to_rgb_u16_row(&input, &mut out_scalar, w);
+    unsafe {
+      x2rgb10_to_rgb_u16_row(&input, &mut out_sse, w);
+    }
+    assert_eq!(
+      out_scalar, out_sse,
+      "SSE4.1 x2rgb10_to_rgb_u16 diverges (width={w})"
+    );
+  }
+}
+
+#[test]
+fn sse41_x2bgr10_to_rgb_matches_scalar() {
+  if !std::arch::is_x86_feature_detected!("sse4.1") {
+    return;
+  }
+  for w in [1usize, 7, 15, 16, 17, 31, 32, 33, 1920, 1921] {
+    let input = pseudo_random_rgba(w);
+    let mut out_scalar = std::vec![0u8; w * 3];
+    let mut out_sse = std::vec![0u8; w * 3];
+    scalar::x2bgr10_to_rgb_row(&input, &mut out_scalar, w);
+    unsafe {
+      x2bgr10_to_rgb_row(&input, &mut out_sse, w);
+    }
+    assert_eq!(
+      out_scalar, out_sse,
+      "SSE4.1 x2bgr10_to_rgb diverges (width={w})"
+    );
+  }
+}
+
+#[test]
+fn sse41_x2bgr10_to_rgba_matches_scalar() {
+  if !std::arch::is_x86_feature_detected!("sse4.1") {
+    return;
+  }
+  for w in [1usize, 7, 15, 16, 17, 31, 32, 33, 1920, 1921] {
+    let input = pseudo_random_rgba(w);
+    let mut out_scalar = std::vec![0u8; w * 4];
+    let mut out_sse = std::vec![0u8; w * 4];
+    scalar::x2bgr10_to_rgba_row(&input, &mut out_scalar, w);
+    unsafe {
+      x2bgr10_to_rgba_row(&input, &mut out_sse, w);
+    }
+    assert_eq!(
+      out_scalar, out_sse,
+      "SSE4.1 x2bgr10_to_rgba diverges (width={w})"
+    );
+  }
+}
+
+#[test]
+fn sse41_x2bgr10_to_rgb_u16_matches_scalar() {
+  if !std::arch::is_x86_feature_detected!("sse4.1") {
+    return;
+  }
+  for w in [1usize, 7, 8, 9, 15, 16, 17, 31, 32, 33, 1920, 1921] {
+    let input = pseudo_random_rgba(w);
+    let mut out_scalar = std::vec![0u16; w * 3];
+    let mut out_sse = std::vec![0u16; w * 3];
+    scalar::x2bgr10_to_rgb_u16_row(&input, &mut out_scalar, w);
+    unsafe {
+      x2bgr10_to_rgb_u16_row(&input, &mut out_sse, w);
+    }
+    assert_eq!(
+      out_scalar, out_sse,
+      "SSE4.1 x2bgr10_to_rgb_u16 diverges (width={w})"
+    );
+  }
+}
