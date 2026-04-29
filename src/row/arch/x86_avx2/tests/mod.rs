@@ -2,6 +2,7 @@ mod high_bit_4_2_0;
 mod high_bit_4_4_4_and_pn;
 mod packed_yuv_8bit;
 mod planar_8bit_and_nv;
+mod v210;
 mod yuva;
 
 // ---- Shared test helpers (used across submodule tests) -------------
