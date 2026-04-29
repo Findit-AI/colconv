@@ -19,8 +19,8 @@ mod packed_rgb_8bit;
 mod yuva;
 
 pub use bayer::*;
-pub use packed_rgb_10bit::*;
 pub use packed_rgb_8bit::*;
+pub use packed_rgb_10bit::*;
 pub use yuva::*;
 
 /// A validated YUV 4:2:0 planar frame.
@@ -4104,7 +4104,6 @@ pub type Yuv444p14Frame<'a> = Yuv444pFrame16<'a, 14>;
 /// the parallel i64 kernel family (see `yuv_444p16_to_rgb_*`).
 pub type Yuv444p16Frame<'a> = Yuv444pFrame16<'a, 16>;
 
-
 /// Errors returned by [`Yuv440pFrame16::try_new`] and
 /// [`Yuv440pFrame16::try_new_checked`]. Transparent alias of
 /// [`Yuv420pFrame16Error`] — same `UnsupportedBits` /
@@ -4459,9 +4458,6 @@ pub enum Yuv420pFrameError {
     rows: u32,
   },
 }
-
-
-
 
 #[cfg(all(test, feature = "std"))]
 #[cfg(any(feature = "std", feature = "alloc"))]

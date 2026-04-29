@@ -465,4 +465,3 @@ fn bgrx_frame_new_panics_on_invalid() {
   let buf = std::vec![0u8; 10];
   let _ = BgrxFrame::new(&buf, 16, 4, 64);
 }
-

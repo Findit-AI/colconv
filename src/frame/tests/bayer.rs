@@ -162,4 +162,3 @@ fn bayer16_new_panics_on_invalid() {
   let data = std::vec![0u16; 10];
   let _ = Bayer12Frame::new(&data, 16, 8, 16);
 }
-

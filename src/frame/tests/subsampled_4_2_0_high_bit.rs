@@ -535,4 +535,3 @@ fn p012_try_new_checked_accepts_low_packed_flat_content_by_design() {
   // corruption. The type system, not `try_new_checked`, must
   // guarantee provenance for 12-bit.
 }
-

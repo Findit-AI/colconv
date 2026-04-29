@@ -113,4 +113,3 @@ fn yuv422p16_try_new_checked_accepts_full_u16_range() {
   Yuv422p16Frame::try_new_checked(&y, &u, &v, 16, 8, 16, 8, 8)
     .expect("every u16 value is in range at 16 bits");
 }
-

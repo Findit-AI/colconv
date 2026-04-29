@@ -438,4 +438,3 @@ fn nv21_try_new_rejects_geometry_overflow() {
   let e = Nv21Frame::try_new(&y, &vu, big, big, big, big).unwrap_err();
   assert!(matches!(e, Nv21FrameError::GeometryOverflow { .. }));
 }
-

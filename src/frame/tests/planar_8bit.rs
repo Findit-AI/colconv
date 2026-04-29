@@ -88,4 +88,3 @@ fn new_panics_on_invalid() {
   let v = std::vec![128u8; 8 * 4];
   let _ = Yuv420pFrame::new(&y, &u, &v, 16, 8, 16, 8, 8);
 }
-

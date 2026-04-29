@@ -198,4 +198,3 @@ fn yuv440p12_try_new_checked_rejects_above_4095() {
     }
   ));
 }
-
