@@ -19,7 +19,7 @@ use crate::row::simd128_available;
 use crate::row::{avx2_available, avx512_available, sse41_available};
 use crate::{
   ColorMatrix,
-  row::{rgb_row_bytes, rgba_row_bytes, scalar},
+  row::{packed_yuv422_row_bytes, rgb_row_bytes, rgba_row_bytes, scalar},
 };
 
 /// Converts one row of YUYV422 to packed RGB. See
@@ -35,7 +35,10 @@ pub fn yuyv422_to_rgb_row(
   use_simd: bool,
 ) {
   assert_eq!(width & 1, 0, "packed YUV 4:2:2 requires even width");
-  assert!(packed.len() >= width * 2, "packed row too short");
+  assert!(
+    packed.len() >= packed_yuv422_row_bytes(width),
+    "packed row too short"
+  );
   assert!(
     rgb_out.len() >= rgb_row_bytes(width),
     "rgb_out row too short"
@@ -92,7 +95,10 @@ pub fn yuyv422_to_rgba_row(
   use_simd: bool,
 ) {
   assert_eq!(width & 1, 0, "packed YUV 4:2:2 requires even width");
-  assert!(packed.len() >= width * 2, "packed row too short");
+  assert!(
+    packed.len() >= packed_yuv422_row_bytes(width),
+    "packed row too short"
+  );
   assert!(
     rgba_out.len() >= rgba_row_bytes(width),
     "rgba_out row too short"
@@ -149,7 +155,10 @@ pub fn uyvy422_to_rgb_row(
   use_simd: bool,
 ) {
   assert_eq!(width & 1, 0, "packed YUV 4:2:2 requires even width");
-  assert!(packed.len() >= width * 2, "packed row too short");
+  assert!(
+    packed.len() >= packed_yuv422_row_bytes(width),
+    "packed row too short"
+  );
   assert!(
     rgb_out.len() >= rgb_row_bytes(width),
     "rgb_out row too short"
@@ -206,7 +215,10 @@ pub fn uyvy422_to_rgba_row(
   use_simd: bool,
 ) {
   assert_eq!(width & 1, 0, "packed YUV 4:2:2 requires even width");
-  assert!(packed.len() >= width * 2, "packed row too short");
+  assert!(
+    packed.len() >= packed_yuv422_row_bytes(width),
+    "packed row too short"
+  );
   assert!(
     rgba_out.len() >= rgba_row_bytes(width),
     "rgba_out row too short"
@@ -263,7 +275,10 @@ pub fn yvyu422_to_rgb_row(
   use_simd: bool,
 ) {
   assert_eq!(width & 1, 0, "packed YUV 4:2:2 requires even width");
-  assert!(packed.len() >= width * 2, "packed row too short");
+  assert!(
+    packed.len() >= packed_yuv422_row_bytes(width),
+    "packed row too short"
+  );
   assert!(
     rgb_out.len() >= rgb_row_bytes(width),
     "rgb_out row too short"
@@ -320,7 +335,10 @@ pub fn yvyu422_to_rgba_row(
   use_simd: bool,
 ) {
   assert_eq!(width & 1, 0, "packed YUV 4:2:2 requires even width");
-  assert!(packed.len() >= width * 2, "packed row too short");
+  assert!(
+    packed.len() >= packed_yuv422_row_bytes(width),
+    "packed row too short"
+  );
   assert!(
     rgba_out.len() >= rgba_row_bytes(width),
     "rgba_out row too short"
@@ -370,7 +388,10 @@ pub fn yvyu422_to_rgba_row(
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub fn yuyv422_to_luma_row(packed: &[u8], luma_out: &mut [u8], width: usize, use_simd: bool) {
   assert_eq!(width & 1, 0, "packed YUV 4:2:2 requires even width");
-  assert!(packed.len() >= width * 2, "packed row too short");
+  assert!(
+    packed.len() >= packed_yuv422_row_bytes(width),
+    "packed row too short"
+  );
   assert!(luma_out.len() >= width, "luma_out row too short");
 
   if use_simd {
@@ -417,7 +438,10 @@ pub fn yuyv422_to_luma_row(packed: &[u8], luma_out: &mut [u8], width: usize, use
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub fn uyvy422_to_luma_row(packed: &[u8], luma_out: &mut [u8], width: usize, use_simd: bool) {
   assert_eq!(width & 1, 0, "packed YUV 4:2:2 requires even width");
-  assert!(packed.len() >= width * 2, "packed row too short");
+  assert!(
+    packed.len() >= packed_yuv422_row_bytes(width),
+    "packed row too short"
+  );
   assert!(luma_out.len() >= width, "luma_out row too short");
 
   if use_simd {
@@ -464,7 +488,10 @@ pub fn uyvy422_to_luma_row(packed: &[u8], luma_out: &mut [u8], width: usize, use
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub fn yvyu422_to_luma_row(packed: &[u8], luma_out: &mut [u8], width: usize, use_simd: bool) {
   assert_eq!(width & 1, 0, "packed YUV 4:2:2 requires even width");
-  assert!(packed.len() >= width * 2, "packed row too short");
+  assert!(
+    packed.len() >= packed_yuv422_row_bytes(width),
+    "packed row too short"
+  );
   assert!(luma_out.len() >= width, "luma_out row too short");
 
   if use_simd {
