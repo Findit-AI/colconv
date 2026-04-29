@@ -1,7 +1,4 @@
-use super::{
-  super::*, high_bit_plane_avx512, interleave_uv_avx512, p_n_packed_plane, p010_uv_interleave,
-  p16_plane_avx512, planar_n_plane,
-};
+use super::{super::*, p_n_packed_plane, p010_uv_interleave, p16_plane_avx512, planar_n_plane};
 
 // ---- rgb_to_hsv_row equivalence --------------------------------------
 

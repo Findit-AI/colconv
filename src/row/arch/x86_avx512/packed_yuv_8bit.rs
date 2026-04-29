@@ -2,6 +2,31 @@ use core::arch::x86_64::*;
 
 use super::*;
 
+/// 64-byte byte-shuffle mask for `_mm512_shuffle_epi8`: per 128-bit
+/// lane, gathers Y bytes from even positions into the low 8 lanes
+/// and chroma bytes from odd positions into the high 8 lanes.
+/// Replicated across all 4 × 128-bit lanes of a `__m512i`.
+///
+/// Loaded via `_mm512_loadu_si512` because Rust's stdarch ships
+/// `_mm512_setr_epi64` but not `_mm512_setr_epi8`.
+#[rustfmt::skip]
+static SPLIT_MASK_Y_LSB: [i8; 64] = [
+  0, 2, 4, 6, 8, 10, 12, 14, 1, 3, 5, 7, 9, 11, 13, 15,
+  0, 2, 4, 6, 8, 10, 12, 14, 1, 3, 5, 7, 9, 11, 13, 15,
+  0, 2, 4, 6, 8, 10, 12, 14, 1, 3, 5, 7, 9, 11, 13, 15,
+  0, 2, 4, 6, 8, 10, 12, 14, 1, 3, 5, 7, 9, 11, 13, 15,
+];
+
+/// Mirror of [`SPLIT_MASK_Y_LSB`] for the `Y_LSB = false` (UYVY)
+/// layout — Y bytes in odd positions, chroma in even.
+#[rustfmt::skip]
+static SPLIT_MASK_Y_MSB: [i8; 64] = [
+  1, 3, 5, 7, 9, 11, 13, 15, 0, 2, 4, 6, 8, 10, 12, 14,
+  1, 3, 5, 7, 9, 11, 13, 15, 0, 2, 4, 6, 8, 10, 12, 14,
+  1, 3, 5, 7, 9, 11, 13, 15, 0, 2, 4, 6, 8, 10, 12, 14,
+  1, 3, 5, 7, 9, 11, 13, 15, 0, 2, 4, 6, 8, 10, 12, 14,
+];
+
 /// AVX‑512 YUYV422 → packed RGB. Semantics match
 /// [`scalar::yuyv422_to_rgb_row`] byte‑identically.
 ///
@@ -175,18 +200,12 @@ unsafe fn yuv422_packed_to_rgb_or_rgba_row<
 
     // Per-lane split mask (replicated across all 4 × 128-bit lanes):
     // gather Y bytes in low 8 lanes, chroma bytes in high 8 lanes.
+    // Loaded from a static `[i8; 64]` because stdarch ships
+    // `_mm512_setr_epi64` but not `_mm512_setr_epi8`.
     let split_mask = if Y_LSB {
-      _mm512_setr_epi8(
-        0, 2, 4, 6, 8, 10, 12, 14, 1, 3, 5, 7, 9, 11, 13, 15, 0, 2, 4, 6, 8, 10, 12, 14, 1, 3, 5,
-        7, 9, 11, 13, 15, 0, 2, 4, 6, 8, 10, 12, 14, 1, 3, 5, 7, 9, 11, 13, 15, 0, 2, 4, 6, 8, 10,
-        12, 14, 1, 3, 5, 7, 9, 11, 13, 15,
-      )
+      _mm512_loadu_si512(SPLIT_MASK_Y_LSB.as_ptr().cast())
     } else {
-      _mm512_setr_epi8(
-        1, 3, 5, 7, 9, 11, 13, 15, 0, 2, 4, 6, 8, 10, 12, 14, 1, 3, 5, 7, 9, 11, 13, 15, 0, 2, 4,
-        6, 8, 10, 12, 14, 1, 3, 5, 7, 9, 11, 13, 15, 0, 2, 4, 6, 8, 10, 12, 14, 1, 3, 5, 7, 9, 11,
-        13, 15, 0, 2, 4, 6, 8, 10, 12, 14,
-      )
+      _mm512_loadu_si512(SPLIT_MASK_Y_MSB.as_ptr().cast())
     };
 
     // Cross-vector merge indices (for `permutex2var_epi64` selecting
@@ -194,13 +213,9 @@ unsafe fn yuv422_packed_to_rgb_or_rgba_row<
     let merge_low = _mm512_setr_epi64(0, 1, 2, 3, 8, 9, 10, 11);
     let merge_high = _mm512_setr_epi64(4, 5, 6, 7, 12, 13, 14, 15);
 
-    // Chroma split mask (same as split_mask in shape but applied to a
-    // 64-byte chroma vector — replicate `[0,2,..,14, 1,3,..,15]`).
-    let chroma_split = _mm512_setr_epi8(
-      0, 2, 4, 6, 8, 10, 12, 14, 1, 3, 5, 7, 9, 11, 13, 15, 0, 2, 4, 6, 8, 10, 12, 14, 1, 3, 5, 7,
-      9, 11, 13, 15, 0, 2, 4, 6, 8, 10, 12, 14, 1, 3, 5, 7, 9, 11, 13, 15, 0, 2, 4, 6, 8, 10, 12,
-      14, 1, 3, 5, 7, 9, 11, 13, 15,
-    );
+    // Chroma split mask — identical to the `Y_LSB = true` split mask
+    // applied to a 64-byte chroma vector.
+    let chroma_split = _mm512_loadu_si512(SPLIT_MASK_Y_LSB.as_ptr().cast());
 
     let mut x = 0usize;
     while x + 64 <= width {
@@ -370,17 +385,9 @@ unsafe fn yuv422_packed_to_luma_row<const Y_LSB: bool>(
     let pack_fixup = _mm512_setr_epi64(0, 2, 4, 6, 1, 3, 5, 7);
     let merge_low = _mm512_setr_epi64(0, 1, 2, 3, 8, 9, 10, 11);
     let split_mask = if Y_LSB {
-      _mm512_setr_epi8(
-        0, 2, 4, 6, 8, 10, 12, 14, 1, 3, 5, 7, 9, 11, 13, 15, 0, 2, 4, 6, 8, 10, 12, 14, 1, 3, 5,
-        7, 9, 11, 13, 15, 0, 2, 4, 6, 8, 10, 12, 14, 1, 3, 5, 7, 9, 11, 13, 15, 0, 2, 4, 6, 8, 10,
-        12, 14, 1, 3, 5, 7, 9, 11, 13, 15,
-      )
+      _mm512_loadu_si512(SPLIT_MASK_Y_LSB.as_ptr().cast())
     } else {
-      _mm512_setr_epi8(
-        1, 3, 5, 7, 9, 11, 13, 15, 0, 2, 4, 6, 8, 10, 12, 14, 1, 3, 5, 7, 9, 11, 13, 15, 0, 2, 4,
-        6, 8, 10, 12, 14, 1, 3, 5, 7, 9, 11, 13, 15, 0, 2, 4, 6, 8, 10, 12, 14, 1, 3, 5, 7, 9, 11,
-        13, 15, 0, 2, 4, 6, 8, 10, 12, 14,
-      )
+      _mm512_loadu_si512(SPLIT_MASK_Y_MSB.as_ptr().cast())
     };
 
     let mut x = 0usize;

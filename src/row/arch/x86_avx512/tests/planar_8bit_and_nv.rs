@@ -1,7 +1,4 @@
-use super::{
-  super::*, high_bit_plane_avx512, interleave_uv_avx512, p_n_packed_plane, p010_uv_interleave,
-  p16_plane_avx512, planar_n_plane,
-};
+use super::super::*;
 
 fn check_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
   let y: std::vec::Vec<u8> = (0..width).map(|i| ((i * 37 + 11) & 0xFF) as u8).collect();

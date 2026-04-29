@@ -1,5 +1,3 @@
-use core::arch::x86_64::*;
-
 use super::*;
 
 // ===== RGB → HSV =========================================================
@@ -49,6 +47,3 @@ pub(crate) unsafe fn rgb_to_hsv_row(
     }
   }
 }
-
-#[cfg(all(test, feature = "std"))]
-mod tests;

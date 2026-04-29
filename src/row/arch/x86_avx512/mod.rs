@@ -573,11 +573,5 @@ pub(super) fn scale_y_u16_avx512(
   }
 }
 
-/// AVX-512 YUV 4:2:0 16-bit → packed **8-bit** RGB. 64 pixels per iteration.
-///
-/// # Safety
-///
-/// 1. **AVX-512F + AVX-512BW must be available.**
-
 #[cfg(all(test, feature = "std"))]
 mod tests;
