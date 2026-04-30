@@ -192,7 +192,10 @@ fn wasm_simd128_y212_matches_scalar_widths() {
         true,
       );
     }
-    assert_eq!(s_u16, k_u16, "simd128 y2xx<12>→RGBA u16 diverges (width={w})");
+    assert_eq!(
+      s_u16, k_u16,
+      "simd128 y2xx<12>→RGBA u16 diverges (width={w})"
+    );
 
     let mut sl = std::vec![0u8; w];
     let mut kl = std::vec![0u8; w];
