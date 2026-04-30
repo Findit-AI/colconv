@@ -131,3 +131,63 @@ fn neon_y210_luma_matches_scalar_widths() {
     check_luma_u16::<10>(w);
   }
 }
+
+#[test]
+#[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
+fn neon_y212_matches_scalar_widths() {
+  // 12-bit MSB-aligned generator: shift by 4 instead of 6.
+  fn pseudo_random_y212(width: usize, seed: usize) -> std::vec::Vec<u16> {
+    (0..width * 2)
+      .map(|i| {
+        let s = ((i.wrapping_mul(seed).wrapping_add(seed * 3)) & 0xFFF) as u16;
+        s << 4
+      })
+      .collect()
+  }
+  for w in [2usize, 4, 14, 16, 18, 30, 32, 34, 62, 64, 66, 1920, 1922] {
+    let p = pseudo_random_y212(w, 0xAA55);
+    let mut s = std::vec![0u8; w * 3];
+    let mut k = std::vec![0u8; w * 3];
+    scalar::y2xx_n_to_rgb_or_rgba_row::<12, false>(&p, &mut s, w, ColorMatrix::Bt709, false);
+    unsafe {
+      y2xx_n_to_rgb_or_rgba_row::<12, false>(&p, &mut k, w, ColorMatrix::Bt709, false);
+    }
+    assert_eq!(s, k, "NEON y2xx<12>→RGB diverges (width={w})");
+
+    let mut s_u16 = std::vec![0u16; w * 4];
+    let mut k_u16 = std::vec![0u16; w * 4];
+    scalar::y2xx_n_to_rgb_u16_or_rgba_u16_row::<12, true>(
+      &p,
+      &mut s_u16,
+      w,
+      ColorMatrix::Bt2020Ncl,
+      true,
+    );
+    unsafe {
+      y2xx_n_to_rgb_u16_or_rgba_u16_row::<12, true>(
+        &p,
+        &mut k_u16,
+        w,
+        ColorMatrix::Bt2020Ncl,
+        true,
+      );
+    }
+    assert_eq!(s_u16, k_u16, "NEON y2xx<12>→RGBA u16 diverges (width={w})");
+
+    let mut sl = std::vec![0u8; w];
+    let mut kl = std::vec![0u8; w];
+    scalar::y2xx_n_to_luma_row::<12>(&p, &mut sl, w);
+    unsafe {
+      y2xx_n_to_luma_row::<12>(&p, &mut kl, w);
+    }
+    assert_eq!(sl, kl, "NEON y2xx<12>→luma diverges (width={w})");
+
+    let mut slu = std::vec![0u16; w];
+    let mut klu = std::vec![0u16; w];
+    scalar::y2xx_n_to_luma_u16_row::<12>(&p, &mut slu, w);
+    unsafe {
+      y2xx_n_to_luma_u16_row::<12>(&p, &mut klu, w);
+    }
+    assert_eq!(slu, klu, "NEON y2xx<12>→luma u16 diverges (width={w})");
+  }
+}
