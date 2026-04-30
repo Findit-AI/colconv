@@ -1,4 +1,4 @@
-use super::super::{Y2xxFrame, Y2xxFrameError, Y210Frame};
+use super::super::{Y2xxFrame, Y2xxFrameError, Y210Frame, Y212Frame};
 
 #[test]
 fn y210_frame_try_new_accepts_valid_tight() {
@@ -150,4 +150,22 @@ fn y210_frame_try_new_checked_ignores_stride_padding_bytes() {
   }
   // try_new_checked must accept this — it scans only the declared payload.
   Y210Frame::try_new_checked(&buf, 4, 2, 12).unwrap();
+}
+
+#[test]
+fn y212_frame_try_new_accepts_valid_tight() {
+  let buf = std::vec![0u16; 8 * 2];
+  let frame = Y212Frame::try_new(&buf, 4, 2, 8).unwrap();
+  assert_eq!(frame.width(), 4);
+  assert_eq!(frame.height(), 2);
+}
+
+#[test]
+fn y212_frame_try_new_checked_rejects_low_bit_violations() {
+  // Y212 = MSB-aligned 12-bit; low 4 bits must be zero.
+  let mut buf = std::vec![0u16; 8]; // width=4, height=1
+  buf[0] = 0xFFF0; // valid: 12-bit value 0xFFF in high 12, low 4 = 0
+  buf[1] = 0xFFF1; // INVALID: low 4 bits = 0x1
+  let err = Y212Frame::try_new_checked(&buf, 4, 1, 8).unwrap_err();
+  assert_eq!(err, Y2xxFrameError::SampleLowBitsSet);
 }

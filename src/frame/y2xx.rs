@@ -39,6 +39,9 @@ pub struct Y2xxFrame<'a, const BITS: u32> {
 /// Y210 alias — 10-bit MSB-aligned packed YUV 4:2:2.
 pub type Y210Frame<'a> = Y2xxFrame<'a, 10>;
 
+/// Y212 alias — 12-bit MSB-aligned packed YUV 4:2:2.
+pub type Y212Frame<'a> = Y2xxFrame<'a, 12>;
+
 /// Errors returned by [`Y2xxFrame::try_new`] and
 /// [`Y2xxFrame::try_new_checked`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Error)]
