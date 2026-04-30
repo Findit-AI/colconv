@@ -1467,8 +1467,7 @@ mod api_smoke_tests {
 
   #[test]
   fn mixed_sinker_default_does_not_produce_luma_u16() {
-    // Use any existing source format marker; V210 will be wired in Task 11.
-    // For this test, use Yuyv422 since V210 marker exists.
+    // Use the currently available V210 source format marker for this smoke test.
     let sink: MixedSinker<'_, crate::yuv::V210> = MixedSinker::new(6, 1);
     assert!(!sink.produces_luma_u16());
   }
