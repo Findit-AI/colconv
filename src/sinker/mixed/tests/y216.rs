@@ -299,3 +299,92 @@ fn y216_luma_u16_buffer_too_short_returns_err() {
     }
   ));
 }
+
+// ---- Planar parity oracle ---------------------------------------------------
+
+/// Pack three 16-bit planes (Y / U / V at 4:2:2 subsampling) into Y216
+/// layout — each row is `width × 2` u16 elements laid out as `(Y₀, U,
+/// Y₁, V)` quadruples. Y216 uses the full u16 range with no alignment
+/// shift; samples are stored direct. Width must be even.
+fn pack_yuv422p16_to_y216(
+  y_plane: &[u16],
+  u_plane: &[u16],
+  v_plane: &[u16],
+  width: usize,
+  height: usize,
+) -> Vec<u16> {
+  let mut packed = std::vec::Vec::with_capacity(width * 2 * height);
+  for r in 0..height {
+    for c in (0..width).step_by(2) {
+      packed.push(y_plane[r * width + c]); // Y₀
+      packed.push(u_plane[r * (width / 2) + c / 2]); // U
+      packed.push(y_plane[r * width + c + 1]); // Y₁
+      packed.push(v_plane[r * (width / 2) + c / 2]); // V
+    }
+  }
+  packed
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn y216_planar_parity_with_yuv422p16() {
+  // Oracle: Yuv422p16 (separate planes) and Y216 (interleaved u16 YUYV)
+  // carry identical logical samples — both paths MUST produce
+  // byte-identical RGB output. This exercises the i64 chroma pipeline
+  // introduced for Y216 (the main point of the kernel family).
+  let width = 16usize;
+  let height = 4usize;
+  let yp: Vec<u16> = (0..(width * height)).map(|i| (i * 17) as u16).collect();
+  let up: Vec<u16> = (0..((width / 2) * height))
+    .map(|i| ((i + 100) * 13) as u16)
+    .collect();
+  let vp: Vec<u16> = (0..((width / 2) * height))
+    .map(|i| ((i + 200) * 11) as u16)
+    .collect();
+
+  let planar = Yuv422p16Frame::new(
+    &yp,
+    &up,
+    &vp,
+    width as u32,
+    height as u32,
+    width as u32,
+    (width / 2) as u32,
+    (width / 2) as u32,
+  );
+
+  let packed = pack_yuv422p16_to_y216(&yp, &up, &vp, width, height);
+  let y216 = Y216Frame::new(&packed, width as u32, height as u32, (width * 2) as u32);
+
+  // u8 RGB parity
+  let mut p_rgb = std::vec![0u8; width * height * 3];
+  let mut y_rgb = std::vec![0u8; width * height * 3];
+  let mut p_sink = MixedSinker::<Yuv422p16>::new(width, height)
+    .with_rgb(&mut p_rgb)
+    .unwrap();
+  let mut y_sink = MixedSinker::<Y216>::new(width, height)
+    .with_rgb(&mut y_rgb)
+    .unwrap();
+  yuv422p16_to(&planar, false, ColorMatrix::Bt709, &mut p_sink).unwrap();
+  y216_to(&y216, false, ColorMatrix::Bt709, &mut y_sink).unwrap();
+  assert_eq!(p_rgb, y_rgb, "Y216 vs Yuv422p16 u8 RGB diverges");
+
+  // u16 RGB parity (the i64 chroma path — the whole point of this oracle)
+  let mut p_rgb_u16 = std::vec![0u16; width * height * 3];
+  let mut y_rgb_u16 = std::vec![0u16; width * height * 3];
+  let mut p_sink2 = MixedSinker::<Yuv422p16>::new(width, height)
+    .with_rgb_u16(&mut p_rgb_u16)
+    .unwrap();
+  let mut y_sink2 = MixedSinker::<Y216>::new(width, height)
+    .with_rgb_u16(&mut y_rgb_u16)
+    .unwrap();
+  yuv422p16_to(&planar, false, ColorMatrix::Bt709, &mut p_sink2).unwrap();
+  y216_to(&y216, false, ColorMatrix::Bt709, &mut y_sink2).unwrap();
+  assert_eq!(
+    p_rgb_u16, y_rgb_u16,
+    "Y216 vs Yuv422p16 u16 RGB diverges"
+  );
+}
