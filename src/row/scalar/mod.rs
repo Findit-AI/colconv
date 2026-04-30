@@ -19,6 +19,7 @@ mod rgb_expand;
 mod semi_planar_8bit;
 mod subsampled_high_bit_pn;
 mod v210;
+mod y216;
 mod y2xx;
 mod yuv_planar_16bit;
 mod yuv_planar_8bit;
@@ -33,6 +34,8 @@ pub(crate) use rgb_expand::*;
 pub(crate) use semi_planar_8bit::*;
 pub(crate) use subsampled_high_bit_pn::*;
 pub(crate) use v210::*;
+#[allow(unused_imports)] // dispatcher lands in follow-up PR
+pub(crate) use y216::*;
 pub(crate) use y2xx::*;
 pub(crate) use yuv_planar_8bit::*;
 pub(crate) use yuv_planar_16bit::*;
