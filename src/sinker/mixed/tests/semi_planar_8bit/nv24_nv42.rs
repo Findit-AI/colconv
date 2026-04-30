@@ -4,6 +4,7 @@ use super::{
     planar_other_8bit_9bit::{solid_yuv422p_frame, solid_yuv440p_frame, solid_yuv444p_frame},
     v210::solid_v210_frame,
     y210::solid_y210_frame,
+    y212::solid_y212_frame,
   },
   nv12::solid_nv12_frame,
   nv16::solid_nv16_frame,
@@ -796,6 +797,20 @@ fn strategy_a_rgb_and_rgba_byte_identical_for_all_wired_families() {
     y210_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
     assert_match(&rgb, &rgba, "Y210");
   }
+
+  {
+    let buf = solid_y212_frame(w, h, 700, 512, 512);
+    let src = Y212Frame::new(&buf, w, h, w * 2);
+    let mut rgb = std::vec![0u8; ws * hs * 3];
+    let mut rgba = std::vec![0u8; ws * hs * 4];
+    let mut sink = MixedSinker::<Y212>::new(ws, hs)
+      .with_rgb(&mut rgb)
+      .unwrap()
+      .with_rgba(&mut rgba)
+      .unwrap();
+    y212_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    assert_match(&rgb, &rgba, "Y212");
+  }
 }
 
 // Cross-format Strategy A invariant on the **u16 RGB / u16 RGBA** path.
@@ -856,5 +871,19 @@ fn strategy_a_rgb_u16_and_rgba_u16_byte_identical_for_all_wired_families() {
       .unwrap();
     y210_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
     assert_match_u16(&rgb, &rgba, "Y210", 1023);
+  }
+
+  {
+    let buf = solid_y212_frame(w, h, 700, 400, 600);
+    let src = Y212Frame::new(&buf, w, h, w * 2);
+    let mut rgb = std::vec![0u16; ws * hs * 3];
+    let mut rgba = std::vec![0u16; ws * hs * 4];
+    let mut sink = MixedSinker::<Y212>::new(ws, hs)
+      .with_rgb_u16(&mut rgb)
+      .unwrap()
+      .with_rgba_u16(&mut rgba)
+      .unwrap();
+    y212_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    assert_match_u16(&rgb, &rgba, "Y212", 4095);
   }
 }
