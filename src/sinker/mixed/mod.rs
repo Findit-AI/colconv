@@ -279,6 +279,17 @@ pub enum MixedSinkerError {
     /// Sink's configured width.
     width: usize,
   },
+
+  /// The sinker's configured `width` is not a multiple of 6.
+  /// v210 packs 6 pixels per 16-byte word — calling the kernel
+  /// with a non-multiple-of-6 width would produce undefined output.
+  #[error(
+    "MixedSinker configured width {width} is not a multiple of 6; v210 packs 6 pixels per 16-byte word"
+  )]
+  WidthNotMultipleOf6 {
+    /// Sink's configured width.
+    width: usize,
+  },
 }
 
 /// Identifies which of the three HSV planes a
@@ -1453,6 +1464,7 @@ mod semi_planar_8bit;
 mod subsampled_4_2_0_high_bit;
 mod subsampled_4_2_2_high_bit;
 mod subsampled_4_4_4_high_bit;
+mod v210;
 mod yuva_4_2_0;
 mod yuva_4_2_2;
 mod yuva_4_4_4;
