@@ -607,10 +607,22 @@ mod overflow_tests {
   #[test]
   #[should_panic(expected = "overflows usize")]
   fn y210_dispatcher_rejects_width_times_2_overflow() {
-    let candidate = (usize::MAX / 2) + 2; // even, overflows
+    // Reuse OVERFLOW_WIDTH_TIMES_2 — an even width whose `× 2`
+    // overflows 32-bit `usize`. The previous `(usize::MAX / 2) + 2`
+    // value was odd on i686 (since `usize::MAX / 2` is odd) and
+    // tripped the even-width check before the overflow guard,
+    // causing this test to panic with the wrong message under
+    // miri-i686. The shared constant has the parity fixup.
     let p: [u16; 0] = [];
     let mut rgb: [u8; 0] = [];
-    y210_to_rgb_row(&p, &mut rgb, candidate, ColorMatrix::Bt601, true, false);
+    y210_to_rgb_row(
+      &p,
+      &mut rgb,
+      OVERFLOW_WIDTH_TIMES_2,
+      ColorMatrix::Bt601,
+      true,
+      false,
+    );
   }
 }
 
