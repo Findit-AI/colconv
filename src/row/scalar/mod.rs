@@ -33,7 +33,6 @@ pub(crate) use rgb_expand::*;
 pub(crate) use semi_planar_8bit::*;
 pub(crate) use subsampled_high_bit_pn::*;
 pub(crate) use v210::*;
-#[allow(unused_imports)] // wired by Task 9 dispatcher
 pub(crate) use y2xx::*;
 pub(crate) use yuv_planar_8bit::*;
 pub(crate) use yuv_planar_16bit::*;

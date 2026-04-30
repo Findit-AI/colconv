@@ -35,7 +35,6 @@ const fn rshift_bits<const BITS: u32>(sample: u16) -> u16 {
 /// - `width` must be even.
 /// - `packed.len() >= width * 2` (one u16 quadruple per chroma pair).
 /// - `out.len() >= width * (if ALPHA { 4 } else { 3 })`.
-#[allow(dead_code)] // wired by Task 9 dispatcher
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn y2xx_n_to_rgb_or_rgba_row<const BITS: u32, const ALPHA: bool>(
   packed: &[u16],
@@ -102,7 +101,6 @@ pub(crate) fn y2xx_n_to_rgb_or_rgba_row<const BITS: u32, const ALPHA: bool>(
 /// - `width` must be even.
 /// - `packed.len() >= width * 2`.
 /// - `out.len() >= width * (if ALPHA { 4 } else { 3 })` (`u16` elements).
-#[allow(dead_code)] // wired by Task 9 dispatcher
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn y2xx_n_to_rgb_u16_or_rgba_u16_row<const BITS: u32, const ALPHA: bool>(
   packed: &[u16],
@@ -165,7 +163,6 @@ pub(crate) fn y2xx_n_to_rgb_u16_or_rgba_u16_row<const BITS: u32, const ALPHA: bo
 /// - `width` must be even.
 /// - `packed.len() >= width * 2`.
 /// - `luma_out.len() >= width`.
-#[allow(dead_code)] // wired by Task 9 dispatcher
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn y2xx_n_to_luma_row<const BITS: u32>(
   packed: &[u16],
@@ -200,7 +197,6 @@ pub(crate) fn y2xx_n_to_luma_row<const BITS: u32>(
 /// - `width` must be even.
 /// - `packed.len() >= width * 2`.
 /// - `luma_out.len() >= width`.
-#[allow(dead_code)] // wired by Task 9 dispatcher
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn y2xx_n_to_luma_u16_row<const BITS: u32>(
   packed: &[u16],
@@ -231,7 +227,6 @@ pub(crate) fn y2xx_n_to_luma_u16_row<const BITS: u32>(
 // BITS=12 wrappers (`y212_to_*_row`) without further kernel changes.
 
 /// Public Y210 (BITS=10) → packed RGB / RGBA u8 wrapper.
-#[allow(dead_code)] // wired by Task 9 dispatcher
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn y210_to_rgb_or_rgba_row<const ALPHA: bool>(
   packed: &[u16],
@@ -244,7 +239,6 @@ pub(crate) fn y210_to_rgb_or_rgba_row<const ALPHA: bool>(
 }
 
 /// Public Y210 → packed `u16` RGB / RGBA wrapper.
-#[allow(dead_code)] // wired by Task 9 dispatcher
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn y210_to_rgb_u16_or_rgba_u16_row<const ALPHA: bool>(
   packed: &[u16],
@@ -257,14 +251,12 @@ pub(crate) fn y210_to_rgb_u16_or_rgba_u16_row<const ALPHA: bool>(
 }
 
 /// Public Y210 → 8-bit luma wrapper.
-#[allow(dead_code)] // wired by Task 9 dispatcher
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn y210_to_luma_row(packed: &[u16], luma_out: &mut [u8], width: usize) {
   y2xx_n_to_luma_row::<10>(packed, luma_out, width);
 }
 
 /// Public Y210 → native-depth `u16` luma wrapper.
-#[allow(dead_code)] // wired by Task 9 dispatcher
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn y210_to_luma_u16_row(packed: &[u16], luma_out: &mut [u16], width: usize) {
   y2xx_n_to_luma_u16_row::<10>(packed, luma_out, width);

@@ -96,7 +96,6 @@ unsafe fn unpack_y2xx_8px_neon(
 /// 2. `width % 2 == 0` (4:2:2 chroma pair).
 /// 3. `packed.len() >= width * 2`.
 /// 4. `out.len() >= width * (if ALPHA { 4 } else { 3 })`.
-#[allow(dead_code)] // wired by Task 9 dispatcher
 #[inline]
 #[target_feature(enable = "neon")]
 pub(crate) unsafe fn y2xx_n_to_rgb_or_rgba_row<const BITS: u32, const ALPHA: bool>(
@@ -230,7 +229,6 @@ pub(crate) unsafe fn y2xx_n_to_rgb_or_rgba_row<const BITS: u32, const ALPHA: boo
 /// 2. `width % 2 == 0` (4:2:2 chroma pair).
 /// 3. `packed.len() >= width * 2`.
 /// 4. `out.len() >= width * (if ALPHA { 4 } else { 3 })` (`u16` elements).
-#[allow(dead_code)] // wired by Task 9 dispatcher
 #[inline]
 #[target_feature(enable = "neon")]
 pub(crate) unsafe fn y2xx_n_to_rgb_u16_or_rgba_u16_row<const BITS: u32, const ALPHA: bool>(
@@ -347,7 +345,6 @@ pub(crate) unsafe fn y2xx_n_to_rgb_u16_or_rgba_u16_row<const BITS: u32, const AL
 /// 2. `width % 2 == 0` (4:2:2 chroma pair).
 /// 3. `packed.len() >= width * 2`.
 /// 4. `luma_out.len() >= width`.
-#[allow(dead_code)] // wired by Task 9 dispatcher
 #[inline]
 #[target_feature(enable = "neon")]
 pub(crate) unsafe fn y2xx_n_to_luma_row<const BITS: u32>(
@@ -398,7 +395,6 @@ pub(crate) unsafe fn y2xx_n_to_luma_row<const BITS: u32>(
 /// 2. `width % 2 == 0` (4:2:2 chroma pair).
 /// 3. `packed.len() >= width * 2`.
 /// 4. `luma_out.len() >= width`.
-#[allow(dead_code)] // wired by Task 9 dispatcher
 #[inline]
 #[target_feature(enable = "neon")]
 pub(crate) unsafe fn y2xx_n_to_luma_u16_row<const BITS: u32>(
