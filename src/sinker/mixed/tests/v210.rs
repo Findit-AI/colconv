@@ -314,3 +314,85 @@ fn v210_luma_u16_buffer_too_short_returns_err() {
     }
   ));
 }
+
+// ---- Planar parity oracle (Task 12) -----------------------------------
+//
+// Re-pack a Yuv422p10 source into v210 layout and verify both produce
+// byte-identical RGB. This is a cross-format invariant: v210 is just a
+// packed byte-stream representation of 4:2:2 10-bit planar data, so the
+// converted output MUST match Yuv422p10's output for the same samples.
+
+/// Pack three 10-bit planes (Y / U / V at 4:2:2 subsampling) into the
+/// v210 byte layout — see `pack_v210_word_for_test` for the per-word
+/// bit ordering. Width must be a multiple of 6.
+fn pack_yuv422p10_to_v210(y: &[u16], u: &[u16], v: &[u16], width: usize, height: usize) -> Vec<u8> {
+  let cw = width / 2;
+  let words_per_row = width / 6;
+  let mut out = std::vec![0u8; words_per_row * 16 * height];
+  for row in 0..height {
+    for w in 0..words_per_row {
+      let px = w * 6;
+      let cu = px / 2;
+      let samples: [u16; 12] = [
+        u[row * cw + cu],
+        y[row * width + px],
+        v[row * cw + cu],
+        y[row * width + px + 1],
+        u[row * cw + cu + 1],
+        y[row * width + px + 2],
+        v[row * cw + cu + 1],
+        y[row * width + px + 3],
+        u[row * cw + cu + 2],
+        y[row * width + px + 4],
+        v[row * cw + cu + 2],
+        y[row * width + px + 5],
+      ];
+      let bytes = pack_v210_word_for_test(samples);
+      let off = (row * words_per_row + w) * 16;
+      out[off..off + 16].copy_from_slice(&bytes);
+    }
+  }
+  out
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn v210_reconstructed_from_yuv422p10_matches_yuv422p10_to_rgb() {
+  let w = 12usize;
+  let h = 4usize;
+  let mut y_plane = std::vec![0u16; w * h];
+  let mut u_plane = std::vec![0u16; (w / 2) * h];
+  let mut v_plane = std::vec![0u16; (w / 2) * h];
+  pseudo_random_u16_low_n_bits(&mut y_plane, 0xC0FFEE, 10);
+  pseudo_random_u16_low_n_bits(&mut u_plane, 0xBADF00D, 10);
+  pseudo_random_u16_low_n_bits(&mut v_plane, 0xFEEDFACE, 10);
+
+  let planar = Yuv422p10Frame::new(
+    &y_plane,
+    &u_plane,
+    &v_plane,
+    w as u32,
+    h as u32,
+    w as u32,
+    (w / 2) as u32,
+    (w / 2) as u32,
+  );
+  let packed = pack_yuv422p10_to_v210(&y_plane, &u_plane, &v_plane, w, h);
+  let v210 = V210Frame::new(&packed, w as u32, h as u32, ((w / 6) * 16) as u32);
+
+  let mut rgb_planar = std::vec![0u8; w * h * 3];
+  let mut rgb_packed = std::vec![0u8; w * h * 3];
+  let mut s_planar = MixedSinker::<Yuv422p10>::new(w, h)
+    .with_rgb(&mut rgb_planar)
+    .unwrap();
+  let mut s_packed = MixedSinker::<V210>::new(w, h)
+    .with_rgb(&mut rgb_packed)
+    .unwrap();
+  yuv422p10_to(&planar, false, ColorMatrix::Bt709, &mut s_planar).unwrap();
+  v210_to(&v210, false, ColorMatrix::Bt709, &mut s_packed).unwrap();
+
+  assert_eq!(rgb_planar, rgb_packed);
+}
