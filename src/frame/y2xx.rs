@@ -184,16 +184,36 @@ impl<'a, const BITS: u32> Y2xxFrame<'a, BITS> {
     Ok(frame)
   }
 
-  /// Panicking convenience over [`Self::try_new`].
+  /// Panicking convenience over [`Self::try_new`]. Per-variant
+  /// panic messages mirror [`crate::frame::V210Frame::new`] for
+  /// debuggability — generic "validation failed" doesn't tell a
+  /// caller whether the issue was odd width, short plane, or
+  /// stride-too-small.
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn new(packed: &'a [u16], width: u32, height: u32, stride: u32) -> Self {
     match Self::try_new(packed, width, height, stride) {
       Ok(f) => f,
-      Err(_) => panic!("invalid Y2xxFrame: validation failed"),
+      Err(e) => match e {
+        Y2xxFrameError::UnsupportedBits { .. } => panic!("invalid Y2xxFrame: unsupported BITS"),
+        Y2xxFrameError::ZeroDimension { .. } => panic!("invalid Y2xxFrame: zero dimension"),
+        Y2xxFrameError::OddWidth { .. } => panic!("invalid Y2xxFrame: odd width"),
+        Y2xxFrameError::StrideTooSmall { .. } => panic!("invalid Y2xxFrame: stride too small"),
+        Y2xxFrameError::PlaneTooShort { .. } => panic!("invalid Y2xxFrame: plane too short"),
+        Y2xxFrameError::GeometryOverflow { .. } => panic!("invalid Y2xxFrame: geometry overflow"),
+        Y2xxFrameError::WidthOverflow { .. } => panic!("invalid Y2xxFrame: width overflow"),
+        // SampleLowBitsSet is only emitted by try_new_checked, never by try_new.
+        // Listed for exhaustiveness so a future variant addition forces an explicit choice.
+        Y2xxFrameError::SampleLowBitsSet => {
+          panic!("invalid Y2xxFrame: sample low bits set (unreachable from try_new)")
+        }
+      },
     }
   }
 
-  /// Packed plane (u16 elements; each pair of samples = 1 pixel).
+  /// Packed plane: `(Y₀, U, Y₁, V)` u16 quadruples — `width × 2`
+  /// u16 elements per row (= `width × 4` bytes). 4:2:2 chroma is
+  /// shared between each Y pair; samples are MSB-aligned with the
+  /// low `(16 - BITS)` bits zero.
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn packed(&self) -> &'a [u16] {
     self.packed
