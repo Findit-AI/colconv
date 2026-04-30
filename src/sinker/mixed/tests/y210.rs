@@ -293,3 +293,119 @@ fn y210_luma_u16_buffer_too_short_returns_err() {
     }
   ));
 }
+
+// ---- Cross-format oracles (Task 11) -----------------------------------
+//
+// 1. Planar parity: re-pack a Yuv422p10 source into Y210 layout and
+//    verify both produce byte-identical RGB. Y210 is just an MSB-aligned
+//    u16 packing of 4:2:2 10-bit planar data, so the converted output
+//    MUST match Yuv422p10's output for the same samples.
+// 2. V210 ↔ Y210 byte-permutation: same logical 10-bit samples encoded
+//    in V210 word-packing vs Y210 MSB-aligned u16 must produce
+//    byte-identical RGB.
+
+/// Pack three 10-bit planes (Y / U / V at 4:2:2 subsampling) into the
+/// Y210 layout — each row is `width × 2` u16 elements laid out as
+/// `(Y₀, U, Y₁, V)` quadruples with each sample MSB-aligned (active 10
+/// bits in bits[15:6]). Width must be even.
+fn pack_yuv422p10_to_y210(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  width: usize,
+  height: usize,
+) -> Vec<u16> {
+  let cw = width / 2;
+  let mut out = std::vec![0u16; width * 2 * height];
+  for row in 0..height {
+    for c in 0..cw {
+      let off = row * width * 2 + c * 4;
+      out[off] = (y[row * width + 2 * c] << 6) & 0xFFC0;
+      out[off + 1] = (u[row * cw + c] << 6) & 0xFFC0;
+      out[off + 2] = (y[row * width + 2 * c + 1] << 6) & 0xFFC0;
+      out[off + 3] = (v[row * cw + c] << 6) & 0xFFC0;
+    }
+  }
+  out
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn y210_reconstructed_from_yuv422p10_matches_yuv422p10_to_rgb() {
+  let w = 16usize;
+  let h = 4usize;
+  let mut y_plane = std::vec![0u16; w * h];
+  let mut u_plane = std::vec![0u16; (w / 2) * h];
+  let mut v_plane = std::vec![0u16; (w / 2) * h];
+  pseudo_random_u16_low_n_bits(&mut y_plane, 0xC0FFEE, 10);
+  pseudo_random_u16_low_n_bits(&mut u_plane, 0xBADF00D, 10);
+  pseudo_random_u16_low_n_bits(&mut v_plane, 0xFEEDFACE, 10);
+
+  let planar = Yuv422p10Frame::new(
+    &y_plane,
+    &u_plane,
+    &v_plane,
+    w as u32,
+    h as u32,
+    w as u32,
+    (w / 2) as u32,
+    (w / 2) as u32,
+  );
+  let packed = pack_yuv422p10_to_y210(&y_plane, &u_plane, &v_plane, w, h);
+  let y210 = Y210Frame::new(&packed, w as u32, h as u32, (w * 2) as u32);
+
+  let mut rgb_planar = std::vec![0u8; w * h * 3];
+  let mut rgb_packed = std::vec![0u8; w * h * 3];
+  let mut s_planar = MixedSinker::<Yuv422p10>::new(w, h)
+    .with_rgb(&mut rgb_planar)
+    .unwrap();
+  let mut s_packed = MixedSinker::<Y210>::new(w, h)
+    .with_rgb(&mut rgb_packed)
+    .unwrap();
+  yuv422p10_to(&planar, false, ColorMatrix::Bt709, &mut s_planar).unwrap();
+  y210_to(&y210, false, ColorMatrix::Bt709, &mut s_packed).unwrap();
+
+  assert_eq!(rgb_planar, rgb_packed);
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn y210_matches_v210_with_same_logical_samples() {
+  // V210 width must be divisible by 6 for full-word coverage; Y210 just
+  // needs even. Pick width = 12 (divisible by both).
+  let w = 12usize;
+  let h = 4usize;
+  let mut y_plane = std::vec![0u16; w * h];
+  let mut u_plane = std::vec![0u16; (w / 2) * h];
+  let mut v_plane = std::vec![0u16; (w / 2) * h];
+  pseudo_random_u16_low_n_bits(&mut y_plane, 0x12345, 10);
+  pseudo_random_u16_low_n_bits(&mut u_plane, 0x67890, 10);
+  pseudo_random_u16_low_n_bits(&mut v_plane, 0xABCDE, 10);
+
+  // V210 source — reuse the helper from Ship 11a's v210 sinker tests.
+  let v210_buf = super::v210::pack_yuv422p10_to_v210(&y_plane, &u_plane, &v_plane, w, h);
+  let v210_src = V210Frame::new(&v210_buf, w as u32, h as u32, ((w / 6) * 16) as u32);
+
+  // Y210 source.
+  let y210_buf = pack_yuv422p10_to_y210(&y_plane, &u_plane, &v_plane, w, h);
+  let y210_src = Y210Frame::new(&y210_buf, w as u32, h as u32, (w * 2) as u32);
+
+  let mut rgb_v210 = std::vec![0u8; w * h * 3];
+  let mut rgb_y210 = std::vec![0u8; w * h * 3];
+  let mut s_v210 = MixedSinker::<V210>::new(w, h)
+    .with_rgb(&mut rgb_v210)
+    .unwrap();
+  let mut s_y210 = MixedSinker::<Y210>::new(w, h)
+    .with_rgb(&mut rgb_y210)
+    .unwrap();
+  v210_to(&v210_src, true, ColorMatrix::Bt2020Ncl, &mut s_v210).unwrap();
+  y210_to(&y210_src, true, ColorMatrix::Bt2020Ncl, &mut s_y210).unwrap();
+
+  assert_eq!(rgb_v210, rgb_y210);
+}
