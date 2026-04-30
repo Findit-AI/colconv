@@ -262,6 +262,47 @@ pub(crate) fn y210_to_luma_u16_row(packed: &[u16], luma_out: &mut [u16], width: 
   y2xx_n_to_luma_u16_row::<10>(packed, luma_out, width);
 }
 
+// ---- Public Y212 (BITS=12) wrappers ------------------------------------
+//
+// Ship 11c monomorphizes the `y2xx_n_*` template at BITS=12. No new
+// SIMD code — the per-arch backends already accept BITS ∈ {10, 12}.
+
+/// Public Y212 (BITS=12) → packed RGB / RGBA u8 wrapper.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn y212_to_rgb_or_rgba_row<const ALPHA: bool>(
+  packed: &[u16],
+  out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  y2xx_n_to_rgb_or_rgba_row::<12, ALPHA>(packed, out, width, matrix, full_range);
+}
+
+/// Public Y212 → packed `u16` RGB / RGBA wrapper.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn y212_to_rgb_u16_or_rgba_u16_row<const ALPHA: bool>(
+  packed: &[u16],
+  out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  full_range: bool,
+) {
+  y2xx_n_to_rgb_u16_or_rgba_u16_row::<12, ALPHA>(packed, out, width, matrix, full_range);
+}
+
+/// Public Y212 → 8-bit luma wrapper.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn y212_to_luma_row(packed: &[u16], luma_out: &mut [u8], width: usize) {
+  y2xx_n_to_luma_row::<12>(packed, luma_out, width);
+}
+
+/// Public Y212 → native-depth `u16` luma wrapper.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn y212_to_luma_u16_row(packed: &[u16], luma_out: &mut [u16], width: usize) {
+  y2xx_n_to_luma_u16_row::<12>(packed, luma_out, width);
+}
+
 #[cfg(all(test, feature = "std"))]
 mod tests {
   use super::*;
