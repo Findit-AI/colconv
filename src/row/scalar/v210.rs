@@ -62,14 +62,6 @@ fn unpack_v210_word(word: &[u8]) -> ([u16; 6], [u16; 3], [u16; 3]) {
 /// - `width` must be a multiple of 6.
 /// - `packed.len() >= (width / 6) * 16`.
 /// - `out.len() >= width * (if ALPHA { 4 } else { 3 })`.
-//
-// Scalar prep for Ship 11a: this kernel and its three siblings below
-// are consumed by the per-arch SIMD fallbacks and dispatcher entries
-// landing in Tasks 4-9. Until those tasks merge, the only callers
-// are this file's inline tests, so the unused-helper warnings would
-// fail CI's `-D warnings`. The `dead_code` allow lets this prep PR
-// ship the foundation without the eventual call sites.
-#[allow(dead_code)]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn v210_to_rgb_or_rgba_row<const ALPHA: bool>(
   packed: &[u8],
@@ -135,7 +127,6 @@ pub(crate) fn v210_to_rgb_or_rgba_row<const ALPHA: bool>(
 /// - `width` must be a multiple of 6.
 /// - `packed.len() >= (width / 6) * 16`.
 /// - `out.len() >= width * (if ALPHA { 4 } else { 3 })` (`u16` elements).
-#[allow(dead_code)] // Ship 11a prep — see note on `v210_to_rgb_or_rgba_row`.
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn v210_to_rgb_u16_or_rgba_u16_row<const ALPHA: bool>(
   packed: &[u8],
@@ -197,7 +188,6 @@ pub(crate) fn v210_to_rgb_u16_or_rgba_u16_row<const ALPHA: bool>(
 /// - `width` must be a multiple of 6.
 /// - `packed.len() >= (width / 6) * 16`.
 /// - `luma_out.len() >= width`.
-#[allow(dead_code)] // Ship 11a prep — see note on `v210_to_rgb_or_rgba_row`.
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn v210_to_luma_row(packed: &[u8], luma_out: &mut [u8], width: usize) {
   debug_assert!(
@@ -225,7 +215,6 @@ pub(crate) fn v210_to_luma_row(packed: &[u8], luma_out: &mut [u8], width: usize)
 /// - `width` must be a multiple of 6.
 /// - `packed.len() >= (width / 6) * 16`.
 /// - `luma_out.len() >= width`.
-#[allow(dead_code)] // Ship 11a prep — see note on `v210_to_rgb_or_rgba_row`.
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn v210_to_luma_u16_row(packed: &[u8], luma_out: &mut [u16], width: usize) {
   debug_assert!(

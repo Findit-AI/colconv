@@ -40,15 +40,6 @@ use crate::{ColorMatrix, row::scalar};
 /// Caller must ensure `ptr` has at least 16 bytes readable, and
 /// `target_feature` includes SSE4.1 (which implies SSSE3 for
 /// `_mm_shuffle_epi8`).
-//
-// Ship 11a prep: this kernel and its public siblings below are the
-// SSE4.1 fallbacks for the v210 dispatcher landing in Task 9. Until
-// then they have no callers outside the per-arch tests, so the
-// unused-helper warnings would fail CI's `-D warnings`. The
-// `dead_code` allow matches the scalar reference at
-// `src/row/scalar/v210.rs` and the NEON sibling at
-// `src/row/arch/neon/v210.rs`.
-#[allow(dead_code)]
 #[inline]
 #[target_feature(enable = "sse4.1")]
 unsafe fn unpack_v210_word_sse41(ptr: *const u8) -> (__m128i, __m128i, __m128i) {
@@ -150,7 +141,6 @@ unsafe fn unpack_v210_word_sse41(ptr: *const u8) -> (__m128i, __m128i, __m128i) 
 /// 2. `width % 6 == 0`.
 /// 3. `packed.len() >= (width / 6) * 16`.
 /// 4. `out.len() >= width * (if ALPHA { 4 } else { 3 })`.
-#[allow(dead_code)] // Ship 11a prep — see note on `unpack_v210_word_sse41`.
 #[inline]
 #[target_feature(enable = "sse4.1")]
 pub(crate) unsafe fn v210_to_rgb_or_rgba_row<const ALPHA: bool>(
@@ -281,7 +271,6 @@ pub(crate) unsafe fn v210_to_rgb_or_rgba_row<const ALPHA: bool>(
 /// 2. `width % 6 == 0`.
 /// 3. `packed.len() >= (width / 6) * 16`.
 /// 4. `out.len() >= width * (if ALPHA { 4 } else { 3 })` (`u16` elements).
-#[allow(dead_code)] // Ship 11a prep — see note on `unpack_v210_word_sse41`.
 #[inline]
 #[target_feature(enable = "sse4.1")]
 pub(crate) unsafe fn v210_to_rgb_u16_or_rgba_u16_row<const ALPHA: bool>(
@@ -395,7 +384,6 @@ pub(crate) unsafe fn v210_to_rgb_u16_or_rgba_u16_row<const ALPHA: bool>(
 /// 2. `width % 6 == 0`.
 /// 3. `packed.len() >= (width / 6) * 16`.
 /// 4. `luma_out.len() >= width`.
-#[allow(dead_code)] // Ship 11a prep — see note on `unpack_v210_word_sse41`.
 #[inline]
 #[target_feature(enable = "sse4.1")]
 pub(crate) unsafe fn v210_to_luma_row(packed: &[u8], luma_out: &mut [u8], width: usize) {
@@ -432,7 +420,6 @@ pub(crate) unsafe fn v210_to_luma_row(packed: &[u8], luma_out: &mut [u8], width:
 /// 2. `width % 6 == 0`.
 /// 3. `packed.len() >= (width / 6) * 16`.
 /// 4. `luma_out.len() >= width`.
-#[allow(dead_code)] // Ship 11a prep — see note on `unpack_v210_word_sse41`.
 #[inline]
 #[target_feature(enable = "sse4.1")]
 pub(crate) unsafe fn v210_to_luma_u16_row(packed: &[u8], luma_out: &mut [u16], width: usize) {

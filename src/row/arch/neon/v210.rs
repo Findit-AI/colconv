@@ -29,14 +29,6 @@ use crate::{ColorMatrix, row::scalar};
 /// # Safety
 ///
 /// Caller must ensure `ptr` has at least 16 bytes readable.
-//
-// Ship 11a prep: this kernel and its public siblings below are the
-// NEON fallbacks for the v210 dispatcher landing in Task 9. Until
-// then they have no callers outside the per-arch tests, so the
-// unused-helper warnings would fail CI's `-D warnings`. The
-// `dead_code` allow matches the scalar reference at
-// `src/row/scalar/v210.rs`.
-#[allow(dead_code)]
 #[inline]
 #[target_feature(enable = "neon")]
 unsafe fn unpack_v210_word_neon(ptr: *const u8) -> (uint16x8_t, uint16x8_t, uint16x8_t) {
@@ -120,7 +112,6 @@ unsafe fn unpack_v210_word_neon(ptr: *const u8) -> (uint16x8_t, uint16x8_t, uint
 /// 2. `width % 6 == 0`.
 /// 3. `packed.len() >= (width / 6) * 16`.
 /// 4. `out.len() >= width * (if ALPHA { 4 } else { 3 })`.
-#[allow(dead_code)] // Ship 11a prep — see note on `unpack_v210_word_neon`.
 #[inline]
 #[target_feature(enable = "neon")]
 pub(crate) unsafe fn v210_to_rgb_or_rgba_row<const ALPHA: bool>(
@@ -235,7 +226,6 @@ pub(crate) unsafe fn v210_to_rgb_or_rgba_row<const ALPHA: bool>(
 /// 2. `width % 6 == 0`.
 /// 3. `packed.len() >= (width / 6) * 16`.
 /// 4. `out.len() >= width * (if ALPHA { 4 } else { 3 })` (`u16` elements).
-#[allow(dead_code)] // Ship 11a prep — see note on `unpack_v210_word_neon`.
 #[inline]
 #[target_feature(enable = "neon")]
 pub(crate) unsafe fn v210_to_rgb_u16_or_rgba_u16_row<const ALPHA: bool>(
@@ -336,7 +326,6 @@ pub(crate) unsafe fn v210_to_rgb_u16_or_rgba_u16_row<const ALPHA: bool>(
 /// 2. `width % 6 == 0`.
 /// 3. `packed.len() >= (width / 6) * 16`.
 /// 4. `luma_out.len() >= width`.
-#[allow(dead_code)] // Ship 11a prep — see note on `unpack_v210_word_neon`.
 #[inline]
 #[target_feature(enable = "neon")]
 pub(crate) unsafe fn v210_to_luma_row(packed: &[u8], luma_out: &mut [u8], width: usize) {
@@ -372,7 +361,6 @@ pub(crate) unsafe fn v210_to_luma_row(packed: &[u8], luma_out: &mut [u8], width:
 /// 2. `width % 6 == 0`.
 /// 3. `packed.len() >= (width / 6) * 16`.
 /// 4. `luma_out.len() >= width`.
-#[allow(dead_code)] // Ship 11a prep — see note on `unpack_v210_word_neon`.
 #[inline]
 #[target_feature(enable = "neon")]
 pub(crate) unsafe fn v210_to_luma_u16_row(packed: &[u8], luma_out: &mut [u16], width: usize) {
