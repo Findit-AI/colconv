@@ -42,8 +42,8 @@ pub fn v210_to_rgb_row(
   use_simd: bool,
 ) {
   assert!(
-    width.is_multiple_of(6),
-    "v210 requires width divisible by 6"
+    width.is_multiple_of(2),
+    "v210 requires even width (4:2:2 chroma pair)"
   );
   assert!(
     packed.len() >= v210_row_bytes(width),
@@ -105,8 +105,8 @@ pub fn v210_to_rgba_row(
   use_simd: bool,
 ) {
   assert!(
-    width.is_multiple_of(6),
-    "v210 requires width divisible by 6"
+    width.is_multiple_of(2),
+    "v210 requires even width (4:2:2 chroma pair)"
   );
   assert!(
     packed.len() >= v210_row_bytes(width),
@@ -169,8 +169,8 @@ pub fn v210_to_rgb_u16_row(
   use_simd: bool,
 ) {
   assert!(
-    width.is_multiple_of(6),
-    "v210 requires width divisible by 6"
+    width.is_multiple_of(2),
+    "v210 requires even width (4:2:2 chroma pair)"
   );
   assert!(
     packed.len() >= v210_row_bytes(width),
@@ -233,8 +233,8 @@ pub fn v210_to_rgba_u16_row(
   use_simd: bool,
 ) {
   assert!(
-    width.is_multiple_of(6),
-    "v210 requires width divisible by 6"
+    width.is_multiple_of(2),
+    "v210 requires even width (4:2:2 chroma pair)"
   );
   assert!(
     packed.len() >= v210_row_bytes(width),
@@ -290,8 +290,8 @@ pub fn v210_to_rgba_u16_row(
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub fn v210_to_luma_row(packed: &[u8], luma_out: &mut [u8], width: usize, use_simd: bool) {
   assert!(
-    width.is_multiple_of(6),
-    "v210 requires width divisible by 6"
+    width.is_multiple_of(2),
+    "v210 requires even width (4:2:2 chroma pair)"
   );
   assert!(
     packed.len() >= v210_row_bytes(width),
@@ -345,8 +345,8 @@ pub fn v210_to_luma_row(packed: &[u8], luma_out: &mut [u8], width: usize, use_si
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub fn v210_to_luma_u16_row(packed: &[u8], luma_out: &mut [u16], width: usize, use_simd: bool) {
   assert!(
-    width.is_multiple_of(6),
-    "v210 requires width divisible by 6"
+    width.is_multiple_of(2),
+    "v210 requires even width (4:2:2 chroma pair)"
   );
   assert!(
     packed.len() >= v210_row_bytes(width),

@@ -7,11 +7,44 @@
 //! pipeline that follows mirrors `yuv_planar_high_bit.rs`'s
 //! `yuv_420p_n_to_rgb_or_rgba_row<10, _>` byte-for-byte — same
 //! `chroma_i16x8` / `scale_y` / `q15_shift` / `clamp_u16_max` calls.
+//!
+//! ## Partial-word tails
+//!
+//! When `width % 6 != 0` (e.g. 720p = 1280 wide → 213 full words +
+//! one 2-px partial word), the SIMD main loop runs `full_words =
+//! width / 6` iterations and the remaining 2 or 4 pixels are emitted
+//! by `scalar::v210_to_*` on the unconsumed 16-byte tail. Width must
+//! still be even (4:2:2 chroma pair).
 
 use core::arch::aarch64::*;
 
 use super::*;
 use crate::{ColorMatrix, row::scalar};
+
+/// Loads 16 bytes as 4 × `u32` in **little-endian** order regardless
+/// of host endianness. v210 words are documented LE; on big-endian
+/// aarch64 (rare — `aarch64_be-*` custom targets) the plain
+/// `vld1q_u32` would put bytes in reversed positions within each
+/// lane and corrupt every subsequent shift-and-mask. Mirrors the
+/// `x2_load_le_u32x4` helper in `packed_rgb.rs` (X2RGB10 / X2BGR10
+/// share the same LE-word constraint). Defining a local helper
+/// avoids cross-file visibility hassle since `x2_load_le_u32x4` is
+/// `pub(super) fn` but not re-exported via the mod's glob.
+///
+/// # Safety
+///
+/// Caller must ensure `ptr` has at least 16 bytes readable.
+#[inline(always)]
+unsafe fn v210_load_le_u32x4(ptr: *const u8) -> uint32x4_t {
+  unsafe {
+    let raw = vld1q_u32(ptr as *const u32);
+    if cfg!(target_endian = "big") {
+      vreinterpretq_u32_u8(vrev32q_u8(vreinterpretq_u8_u32(raw)))
+    } else {
+      raw
+    }
+  }
+}
 
 /// Unpacks one 16-byte v210 word into three u16x8 vectors holding
 /// 10-bit samples in their low bits:
@@ -19,7 +52,8 @@ use crate::{ColorMatrix, row::scalar};
 /// - `u_vec`: lanes 0..3 = Cb0..Cb2 (lanes 3..7 are don't-care).
 /// - `v_vec`: lanes 0..3 = Cr0..Cr2 (lanes 3..7 are don't-care).
 ///
-/// Strategy: load 4 × u32, then three shifted-AND ops yield arrays
+/// Strategy: load 4 × u32 (in little-endian byte order regardless of
+/// host endianness), then three shifted-AND ops yield arrays
 /// `low10`, `mid10`, `high10` (one 10-bit field per 32-bit lane).
 /// Because each 10-bit value sits in the low 16 bits of its 32-bit
 /// lane, reinterpreting these as `uint8x16_t` places valid bytes at
@@ -34,7 +68,7 @@ use crate::{ColorMatrix, row::scalar};
 unsafe fn unpack_v210_word_neon(ptr: *const u8) -> (uint16x8_t, uint16x8_t, uint16x8_t) {
   // SAFETY: caller obligation — `ptr` has 16 bytes readable.
   unsafe {
-    let words = vld1q_u32(ptr.cast());
+    let words = v210_load_le_u32x4(ptr);
     let mask10 = vdupq_n_u32(0x3FF);
     let low10 = vandq_u32(words, mask10);
     let mid10 = vandq_u32(vshrq_n_u32::<10>(words), mask10);
@@ -109,8 +143,8 @@ unsafe fn unpack_v210_word_neon(ptr: *const u8) -> (uint16x8_t, uint16x8_t, uint
 /// # Safety
 ///
 /// 1. **NEON must be available on the current CPU.**
-/// 2. `width % 6 == 0`.
-/// 3. `packed.len() >= (width / 6) * 16`.
+/// 2. `width % 2 == 0` (4:2:2 chroma pair).
+/// 3. `packed.len() >= ceil(width / 6) * 16`.
 /// 4. `out.len() >= width * (if ALPHA { 4 } else { 3 })`.
 #[inline]
 #[target_feature(enable = "neon")]
@@ -121,13 +155,11 @@ pub(crate) unsafe fn v210_to_rgb_or_rgba_row<const ALPHA: bool>(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  debug_assert!(
-    width.is_multiple_of(6),
-    "v210 requires width divisible by 6"
-  );
-  let words = width / 6;
+  debug_assert!(width.is_multiple_of(2), "v210 requires even width");
+  let total_words = width.div_ceil(6);
+  let full_words = width / 6;
   let bpp: usize = if ALPHA { 4 } else { 3 };
-  debug_assert!(packed.len() >= words * 16);
+  debug_assert!(packed.len() >= total_words * 16);
   debug_assert!(out.len() >= width * bpp);
 
   let coeffs = scalar::Coefficients::for_matrix(matrix);
@@ -137,7 +169,7 @@ pub(crate) unsafe fn v210_to_rgb_or_rgba_row<const ALPHA: bool>(
 
   // SAFETY: NEON availability is the caller's obligation; the
   // dispatcher in `crate::row` verifies it. Pointer adds are bounded
-  // by the `for w in 0..words` loop and the caller-promised slice
+  // by the `for w in 0..full_words` loop and the caller-promised slice
   // lengths checked above.
   unsafe {
     let rnd_v = vdupq_n_s32(RND);
@@ -152,7 +184,7 @@ pub(crate) unsafe fn v210_to_rgb_or_rgba_row<const ALPHA: bool>(
     let cbu = vdupq_n_s32(coeffs.b_u());
     let cbv = vdupq_n_s32(coeffs.b_v());
 
-    for w in 0..words {
+    for w in 0..full_words {
       let (y_vec, u_vec, v_vec) = unpack_v210_word_neon(packed.as_ptr().add(w * 16));
 
       let y_i16 = vreinterpretq_s16_u16(y_vec);
@@ -213,6 +245,18 @@ pub(crate) unsafe fn v210_to_rgb_or_rgba_row<const ALPHA: bool>(
         out[w * 6 * 3..w * 6 * 3 + 6 * 3].copy_from_slice(&tmp[..6 * 3]);
       }
     }
+
+    // Tail: any remaining 2 or 4 pixels go through scalar, reading
+    // the unconsumed 16-byte partial word and writing the partial
+    // output prefix. The scalar handler only emits `tail_pixels`
+    // pixels and ignores invalid sample slots in the partial word.
+    if full_words * 6 < width {
+      let tail_start_px = full_words * 6;
+      let tail_packed = &packed[full_words * 16..total_words * 16];
+      let tail_out = &mut out[tail_start_px * bpp..width * bpp];
+      let tail_w = width - tail_start_px;
+      scalar::v210_to_rgb_or_rgba_row::<ALPHA>(tail_packed, tail_out, tail_w, matrix, full_range);
+    }
   }
 }
 
@@ -223,8 +267,8 @@ pub(crate) unsafe fn v210_to_rgb_or_rgba_row<const ALPHA: bool>(
 /// # Safety
 ///
 /// 1. **NEON must be available.**
-/// 2. `width % 6 == 0`.
-/// 3. `packed.len() >= (width / 6) * 16`.
+/// 2. `width % 2 == 0` (4:2:2 chroma pair).
+/// 3. `packed.len() >= ceil(width / 6) * 16`.
 /// 4. `out.len() >= width * (if ALPHA { 4 } else { 3 })` (`u16` elements).
 #[inline]
 #[target_feature(enable = "neon")]
@@ -235,13 +279,11 @@ pub(crate) unsafe fn v210_to_rgb_u16_or_rgba_u16_row<const ALPHA: bool>(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  debug_assert!(
-    width.is_multiple_of(6),
-    "v210 requires width divisible by 6"
-  );
-  let words = width / 6;
+  debug_assert!(width.is_multiple_of(2), "v210 requires even width");
+  let total_words = width.div_ceil(6);
+  let full_words = width / 6;
   let bpp: usize = if ALPHA { 4 } else { 3 };
-  debug_assert!(packed.len() >= words * 16);
+  debug_assert!(packed.len() >= total_words * 16);
   debug_assert!(out.len() >= width * bpp);
 
   let coeffs = scalar::Coefficients::for_matrix(matrix);
@@ -266,7 +308,7 @@ pub(crate) unsafe fn v210_to_rgb_u16_or_rgba_u16_row<const ALPHA: bool>(
     let cbu = vdupq_n_s32(coeffs.b_u());
     let cbv = vdupq_n_s32(coeffs.b_v());
 
-    for w in 0..words {
+    for w in 0..full_words {
       let (y_vec, u_vec, v_vec) = unpack_v210_word_neon(packed.as_ptr().add(w * 16));
 
       let y_i16 = vreinterpretq_s16_u16(y_vec);
@@ -313,6 +355,21 @@ pub(crate) unsafe fn v210_to_rgb_u16_or_rgba_u16_row<const ALPHA: bool>(
         out[w * 6 * 3..w * 6 * 3 + 6 * 3].copy_from_slice(&tmp[..6 * 3]);
       }
     }
+
+    // Partial-word tail through scalar.
+    if full_words * 6 < width {
+      let tail_start_px = full_words * 6;
+      let tail_packed = &packed[full_words * 16..total_words * 16];
+      let tail_out = &mut out[tail_start_px * bpp..width * bpp];
+      let tail_w = width - tail_start_px;
+      scalar::v210_to_rgb_u16_or_rgba_u16_row::<ALPHA>(
+        tail_packed,
+        tail_out,
+        tail_w,
+        matrix,
+        full_range,
+      );
+    }
   }
 }
 
@@ -323,23 +380,21 @@ pub(crate) unsafe fn v210_to_rgb_u16_or_rgba_u16_row<const ALPHA: bool>(
 /// # Safety
 ///
 /// 1. **NEON must be available.**
-/// 2. `width % 6 == 0`.
-/// 3. `packed.len() >= (width / 6) * 16`.
+/// 2. `width % 2 == 0` (4:2:2 chroma pair).
+/// 3. `packed.len() >= ceil(width / 6) * 16`.
 /// 4. `luma_out.len() >= width`.
 #[inline]
 #[target_feature(enable = "neon")]
 pub(crate) unsafe fn v210_to_luma_row(packed: &[u8], luma_out: &mut [u8], width: usize) {
-  debug_assert!(
-    width.is_multiple_of(6),
-    "v210 requires width divisible by 6"
-  );
-  let words = width / 6;
-  debug_assert!(packed.len() >= words * 16);
+  debug_assert!(width.is_multiple_of(2), "v210 requires even width");
+  let total_words = width.div_ceil(6);
+  let full_words = width / 6;
+  debug_assert!(packed.len() >= total_words * 16);
   debug_assert!(luma_out.len() >= width);
 
   // SAFETY: caller's obligation per the safety contract above.
   unsafe {
-    for w in 0..words {
+    for w in 0..full_words {
       let (y_vec, _, _) = unpack_v210_word_neon(packed.as_ptr().add(w * 16));
       // Downshift 10-bit Y by 2 → 8-bit, narrow to u8x8.
       let y_u8 = vqmovn_u16(vshrq_n_u16::<2>(y_vec));
@@ -347,6 +402,13 @@ pub(crate) unsafe fn v210_to_luma_row(packed: &[u8], luma_out: &mut [u8], width:
       let mut tmp = [0u8; 8];
       vst1_u8(tmp.as_mut_ptr(), y_u8);
       luma_out[w * 6..w * 6 + 6].copy_from_slice(&tmp[..6]);
+    }
+    if full_words * 6 < width {
+      let tail_start_px = full_words * 6;
+      let tail_packed = &packed[full_words * 16..total_words * 16];
+      let tail_out = &mut luma_out[tail_start_px..width];
+      let tail_w = width - tail_start_px;
+      scalar::v210_to_luma_row(tail_packed, tail_out, tail_w);
     }
   }
 }
@@ -358,28 +420,33 @@ pub(crate) unsafe fn v210_to_luma_row(packed: &[u8], luma_out: &mut [u8], width:
 /// # Safety
 ///
 /// 1. **NEON must be available.**
-/// 2. `width % 6 == 0`.
-/// 3. `packed.len() >= (width / 6) * 16`.
+/// 2. `width % 2 == 0` (4:2:2 chroma pair).
+/// 3. `packed.len() >= ceil(width / 6) * 16`.
 /// 4. `luma_out.len() >= width`.
 #[inline]
 #[target_feature(enable = "neon")]
 pub(crate) unsafe fn v210_to_luma_u16_row(packed: &[u8], luma_out: &mut [u16], width: usize) {
-  debug_assert!(
-    width.is_multiple_of(6),
-    "v210 requires width divisible by 6"
-  );
-  let words = width / 6;
-  debug_assert!(packed.len() >= words * 16);
+  debug_assert!(width.is_multiple_of(2), "v210 requires even width");
+  let total_words = width.div_ceil(6);
+  let full_words = width / 6;
+  debug_assert!(packed.len() >= total_words * 16);
   debug_assert!(luma_out.len() >= width);
 
   // SAFETY: caller's obligation per the safety contract above.
   unsafe {
-    for w in 0..words {
+    for w in 0..full_words {
       let (y_vec, _, _) = unpack_v210_word_neon(packed.as_ptr().add(w * 16));
       // Store 6 of the 8 u16 lanes via stack buffer + copy_from_slice.
       let mut tmp = [0u16; 8];
       vst1q_u16(tmp.as_mut_ptr(), y_vec);
       luma_out[w * 6..w * 6 + 6].copy_from_slice(&tmp[..6]);
+    }
+    if full_words * 6 < width {
+      let tail_start_px = full_words * 6;
+      let tail_packed = &packed[full_words * 16..total_words * 16];
+      let tail_out = &mut luma_out[tail_start_px..width];
+      let tail_w = width - tail_start_px;
+      scalar::v210_to_luma_u16_row(tail_packed, tail_out, tail_w);
     }
   }
 }

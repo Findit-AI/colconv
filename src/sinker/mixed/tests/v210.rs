@@ -28,7 +28,9 @@ use super::*;
 /// For a solid color, the same Y goes into all 6 Y slots, the same U
 /// into all 3 Cb slots, the same V into all 3 Cr slots.
 pub(super) fn solid_v210_frame(width: u32, height: u32, y: u16, u: u16, v: u16) -> Vec<u8> {
-  let words_per_row = (width / 6) as usize;
+  // Round up — partial-word widths (e.g. 1280) need the trailing
+  // 16-byte block too, even if only 2 or 4 of its samples are valid.
+  let words_per_row = width.div_ceil(6) as usize;
   let mut buf = std::vec![0u8; words_per_row * 16 * height as usize];
   let samples: [u16; 12] = [u, y, v, y, u, y, v, y, u, y, v, y];
   let word = pack_v210_word_for_test(samples);
@@ -229,12 +231,16 @@ fn v210_with_rgb_u16_and_with_rgba_u16_byte_identical() {
 )]
 fn v210_with_simd_false_matches_with_simd_true() {
   // Pseudo-random v210 across multiple widths covering the main loop
-  // + scalar tail of every backend block size. Mask packed buffer to
-  // keep the low 30 bits of each u32 word valid (10-bit fields × 3;
-  // the top 2 bits are unused per the v210 spec).
-  for w in [6usize, 12, 18, 24, 30, 1920, 1926] {
+  // + scalar tail of every backend block size, plus partial-word
+  // widths (2, 4, 8, 10, 14, 1280) that exercise the partial-tail
+  // emitter. Mask packed buffer to keep the low 30 bits of each u32
+  // word valid (10-bit fields × 3; the top 2 bits are unused per the
+  // v210 spec).
+  for w in [
+    2usize, 4, 6, 8, 10, 12, 14, 18, 24, 30, 1280, 1920, 1922, 1926,
+  ] {
     let h = 2usize;
-    let mut buf = std::vec![0u8; (w / 6) * 16 * h];
+    let mut buf = std::vec![0u8; w.div_ceil(6) * 16 * h];
     pseudo_random_u8(&mut buf, 0xC0FFEE);
     // Each 4-byte LE u32 has its top 2 bits unused (bits[31:30]).
     // Byte 3 of each word holds bits[31:24]; mask off the top 2 to
@@ -242,7 +248,7 @@ fn v210_with_simd_false_matches_with_simd_true() {
     for i in (0..buf.len()).step_by(4) {
       buf[i + 3] &= 0x3F;
     }
-    let src = V210Frame::new(&buf, w as u32, h as u32, ((w / 6) * 16) as u32);
+    let src = V210Frame::new(&buf, w as u32, h as u32, (w.div_ceil(6) * 16) as u32);
 
     let mut rgb_simd = std::vec![0u8; w * h * 3];
     let mut rgb_scalar = std::vec![0u8; w * h * 3];
@@ -262,20 +268,48 @@ fn v210_with_simd_false_matches_with_simd_true() {
 // ---- Error-path tests --------------------------------------------------
 
 #[test]
-fn v210_width_not_multiple_of_6_returns_err() {
-  // Direct `process()` call with a sink configured at width=8 (not a
-  // multiple of 6). The width check fires *before* any kernel runs,
-  // preserving the no-panic contract — even if the caller bypasses
-  // the walker (which would catch this in `begin_frame`).
+fn v210_odd_width_returns_err() {
+  // Direct `process()` call with a sink configured at width=7 (odd —
+  // violates 4:2:2 chroma-pair constraint). Even widths that aren't
+  // multiples of 6 are now supported (partial-word handling), so this
+  // covers only the genuinely-invalid odd-width case. The width check
+  // fires *before* any kernel runs, preserving the no-panic contract
+  // — even if the caller bypasses the walker (which would catch this
+  // in `begin_frame`).
   let mut rgb = std::vec![0u8; 8 * 8 * 3];
-  let mut sink = MixedSinker::<V210>::new(8, 8).with_rgb(&mut rgb).unwrap();
+  let mut sink = MixedSinker::<V210>::new(7, 8).with_rgb(&mut rgb).unwrap();
   let buf = std::vec![0u8; 16];
   let row = V210Row::new(&buf, 0, ColorMatrix::Bt601, true);
   let err = sink.process(row).err().unwrap();
-  assert!(matches!(
-    err,
-    MixedSinkerError::WidthNotMultipleOf6 { width: 8 }
-  ));
+  assert!(matches!(err, MixedSinkerError::OddWidth { width: 7 }));
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn v210_partial_word_width_works_end_to_end() {
+  // 720p-sized solid gray (Y=512, U=V=512) at width = 1280 (partial
+  // last word: 213 full + 1 partial holding 2 valid px). The frame +
+  // walker + sinker + scalar/SIMD kernels must all agree and produce
+  // a uniform mid-gray RGB output across every pixel.
+  let buf = solid_v210_frame(1280, 1, 512, 512, 512);
+  let stride = 1280u32.div_ceil(6) * 16;
+  let src = V210Frame::new(&buf, 1280, 1, stride);
+  let mut rgb = std::vec![0u8; 1280 * 3];
+  let mut sink = MixedSinker::<V210>::new(1280, 1)
+    .with_rgb(&mut rgb)
+    .unwrap();
+  v210_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  for px in rgb.chunks(3) {
+    assert!(
+      px[0].abs_diff(128) <= 1,
+      "partial-word RGB diverged: {px:?}"
+    );
+    assert_eq!(px[0], px[1]);
+    assert_eq!(px[1], px[2]);
+  }
 }
 
 #[test]

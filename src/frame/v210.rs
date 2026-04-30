@@ -14,6 +14,17 @@
 //! De-facto pro-broadcast standard for 10-bit SDI capture (DeckLink,
 //! Kona, AJA, etc.). Used in BlackmagicDesign tooling, ProRes
 //! intermediate workflows, and most DIT pipelines.
+//!
+//! ## Width handling
+//!
+//! v210 packs 6 pixels per 16-byte word, but real captures often have
+//! widths that don't end on a complete word boundary — e.g. 720p (1280
+//! wide) needs `ceil(1280 / 6) = 214` words = 3424 bytes per row, with
+//! the last word holding only 4 valid samples (2 pixels: Cb, Y, Cr, Y).
+//! [`V210Frame`] therefore accepts any **even** width: 4:2:2 chroma
+//! subsampling still mandates the 2-pixel pair, but a partial last
+//! word with 2 or 4 valid samples is fully supported. The minimum
+//! row size is computed as `width.div_ceil(6) * 16`.
 
 use derive_more::IsVariant;
 use thiserror::Error;
@@ -42,18 +53,22 @@ pub enum V210FrameError {
     /// Configured height.
     height: u32,
   },
-  /// `width % 6 != 0`. v210 packs 6 pixels per 16-byte word, so the
-  /// kernel only handles widths divisible by 6.
-  #[error("V210Frame: width {width} is not a multiple of 6 (v210 packs 6 pixels per 16-byte word)")]
-  WidthNotMultipleOf6 {
+  /// `width % 2 != 0`. v210 is 4:2:2 (chroma pair), so width must be
+  /// even. Partial last words (widths not divisible by 6) are supported
+  /// — the last word emits 2 or 4 valid pixels — so only the chroma-pair
+  /// constraint applies.
+  #[error("V210Frame: width {width} is odd; v210 is 4:2:2 and requires even width")]
+  OddWidth {
     /// Configured width.
     width: u32,
   },
-  /// `stride < (width / 6) * 16`. Each row needs at least
-  /// `(width / 6) * 16` bytes to hold all pixels.
+  /// `stride < width.div_ceil(6) * 16`. Each row needs at least
+  /// `ceil(width / 6) * 16` bytes to hold all pixels (the final partial
+  /// word still occupies 16 bytes even if only 2 or 4 samples are
+  /// valid).
   #[error("V210Frame: stride {stride} is below the minimum {min_stride}")]
   StrideTooSmall {
-    /// Minimum required stride in bytes (`(width / 6) * 16`).
+    /// Minimum required stride in bytes (`ceil(width / 6) * 16`).
     min_stride: u32,
     /// Caller-supplied stride.
     stride: u32,
@@ -76,9 +91,9 @@ pub enum V210FrameError {
     /// Configured height.
     rows: u32,
   },
-  /// `(width / 6) * 16` overflows `u32`. Only reachable on 32-bit
+  /// `ceil(width / 6) * 16` overflows `u32`. Only reachable on 32-bit
   /// targets with extreme widths.
-  #[error("V210Frame: row size in bytes ((width / 6) × 16) overflows u32")]
+  #[error("V210Frame: row size in bytes (ceil(width / 6) × 16) overflows u32")]
   WidthOverflow {
     /// Configured width.
     width: u32,
@@ -97,10 +112,12 @@ impl<'a> V210Frame<'a> {
     if width == 0 || height == 0 {
       return Err(V210FrameError::ZeroDimension { width, height });
     }
-    if !width.is_multiple_of(6) {
-      return Err(V210FrameError::WidthNotMultipleOf6 { width });
+    if !width.is_multiple_of(2) {
+      return Err(V210FrameError::OddWidth { width });
     }
-    let words = width / 6;
+    // `width.div_ceil(6) * 16` — partial last words are supported, so
+    // the row byte count rounds up to the next complete word.
+    let words = width.div_ceil(6);
     let min_stride = match words.checked_mul(16) {
       Some(n) => n,
       None => return Err(V210FrameError::WidthOverflow { width }),
@@ -140,9 +157,7 @@ impl<'a> V210Frame<'a> {
         // const-context-compatible panic message.
         match e {
           V210FrameError::ZeroDimension { .. } => panic!("invalid V210Frame: zero dimension"),
-          V210FrameError::WidthNotMultipleOf6 { .. } => {
-            panic!("invalid V210Frame: width not multiple of 6")
-          }
+          V210FrameError::OddWidth { .. } => panic!("invalid V210Frame: odd width"),
           V210FrameError::StrideTooSmall { .. } => panic!("invalid V210Frame: stride too small"),
           V210FrameError::PlaneTooShort { .. } => panic!("invalid V210Frame: plane too short"),
           V210FrameError::GeometryOverflow { .. } => {

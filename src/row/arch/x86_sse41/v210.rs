@@ -138,8 +138,8 @@ unsafe fn unpack_v210_word_sse41(ptr: *const u8) -> (__m128i, __m128i, __m128i) 
 /// # Safety
 ///
 /// 1. **SSE4.1 must be available on the current CPU.**
-/// 2. `width % 6 == 0`.
-/// 3. `packed.len() >= (width / 6) * 16`.
+/// 2. `width % 2 == 0` (4:2:2 chroma pair).
+/// 3. `packed.len() >= ceil(width / 6) * 16`.
 /// 4. `out.len() >= width * (if ALPHA { 4 } else { 3 })`.
 #[inline]
 #[target_feature(enable = "sse4.1")]
@@ -150,13 +150,11 @@ pub(crate) unsafe fn v210_to_rgb_or_rgba_row<const ALPHA: bool>(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  debug_assert!(
-    width.is_multiple_of(6),
-    "v210 requires width divisible by 6"
-  );
+  debug_assert!(width.is_multiple_of(2), "v210 requires even width");
+  let total_words = width.div_ceil(6);
   let words = width / 6;
   let bpp: usize = if ALPHA { 4 } else { 3 };
-  debug_assert!(packed.len() >= words * 16);
+  debug_assert!(packed.len() >= total_words * 16);
   debug_assert!(out.len() >= width * bpp);
 
   let coeffs = scalar::Coefficients::for_matrix(matrix);
@@ -258,6 +256,15 @@ pub(crate) unsafe fn v210_to_rgb_or_rgba_row<const ALPHA: bool>(
         }
       }
     }
+
+    // Partial-word tail (2 or 4 px) goes through scalar.
+    if words * 6 < width {
+      let tail_start_px = words * 6;
+      let tail_packed = &packed[words * 16..total_words * 16];
+      let tail_out = &mut out[tail_start_px * bpp..width * bpp];
+      let tail_w = width - tail_start_px;
+      scalar::v210_to_rgb_or_rgba_row::<ALPHA>(tail_packed, tail_out, tail_w, matrix, full_range);
+    }
   }
 }
 
@@ -268,8 +275,8 @@ pub(crate) unsafe fn v210_to_rgb_or_rgba_row<const ALPHA: bool>(
 /// # Safety
 ///
 /// 1. **SSE4.1 must be available.**
-/// 2. `width % 6 == 0`.
-/// 3. `packed.len() >= (width / 6) * 16`.
+/// 2. `width % 2 == 0` (4:2:2 chroma pair).
+/// 3. `packed.len() >= ceil(width / 6) * 16`.
 /// 4. `out.len() >= width * (if ALPHA { 4 } else { 3 })` (`u16` elements).
 #[inline]
 #[target_feature(enable = "sse4.1")]
@@ -280,13 +287,11 @@ pub(crate) unsafe fn v210_to_rgb_u16_or_rgba_u16_row<const ALPHA: bool>(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  debug_assert!(
-    width.is_multiple_of(6),
-    "v210 requires width divisible by 6"
-  );
+  debug_assert!(width.is_multiple_of(2), "v210 requires even width");
+  let total_words = width.div_ceil(6);
   let words = width / 6;
   let bpp: usize = if ALPHA { 4 } else { 3 };
-  debug_assert!(packed.len() >= words * 16);
+  debug_assert!(packed.len() >= total_words * 16);
   debug_assert!(out.len() >= width * bpp);
 
   let coeffs = scalar::Coefficients::for_matrix(matrix);
@@ -371,6 +376,21 @@ pub(crate) unsafe fn v210_to_rgb_u16_or_rgba_u16_row<const ALPHA: bool>(
         }
       }
     }
+
+    // Partial-word tail (2 or 4 px) goes through scalar.
+    if words * 6 < width {
+      let tail_start_px = words * 6;
+      let tail_packed = &packed[words * 16..total_words * 16];
+      let tail_out = &mut out[tail_start_px * bpp..width * bpp];
+      let tail_w = width - tail_start_px;
+      scalar::v210_to_rgb_u16_or_rgba_u16_row::<ALPHA>(
+        tail_packed,
+        tail_out,
+        tail_w,
+        matrix,
+        full_range,
+      );
+    }
   }
 }
 
@@ -381,18 +401,16 @@ pub(crate) unsafe fn v210_to_rgb_u16_or_rgba_u16_row<const ALPHA: bool>(
 /// # Safety
 ///
 /// 1. **SSE4.1 must be available.**
-/// 2. `width % 6 == 0`.
-/// 3. `packed.len() >= (width / 6) * 16`.
+/// 2. `width % 2 == 0` (4:2:2 chroma pair).
+/// 3. `packed.len() >= ceil(width / 6) * 16`.
 /// 4. `luma_out.len() >= width`.
 #[inline]
 #[target_feature(enable = "sse4.1")]
 pub(crate) unsafe fn v210_to_luma_row(packed: &[u8], luma_out: &mut [u8], width: usize) {
-  debug_assert!(
-    width.is_multiple_of(6),
-    "v210 requires width divisible by 6"
-  );
+  debug_assert!(width.is_multiple_of(2), "v210 requires even width");
+  let total_words = width.div_ceil(6);
   let words = width / 6;
-  debug_assert!(packed.len() >= words * 16);
+  debug_assert!(packed.len() >= total_words * 16);
   debug_assert!(luma_out.len() >= width);
 
   // SAFETY: caller's obligation per the safety contract above.
@@ -407,6 +425,13 @@ pub(crate) unsafe fn v210_to_luma_row(packed: &[u8], luma_out: &mut [u8], width:
       _mm_storeu_si128(tmp.as_mut_ptr().cast(), y_u8);
       luma_out[w * 6..w * 6 + 6].copy_from_slice(&tmp[..6]);
     }
+    if words * 6 < width {
+      let tail_start_px = words * 6;
+      let tail_packed = &packed[words * 16..total_words * 16];
+      let tail_out = &mut luma_out[tail_start_px..width];
+      let tail_w = width - tail_start_px;
+      scalar::v210_to_luma_row(tail_packed, tail_out, tail_w);
+    }
   }
 }
 
@@ -417,18 +442,16 @@ pub(crate) unsafe fn v210_to_luma_row(packed: &[u8], luma_out: &mut [u8], width:
 /// # Safety
 ///
 /// 1. **SSE4.1 must be available.**
-/// 2. `width % 6 == 0`.
-/// 3. `packed.len() >= (width / 6) * 16`.
+/// 2. `width % 2 == 0` (4:2:2 chroma pair).
+/// 3. `packed.len() >= ceil(width / 6) * 16`.
 /// 4. `luma_out.len() >= width`.
 #[inline]
 #[target_feature(enable = "sse4.1")]
 pub(crate) unsafe fn v210_to_luma_u16_row(packed: &[u8], luma_out: &mut [u16], width: usize) {
-  debug_assert!(
-    width.is_multiple_of(6),
-    "v210 requires width divisible by 6"
-  );
+  debug_assert!(width.is_multiple_of(2), "v210 requires even width");
+  let total_words = width.div_ceil(6);
   let words = width / 6;
-  debug_assert!(packed.len() >= words * 16);
+  debug_assert!(packed.len() >= total_words * 16);
   debug_assert!(luma_out.len() >= width);
 
   // SAFETY: caller's obligation per the safety contract above.
@@ -439,6 +462,13 @@ pub(crate) unsafe fn v210_to_luma_u16_row(packed: &[u8], luma_out: &mut [u16], w
       let mut tmp = [0u16; 8];
       _mm_storeu_si128(tmp.as_mut_ptr().cast(), y_vec);
       luma_out[w * 6..w * 6 + 6].copy_from_slice(&tmp[..6]);
+    }
+    if words * 6 < width {
+      let tail_start_px = words * 6;
+      let tail_packed = &packed[words * 16..total_words * 16];
+      let tail_out = &mut luma_out[tail_start_px..width];
+      let tail_w = width - tail_start_px;
+      scalar::v210_to_luma_u16_row(tail_packed, tail_out, tail_w);
     }
   }
 }

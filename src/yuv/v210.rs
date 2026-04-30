@@ -79,7 +79,7 @@ pub fn v210_to<S: V210Sink>(
 
   let h = src.height() as usize;
   let stride = src.stride() as usize;
-  let row_bytes = (src.width() as usize / 6) * 16;
+  let row_bytes = (src.width() as usize).div_ceil(6) * 16;
   let plane = src.v210();
 
   for row in 0..h {

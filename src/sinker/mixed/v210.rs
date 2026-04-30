@@ -4,8 +4,9 @@
 //!
 //! v210 packs 12 × 10-bit samples per 16-byte word = 6 pixels (4:2:2
 //! with 6 Y + 3 Cb + 3 Cr per word). The sinker's configured width
-//! must be a multiple of 6; non-multiples surface as
-//! [`MixedSinkerError::WidthNotMultipleOf6`] before any kernel runs,
+//! must be **even** (4:2:2 chroma pair) — partial last words (widths
+//! not divisible by 6, e.g. 720p = 1280) are supported. Odd widths
+//! surface as [`MixedSinkerError::OddWidth`] before any kernel runs,
 //! preserving the no-panic contract.
 //!
 //! Outputs map to the sink's standard channels:
@@ -148,8 +149,8 @@ impl PixelSink for MixedSinker<'_, V210> {
 
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     check_dimensions_match(self.width, self.height, width, height)?;
-    if !self.width.is_multiple_of(6) {
-      return Err(MixedSinkerError::WidthNotMultipleOf6 { width: self.width });
+    if !self.width.is_multiple_of(2) {
+      return Err(MixedSinkerError::OddWidth { width: self.width });
     }
     Ok(())
   }
@@ -161,17 +162,18 @@ impl PixelSink for MixedSinker<'_, V210> {
     let idx = row.row();
     let use_simd = self.simd;
 
-    if !w.is_multiple_of(6) {
-      return Err(MixedSinkerError::WidthNotMultipleOf6 { width: w });
+    if !w.is_multiple_of(2) {
+      return Err(MixedSinkerError::OddWidth { width: w });
     }
 
-    let packed_expected = (w / 6)
-      .checked_mul(16)
-      .ok_or(MixedSinkerError::GeometryOverflow {
-        width: w,
-        height: h,
-        channels: 16,
-      })?;
+    let packed_expected =
+      w.div_ceil(6)
+        .checked_mul(16)
+        .ok_or(MixedSinkerError::GeometryOverflow {
+          width: w,
+          height: h,
+          channels: 16,
+        })?;
     if row.v210().len() != packed_expected {
       return Err(MixedSinkerError::RowShapeMismatch {
         which: RowSlice::V210Packed,

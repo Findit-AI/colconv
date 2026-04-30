@@ -23,7 +23,7 @@ fn pseudo_random_v210_words(words: usize, seed: usize) -> std::vec::Vec<u8> {
 }
 
 fn check_rgb(width: usize, matrix: ColorMatrix, full_range: bool) {
-  let p = pseudo_random_v210_words(width / 6, 0xAA55);
+  let p = pseudo_random_v210_words(width.div_ceil(6), 0xAA55);
   let mut s = std::vec![0u8; width * 3];
   let mut k = std::vec![0u8; width * 3];
   scalar::v210_to_rgb_or_rgba_row::<false>(&p, &mut s, width, matrix, full_range);
@@ -37,7 +37,7 @@ fn check_rgb(width: usize, matrix: ColorMatrix, full_range: bool) {
 }
 
 fn check_rgba(width: usize, matrix: ColorMatrix, full_range: bool) {
-  let p = pseudo_random_v210_words(width / 6, 0xAA55);
+  let p = pseudo_random_v210_words(width.div_ceil(6), 0xAA55);
   let mut s = std::vec![0u8; width * 4];
   let mut k = std::vec![0u8; width * 4];
   scalar::v210_to_rgb_or_rgba_row::<true>(&p, &mut s, width, matrix, full_range);
@@ -51,7 +51,7 @@ fn check_rgba(width: usize, matrix: ColorMatrix, full_range: bool) {
 }
 
 fn check_rgb_u16(width: usize, matrix: ColorMatrix, full_range: bool) {
-  let p = pseudo_random_v210_words(width / 6, 0xAA55);
+  let p = pseudo_random_v210_words(width.div_ceil(6), 0xAA55);
   let mut s = std::vec![0u16; width * 3];
   let mut k = std::vec![0u16; width * 3];
   scalar::v210_to_rgb_u16_or_rgba_u16_row::<false>(&p, &mut s, width, matrix, full_range);
@@ -65,7 +65,7 @@ fn check_rgb_u16(width: usize, matrix: ColorMatrix, full_range: bool) {
 }
 
 fn check_rgba_u16(width: usize, matrix: ColorMatrix, full_range: bool) {
-  let p = pseudo_random_v210_words(width / 6, 0xAA55);
+  let p = pseudo_random_v210_words(width.div_ceil(6), 0xAA55);
   let mut s = std::vec![0u16; width * 4];
   let mut k = std::vec![0u16; width * 4];
   scalar::v210_to_rgb_u16_or_rgba_u16_row::<true>(&p, &mut s, width, matrix, full_range);
@@ -79,7 +79,7 @@ fn check_rgba_u16(width: usize, matrix: ColorMatrix, full_range: bool) {
 }
 
 fn check_luma(width: usize) {
-  let p = pseudo_random_v210_words(width / 6, 0xC001);
+  let p = pseudo_random_v210_words(width.div_ceil(6), 0xC001);
   let mut s = std::vec![0u8; width];
   let mut k = std::vec![0u8; width];
   scalar::v210_to_luma_row(&p, &mut s, width);
@@ -90,7 +90,7 @@ fn check_luma(width: usize) {
 }
 
 fn check_luma_u16(width: usize) {
-  let p = pseudo_random_v210_words(width / 6, 0xC001);
+  let p = pseudo_random_v210_words(width.div_ceil(6), 0xC001);
   let mut s = std::vec![0u16; width];
   let mut k = std::vec![0u16; width];
   scalar::v210_to_luma_u16_row(&p, &mut s, width);
@@ -140,10 +140,18 @@ fn avx512_v210_matches_scalar_widths() {
   {
     return;
   }
-  // Widths cover: 24 = one main-loop quad (no tail); 30 = 1 quad + 6-px
-  // scalar tail; 48 = 2 quads, no tail; 1920 = 80 quads no tail; 1944 =
-  // 81 quads (24 * 81 = 1944), exercising deep tail-free path.
-  for w in [24usize, 30, 48, 1920, 1944] {
+  // Widths cover existing AVX-512 cells (main-loop quad = 24 px) plus
+  // partial-word cases (2, 4, 8, 10, 14, 1280, 1922) that route through
+  // the scalar tail. Specifically:
+  //   2, 4 = pure scalar tail (no main loop iterations)
+  //   8 = 0 quads + 6 full + 2 partial
+  //   10 = 0 quads + 6 full + 4 partial
+  //   14 = 0 quads + 12 full + 2 partial
+  //   1280 = 53 quads + 8 px scalar tail
+  //   1922 = 80 quads + 2 px partial-only tail
+  for w in [
+    2usize, 4, 8, 10, 12, 14, 18, 24, 30, 48, 1280, 1920, 1922, 1944,
+  ] {
     check_rgb(w, ColorMatrix::Bt709, false);
     check_rgba(w, ColorMatrix::Bt709, true);
     check_rgb_u16(w, ColorMatrix::Bt2020Ncl, true);
@@ -162,7 +170,9 @@ fn avx512_v210_luma_matches_scalar_widths() {
   {
     return;
   }
-  for w in [24usize, 30, 48, 1920, 1944] {
+  for w in [
+    2usize, 4, 8, 10, 12, 14, 18, 24, 30, 48, 1280, 1920, 1922, 1944,
+  ] {
     check_luma(w);
     check_luma_u16(w);
   }

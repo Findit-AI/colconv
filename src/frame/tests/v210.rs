@@ -37,19 +37,54 @@ fn v210_frame_try_new_rejects_zero_dimension() {
 }
 
 #[test]
-fn v210_frame_try_new_rejects_width_not_multiple_of_6() {
-  let buf = std::vec![0u8; 256];
-  for w in [1u32, 2, 3, 4, 5, 7, 8, 9, 10, 11, 13] {
-    let stride = ((w as usize) * 8 / 3).div_ceil(16) * 16;
-    let err = V210Frame::try_new(&buf, w, 1, stride as u32).unwrap_err();
-    assert_eq!(err, V210FrameError::WidthNotMultipleOf6 { width: w });
+fn v210_frame_try_new_rejects_odd_width() {
+  // Odd widths violate the 4:2:2 chroma-pair constraint. Even widths
+  // that aren't multiples of 6 (e.g. 1280 = 720p) are now supported
+  // via partial-word handling — see the dedicated accept tests.
+  let buf = std::vec![0u8; 4096];
+  for w in [1u32, 3, 5, 7, 9, 11, 13, 15] {
+    let stride = ((w as usize) * 8 / 3 + 16) as u32;
+    let err = V210Frame::try_new(&buf, w, 1, stride).unwrap_err();
+    assert_eq!(err, V210FrameError::OddWidth { width: w });
   }
-  // 6, 12, 18, 24 must succeed (when buffer is large enough).
-  for w in [6u32, 12, 18, 24] {
-    let stride = ((w as usize) * 8 / 3) as u32;
+}
+
+#[test]
+fn v210_frame_try_new_accepts_partial_word_width() {
+  // 720p HD: width = 1280 ⇒ 1280 / 6 = 213 rem 2 ⇒ ceil(1280/6) = 214
+  // words = 214 * 16 = 3424 bytes per row. The last word holds 2 valid
+  // pixels (Cb, Y, Cr, Y) and 12 unused/undefined bytes.
+  let stride = 1280u32.div_ceil(6) * 16;
+  assert_eq!(stride, 3424);
+  let buf = std::vec![0u8; stride as usize];
+  let frame = V210Frame::try_new(&buf, 1280, 1, stride).unwrap();
+  assert_eq!(frame.width(), 1280);
+  assert_eq!(frame.stride(), 3424);
+
+  // Width = 1922 (1920 + 2) — forces the partial-word tail right after
+  // a long sequence of complete words.
+  let stride = 1922u32.div_ceil(6) * 16;
+  let buf = std::vec![0u8; stride as usize];
+  V210Frame::try_new(&buf, 1922, 1, stride).unwrap();
+
+  // Smaller partial-word widths.
+  for w in [2u32, 4, 8, 10, 14, 16, 20] {
+    let stride = w.div_ceil(6) * 16;
     let buf = std::vec![0u8; stride as usize];
     V210Frame::try_new(&buf, w, 1, stride).unwrap();
   }
+}
+
+#[test]
+fn v210_frame_accessors_round_trip_partial_word() {
+  // Round-trip on a 720p-sized frame (partial-word at end of row).
+  let stride = 1280u32.div_ceil(6) * 16;
+  let buf = std::vec![0u8; stride as usize * 720];
+  let frame = V210Frame::try_new(&buf, 1280, 720, stride).unwrap();
+  assert_eq!(frame.v210().len(), stride as usize * 720);
+  assert_eq!(frame.width(), 1280);
+  assert_eq!(frame.height(), 720);
+  assert_eq!(frame.stride(), stride);
 }
 
 #[test]
@@ -61,6 +96,14 @@ fn v210_frame_try_new_rejects_stride_too_small() {
     Err(V210FrameError::StrideTooSmall {
       min_stride: 16,
       stride: 15
+    })
+  ));
+  // For width=8 (partial-word, 2 words), min_stride = 32.
+  assert!(matches!(
+    V210Frame::try_new(&buf, 8, 1, 31),
+    Err(V210FrameError::StrideTooSmall {
+      min_stride: 32,
+      stride: 31
     })
   ));
 }
@@ -91,6 +134,7 @@ fn v210_frame_accessors_round_trip() {
 #[should_panic(expected = "invalid V210Frame:")]
 fn v210_frame_new_panics_on_invalid() {
   let buf = [];
-  // `new` is the panicking convenience.
+  // `new` is the panicking convenience; zero dimension is a guaranteed
+  // invariant violation regardless of the partial-word width relaxation.
   let _ = V210Frame::new(&buf, 0, 0, 0);
 }

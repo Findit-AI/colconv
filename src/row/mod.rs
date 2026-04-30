@@ -210,15 +210,18 @@ pub(crate) fn packed_yuv422_row_bytes(width: usize) -> usize {
   }
 }
 
-/// Byte length of one packed `v210` row (`(width / 6) * 16`) with
-/// overflow checking. v210 packs 6 pixels per 16-byte word.
+/// Byte length of one packed `v210` row (`ceil(width / 6) * 16`) with
+/// overflow checking. v210 packs 6 pixels per 16-byte word; widths
+/// that don't end on a complete-word boundary (e.g. 1280 for 720p)
+/// round up to the next word, with the final word emitting only its
+/// 2 or 4 valid pixels.
 ///
 /// Same `checked_mul` rationale as [`rgb_row_bytes`] — the returned
 /// byte count gates entry into unsafe SIMD loads. Panics if the
 /// multiplication overflows.
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn v210_row_bytes(width: usize) -> usize {
-  let words = width / 6;
+  let words = width.div_ceil(6);
   match words.checked_mul(16) {
     Some(n) => n,
     None => panic!("width ({width}) / 6 × 16 overflows usize (v210 row)"),

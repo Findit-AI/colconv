@@ -23,7 +23,7 @@ fn pseudo_random_v210_words(words: usize, seed: usize) -> std::vec::Vec<u8> {
 }
 
 fn check_rgb(width: usize, matrix: ColorMatrix, full_range: bool) {
-  let p = pseudo_random_v210_words(width / 6, 0xAA55);
+  let p = pseudo_random_v210_words(width.div_ceil(6), 0xAA55);
   let mut s = std::vec![0u8; width * 3];
   let mut k = std::vec![0u8; width * 3];
   scalar::v210_to_rgb_or_rgba_row::<false>(&p, &mut s, width, matrix, full_range);
@@ -37,7 +37,7 @@ fn check_rgb(width: usize, matrix: ColorMatrix, full_range: bool) {
 }
 
 fn check_rgba(width: usize, matrix: ColorMatrix, full_range: bool) {
-  let p = pseudo_random_v210_words(width / 6, 0xAA55);
+  let p = pseudo_random_v210_words(width.div_ceil(6), 0xAA55);
   let mut s = std::vec![0u8; width * 4];
   let mut k = std::vec![0u8; width * 4];
   scalar::v210_to_rgb_or_rgba_row::<true>(&p, &mut s, width, matrix, full_range);
@@ -51,7 +51,7 @@ fn check_rgba(width: usize, matrix: ColorMatrix, full_range: bool) {
 }
 
 fn check_rgb_u16(width: usize, matrix: ColorMatrix, full_range: bool) {
-  let p = pseudo_random_v210_words(width / 6, 0xAA55);
+  let p = pseudo_random_v210_words(width.div_ceil(6), 0xAA55);
   let mut s = std::vec![0u16; width * 3];
   let mut k = std::vec![0u16; width * 3];
   scalar::v210_to_rgb_u16_or_rgba_u16_row::<false>(&p, &mut s, width, matrix, full_range);
@@ -65,7 +65,7 @@ fn check_rgb_u16(width: usize, matrix: ColorMatrix, full_range: bool) {
 }
 
 fn check_rgba_u16(width: usize, matrix: ColorMatrix, full_range: bool) {
-  let p = pseudo_random_v210_words(width / 6, 0xAA55);
+  let p = pseudo_random_v210_words(width.div_ceil(6), 0xAA55);
   let mut s = std::vec![0u16; width * 4];
   let mut k = std::vec![0u16; width * 4];
   scalar::v210_to_rgb_u16_or_rgba_u16_row::<true>(&p, &mut s, width, matrix, full_range);
@@ -79,7 +79,7 @@ fn check_rgba_u16(width: usize, matrix: ColorMatrix, full_range: bool) {
 }
 
 fn check_luma(width: usize) {
-  let p = pseudo_random_v210_words(width / 6, 0xC001);
+  let p = pseudo_random_v210_words(width.div_ceil(6), 0xC001);
   let mut s = std::vec![0u8; width];
   let mut k = std::vec![0u8; width];
   scalar::v210_to_luma_row(&p, &mut s, width);
@@ -90,7 +90,7 @@ fn check_luma(width: usize) {
 }
 
 fn check_luma_u16(width: usize) {
-  let p = pseudo_random_v210_words(width / 6, 0xC001);
+  let p = pseudo_random_v210_words(width.div_ceil(6), 0xC001);
   let mut s = std::vec![0u16; width];
   let mut k = std::vec![0u16; width];
   scalar::v210_to_luma_u16_row(&p, &mut s, width);
@@ -134,7 +134,11 @@ fn wasm_simd128_v210_rgb_matches_scalar_all_matrices() {
   ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
 )]
 fn wasm_simd128_v210_matches_scalar_widths() {
-  for w in [6usize, 12, 18, 24, 30, 1920, 1926] {
+  // Includes partial-word widths: 2, 4, 8, 10, 14 (small mixes of full
+  // + partial), 1280 (canonical 720p), 1922 (1920 + 2 partial-tail).
+  for w in [
+    2usize, 4, 6, 8, 10, 12, 14, 18, 24, 30, 1280, 1920, 1922, 1926,
+  ] {
     check_rgb(w, ColorMatrix::Bt709, false);
     check_rgba(w, ColorMatrix::Bt709, true);
     check_rgb_u16(w, ColorMatrix::Bt2020Ncl, true);
@@ -148,7 +152,9 @@ fn wasm_simd128_v210_matches_scalar_widths() {
   ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
 )]
 fn wasm_simd128_v210_luma_matches_scalar_widths() {
-  for w in [6usize, 12, 18, 24, 30, 1920, 1926] {
+  for w in [
+    2usize, 4, 6, 8, 10, 12, 14, 18, 24, 30, 1280, 1920, 1922, 1926,
+  ] {
     check_luma(w);
     check_luma_u16(w);
   }

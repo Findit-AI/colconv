@@ -279,17 +279,6 @@ pub enum MixedSinkerError {
     /// Sink's configured width.
     width: usize,
   },
-
-  /// The sinker's configured `width` is not a multiple of 6.
-  /// v210 packs 6 pixels per 16-byte word — calling the kernel
-  /// with a non-multiple-of-6 width would produce undefined output.
-  #[error(
-    "MixedSinker configured width {width} is not a multiple of 6; v210 packs 6 pixels per 16-byte word"
-  )]
-  WidthNotMultipleOf6 {
-    /// Sink's configured width.
-    width: usize,
-  },
 }
 
 /// Identifies which of the three HSV planes a

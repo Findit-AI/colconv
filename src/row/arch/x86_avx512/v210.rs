@@ -242,8 +242,8 @@ unsafe fn unpack_v210_4words_avx512(ptr: *const u8) -> (__m512i, __m512i, __m512
 /// # Safety
 ///
 /// 1. **AVX-512F + AVX-512BW must be available on the current CPU.**
-/// 2. `width % 6 == 0`.
-/// 3. `packed.len() >= (width / 6) * 16`.
+/// 2. `width % 2 == 0` (4:2:2 chroma pair).
+/// 3. `packed.len() >= ceil(width / 6) * 16`.
 /// 4. `out.len() >= width * (if ALPHA { 4 } else { 3 })`.
 #[inline]
 #[target_feature(enable = "avx512f,avx512bw")]
@@ -254,13 +254,11 @@ pub(crate) unsafe fn v210_to_rgb_or_rgba_row<const ALPHA: bool>(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  debug_assert!(
-    width.is_multiple_of(6),
-    "v210 requires width divisible by 6"
-  );
+  debug_assert!(width.is_multiple_of(2), "v210 requires even width");
+  let total_words = width.div_ceil(6);
   let words = width / 6;
   let bpp: usize = if ALPHA { 4 } else { 3 };
-  debug_assert!(packed.len() >= words * 16);
+  debug_assert!(packed.len() >= total_words * 16);
   debug_assert!(out.len() >= width * bpp);
 
   let coeffs = scalar::Coefficients::for_matrix(matrix);
@@ -387,11 +385,11 @@ pub(crate) unsafe fn v210_to_rgb_or_rgba_row<const ALPHA: bool>(
       }
     }
 
-    // Tail: any remaining 1, 2, or 3 words (6, 12, or 18 px) goes
-    // through scalar.
-    if quads * 4 < words {
+    // Tail: any remaining 1, 2, or 3 full words (6, 12, or 18 px) and /
+    // or a partial word (2 / 4 px) goes through scalar.
+    if quads * 24 < width {
       let tail_start_px = quads * 24;
-      let tail_packed = &packed[quads * 64..words * 16];
+      let tail_packed = &packed[quads * 64..total_words * 16];
       let tail_out = &mut out[tail_start_px * bpp..width * bpp];
       let tail_w = width - tail_start_px;
       scalar::v210_to_rgb_or_rgba_row::<ALPHA>(tail_packed, tail_out, tail_w, matrix, full_range);
@@ -406,8 +404,8 @@ pub(crate) unsafe fn v210_to_rgb_or_rgba_row<const ALPHA: bool>(
 /// # Safety
 ///
 /// 1. **AVX-512F + AVX-512BW must be available.**
-/// 2. `width % 6 == 0`.
-/// 3. `packed.len() >= (width / 6) * 16`.
+/// 2. `width % 2 == 0` (4:2:2 chroma pair).
+/// 3. `packed.len() >= ceil(width / 6) * 16`.
 /// 4. `out.len() >= width * (if ALPHA { 4 } else { 3 })` (`u16` elements).
 #[inline]
 #[target_feature(enable = "avx512f,avx512bw")]
@@ -418,13 +416,11 @@ pub(crate) unsafe fn v210_to_rgb_u16_or_rgba_u16_row<const ALPHA: bool>(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  debug_assert!(
-    width.is_multiple_of(6),
-    "v210 requires width divisible by 6"
-  );
+  debug_assert!(width.is_multiple_of(2), "v210 requires even width");
+  let total_words = width.div_ceil(6);
   let words = width / 6;
   let bpp: usize = if ALPHA { 4 } else { 3 };
-  debug_assert!(packed.len() >= words * 16);
+  debug_assert!(packed.len() >= total_words * 16);
   debug_assert!(out.len() >= width * bpp);
 
   let coeffs = scalar::Coefficients::for_matrix(matrix);
@@ -526,11 +522,11 @@ pub(crate) unsafe fn v210_to_rgb_u16_or_rgba_u16_row<const ALPHA: bool>(
       }
     }
 
-    // Tail: any remaining 1, 2, or 3 words (6, 12, or 18 px) goes
-    // through scalar.
-    if quads * 4 < words {
+    // Tail: any remaining 1, 2, or 3 full words (6, 12, or 18 px) and /
+    // or a partial word (2 / 4 px) goes through scalar.
+    if quads * 24 < width {
       let tail_start_px = quads * 24;
-      let tail_packed = &packed[quads * 64..words * 16];
+      let tail_packed = &packed[quads * 64..total_words * 16];
       let tail_out = &mut out[tail_start_px * bpp..width * bpp];
       let tail_w = width - tail_start_px;
       scalar::v210_to_rgb_u16_or_rgba_u16_row::<ALPHA>(
@@ -551,18 +547,16 @@ pub(crate) unsafe fn v210_to_rgb_u16_or_rgba_u16_row<const ALPHA: bool>(
 /// # Safety
 ///
 /// 1. **AVX-512F + AVX-512BW must be available.**
-/// 2. `width % 6 == 0`.
-/// 3. `packed.len() >= (width / 6) * 16`.
+/// 2. `width % 2 == 0` (4:2:2 chroma pair).
+/// 3. `packed.len() >= ceil(width / 6) * 16`.
 /// 4. `luma_out.len() >= width`.
 #[inline]
 #[target_feature(enable = "avx512f,avx512bw")]
 pub(crate) unsafe fn v210_to_luma_row(packed: &[u8], luma_out: &mut [u8], width: usize) {
-  debug_assert!(
-    width.is_multiple_of(6),
-    "v210 requires width divisible by 6"
-  );
+  debug_assert!(width.is_multiple_of(2), "v210 requires even width");
+  let total_words = width.div_ceil(6);
   let words = width / 6;
-  debug_assert!(packed.len() >= words * 16);
+  debug_assert!(packed.len() >= total_words * 16);
   debug_assert!(luma_out.len() >= width);
 
   // SAFETY: caller's obligation per the safety contract above.
@@ -584,10 +578,11 @@ pub(crate) unsafe fn v210_to_luma_row(packed: &[u8], luma_out: &mut [u8], width:
       luma_out[q * 24..q * 24 + 24].copy_from_slice(&tmp[..24]);
     }
 
-    // Tail: any remaining 1, 2, or 3 words goes through scalar.
-    if quads * 4 < words {
+    // Tail: any remaining 1, 2, or 3 full words and / or a partial
+    // word (2 / 4 px) goes through scalar.
+    if quads * 24 < width {
       let tail_start_px = quads * 24;
-      let tail_packed = &packed[quads * 64..words * 16];
+      let tail_packed = &packed[quads * 64..total_words * 16];
       let tail_out = &mut luma_out[tail_start_px..width];
       let tail_w = width - tail_start_px;
       scalar::v210_to_luma_row(tail_packed, tail_out, tail_w);
@@ -602,18 +597,16 @@ pub(crate) unsafe fn v210_to_luma_row(packed: &[u8], luma_out: &mut [u8], width:
 /// # Safety
 ///
 /// 1. **AVX-512F + AVX-512BW must be available.**
-/// 2. `width % 6 == 0`.
-/// 3. `packed.len() >= (width / 6) * 16`.
+/// 2. `width % 2 == 0` (4:2:2 chroma pair).
+/// 3. `packed.len() >= ceil(width / 6) * 16`.
 /// 4. `luma_out.len() >= width`.
 #[inline]
 #[target_feature(enable = "avx512f,avx512bw")]
 pub(crate) unsafe fn v210_to_luma_u16_row(packed: &[u8], luma_out: &mut [u16], width: usize) {
-  debug_assert!(
-    width.is_multiple_of(6),
-    "v210 requires width divisible by 6"
-  );
+  debug_assert!(width.is_multiple_of(2), "v210 requires even width");
+  let total_words = width.div_ceil(6);
   let words = width / 6;
-  debug_assert!(packed.len() >= words * 16);
+  debug_assert!(packed.len() >= total_words * 16);
   debug_assert!(luma_out.len() >= width);
 
   // SAFETY: caller's obligation per the safety contract above.
@@ -627,10 +620,11 @@ pub(crate) unsafe fn v210_to_luma_u16_row(packed: &[u8], luma_out: &mut [u16], w
       luma_out[q * 24..q * 24 + 24].copy_from_slice(&tmp[..24]);
     }
 
-    // Tail: any remaining 1, 2, or 3 words goes through scalar.
-    if quads * 4 < words {
+    // Tail: any remaining 1, 2, or 3 full words and / or a partial
+    // word (2 / 4 px) goes through scalar.
+    if quads * 24 < width {
       let tail_start_px = quads * 24;
-      let tail_packed = &packed[quads * 64..words * 16];
+      let tail_packed = &packed[quads * 64..total_words * 16];
       let tail_out = &mut luma_out[tail_start_px..width];
       let tail_w = width - tail_start_px;
       scalar::v210_to_luma_u16_row(tail_packed, tail_out, tail_w);
