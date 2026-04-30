@@ -16,6 +16,7 @@ mod subsampled_4_2_0_high_bit;
 mod subsampled_high_bit_pn;
 mod v210;
 mod y210;
+mod y212;
 mod yuv420p_8bit;
 mod yuva;
 

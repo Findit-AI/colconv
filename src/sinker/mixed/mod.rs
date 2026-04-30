@@ -1455,6 +1455,7 @@ mod subsampled_4_2_2_high_bit;
 mod subsampled_4_4_4_high_bit;
 mod v210;
 mod y210;
+mod y212;
 mod yuva_4_2_0;
 mod yuva_4_2_2;
 mod yuva_4_4_4;
