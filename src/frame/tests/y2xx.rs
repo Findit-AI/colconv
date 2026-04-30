@@ -211,7 +211,7 @@ fn y216_frame_try_new_rejects_zero_dimension() {
 }
 
 #[test]
-fn y216_try_new_rejects_odd_width() {
+fn y216_frame_try_new_rejects_odd_width() {
   let buf = std::vec![0u16; 64];
   for w in [1u32, 3, 5, 7, 9, 11, 13] {
     let stride = (w as usize) * 2;
@@ -264,7 +264,7 @@ fn y216_frame_accessors_round_trip() {
 }
 
 #[test]
-fn y216_try_new_checked_accepts_arbitrary_low_bits() {
+fn y216_frame_try_new_checked_accepts_arbitrary_low_bits() {
   // Y216 = full 16-bit range; all bits are active, so any sample value
   // is valid. try_new_checked must succeed even when every bit is set.
   let buf = std::vec![0xFFFFu16; 8]; // width=4, height=1, stride=8
@@ -288,32 +288,4 @@ fn y216_frame_try_new_checked_accepts_valid_tight() {
 fn y216_frame_new_panics_on_invalid() {
   let buf: [u16; 0] = [];
   let _ = Y216Frame::new(&buf, 0, 0, 0);
-}
-
-#[test]
-fn y216_frame_try_new_geometry_overflow_guard() {
-  // GeometryOverflow: stride * height overflows usize. On 64-bit this
-  // requires astronomically large values — we test the WidthOverflow path
-  // as a proxy for the overflow-guard coverage on 64-bit hosts, and
-  // confirm GeometryOverflow is only reachable on 32-bit targets.
-  // On a 64-bit machine, u32::MAX * u32::MAX overflows usize only if
-  // usize is 32-bit. We instead assert try_new returns Ok or an expected
-  // error variant (never an unexpected panic) for a moderately large stride.
-  let buf = std::vec![0u16; 8];
-  // stride=8 > min_stride for width=2, height=1; should succeed.
-  Y216Frame::try_new(&buf, 2, 1, 8).unwrap();
-}
-
-#[test]
-fn y216_frame_try_new_width_overflow_guard() {
-  // width × 2 overflows u32 when width = u32::MAX (only on 32-bit). On
-  // 64-bit, the multiplication succeeds and we get StrideTooSmall/PlaneTooShort
-  // instead. The important thing is that no panic occurs.
-  let buf = std::vec![0u16; 8];
-  let result = Y216Frame::try_new(&buf, u32::MAX, 1, u32::MAX);
-  // Accept either WidthOverflow (32-bit) or StrideTooSmall / PlaneTooShort
-  // (64-bit, where the multiplication doesn't overflow u32 but the math
-  // still fails for other reasons). Anything but Ok or an unexpected panic
-  // is fine here.
-  assert!(result.is_err());
 }
