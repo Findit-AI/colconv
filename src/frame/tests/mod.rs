@@ -10,6 +10,7 @@ mod subsampled_4_2_0_high_bit;
 mod subsampled_4_2_2_high_bit;
 mod subsampled_4_4_4_high_bit;
 mod v210;
+mod y2xx;
 
 // ---- 32-bit overflow regressions --------------------------------------
 //

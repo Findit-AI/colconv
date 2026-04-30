@@ -55,7 +55,8 @@ pub(crate) use scalar::expand_rgb_to_rgba_row;
 pub(crate) use scalar::expand_rgb_u16_to_rgba_u16_row;
 
 pub use dispatch::{
-  bayer::*, nv::*, packed_yuv422::*, pn::*, rgb_ops::*, v210::*, yuv420::*, yuv444::*, yuva::*,
+  bayer::*, nv::*, packed_yuv422::*, pn::*, rgb_ops::*, v210::*, y210::*, yuv420::*, yuv444::*,
+  yuva::*,
 };
 
 // `yuv_444p_n_to_rgb_u16_row` is consumed by the 32-bit overflow test
@@ -225,6 +226,18 @@ pub(crate) fn v210_row_bytes(width: usize) -> usize {
   match words.checked_mul(16) {
     Some(n) => n,
     None => panic!("width ({width}) / 6 × 16 overflows usize (v210 row)"),
+  }
+}
+
+/// Element count of one packed `Y2xx` row (`width × 2` u16
+/// elements) with overflow checking. Used by the Y210 / Y212 / Y216
+/// dispatchers to gate entry into unsafe SIMD loads. Same
+/// `checked_mul` rationale as [`rgb_row_bytes`].
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn y2xx_row_elems(width: usize) -> usize {
+  match width.checked_mul(2) {
+    Some(n) => n,
+    None => panic!("width ({width}) × 2 overflows usize (Y2xx row)"),
   }
 }
 
@@ -580,6 +593,36 @@ mod overflow_tests {
     let p: [u8; 0] = [];
     let mut rgb: [u8; 0] = [];
     v210_to_rgb_row(&p, &mut rgb, candidate, ColorMatrix::Bt601, true, false);
+  }
+
+  // ---- Y2xx dispatcher — `width × 2` overflow ----
+  //
+  // Y210 (and the upcoming Y212 / Y216) sources consume `2 * width`
+  // u16 elements per row (one quadruple per chroma pair = 4 u16 per
+  // 2 pixels). Without the [`y2xx_row_elems`] helper, a 32-bit caller
+  // could overflow `width * 2` to a small value, pass the input-side
+  // `assert!` with an undersized slice, and reach unsafe SIMD loads.
+
+  #[cfg(target_pointer_width = "32")]
+  #[test]
+  #[should_panic(expected = "overflows usize")]
+  fn y210_dispatcher_rejects_width_times_2_overflow() {
+    // Reuse OVERFLOW_WIDTH_TIMES_2 — an even width whose `× 2`
+    // overflows 32-bit `usize`. The previous `(usize::MAX / 2) + 2`
+    // value was odd on i686 (since `usize::MAX / 2` is odd) and
+    // tripped the even-width check before the overflow guard,
+    // causing this test to panic with the wrong message under
+    // miri-i686. The shared constant has the parity fixup.
+    let p: [u16; 0] = [];
+    let mut rgb: [u8; 0] = [];
+    y210_to_rgb_row(
+      &p,
+      &mut rgb,
+      OVERFLOW_WIDTH_TIMES_2,
+      ColorMatrix::Bt601,
+      true,
+      false,
+    );
   }
 }
 

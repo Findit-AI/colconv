@@ -359,7 +359,13 @@ fn v210_luma_u16_buffer_too_short_returns_err() {
 /// Pack three 10-bit planes (Y / U / V at 4:2:2 subsampling) into the
 /// v210 byte layout — see `pack_v210_word_for_test` for the per-word
 /// bit ordering. Width must be a multiple of 6.
-fn pack_yuv422p10_to_v210(y: &[u16], u: &[u16], v: &[u16], width: usize, height: usize) -> Vec<u8> {
+pub(super) fn pack_yuv422p10_to_v210(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  width: usize,
+  height: usize,
+) -> Vec<u8> {
   let cw = width / 2;
   let words_per_row = width / 6;
   let mut out = std::vec![0u8; words_per_row * 16 * height];
