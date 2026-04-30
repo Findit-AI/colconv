@@ -11,10 +11,6 @@ use super::*;
 
 // ---- u8 RGB / RGBA output (i32 chroma — same as Y210/Y212) -------
 
-// Dispatcher (`src/row/dispatch/y216.rs`) lands in a follow-up PR.
-// `dead_code` allow lets this scalar prep ship without the eventual
-// call site, matching the `rgb_expand.rs` precedent.
-#[allow(dead_code)]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn y216_to_rgb_or_rgba_row<const ALPHA: bool>(
   packed: &[u16],
@@ -63,7 +59,6 @@ pub(crate) fn y216_to_rgb_or_rgba_row<const ALPHA: bool>(
 
 // ---- u16 RGB / RGBA native-depth output (i64 chroma) ----------------
 
-#[allow(dead_code)]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn y216_to_rgb_u16_or_rgba_u16_row<const ALPHA: bool>(
   packed: &[u16],
@@ -112,7 +107,6 @@ pub(crate) fn y216_to_rgb_u16_or_rgba_u16_row<const ALPHA: bool>(
 
 // ---- Luma (u8) — `>> 8` ----------------------------------------------
 
-#[allow(dead_code)]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn y216_to_luma_row(packed: &[u16], out: &mut [u8], width: usize) {
   debug_assert!(width.is_multiple_of(2));
@@ -128,7 +122,6 @@ pub(crate) fn y216_to_luma_row(packed: &[u16], out: &mut [u8], width: usize) {
 
 // ---- Luma (u16, direct extract) ---------------------------------------
 
-#[allow(dead_code)]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn y216_to_luma_u16_row(packed: &[u16], out: &mut [u16], width: usize) {
   debug_assert!(width.is_multiple_of(2));

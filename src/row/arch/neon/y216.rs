@@ -41,7 +41,6 @@ use crate::{ColorMatrix, row::scalar};
 /// 2. `width % 2 == 0`.
 /// 3. `packed.len() >= width * 2`.
 /// 4. `out.len() >= width * (if ALPHA { 4 } else { 3 })`.
-#[allow(dead_code)] // dispatcher lands in follow-up PR (Task 9)
 #[inline]
 #[target_feature(enable = "neon")]
 pub(crate) unsafe fn y216_to_rgb_or_rgba_row<const ALPHA: bool>(
@@ -207,7 +206,6 @@ pub(crate) unsafe fn y216_to_rgb_or_rgba_row<const ALPHA: bool>(
 /// 2. `width % 2 == 0`.
 /// 3. `packed.len() >= width * 2`.
 /// 4. `out.len() >= width * (if ALPHA { 4 } else { 3 })` (u16 elements).
-#[allow(dead_code)] // dispatcher lands in follow-up PR (Task 9)
 #[inline]
 #[target_feature(enable = "neon")]
 pub(crate) unsafe fn y216_to_rgb_u16_or_rgba_u16_row<const ALPHA: bool>(
@@ -424,7 +422,6 @@ pub(crate) unsafe fn y216_to_rgb_u16_or_rgba_u16_row<const ALPHA: bool>(
 /// 2. `width % 2 == 0`.
 /// 3. `packed.len() >= width * 2`.
 /// 4. `out.len() >= width`.
-#[allow(dead_code)] // dispatcher lands in follow-up PR (Task 9)
 #[inline]
 #[target_feature(enable = "neon")]
 pub(crate) unsafe fn y216_to_luma_row(packed: &[u16], out: &mut [u8], width: usize) {
@@ -466,7 +463,6 @@ pub(crate) unsafe fn y216_to_luma_row(packed: &[u16], out: &mut [u8], width: usi
 /// 2. `width % 2 == 0`.
 /// 3. `packed.len() >= width * 2`.
 /// 4. `out.len() >= width`.
-#[allow(dead_code)] // dispatcher lands in follow-up PR (Task 9)
 #[inline]
 #[target_feature(enable = "neon")]
 pub(crate) unsafe fn y216_to_luma_u16_row(packed: &[u16], out: &mut [u16], width: usize) {

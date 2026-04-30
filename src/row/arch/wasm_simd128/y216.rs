@@ -106,7 +106,6 @@ unsafe fn unpack_y216_8px_wasm(ptr: *const u16) -> (v128, v128, v128) {
 /// 2. `width % 2 == 0`.
 /// 3. `packed.len() >= width * 2`.
 /// 4. `out.len() >= width * (if ALPHA { 4 } else { 3 })`.
-#[allow(dead_code)]
 #[inline]
 #[target_feature(enable = "simd128")]
 pub(crate) unsafe fn y216_to_rgb_or_rgba_row<const ALPHA: bool>(
@@ -237,7 +236,6 @@ pub(crate) unsafe fn y216_to_rgb_or_rgba_row<const ALPHA: bool>(
 /// 2. `width % 2 == 0`.
 /// 3. `packed.len() >= width * 2`.
 /// 4. `out.len() >= width * (if ALPHA { 4 } else { 3 })` (u16 elements).
-#[allow(dead_code)]
 #[inline]
 #[target_feature(enable = "simd128")]
 pub(crate) unsafe fn y216_to_rgb_u16_or_rgba_u16_row<const ALPHA: bool>(
@@ -374,7 +372,6 @@ pub(crate) unsafe fn y216_to_rgb_u16_or_rgba_u16_row<const ALPHA: bool>(
 /// 2. `width % 2 == 0`.
 /// 3. `packed.len() >= width * 2`.
 /// 4. `luma_out.len() >= width`.
-#[allow(dead_code)]
 #[inline]
 #[target_feature(enable = "simd128")]
 pub(crate) unsafe fn y216_to_luma_row(packed: &[u16], luma_out: &mut [u8], width: usize) {
@@ -434,7 +431,6 @@ pub(crate) unsafe fn y216_to_luma_row(packed: &[u16], luma_out: &mut [u8], width
 /// 2. `width % 2 == 0`.
 /// 3. `packed.len() >= width * 2`.
 /// 4. `luma_out.len() >= width`.
-#[allow(dead_code)]
 #[inline]
 #[target_feature(enable = "simd128")]
 pub(crate) unsafe fn y216_to_luma_u16_row(packed: &[u16], luma_out: &mut [u16], width: usize) {
