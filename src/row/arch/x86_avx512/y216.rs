@@ -443,7 +443,6 @@ pub(crate) unsafe fn y216_to_luma_row(packed: &[u16], out: &mut [u8], width: usi
   // SAFETY: AVX-512F + AVX-512BW is the caller's obligation.
   unsafe {
     let pack_fixup = _mm512_setr_epi64(0, 2, 4, 6, 1, 3, 5, 7);
-    let zero = _mm512_setzero_si512();
     let y_idx = _mm512_loadu_si512(Y_FROM_YUYV_IDX.as_ptr().cast());
 
     let mut x = 0usize;
@@ -465,7 +464,6 @@ pub(crate) unsafe fn y216_to_luma_row(packed: &[u16], out: &mut [u8], width: usi
       // Store all 64 bytes at once.
       _mm512_storeu_si512(out.as_mut_ptr().add(x).cast(), y_u8);
 
-      let _ = zero; // unused but allocated above for symmetry
       x += 64;
     }
 
