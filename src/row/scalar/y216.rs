@@ -206,9 +206,10 @@ mod tests {
     assert_eq!(&out[0..3], &[0, 0, 0], "pixel 0 (Y=4096, neutral chroma, u16)");
     // Pixel 1: Y=32000 neutral chroma → 32618 on all channels
     assert_eq!(&out[3..6], &[32618, 32618, 32618], "pixel 1 (Y=32000, neutral chroma, u16)");
-    // Pixels 2 and 3: non-neutral chroma — just verify they are non-zero
-    // (any u16 is in-range by type; the clamp ensures no wrap-around)
-    let _ = &out[6..12]; // bounds-check the slice access
+    // Pixel 2: non-neutral chroma — pixel-exact i64-path values
+    assert_eq!(&out[6..9], &[24702_u16, 0, 0]);
+    // Pixel 3
+    assert_eq!(&out[9..12], &[65535_u16, 65535, 37073]);
   }
 
   /// u16 RGBA output — same color values, alpha=0xFFFF.
@@ -220,10 +221,10 @@ mod tests {
 
     assert_eq!(&out[0..4], &[0, 0, 0, 0xFFFF]);
     assert_eq!(&out[4..8], &[32618, 32618, 32618, 0xFFFF]);
-    assert_eq!(out[3], 0xFFFF, "pixel 0 alpha must be 0xFFFF");
-    assert_eq!(out[7], 0xFFFF, "pixel 1 alpha must be 0xFFFF");
-    assert_eq!(out[11], 0xFFFF, "pixel 2 alpha must be 0xFFFF");
-    assert_eq!(out[15], 0xFFFF, "pixel 3 alpha must be 0xFFFF");
+    // Pixel 2: non-neutral chroma — pixel-exact i64-path values
+    assert_eq!(&out[8..12], &[24702_u16, 0, 0, 0xFFFF]);
+    // Pixel 3
+    assert_eq!(&out[12..16], &[65535_u16, 65535, 37073, 0xFFFF]);
   }
 
   /// Luma u8: each Y extracted via `>> 8`. Input quadruple
