@@ -45,7 +45,8 @@ use crate::{ColorMatrix, row::scalar};
 ///
 /// `ptr` must point to at least 64 readable bytes (32 u16). Caller's
 /// `target_feature` must include AVX2.
-#[inline(always)]
+#[inline]
+#[target_feature(enable = "avx2")]
 unsafe fn unpack_y216_16px_avx2(ptr: *const u16) -> (__m256i, __m256i, __m256i) {
   unsafe {
     // Load 32 u16 = 64 bytes = 16 pixels (2 × __m256i).
