@@ -153,6 +153,18 @@ pub enum MixedSinkerError {
     actual: usize,
   },
 
+  /// Native-depth `u16` luma buffer attached via per-format
+  /// `with_luma_u16` is shorter than `width × height` `u16`
+  /// elements. Tier 4 sources (V210 / Y210 / Y212 / Y216) are the
+  /// first consumers of this API.
+  #[error("MixedSinker luma_u16 buffer too short: expected >= {expected} elements, got {actual}")]
+  LumaU16BufferTooShort {
+    /// Minimum `u16` elements required (`width × height`).
+    expected: usize,
+    /// `u16` elements supplied.
+    actual: usize,
+  },
+
   /// RGBA buffer attached via [`MixedSinker::with_rgba`] /
   /// [`MixedSinker::set_rgba`] is shorter than `width × height × 4`.
   /// The fourth byte per pixel is alpha — opaque (`0xFF`) by default
@@ -609,6 +621,23 @@ pub enum RowSlice {
   /// [`Yuyv422Packed`](Self::Yuyv422Packed)).
   #[display("YVYU422 packed")]
   Yvyu422Packed,
+  /// Packed `v210` row of a [`V210`](crate::yuv::V210) source —
+  /// Tier 4 10-bit pro-broadcast SDI capture format. Each 16-byte
+  /// word holds 12 × 10-bit samples = 6 pixels (4:2:2: 6 Y +
+  /// 3 Cb + 3 Cr). Row length: `(width / 6) * 16` `u8` bytes.
+  #[display("V210 packed")]
+  V210Packed,
+  /// Packed `y210` row of a [`Y210`](crate::yuv::Y210) source —
+  /// Tier 4 10-bit MSB-aligned in u16 with YUYV422 byte order.
+  /// Row length: `2 * width` `u16` elements (= `4 * width` bytes).
+  #[display("Y210 packed")]
+  Y210Packed,
+  /// Packed `y212` row — same shape as Y210 with BITS=12.
+  #[display("Y212 packed")]
+  Y212Packed,
+  /// Packed `y216` row — same shape as Y210 with BITS=16.
+  #[display("Y216 packed")]
+  Y216Packed,
 }
 
 /// A sink that writes any subset of `{RGB, Luma, HSV}` into
@@ -637,6 +666,7 @@ pub struct MixedSinker<'a, F: SourceFormat> {
   rgba: Option<&'a mut [u8]>,
   rgba_u16: Option<&'a mut [u16]>,
   luma: Option<&'a mut [u8]>,
+  luma_u16: Option<&'a mut [u16]>,
   hsv: Option<HsvBuffers<'a>>,
   width: usize,
   height: usize,
@@ -984,6 +1014,7 @@ impl<F: SourceFormat> MixedSinker<'_, F> {
       rgba: None,
       rgba_u16: None,
       luma: None,
+      luma_u16: None,
       hsv: None,
       width,
       height,
@@ -1037,6 +1068,14 @@ impl<F: SourceFormat> MixedSinker<'_, F> {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn produces_luma(&self) -> bool {
     self.luma.is_some()
+  }
+
+  /// Returns `true` iff the sinker will write native-depth `u16`
+  /// luma. Only honored by per-format impls that wire the
+  /// `with_luma_u16` accessor (Tier 4 source families).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn produces_luma_u16(&self) -> bool {
+    self.luma_u16.is_some()
   }
 
   /// Returns `true` iff the sinker will write HSV.
@@ -1414,9 +1453,33 @@ mod semi_planar_8bit;
 mod subsampled_4_2_0_high_bit;
 mod subsampled_4_2_2_high_bit;
 mod subsampled_4_4_4_high_bit;
+mod v210;
 mod yuva_4_2_0;
 mod yuva_4_2_2;
 mod yuva_4_4_4;
 
 #[cfg(all(test, feature = "std"))]
 mod tests;
+
+#[cfg(all(test, feature = "std"))]
+mod api_smoke_tests {
+  use super::*;
+
+  #[test]
+  fn mixed_sinker_default_does_not_produce_luma_u16() {
+    // Use the currently available V210 source format marker for this smoke test.
+    let sink: MixedSinker<'_, crate::yuv::V210> = MixedSinker::new(6, 1);
+    assert!(!sink.produces_luma_u16());
+  }
+
+  #[test]
+  fn luma_u16_buffer_too_short_error_displays() {
+    let err = MixedSinkerError::LumaU16BufferTooShort {
+      expected: 100,
+      actual: 50,
+    };
+    let msg = format!("{err}");
+    assert!(msg.contains("100"));
+    assert!(msg.contains("50"));
+  }
+}

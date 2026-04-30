@@ -16,6 +16,7 @@ mod planar_8bit;
 mod semi_planar_8bit;
 mod subsampled_high_bit_planar;
 mod subsampled_high_bit_pn;
+mod v210;
 mod yuva;
 
 pub use bayer::*;
@@ -26,6 +27,7 @@ pub use planar_8bit::*;
 pub use semi_planar_8bit::*;
 pub use subsampled_high_bit_planar::*;
 pub use subsampled_high_bit_pn::*;
+pub use v210::*;
 pub use yuva::*;
 
 #[cfg(all(test, feature = "std"))]

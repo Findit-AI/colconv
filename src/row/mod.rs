@@ -55,7 +55,7 @@ pub(crate) use scalar::expand_rgb_to_rgba_row;
 pub(crate) use scalar::expand_rgb_u16_to_rgba_u16_row;
 
 pub use dispatch::{
-  bayer::*, nv::*, packed_yuv422::*, pn::*, rgb_ops::*, yuv420::*, yuv444::*, yuva::*,
+  bayer::*, nv::*, packed_yuv422::*, pn::*, rgb_ops::*, v210::*, yuv420::*, yuv444::*, yuva::*,
 };
 
 // `yuv_444p_n_to_rgb_u16_row` is consumed by the 32-bit overflow test
@@ -207,6 +207,24 @@ pub(crate) fn packed_yuv422_row_bytes(width: usize) -> usize {
   match width.checked_mul(2) {
     Some(n) => n,
     None => panic!("width ({width}) × 2 overflows usize (packed YUV 4:2:2 row)"),
+  }
+}
+
+/// Byte length of one packed `v210` row (`ceil(width / 6) * 16`) with
+/// overflow checking. v210 packs 6 pixels per 16-byte word; widths
+/// that don't end on a complete-word boundary (e.g. 1280 for 720p)
+/// round up to the next word, with the final word emitting only its
+/// 2 or 4 valid pixels.
+///
+/// Same `checked_mul` rationale as [`rgb_row_bytes`] — the returned
+/// byte count gates entry into unsafe SIMD loads. Panics if the
+/// multiplication overflows.
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn v210_row_bytes(width: usize) -> usize {
+  let words = width.div_ceil(6);
+  match words.checked_mul(16) {
+    Some(n) => n,
+    None => panic!("width ({width}) / 6 × 16 overflows usize (v210 row)"),
   }
 }
 
@@ -544,6 +562,24 @@ mod overflow_tests {
     let p: [u8; 0] = [];
     let mut luma: [u8; 0] = [];
     yvyu422_to_luma_row(&p, &mut luma, OVERFLOW_WIDTH_TIMES_2, false);
+  }
+
+  // ---- v210 dispatcher — `(width / 6) × 16` overflow ----
+  //
+  // The v210 source (Tier 4) packs 6 pixels per 16-byte word, so the
+  // row's byte count is `(width / 6) * 16`. Without the
+  // [`v210_row_bytes`] helper, a 32-bit caller could overflow this
+  // multiplication to a small value, pass the input-side `assert!`
+  // with an undersized slice, and reach unsafe SIMD loads.
+
+  #[cfg(target_pointer_width = "32")]
+  #[test]
+  #[should_panic(expected = "overflows usize")]
+  fn v210_dispatcher_rejects_words_times_16_overflow() {
+    let candidate = ((usize::MAX / 16) + 1) * 6;
+    let p: [u8; 0] = [];
+    let mut rgb: [u8; 0] = [];
+    v210_to_rgb_row(&p, &mut rgb, candidate, ColorMatrix::Bt601, true, false);
   }
 }
 

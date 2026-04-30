@@ -2,6 +2,7 @@ use super::{
   super::{
     packed_yuv_8bit::{solid_uyvy422_frame, solid_yuyv422_frame, solid_yvyu422_frame},
     planar_other_8bit_9bit::{solid_yuv422p_frame, solid_yuv440p_frame, solid_yuv444p_frame},
+    v210::solid_v210_frame,
   },
   nv12::solid_nv12_frame,
   nv16::solid_nv16_frame,
@@ -573,7 +574,9 @@ fn nv42_rgba_simd_matches_scalar_with_random_yuv() {
   ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
 )]
 fn strategy_a_rgb_and_rgba_byte_identical_for_all_wired_families() {
-  let w: u32 = 32;
+  // Width chosen as a common multiple of 2 / 4 / 6 so all 4:2:0,
+  // 4:2:2, 4:4:4 and v210 layouts work with the same dimensions.
+  let w: u32 = 24;
   let h: u32 = 8;
   let ws = w as usize;
   let hs = h as usize;
@@ -761,5 +764,68 @@ fn strategy_a_rgb_and_rgba_byte_identical_for_all_wired_families() {
       .unwrap();
     yvyu422_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
     assert_match(&rgb, &rgba, "Yvyu422");
+  }
+
+  {
+    // V210 carries 10-bit samples; pick mid-range values inside 0..1024
+    // so the gray-derived RGB stays sensible on the u8 path.
+    let buf = solid_v210_frame(w, h, 700, 512, 512);
+    let src = V210Frame::new(&buf, w, h, (w / 6) * 16);
+    let mut rgb = std::vec![0u8; ws * hs * 3];
+    let mut rgba = std::vec![0u8; ws * hs * 4];
+    let mut sink = MixedSinker::<V210>::new(ws, hs)
+      .with_rgb(&mut rgb)
+      .unwrap()
+      .with_rgba(&mut rgba)
+      .unwrap();
+    v210_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    assert_match(&rgb, &rgba, "V210");
+  }
+}
+
+// Cross-format Strategy A invariant on the **u16 RGB / u16 RGBA** path.
+// First u16-output umbrella in the crate; future tranches will extend
+// this with Y210 / Y212 / Y216 / Yuv420p10 etc. Initially V210 is the
+// only entry — it is the first packed-source u16 sinker family wired
+// in Ship 11a.
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn strategy_a_rgb_u16_and_rgba_u16_byte_identical_for_all_wired_families() {
+  let w: u32 = 12;
+  let h: u32 = 8;
+  let ws = w as usize;
+  let hs = h as usize;
+  let assert_match_u16 = |rgb: &[u16], rgba: &[u16], who: &str, alpha_max: u16| {
+    for i in 0..(ws * hs) {
+      assert_eq!(rgba[i * 4], rgb[i * 3], "{who}: R differs at px {i}");
+      assert_eq!(
+        rgba[i * 4 + 1],
+        rgb[i * 3 + 1],
+        "{who}: G differs at px {i}"
+      );
+      assert_eq!(
+        rgba[i * 4 + 2],
+        rgb[i * 3 + 2],
+        "{who}: B differs at px {i}"
+      );
+      assert_eq!(rgba[i * 4 + 3], alpha_max, "{who}: alpha not max at px {i}");
+    }
+  };
+
+  {
+    let buf = solid_v210_frame(w, h, 700, 400, 600);
+    let src = V210Frame::new(&buf, w, h, (w / 6) * 16);
+    let mut rgb = std::vec![0u16; ws * hs * 3];
+    let mut rgba = std::vec![0u16; ws * hs * 4];
+    let mut sink = MixedSinker::<V210>::new(ws, hs)
+      .with_rgb_u16(&mut rgb)
+      .unwrap()
+      .with_rgba_u16(&mut rgba)
+      .unwrap();
+    v210_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    assert_match_u16(&rgb, &rgba, "V210", 1023);
   }
 }
