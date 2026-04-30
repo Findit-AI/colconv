@@ -90,7 +90,7 @@ pub fn v210_to<S: V210Sink>(
   Ok(())
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod tests {
   use super::*;
   use crate::{ColorMatrix, PixelSink, frame::V210Frame};
