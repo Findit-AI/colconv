@@ -1,5 +1,24 @@
 # CHANGELOG
 
+## 0.13.0 — Ship 12a (Tier 5 V410, first tranche)
+
+- Add `V410Frame` (10-bit packed YUV 4:4:4 in 32-bit words; FFmpeg
+  `AV_PIX_FMT_V410` = XV30 alias).
+- 5-backend SIMD: NEON (4 px/iter), SSE4.1 (8 px/iter), AVX2
+  (8 px/iter), AVX-512 (16 px/iter), wasm-simd128 (4 px/iter).
+- `MixedSinker<V410>` with `with_rgb` / `with_rgba` / `with_rgb_u16` /
+  `with_rgba_u16` / `with_luma` / `with_hsv`. (`with_luma_u16`
+  deferred — no library consumer ask yet.)
+- Cross-tranche infrastructure: 4 new `RowSlice` variants (`V410Packed`,
+  `Xv36Packed`, `VuyaPacked`, `Ayuv64Packed`) added eagerly so Ship
+  12b/c/d don't touch `MixedSinker` mod.rs.
+- V410 ↔ Yuv444p10 planar parity oracle validates the SIMD path
+  byte-for-byte against the established planar 4:4:4 reference.
+- Opens Tier 5 (packed YUV 4:4:4); remaining tranches are Ship 12b
+  (XV36, 12-bit), 12c (VUYA, 8-bit + α), 12d (AYUV64, 16-bit + α).
+
+---
+
 ## 0.12.0 — Ship 11d (Tier 4 Y216, closes Tier 4)
 
 - Add `Y216Frame` (16-bit packed YUV 4:2:2, full-range u16 samples).
