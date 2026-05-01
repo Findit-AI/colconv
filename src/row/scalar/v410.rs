@@ -120,7 +120,7 @@ pub(crate) fn v410_to_luma_u16_row(packed: &[u32], out: &mut [u16], width: usize
   }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod tests {
   use super::*;
   use crate::ColorMatrix;
@@ -139,7 +139,7 @@ mod tests {
     let p = vec![
       pack_v410(512, 64, 512),
       pack_v410(512, 64, 512),
-      pack_v410(512, 940, 512),  // Y=940 ≈ 255 (limited-range white)
+      pack_v410(512, 940, 512), // Y=940 ≈ 255 (limited-range white)
       pack_v410(512, 940, 512),
     ];
     let mut out = vec![0u8; 4 * 3];
@@ -162,8 +162,8 @@ mod tests {
   #[test]
   fn v410_luma_extract_u8() {
     let p = vec![
-      pack_v410(0, 0x3FF, 0),  // Y = 0x3FF (10-bit max)
-      pack_v410(0, 0x100, 0),  // Y = 0x100
+      pack_v410(0, 0x3FF, 0), // Y = 0x3FF (10-bit max)
+      pack_v410(0, 0x100, 0), // Y = 0x100
     ];
     let mut out = vec![0u8; 2];
     v410_to_luma_row(&p, &mut out, 2);
@@ -173,10 +173,7 @@ mod tests {
 
   #[test]
   fn v410_luma_extract_u16_low_bit_packed() {
-    let p = vec![
-      pack_v410(0, 0x3FF, 0),
-      pack_v410(0, 0x123, 0),
-    ];
+    let p = vec![pack_v410(0, 0x3FF, 0), pack_v410(0, 0x123, 0)];
     let mut out = vec![0u16; 2];
     v410_to_luma_u16_row(&p, &mut out, 2);
     assert_eq!(&out[..], &[0x3FFu16, 0x123]);

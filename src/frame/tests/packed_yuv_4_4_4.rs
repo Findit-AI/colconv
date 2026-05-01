@@ -26,11 +26,17 @@ fn v410_frame_try_new_rejects_zero_dimension() {
   let buf = zero_buf::<16>();
   assert!(matches!(
     V410Frame::try_new(&buf, 0, 4, 4),
-    Err(V410FrameError::ZeroDimension { width: 0, height: 4 })
+    Err(V410FrameError::ZeroDimension {
+      width: 0,
+      height: 4
+    })
   ));
   assert!(matches!(
     V410Frame::try_new(&buf, 4, 0, 4),
-    Err(V410FrameError::ZeroDimension { width: 4, height: 0 })
+    Err(V410FrameError::ZeroDimension {
+      width: 4,
+      height: 0
+    })
   ));
 }
 
@@ -39,7 +45,10 @@ fn v410_frame_try_new_rejects_stride_too_small() {
   let buf = zero_buf::<16>();
   assert!(matches!(
     V410Frame::try_new(&buf, 4, 4, 3),
-    Err(V410FrameError::StrideTooSmall { min_stride: 4, stride: 3 })
+    Err(V410FrameError::StrideTooSmall {
+      min_stride: 4,
+      stride: 3
+    })
   ));
 }
 
@@ -48,7 +57,10 @@ fn v410_frame_try_new_rejects_short_plane() {
   let buf = zero_buf::<8>();
   assert!(matches!(
     V410Frame::try_new(&buf, 4, 4, 4),
-    Err(V410FrameError::PlaneTooShort { expected: 16, actual: 8 })
+    Err(V410FrameError::PlaneTooShort {
+      expected: 16,
+      actual: 8
+    })
   ));
 }
 
