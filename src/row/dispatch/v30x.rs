@@ -17,7 +17,7 @@ use crate::row::arch;
 #[cfg(target_arch = "aarch64")]
 use crate::row::neon_available;
 #[cfg(target_arch = "x86_64")]
-use crate::row::{avx2_available, sse41_available};
+use crate::row::{avx2_available, avx512_available, sse41_available};
 use crate::{
   ColorMatrix,
   row::{rgb_row_bytes, rgb_row_elems, rgba_row_bytes, rgba_row_elems, scalar},
@@ -51,6 +51,11 @@ pub fn v30x_to_rgb_row(
         }
       },
       target_arch = "x86_64" => {
+        if avx512_available() {
+          // SAFETY: AVX-512BW verified.
+          unsafe { arch::x86_avx512::v30x_to_rgb_or_rgba_row::<false>(packed, rgb_out, width, matrix, full_range); }
+          return;
+        }
         if avx2_available() {
           // SAFETY: AVX2 verified.
           unsafe { arch::x86_avx2::v30x_to_rgb_or_rgba_row::<false>(packed, rgb_out, width, matrix, full_range); }
@@ -95,6 +100,11 @@ pub fn v30x_to_rgba_row(
         }
       },
       target_arch = "x86_64" => {
+        if avx512_available() {
+          // SAFETY: AVX-512BW verified.
+          unsafe { arch::x86_avx512::v30x_to_rgb_or_rgba_row::<true>(packed, rgba_out, width, matrix, full_range); }
+          return;
+        }
         if avx2_available() {
           // SAFETY: AVX2 verified.
           unsafe { arch::x86_avx2::v30x_to_rgb_or_rgba_row::<true>(packed, rgba_out, width, matrix, full_range); }
@@ -140,6 +150,11 @@ pub fn v30x_to_rgb_u16_row(
         }
       },
       target_arch = "x86_64" => {
+        if avx512_available() {
+          // SAFETY: AVX-512BW verified.
+          unsafe { arch::x86_avx512::v30x_to_rgb_u16_or_rgba_u16_row::<false>(packed, rgb_out, width, matrix, full_range); }
+          return;
+        }
         if avx2_available() {
           // SAFETY: AVX2 verified.
           unsafe { arch::x86_avx2::v30x_to_rgb_u16_or_rgba_u16_row::<false>(packed, rgb_out, width, matrix, full_range); }
@@ -185,6 +200,11 @@ pub fn v30x_to_rgba_u16_row(
         }
       },
       target_arch = "x86_64" => {
+        if avx512_available() {
+          // SAFETY: AVX-512BW verified.
+          unsafe { arch::x86_avx512::v30x_to_rgb_u16_or_rgba_u16_row::<true>(packed, rgba_out, width, matrix, full_range); }
+          return;
+        }
         if avx2_available() {
           // SAFETY: AVX2 verified.
           unsafe { arch::x86_avx2::v30x_to_rgb_u16_or_rgba_u16_row::<true>(packed, rgba_out, width, matrix, full_range); }
@@ -220,6 +240,11 @@ pub fn v30x_to_luma_row(packed: &[u32], luma_out: &mut [u8], width: usize, use_s
         }
       },
       target_arch = "x86_64" => {
+        if avx512_available() {
+          // SAFETY: AVX-512BW verified.
+          unsafe { arch::x86_avx512::v30x_to_luma_row(packed, luma_out, width); }
+          return;
+        }
         if avx2_available() {
           // SAFETY: AVX2 verified.
           unsafe { arch::x86_avx2::v30x_to_luma_row(packed, luma_out, width); }
@@ -256,6 +281,11 @@ pub fn v30x_to_luma_u16_row(packed: &[u32], luma_out: &mut [u16], width: usize, 
         }
       },
       target_arch = "x86_64" => {
+        if avx512_available() {
+          // SAFETY: AVX-512BW verified.
+          unsafe { arch::x86_avx512::v30x_to_luma_u16_row(packed, luma_out, width); }
+          return;
+        }
         if avx2_available() {
           // SAFETY: AVX2 verified.
           unsafe { arch::x86_avx2::v30x_to_luma_u16_row(packed, luma_out, width); }
