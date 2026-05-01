@@ -11,31 +11,35 @@ fn pseudo_random_y216(width: usize, seed: usize) -> std::vec::Vec<u16> {
     .collect()
 }
 
-fn check_rgb(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_rgb<const ALPHA: bool>(width: usize, matrix: ColorMatrix, full_range: bool) {
   let p = pseudo_random_y216(width, 0xAA55);
-  let mut s = std::vec![0u8; width * 3];
-  let mut k = std::vec![0u8; width * 3];
-  scalar::y216_to_rgb_or_rgba_row::<false>(&p, &mut s, width, matrix, full_range);
+  let bpp = if ALPHA { 4 } else { 3 };
+  let mut s = std::vec![0u8; width * bpp];
+  let mut k = std::vec![0u8; width * bpp];
+  scalar::y216_to_rgb_or_rgba_row::<ALPHA>(&p, &mut s, width, matrix, full_range);
   unsafe {
-    y216_to_rgb_or_rgba_row::<false>(&p, &mut k, width, matrix, full_range);
+    y216_to_rgb_or_rgba_row::<ALPHA>(&p, &mut k, width, matrix, full_range);
   }
   assert_eq!(
     s, k,
-    "AVX2 y216→RGB diverges (width={width}, matrix={matrix:?}, full_range={full_range})"
+    "AVX2 y216<ALPHA={ALPHA}>→{} diverges (width={width}, matrix={matrix:?}, full_range={full_range})",
+    if ALPHA { "RGBA" } else { "RGB" }
   );
 }
 
-fn check_rgb_u16(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_rgb_u16<const ALPHA: bool>(width: usize, matrix: ColorMatrix, full_range: bool) {
   let p = pseudo_random_y216(width, 0xAA55);
-  let mut s = std::vec![0u16; width * 3];
-  let mut k = std::vec![0u16; width * 3];
-  scalar::y216_to_rgb_u16_or_rgba_u16_row::<false>(&p, &mut s, width, matrix, full_range);
+  let bpp = if ALPHA { 4 } else { 3 };
+  let mut s = std::vec![0u16; width * bpp];
+  let mut k = std::vec![0u16; width * bpp];
+  scalar::y216_to_rgb_u16_or_rgba_u16_row::<ALPHA>(&p, &mut s, width, matrix, full_range);
   unsafe {
-    y216_to_rgb_u16_or_rgba_u16_row::<false>(&p, &mut k, width, matrix, full_range);
+    y216_to_rgb_u16_or_rgba_u16_row::<ALPHA>(&p, &mut k, width, matrix, full_range);
   }
   assert_eq!(
     s, k,
-    "AVX2 y216→RGB u16 diverges (width={width}, matrix={matrix:?}, full_range={full_range})"
+    "AVX2 y216<ALPHA={ALPHA}>→{} u16 diverges (width={width}, matrix={matrix:?}, full_range={full_range})",
+    if ALPHA { "RGBA" } else { "RGB" }
   );
 }
 
@@ -79,8 +83,10 @@ fn avx2_y216_rgb_matches_scalar_all_matrices() {
     ColorMatrix::YCgCo,
   ] {
     for full in [true, false] {
-      check_rgb(32, m, full);
-      check_rgb_u16(32, m, full);
+      check_rgb::<false>(32, m, full);
+      check_rgb::<true>(32, m, full);
+      check_rgb_u16::<false>(32, m, full);
+      check_rgb_u16::<true>(32, m, full);
     }
   }
 }
@@ -97,8 +103,10 @@ fn avx2_y216_matches_scalar_widths() {
   // 16 = u16 natural block (falls straight through to scalar for u8 path).
   // 32 = u8 natural block. Widths < 16 fall to scalar for both paths.
   for w in [16usize, 18, 32, 34, 62, 64, 66, 128, 1920, 1922] {
-    check_rgb(w, ColorMatrix::Bt709, false);
-    check_rgb_u16(w, ColorMatrix::Bt2020Ncl, true);
+    check_rgb::<false>(w, ColorMatrix::Bt709, false);
+    check_rgb::<true>(w, ColorMatrix::Bt709, true);
+    check_rgb_u16::<false>(w, ColorMatrix::Bt2020Ncl, true);
+    check_rgb_u16::<true>(w, ColorMatrix::Bt601, false);
   }
 }
 
