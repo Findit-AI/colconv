@@ -1,5 +1,5 @@
 //! Scalar reference kernels for the V30X packed YUV 4:4:4 10-bit
-//! family (FFmpeg `AV_PIX_FMT_V30X`). One pixel per 32-bit word;
+//! family (FFmpeg `AV_PIX_FMT_V30XLE`). One pixel per 32-bit word;
 //! 10-bit V / Y / U channels with 2-bit padding at the **LSB** (unlike
 //! V410, which pads at the MSB). 4:4:4 means no chroma deinterleave
 //! step — each word yields a complete `(Y, U, V)` triple.
