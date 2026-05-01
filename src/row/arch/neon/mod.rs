@@ -44,6 +44,7 @@ mod semi_planar_8bit;
 mod subsampled_high_bit_pn_4_2_0;
 mod subsampled_high_bit_pn_4_4_4;
 mod v210;
+mod v30x;
 mod v410;
 mod y216;
 mod y2xx;
@@ -58,6 +59,8 @@ pub(crate) use semi_planar_8bit::*;
 pub(crate) use subsampled_high_bit_pn_4_2_0::*;
 pub(crate) use subsampled_high_bit_pn_4_4_4::*;
 pub(crate) use v210::*;
+#[allow(unused_imports)]
+pub(crate) use v30x::*;
 pub(crate) use v410::*;
 pub(crate) use y2xx::*;
 pub(crate) use y216::*;
