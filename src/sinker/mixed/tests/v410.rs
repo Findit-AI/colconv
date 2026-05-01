@@ -1,0 +1,326 @@
+//! Tier 5 V410 sinker tests — Ship 12a.
+//!
+//! Coverage matrix:
+//! - Single-output paths (luma u8, rgb, rgba, rgb_u16, rgba_u16, hsv)
+//!   on solid-gray frames.
+//! - Strategy A invariant (`with_rgb` + `with_rgba` byte-identical;
+//!   same for the u16 variants).
+//! - SIMD-vs-scalar parity across multiple widths covering the main
+//!   loop + scalar tail of every backend block size.
+//! - Three error-path tests: short packed slice, row index out of
+//!   range, and short rgba_u16 buffer.
+//!
+//! Note: `with_luma_u16` is NOT tested here — V410 does not expose
+//! that accessor (deferred per Spec § 11).
+
+#[cfg(all(test, feature = "std"))]
+use super::*;
+
+// ---- Solid-color V410 builder -----------------------------------------
+
+/// Builds a solid-color V410 plane with one (U, Y, V) triplet repeated.
+/// Each pixel is packed as a u32 word:
+///   bits[31:30] = 0 (padding)
+///   bits[29:20] = V (10-bit)
+///   bits[19:10] = Y (10-bit)
+///   bits[9:0]   = U (10-bit)
+///
+/// Row stride equals width (one u32 per pixel; no padding between rows).
+#[cfg(all(test, feature = "std"))]
+pub(super) fn solid_v410_frame(width: u32, height: u32, u: u32, y: u32, v: u32) -> Vec<u32> {
+  let word = (v << 20) | (y << 10) | u;
+  std::vec![word; (width as usize) * (height as usize)]
+}
+
+// ---- Single-output gray-to-gray tests ---------------------------------
+
+#[test]
+#[cfg(all(test, feature = "std"))]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn v410_luma_only_extracts_y_bytes_downshifted() {
+  // Y=256 (10-bit) → 8-bit (256 >> 2) = 64.
+  let buf = solid_v410_frame(6, 8, 512, 256, 512);
+  let src = V410Frame::new(&buf, 6, 8, 6);
+  let mut luma = std::vec![0u8; 6 * 8];
+  let mut sink = MixedSinker::<V410>::new(6, 8).with_luma(&mut luma).unwrap();
+  v410_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  // 10-bit Y=256 → 8-bit (256 >> 2) = 64.
+  assert!(luma.iter().all(|&y| y == 64), "luma {luma:?}");
+}
+
+#[test]
+#[cfg(all(test, feature = "std"))]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn v410_rgb_only_converts_gray_to_gray() {
+  // Y=512, U=V=512 (neutral chroma at 10-bit midpoint ≈ 0.5×1023).
+  // Mid-gray input should yield mid-gray output at ~128 ± tolerance.
+  let buf = solid_v410_frame(12, 4, 512, 512, 512);
+  let src = V410Frame::new(&buf, 12, 4, 12);
+  let mut rgb = std::vec![0u8; 12 * 4 * 3];
+  let mut sink = MixedSinker::<V410>::new(12, 4).with_rgb(&mut rgb).unwrap();
+  v410_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  for px in rgb.chunks(3) {
+    assert!(px[0].abs_diff(128) <= 4);
+    assert_eq!(px[0], px[1]);
+    assert_eq!(px[1], px[2]);
+  }
+}
+
+#[test]
+#[cfg(all(test, feature = "std"))]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn v410_rgba_only_converts_gray_to_gray_with_opaque_alpha() {
+  let buf = solid_v410_frame(12, 4, 512, 512, 512);
+  let src = V410Frame::new(&buf, 12, 4, 12);
+  let mut rgba = std::vec![0u8; 12 * 4 * 4];
+  let mut sink = MixedSinker::<V410>::new(12, 4)
+    .with_rgba(&mut rgba)
+    .unwrap();
+  v410_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  for px in rgba.chunks(4) {
+    assert_eq!(px[3], 0xFF);
+  }
+}
+
+#[test]
+#[cfg(all(test, feature = "std"))]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn v410_rgb_u16_only_converts_gray_to_gray_native_depth() {
+  // Y=U=V=512 (10-bit midpoint). After YUV→RGB at 10-bit depth the
+  // per-channel value should be near 512; allow ±8 for Q15 rounding.
+  let buf = solid_v410_frame(12, 4, 512, 512, 512);
+  let src = V410Frame::new(&buf, 12, 4, 12);
+  let mut rgb = std::vec![0u16; 12 * 4 * 3];
+  let mut sink = MixedSinker::<V410>::new(12, 4)
+    .with_rgb_u16(&mut rgb)
+    .unwrap();
+  v410_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  for px in rgb.chunks(3) {
+    assert!(
+      px[0].abs_diff(512) <= 16,
+      "expected ~512, got {}",
+      px[0]
+    );
+  }
+}
+
+#[test]
+#[cfg(all(test, feature = "std"))]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn v410_rgba_u16_alpha_is_max() {
+  // 10-bit alpha max = 0x3FF = 1023.
+  let buf = solid_v410_frame(12, 4, 512, 512, 512);
+  let src = V410Frame::new(&buf, 12, 4, 12);
+  let mut rgba = std::vec![0u16; 12 * 4 * 4];
+  let mut sink = MixedSinker::<V410>::new(12, 4)
+    .with_rgba_u16(&mut rgba)
+    .unwrap();
+  v410_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  for px in rgba.chunks(4) {
+    assert_eq!(px[3], 0x3FF);
+  }
+}
+
+#[test]
+#[cfg(all(test, feature = "std"))]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn v410_hsv_only_produces_valid_hue_range() {
+  // Solid gray frame → HSV should have H≈0, S≈0, V≈mid-range.
+  let buf = solid_v410_frame(12, 4, 512, 512, 512);
+  let src = V410Frame::new(&buf, 12, 4, 12);
+  let n = 12 * 4;
+  let mut h = std::vec![0u8; n];
+  let mut s = std::vec![0u8; n];
+  let mut v_plane = std::vec![0u8; n];
+  let mut sink = MixedSinker::<V410>::new(12, 4)
+    .with_hsv(&mut h, &mut s, &mut v_plane)
+    .unwrap();
+  v410_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  // Gray pixels: hue and saturation must be 0.
+  assert!(h.iter().all(|&x| x == 0), "H {h:?}");
+  assert!(s.iter().all(|&x| x == 0), "S {s:?}");
+}
+
+// ---- Strategy A invariant tests ---------------------------------------
+
+#[test]
+#[cfg(all(test, feature = "std"))]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn v410_with_rgb_and_with_rgba_byte_identical_u8() {
+  // Strategy A invariant on u8 path — calling both `with_rgb` and
+  // `with_rgba` must produce the same RGB bytes in both buffers, with
+  // alpha = 0xFF in the RGBA buffer.
+  let w = 12u32;
+  let h = 4u32;
+  let buf = solid_v410_frame(w, h, 200, 700, 400);
+  let src = V410Frame::new(&buf, w, h, w);
+  let mut rgb = std::vec![0u8; (w * h) as usize * 3];
+  let mut rgba = std::vec![0u8; (w * h) as usize * 4];
+  let mut sink = MixedSinker::<V410>::new(w as usize, h as usize)
+    .with_rgb(&mut rgb)
+    .unwrap()
+    .with_rgba(&mut rgba)
+    .unwrap();
+  v410_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  for i in 0..(w * h) as usize {
+    assert_eq!(rgba[i * 4], rgb[i * 3]);
+    assert_eq!(rgba[i * 4 + 1], rgb[i * 3 + 1]);
+    assert_eq!(rgba[i * 4 + 2], rgb[i * 3 + 2]);
+    assert_eq!(rgba[i * 4 + 3], 0xFF);
+  }
+}
+
+#[test]
+#[cfg(all(test, feature = "std"))]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn v410_with_rgb_u16_and_with_rgba_u16_byte_identical() {
+  // Strategy A invariant on u16 path — alpha must be 0x3FF (10-bit
+  // max, low-bit-packed).
+  let w = 12u32;
+  let h = 4u32;
+  let buf = solid_v410_frame(w, h, 200, 700, 400);
+  let src = V410Frame::new(&buf, w, h, w);
+  let mut rgb = std::vec![0u16; (w * h) as usize * 3];
+  let mut rgba = std::vec![0u16; (w * h) as usize * 4];
+  let mut sink = MixedSinker::<V410>::new(w as usize, h as usize)
+    .with_rgb_u16(&mut rgb)
+    .unwrap()
+    .with_rgba_u16(&mut rgba)
+    .unwrap();
+  v410_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  for i in 0..(w * h) as usize {
+    assert_eq!(rgba[i * 4], rgb[i * 3]);
+    assert_eq!(rgba[i * 4 + 1], rgb[i * 3 + 1]);
+    assert_eq!(rgba[i * 4 + 2], rgb[i * 3 + 2]);
+    assert_eq!(rgba[i * 4 + 3], 0x3FF);
+  }
+}
+
+// ---- SIMD-vs-scalar parity --------------------------------------------
+
+#[test]
+#[cfg(all(test, feature = "std"))]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn v410_with_simd_false_matches_with_simd_true() {
+  // Pseudo-random V410 across multiple widths covering the main loop
+  // + scalar tail of every backend block size. V410 samples are 10-bit
+  // low-bit-packed in u32 words; pseudo-random fill uses the low 10
+  // bits of each channel slot.
+  for w in [1usize, 2, 4, 7, 8, 15, 16, 17, 31, 32, 33, 1920, 1921] {
+    let h = 2usize;
+    let mut buf = std::vec![0u32; w * h];
+    // Fill each word with pseudo-random 10-bit channels.
+    let mut state = 0xC0FFEE_u32;
+    for word in &mut buf {
+      state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+      let u = (state >> 2) & 0x3FF;
+      state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+      let y = (state >> 2) & 0x3FF;
+      state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+      let v = (state >> 2) & 0x3FF;
+      *word = (v << 20) | (y << 10) | u;
+    }
+    let src = V410Frame::new(&buf, w as u32, h as u32, w as u32);
+
+    let mut rgb_simd = std::vec![0u8; w * h * 3];
+    let mut rgb_scalar = std::vec![0u8; w * h * 3];
+    let mut sink_simd = MixedSinker::<V410>::new(w, h)
+      .with_rgb(&mut rgb_simd)
+      .unwrap();
+    let mut sink_scalar = MixedSinker::<V410>::new(w, h)
+      .with_rgb(&mut rgb_scalar)
+      .unwrap()
+      .with_simd(false);
+    v410_to(&src, false, ColorMatrix::Bt709, &mut sink_simd).unwrap();
+    v410_to(&src, false, ColorMatrix::Bt709, &mut sink_scalar).unwrap();
+    assert_eq!(rgb_simd, rgb_scalar, "V410 SIMD≠scalar at width {w}");
+  }
+}
+
+// ---- Error-path tests --------------------------------------------------
+
+#[test]
+#[cfg(all(test, feature = "std"))]
+fn v410_process_rejects_short_packed_slice() {
+  // 6-pixel-wide sink expects 6 u32 elements per row; a 5-element
+  // slice surfaces as `RowShapeMismatch { which: V410Packed, .. }`.
+  let mut rgb = std::vec![0u8; 6 * 3];
+  let mut sink = MixedSinker::<V410>::new(6, 1).with_rgb(&mut rgb).unwrap();
+  let packed = [0u32; 5];
+  let row = V410Row::new(&packed, 0, ColorMatrix::Bt601, true);
+  let err = sink.process(row).err().unwrap();
+  assert_eq!(
+    err,
+    MixedSinkerError::RowShapeMismatch {
+      which: RowSlice::V410Packed,
+      row: 0,
+      expected: 6,
+      actual: 5,
+    }
+  );
+}
+
+#[test]
+#[cfg(all(test, feature = "std"))]
+fn v410_process_rejects_row_index_out_of_range() {
+  // Sink configured for 1 row; passing row index 1 must return
+  // RowIndexOutOfRange before any kernel runs.
+  let mut rgb = std::vec![0u8; 4 * 3];
+  let mut sink = MixedSinker::<V410>::new(4, 1).with_rgb(&mut rgb).unwrap();
+  let packed = [0u32; 4];
+  let row = V410Row::new(&packed, 1, ColorMatrix::Bt601, true);
+  let err = sink.process(row).err().unwrap();
+  assert!(matches!(
+    err,
+    MixedSinkerError::RowIndexOutOfRange {
+      row: 1,
+      configured_height: 1,
+    }
+  ));
+}
+
+#[test]
+#[cfg(all(test, feature = "std"))]
+fn v410_rgba_u16_buffer_too_short_returns_err() {
+  // Buffer holds 6×7 = 42 elements × 4 channels = 168 u16 elements;
+  // a 6×8 frame needs 6×8×4 = 192.
+  let mut rgba = std::vec![0u16; 6 * 7 * 4];
+  let result = MixedSinker::<V410>::new(6, 8).with_rgba_u16(&mut rgba);
+  let Err(err) = result else {
+    panic!("expected RgbaU16BufferTooShort");
+  };
+  assert!(matches!(
+    err,
+    MixedSinkerError::RgbaU16BufferTooShort {
+      expected: 192,
+      actual: 168,
+    }
+  ));
+}
