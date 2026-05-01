@@ -15,6 +15,7 @@ mod semi_planar_8bit;
 mod subsampled_4_2_0_high_bit;
 mod subsampled_high_bit_pn;
 mod v210;
+mod v30x;
 mod v410;
 mod y210;
 mod y212;
