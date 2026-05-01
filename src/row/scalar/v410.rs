@@ -7,7 +7,6 @@
 use super::*;
 
 /// Extract `(u, y, v)` from one V410 word.
-#[allow(dead_code)]
 #[cfg_attr(not(tarpaulin), inline(always))]
 const fn extract_v410(word: u32) -> (i32, i32, i32) {
   let u = (word & 0x3FF) as i32;
@@ -18,7 +17,6 @@ const fn extract_v410(word: u32) -> (i32, i32, i32) {
 
 // ---- u8 RGB / RGBA output ----------------------------------------------
 
-#[allow(dead_code)]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn v410_to_rgb_or_rgba_row<const ALPHA: bool>(
   packed: &[u32],
@@ -56,7 +54,6 @@ pub(crate) fn v410_to_rgb_or_rgba_row<const ALPHA: bool>(
 
 // ---- u16 RGB / RGBA native-depth output --------------------------------
 
-#[allow(dead_code)]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn v410_to_rgb_u16_or_rgba_u16_row<const ALPHA: bool>(
   packed: &[u32],
@@ -96,7 +93,6 @@ pub(crate) fn v410_to_rgb_u16_or_rgba_u16_row<const ALPHA: bool>(
 
 // ---- Luma (u8) — `>> 2` ------------------------------------------------
 
-#[allow(dead_code)]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn v410_to_luma_row(packed: &[u32], out: &mut [u8], width: usize) {
   debug_assert!(packed.len() >= width);
@@ -109,7 +105,6 @@ pub(crate) fn v410_to_luma_row(packed: &[u32], out: &mut [u8], width: usize) {
 
 // ---- Luma (u16, low-bit-packed at 10-bit) ------------------------------
 
-#[allow(dead_code)]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn v410_to_luma_u16_row(packed: &[u32], out: &mut [u16], width: usize) {
   debug_assert!(packed.len() >= width);

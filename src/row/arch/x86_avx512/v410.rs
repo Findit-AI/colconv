@@ -47,7 +47,6 @@ use crate::{ColorMatrix, row::scalar};
 ///
 /// Caller must ensure `ptr` has at least 64 bytes (16 u32) readable, and
 /// that `target_feature` includes AVX-512F + AVX-512BW.
-#[allow(dead_code)]
 #[inline]
 #[target_feature(enable = "avx512f,avx512bw")]
 unsafe fn unpack_v410_16px_avx512(ptr: *const u32) -> (__m512i, __m512i, __m512i) {
@@ -86,7 +85,6 @@ unsafe fn unpack_v410_16px_avx512(ptr: *const u32) -> (__m512i, __m512i, __m512i
 /// 1. **AVX-512F + AVX-512BW must be available.**
 /// 2. `packed.len() >= width`.
 /// 3. `out.len() >= width * (if ALPHA { 4 } else { 3 })`.
-#[allow(dead_code)]
 #[inline]
 #[target_feature(enable = "avx512f,avx512bw")]
 pub(crate) unsafe fn v410_to_rgb_or_rgba_row<const ALPHA: bool>(
@@ -210,7 +208,6 @@ pub(crate) unsafe fn v410_to_rgb_or_rgba_row<const ALPHA: bool>(
 /// 1. **AVX-512F + AVX-512BW must be available.**
 /// 2. `packed.len() >= width`.
 /// 3. `out.len() >= width * (if ALPHA { 4 } else { 3 })` (u16 elements).
-#[allow(dead_code)]
 #[inline]
 #[target_feature(enable = "avx512f,avx512bw")]
 pub(crate) unsafe fn v410_to_rgb_u16_or_rgba_u16_row<const ALPHA: bool>(
@@ -335,7 +332,6 @@ pub(crate) unsafe fn v410_to_rgb_u16_or_rgba_u16_row<const ALPHA: bool>(
 /// 1. **AVX-512F + AVX-512BW must be available.**
 /// 2. `packed.len() >= width`.
 /// 3. `out.len() >= width`.
-#[allow(dead_code)]
 #[inline]
 #[target_feature(enable = "avx512f,avx512bw")]
 pub(crate) unsafe fn v410_to_luma_row(packed: &[u32], out: &mut [u8], width: usize) {
@@ -392,7 +388,6 @@ pub(crate) unsafe fn v410_to_luma_row(packed: &[u32], out: &mut [u8], width: usi
 /// 1. **AVX-512F + AVX-512BW must be available.**
 /// 2. `packed.len() >= width`.
 /// 3. `out.len() >= width`.
-#[allow(dead_code)]
 #[inline]
 #[target_feature(enable = "avx512f,avx512bw")]
 pub(crate) unsafe fn v410_to_luma_u16_row(packed: &[u32], out: &mut [u16], width: usize) {
