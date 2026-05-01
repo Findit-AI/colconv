@@ -1,21 +1,23 @@
 //! Sinker impl for the packed Y216 source format — Ship 11d (Tier 4
-//! 16-bit packed YUV 4:2:2 with MSB-aligned u16 samples). Full output
+//! 16-bit packed YUV 4:2:2 with full-range u16 samples). Full output
 //! coverage: u8 + native-depth u16 RGB / RGBA / luma + u8 HSV.
 //!
-//! Y216 packs 4 × MSB-aligned 16-bit samples per `u16` quadruple
-//! (`Y₀, U, Y₁, V`) — 2 pixels per quadruple (4:2:2). The sinker's
-//! configured width must be **even** (4:2:2 chroma pair); odd widths
-//! surface as [`MixedSinkerError::OddWidth`] before any kernel runs,
-//! preserving the no-panic contract.
+//! Y216 packs 4 × full-range 16-bit samples per `u16` quadruple
+//! (`Y₀, U, Y₁, V`) — 2 pixels per quadruple (4:2:2). All 16 bits are
+//! active per sample (unlike Y210 / Y212 which MSB-align 10 / 12-bit
+//! samples with low bits zero). The sinker's configured width must be
+//! **even** (4:2:2 chroma pair); odd widths surface as
+//! [`MixedSinkerError::OddWidth`] before any kernel runs, preserving
+//! the no-panic contract.
 //!
 //! Outputs map to the sink's standard channels:
 //! - `with_rgb` / `with_rgba` — packed YUV → RGB Q15 pipeline at
 //!   `BITS = 16`, downshifted to u8; RGBA alpha is forced to `0xFF`
 //!   (Y216 has no alpha channel).
 //! - `with_rgb_u16` / `with_rgba_u16` — same pipeline at native
-//!   16-bit depth, low-bit-packed in `u16`; RGBA alpha is `65535`.
+//!   16-bit depth, full-range `u16`; RGBA alpha is `0xFFFF`.
 //! - `with_luma` — extracts the Y values from each Y216 quadruple and
-//!   downshifts `>> 8` to u8 (the kernel reads MSB-aligned 16-bit and
+//!   downshifts `>> 8` to u8 (the kernel reads the full 16-bit Y and
 //!   outputs the high 8 bits).
 //! - `with_luma_u16` — extracts the 16-bit Y values into u16 via a
 //!   direct memcpy (no shift — the samples are already full 16-bit).
