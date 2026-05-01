@@ -12,10 +12,16 @@
 //! / [31:22] with 2-bit padding at the bottom. Buffer length is `width`
 //! u32 elements — no even-width restriction, no width×2 scaling.
 
-#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
+#[cfg(any(
+  target_arch = "aarch64",
+  target_arch = "x86_64",
+  target_arch = "wasm32"
+))]
 use crate::row::arch;
 #[cfg(target_arch = "aarch64")]
 use crate::row::neon_available;
+#[cfg(target_arch = "wasm32")]
+use crate::row::simd128_available;
 #[cfg(target_arch = "x86_64")]
 use crate::row::{avx2_available, avx512_available, sse41_available};
 use crate::{
@@ -67,6 +73,13 @@ pub fn v30x_to_rgb_row(
           return;
         }
       },
+      target_arch = "wasm32" => {
+        if simd128_available() {
+          // SAFETY: simd128 compile-time verified.
+          unsafe { arch::wasm_simd128::v30x_to_rgb_or_rgba_row::<false>(packed, rgb_out, width, matrix, full_range); }
+          return;
+        }
+      },
       _ => {}
     }
   }
@@ -113,6 +126,13 @@ pub fn v30x_to_rgba_row(
         if sse41_available() {
           // SAFETY: SSE4.1 verified.
           unsafe { arch::x86_sse41::v30x_to_rgb_or_rgba_row::<true>(packed, rgba_out, width, matrix, full_range); }
+          return;
+        }
+      },
+      target_arch = "wasm32" => {
+        if simd128_available() {
+          // SAFETY: simd128 compile-time verified.
+          unsafe { arch::wasm_simd128::v30x_to_rgb_or_rgba_row::<true>(packed, rgba_out, width, matrix, full_range); }
           return;
         }
       },
@@ -166,6 +186,13 @@ pub fn v30x_to_rgb_u16_row(
           return;
         }
       },
+      target_arch = "wasm32" => {
+        if simd128_available() {
+          // SAFETY: simd128 compile-time verified.
+          unsafe { arch::wasm_simd128::v30x_to_rgb_u16_or_rgba_u16_row::<false>(packed, rgb_out, width, matrix, full_range); }
+          return;
+        }
+      },
       _ => {}
     }
   }
@@ -216,6 +243,13 @@ pub fn v30x_to_rgba_u16_row(
           return;
         }
       },
+      target_arch = "wasm32" => {
+        if simd128_available() {
+          // SAFETY: simd128 compile-time verified.
+          unsafe { arch::wasm_simd128::v30x_to_rgb_u16_or_rgba_u16_row::<true>(packed, rgba_out, width, matrix, full_range); }
+          return;
+        }
+      },
       _ => {}
     }
   }
@@ -253,6 +287,13 @@ pub fn v30x_to_luma_row(packed: &[u32], luma_out: &mut [u8], width: usize, use_s
         if sse41_available() {
           // SAFETY: SSE4.1 verified.
           unsafe { arch::x86_sse41::v30x_to_luma_row(packed, luma_out, width); }
+          return;
+        }
+      },
+      target_arch = "wasm32" => {
+        if simd128_available() {
+          // SAFETY: simd128 compile-time verified.
+          unsafe { arch::wasm_simd128::v30x_to_luma_row(packed, luma_out, width); }
           return;
         }
       },
@@ -294,6 +335,13 @@ pub fn v30x_to_luma_u16_row(packed: &[u32], luma_out: &mut [u16], width: usize, 
         if sse41_available() {
           // SAFETY: SSE4.1 verified.
           unsafe { arch::x86_sse41::v30x_to_luma_u16_row(packed, luma_out, width); }
+          return;
+        }
+      },
+      target_arch = "wasm32" => {
+        if simd128_available() {
+          // SAFETY: simd128 compile-time verified.
+          unsafe { arch::wasm_simd128::v30x_to_luma_u16_row(packed, luma_out, width); }
           return;
         }
       },
