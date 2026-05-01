@@ -144,8 +144,11 @@
 //!
 //! - **Packed RGB sources** (`Rgb24`, `Bgr24`, `Rgba`, `Bgra`,
 //!   `Rgba1010102`, etc.) — Tier 6+.
-//! - **Packed YUV** (Tier 5
-//!   `V410` / `XV36` / `VUYA` / `AYUV64` / `UYYVYY411`).
+//! - **Additional packed YUV** — Tiers 3 and 4 are already supported
+//!   ([`yuv::Yuyv422`] / [`yuv::Uyvy422`] / [`yuv::Yvyu422`] in Tier
+//!   3; [`V210`] / [`Y210`] / [`Y212`] / [`Y216`] in Tier 4). Remaining
+//!   follow-up: Tier 5 (`V410` / `XV36` / `VUYA` / `AYUV64` /
+//!   `UYYVYY411`).
 //! - **Alpha + RGBA output** (Ship 8) — `with_rgba` /
 //!   `with_rgba_u16` `MixedSinker` accessors plus native YUVA
 //!   frame types.
