@@ -14,6 +14,7 @@ pub(super) mod packed_yuv422;
 pub(super) mod pn;
 pub(super) mod rgb_ops;
 pub(super) mod v210;
+pub(super) mod v30x;
 pub(super) mod v410;
 pub(super) mod y210;
 pub(super) mod y212;
