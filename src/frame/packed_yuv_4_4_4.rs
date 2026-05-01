@@ -10,9 +10,13 @@ use thiserror::Error;
 
 /// Validated wrapper around a packed YUV 4:4:4 10-bit `V410` plane.
 ///
-/// `V410` (FFmpeg `AV_PIX_FMT_V410`, also known as `XV30`) packs **one
-/// pixel per 32-bit word** with the following little-endian layout
-/// (MSB → LSB):
+/// `V410` is the **MSB-padded** packed YUV 4:4:4 layout — the same
+/// bits Microsoft V410 fourcc, NVIDIA Video Codec SDK, Apple
+/// AVFoundation, and the FFmpeg `AV_CODEC_ID_V410` codec all describe.
+/// Current FFmpeg (8.1+) exposes this layout as `AV_PIX_FMT_XV30LE`
+/// (the `AV_PIX_FMT_V410` symbol was renamed to `XV30` — same bit
+/// pattern, new name). Each pixel occupies one 32-bit word with the
+/// following little-endian layout (MSB → LSB):
 ///
 /// | Bits  | Field |
 /// |-------|-------|
@@ -20,6 +24,11 @@ use thiserror::Error;
 /// | 29:20 | V (10 bits) |
 /// | 19:10 | Y (10 bits) |
 /// | 9:0   | U (10 bits) |
+///
+/// **If your data uses LSB padding instead** (`AV_PIX_FMT_V30XLE`,
+/// `(msb) 10V 10Y 10U 2X (lsb)`), use [`V30XFrame`] — it is a
+/// type-distinct sibling with the same shape but shifted bit
+/// positions.
 ///
 /// Each row holds exactly `width` u32 words (`stride >= width`); the
 /// plane occupies `stride * height` u32 elements.
