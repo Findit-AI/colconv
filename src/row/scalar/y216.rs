@@ -164,11 +164,19 @@ mod tests {
     // Pixel 0: Y=4096 (limited-range black), neutral chroma → (0, 0, 0)
     assert_eq!(&out[0..3], &[0, 0, 0], "pixel 0 (Y=4096, neutral chroma)");
     // Pixel 1: Y=32000, neutral chroma → (127, 127, 127)
-    assert_eq!(&out[3..6], &[127, 127, 127], "pixel 1 (Y=32000, neutral chroma)");
+    assert_eq!(
+      &out[3..6],
+      &[127, 127, 127],
+      "pixel 1 (Y=32000, neutral chroma)"
+    );
     // Pixel 2: Y=0 (below floor), U=16384, V=49152 → (96, 0, 0)
     assert_eq!(&out[6..9], &[96, 0, 0], "pixel 2 (Y=0, non-neutral chroma)");
     // Pixel 3: Y=65535 (above ceil), U=16384, V=49152 → (255, 255, 144)
-    assert_eq!(&out[9..12], &[255, 255, 144], "pixel 3 (Y=65535, non-neutral chroma)");
+    assert_eq!(
+      &out[9..12],
+      &[255, 255, 144],
+      "pixel 3 (Y=65535, non-neutral chroma)"
+    );
   }
 
   /// RGBA output — same values as RGB plus alpha=0xFF at byte [3].
@@ -196,9 +204,17 @@ mod tests {
     y216_to_rgb_u16_or_rgba_u16_row::<false>(&packed, &mut out, 4, ColorMatrix::Bt709, false);
 
     // Pixel 0: Y=4096 = limited-range floor → all channels 0
-    assert_eq!(&out[0..3], &[0, 0, 0], "pixel 0 (Y=4096, neutral chroma, u16)");
+    assert_eq!(
+      &out[0..3],
+      &[0, 0, 0],
+      "pixel 0 (Y=4096, neutral chroma, u16)"
+    );
     // Pixel 1: Y=32000 neutral chroma → 32618 on all channels
-    assert_eq!(&out[3..6], &[32618, 32618, 32618], "pixel 1 (Y=32000, neutral chroma, u16)");
+    assert_eq!(
+      &out[3..6],
+      &[32618, 32618, 32618],
+      "pixel 1 (Y=32000, neutral chroma, u16)"
+    );
     // Pixel 2: non-neutral chroma — pixel-exact i64-path values
     assert_eq!(&out[6..9], &[24702_u16, 0, 0]);
     // Pixel 3

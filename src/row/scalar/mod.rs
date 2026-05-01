@@ -34,9 +34,9 @@ pub(crate) use rgb_expand::*;
 pub(crate) use semi_planar_8bit::*;
 pub(crate) use subsampled_high_bit_pn::*;
 pub(crate) use v210::*;
+pub(crate) use y2xx::*;
 #[allow(unused_imports)] // dispatcher lands in follow-up PR
 pub(crate) use y216::*;
-pub(crate) use y2xx::*;
 pub(crate) use yuv_planar_8bit::*;
 pub(crate) use yuv_planar_16bit::*;
 pub(crate) use yuv_planar_high_bit::*;

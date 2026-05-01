@@ -74,8 +74,7 @@ unsafe fn unpack_y216_8px_wasm(ptr: *const u16) -> (v128, v128, v128) {
     let y_lo = u8x16_swizzle(lo, y_idx); // [Y0, Y1, Y2, Y3, _, _, _, _]
     let y_hi = u8x16_swizzle(hi, y_idx); // [Y4, Y5, Y6, Y7, _, _, _, _]
     // Merge low 8 bytes of each → [Y0..Y7]
-    let y_vec =
-      i8x16_shuffle::<0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23>(y_lo, y_hi);
+    let y_vec = i8x16_shuffle::<0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23>(y_lo, y_hi);
 
     // Chroma: odd u16 lanes → [U0,V0,U1,V1, _, _, _, _] / [U2,V2,U3,V3, _, _, _, _]
     let c_idx = i8x16(2, 3, 6, 7, 10, 11, 14, 15, -1, -1, -1, -1, -1, -1, -1, -1);

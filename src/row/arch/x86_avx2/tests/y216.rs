@@ -21,7 +21,8 @@ fn check_rgb<const ALPHA: bool>(width: usize, matrix: ColorMatrix, full_range: b
     y216_to_rgb_or_rgba_row::<ALPHA>(&p, &mut k, width, matrix, full_range);
   }
   assert_eq!(
-    s, k,
+    s,
+    k,
     "AVX2 y216<ALPHA={ALPHA}>→{} diverges (width={width}, matrix={matrix:?}, full_range={full_range})",
     if ALPHA { "RGBA" } else { "RGB" }
   );
@@ -37,7 +38,8 @@ fn check_rgb_u16<const ALPHA: bool>(width: usize, matrix: ColorMatrix, full_rang
     y216_to_rgb_u16_or_rgba_u16_row::<ALPHA>(&p, &mut k, width, matrix, full_range);
   }
   assert_eq!(
-    s, k,
+    s,
+    k,
     "AVX2 y216<ALPHA={ALPHA}>→{} u16 diverges (width={width}, matrix={matrix:?}, full_range={full_range})",
     if ALPHA { "RGBA" } else { "RGB" }
   );

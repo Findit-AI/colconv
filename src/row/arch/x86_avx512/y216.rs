@@ -156,8 +156,7 @@ pub(crate) unsafe fn y216_to_rgb_or_rgba_row<const ALPHA: bool>(
     let mut x = 0usize;
     while x + 64 <= width {
       // --- lo group: pixels x..x+31 (32 pixels) --------------------------
-      let (y_lo_vec, u_lo_vec, v_lo_vec) =
-        unpack_y216_32px_avx512(packed.as_ptr().add(x * 2));
+      let (y_lo_vec, u_lo_vec, v_lo_vec) = unpack_y216_32px_avx512(packed.as_ptr().add(x * 2));
 
       let u_lo_i16 = _mm512_sub_epi16(u_lo_vec, bias16_v);
       let v_lo_i16 = _mm512_sub_epi16(v_lo_vec, bias16_v);
@@ -168,15 +167,33 @@ pub(crate) unsafe fn y216_to_rgb_or_rgba_row<const ALPHA: bool>(
       let v_lo_a = _mm512_cvtepi16_epi32(_mm512_castsi512_si256(v_lo_i16));
       let v_lo_b = _mm512_cvtepi16_epi32(_mm512_extracti64x4_epi64::<1>(v_lo_i16));
 
-      let u_d_lo_a = q15_shift(_mm512_add_epi32(_mm512_mullo_epi32(u_lo_a, c_scale_v), rnd_v));
-      let u_d_lo_b = q15_shift(_mm512_add_epi32(_mm512_mullo_epi32(u_lo_b, c_scale_v), rnd_v));
-      let v_d_lo_a = q15_shift(_mm512_add_epi32(_mm512_mullo_epi32(v_lo_a, c_scale_v), rnd_v));
-      let v_d_lo_b = q15_shift(_mm512_add_epi32(_mm512_mullo_epi32(v_lo_b, c_scale_v), rnd_v));
+      let u_d_lo_a = q15_shift(_mm512_add_epi32(
+        _mm512_mullo_epi32(u_lo_a, c_scale_v),
+        rnd_v,
+      ));
+      let u_d_lo_b = q15_shift(_mm512_add_epi32(
+        _mm512_mullo_epi32(u_lo_b, c_scale_v),
+        rnd_v,
+      ));
+      let v_d_lo_a = q15_shift(_mm512_add_epi32(
+        _mm512_mullo_epi32(v_lo_a, c_scale_v),
+        rnd_v,
+      ));
+      let v_d_lo_b = q15_shift(_mm512_add_epi32(
+        _mm512_mullo_epi32(v_lo_b, c_scale_v),
+        rnd_v,
+      ));
 
       // chroma_i16x32: 32-lane vector, valid data in lanes 0..16.
-      let r_chroma_lo = chroma_i16x32(cru, crv, u_d_lo_a, v_d_lo_a, u_d_lo_b, v_d_lo_b, rnd_v, pack_fixup);
-      let g_chroma_lo = chroma_i16x32(cgu, cgv, u_d_lo_a, v_d_lo_a, u_d_lo_b, v_d_lo_b, rnd_v, pack_fixup);
-      let b_chroma_lo = chroma_i16x32(cbu, cbv, u_d_lo_a, v_d_lo_a, u_d_lo_b, v_d_lo_b, rnd_v, pack_fixup);
+      let r_chroma_lo = chroma_i16x32(
+        cru, crv, u_d_lo_a, v_d_lo_a, u_d_lo_b, v_d_lo_b, rnd_v, pack_fixup,
+      );
+      let g_chroma_lo = chroma_i16x32(
+        cgu, cgv, u_d_lo_a, v_d_lo_a, u_d_lo_b, v_d_lo_b, rnd_v, pack_fixup,
+      );
+      let b_chroma_lo = chroma_i16x32(
+        cbu, cbv, u_d_lo_a, v_d_lo_a, u_d_lo_b, v_d_lo_b, rnd_v, pack_fixup,
+      );
 
       // Duplicate each chroma sample into its 4:2:2 Y-pair slot.
       // 16 valid chroma → lo32 covers all 32 Y lanes.
@@ -188,8 +205,7 @@ pub(crate) unsafe fn y216_to_rgb_or_rgba_row<const ALPHA: bool>(
       let y_lo_scaled = scale_y_u16_avx512(y_lo_vec, y_off_v, y_scale_v, rnd_v, pack_fixup);
 
       // --- hi group: pixels x+32..x+63 (32 pixels) ----------------------
-      let (y_hi_vec, u_hi_vec, v_hi_vec) =
-        unpack_y216_32px_avx512(packed.as_ptr().add(x * 2 + 64));
+      let (y_hi_vec, u_hi_vec, v_hi_vec) = unpack_y216_32px_avx512(packed.as_ptr().add(x * 2 + 64));
 
       let u_hi_i16 = _mm512_sub_epi16(u_hi_vec, bias16_v);
       let v_hi_i16 = _mm512_sub_epi16(v_hi_vec, bias16_v);
@@ -199,14 +215,32 @@ pub(crate) unsafe fn y216_to_rgb_or_rgba_row<const ALPHA: bool>(
       let v_hi_a = _mm512_cvtepi16_epi32(_mm512_castsi512_si256(v_hi_i16));
       let v_hi_b = _mm512_cvtepi16_epi32(_mm512_extracti64x4_epi64::<1>(v_hi_i16));
 
-      let u_d_hi_a = q15_shift(_mm512_add_epi32(_mm512_mullo_epi32(u_hi_a, c_scale_v), rnd_v));
-      let u_d_hi_b = q15_shift(_mm512_add_epi32(_mm512_mullo_epi32(u_hi_b, c_scale_v), rnd_v));
-      let v_d_hi_a = q15_shift(_mm512_add_epi32(_mm512_mullo_epi32(v_hi_a, c_scale_v), rnd_v));
-      let v_d_hi_b = q15_shift(_mm512_add_epi32(_mm512_mullo_epi32(v_hi_b, c_scale_v), rnd_v));
+      let u_d_hi_a = q15_shift(_mm512_add_epi32(
+        _mm512_mullo_epi32(u_hi_a, c_scale_v),
+        rnd_v,
+      ));
+      let u_d_hi_b = q15_shift(_mm512_add_epi32(
+        _mm512_mullo_epi32(u_hi_b, c_scale_v),
+        rnd_v,
+      ));
+      let v_d_hi_a = q15_shift(_mm512_add_epi32(
+        _mm512_mullo_epi32(v_hi_a, c_scale_v),
+        rnd_v,
+      ));
+      let v_d_hi_b = q15_shift(_mm512_add_epi32(
+        _mm512_mullo_epi32(v_hi_b, c_scale_v),
+        rnd_v,
+      ));
 
-      let r_chroma_hi = chroma_i16x32(cru, crv, u_d_hi_a, v_d_hi_a, u_d_hi_b, v_d_hi_b, rnd_v, pack_fixup);
-      let g_chroma_hi = chroma_i16x32(cgu, cgv, u_d_hi_a, v_d_hi_a, u_d_hi_b, v_d_hi_b, rnd_v, pack_fixup);
-      let b_chroma_hi = chroma_i16x32(cbu, cbv, u_d_hi_a, v_d_hi_a, u_d_hi_b, v_d_hi_b, rnd_v, pack_fixup);
+      let r_chroma_hi = chroma_i16x32(
+        cru, crv, u_d_hi_a, v_d_hi_a, u_d_hi_b, v_d_hi_b, rnd_v, pack_fixup,
+      );
+      let g_chroma_hi = chroma_i16x32(
+        cgu, cgv, u_d_hi_a, v_d_hi_a, u_d_hi_b, v_d_hi_b, rnd_v, pack_fixup,
+      );
+      let b_chroma_hi = chroma_i16x32(
+        cbu, cbv, u_d_hi_a, v_d_hi_a, u_d_hi_b, v_d_hi_b, rnd_v, pack_fixup,
+      );
 
       let (r_dup_hi, _) = chroma_dup(r_chroma_hi, dup_lo_idx, dup_hi_idx);
       let (g_dup_hi, _) = chroma_dup(g_chroma_hi, dup_lo_idx, dup_hi_idx);
@@ -303,11 +337,9 @@ pub(crate) unsafe fn y216_to_rgb_u16_or_rgba_u16_row<const ALPHA: bool>(
     // Permute indices built once.
     // dup_{lo,hi}_idx: duplicate 16 chroma i32 lanes into 32 slots.
     let dup_lo_idx = _mm512_setr_epi32(0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7);
-    let dup_hi_idx =
-      _mm512_setr_epi32(8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15);
+    let dup_hi_idx = _mm512_setr_epi32(8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15);
     // interleave_idx: even i32x8 + odd i32x8 → i32x16 [e0,o0,e1,o1,...].
-    let interleave_idx =
-      _mm512_setr_epi32(0, 16, 1, 17, 2, 18, 3, 19, 4, 20, 5, 21, 6, 22, 7, 23);
+    let interleave_idx = _mm512_setr_epi32(0, 16, 1, 17, 2, 18, 3, 19, 4, 20, 5, 21, 6, 22, 7, 23);
     let pack_fixup = _mm512_setr_epi64(0, 2, 4, 6, 1, 3, 5, 7);
 
     let mut x = 0usize;

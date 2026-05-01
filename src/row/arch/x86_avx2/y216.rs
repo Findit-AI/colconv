@@ -76,12 +76,12 @@ unsafe fn unpack_y216_16px_avx2(ptr: *const u16) -> (__m256i, __m256i, __m256i) 
     // chroma per 128-bit lane = 8 u16: [U,V,U,V, U,V,U,V].
     // 0x88 = [0, 2, 0, 2] → low 128 = [U0..U3, U4..U7].
     let u_idx = _mm256_setr_epi8(
-      0, 1, 4, 5, 8, 9, 12, 13, -1, -1, -1, -1, -1, -1, -1, -1,
-      0, 1, 4, 5, 8, 9, 12, 13, -1, -1, -1, -1, -1, -1, -1, -1,
+      0, 1, 4, 5, 8, 9, 12, 13, -1, -1, -1, -1, -1, -1, -1, -1, 0, 1, 4, 5, 8, 9, 12, 13, -1, -1,
+      -1, -1, -1, -1, -1, -1,
     );
     let v_idx = _mm256_setr_epi8(
-      2, 3, 6, 7, 10, 11, 14, 15, -1, -1, -1, -1, -1, -1, -1, -1,
-      2, 3, 6, 7, 10, 11, 14, 15, -1, -1, -1, -1, -1, -1, -1, -1,
+      2, 3, 6, 7, 10, 11, 14, 15, -1, -1, -1, -1, -1, -1, -1, -1, 2, 3, 6, 7, 10, 11, 14, 15, -1,
+      -1, -1, -1, -1, -1, -1, -1,
     );
     let u_per_lane = _mm256_shuffle_epi8(chroma_raw, u_idx);
     let v_per_lane = _mm256_shuffle_epi8(chroma_raw, v_idx);
@@ -146,8 +146,7 @@ pub(crate) unsafe fn y216_to_rgb_or_rgba_row<const ALPHA: bool>(
     let mut x = 0usize;
     while x + 32 <= width {
       // --- lo group: pixels x..x+15 (two 256-bit loads, 16 pixels) ------
-      let (y_lo_vec, u_lo_vec, v_lo_vec) =
-        unpack_y216_16px_avx2(packed.as_ptr().add(x * 2));
+      let (y_lo_vec, u_lo_vec, v_lo_vec) = unpack_y216_16px_avx2(packed.as_ptr().add(x * 2));
 
       // Chroma bias subtraction (wrapping).
       let u_lo_i16 = _mm256_sub_epi16(u_lo_vec, bias16_v);
@@ -161,10 +160,22 @@ pub(crate) unsafe fn y216_to_rgb_or_rgba_row<const ALPHA: bool>(
       let v_lo_a = _mm256_cvtepi16_epi32(_mm256_castsi256_si128(v_lo_i16));
       let v_lo_b = _mm256_cvtepi16_epi32(_mm256_extracti128_si256::<1>(v_lo_i16));
 
-      let u_d_lo_a = q15_shift(_mm256_add_epi32(_mm256_mullo_epi32(u_lo_a, c_scale_v), rnd_v));
-      let u_d_lo_b = q15_shift(_mm256_add_epi32(_mm256_mullo_epi32(u_lo_b, c_scale_v), rnd_v));
-      let v_d_lo_a = q15_shift(_mm256_add_epi32(_mm256_mullo_epi32(v_lo_a, c_scale_v), rnd_v));
-      let v_d_lo_b = q15_shift(_mm256_add_epi32(_mm256_mullo_epi32(v_lo_b, c_scale_v), rnd_v));
+      let u_d_lo_a = q15_shift(_mm256_add_epi32(
+        _mm256_mullo_epi32(u_lo_a, c_scale_v),
+        rnd_v,
+      ));
+      let u_d_lo_b = q15_shift(_mm256_add_epi32(
+        _mm256_mullo_epi32(u_lo_b, c_scale_v),
+        rnd_v,
+      ));
+      let v_d_lo_a = q15_shift(_mm256_add_epi32(
+        _mm256_mullo_epi32(v_lo_a, c_scale_v),
+        rnd_v,
+      ));
+      let v_d_lo_b = q15_shift(_mm256_add_epi32(
+        _mm256_mullo_epi32(v_lo_b, c_scale_v),
+        rnd_v,
+      ));
 
       // chroma_i16x16: 16-lane vector with valid data in lanes 0..7 (lo).
       let r_chroma_lo = chroma_i16x16(cru, crv, u_d_lo_a, v_d_lo_a, u_d_lo_b, v_d_lo_b, rnd_v);
@@ -182,8 +193,7 @@ pub(crate) unsafe fn y216_to_rgb_or_rgba_row<const ALPHA: bool>(
       let y_lo_scaled = scale_y_u16_avx2(y_lo_vec, y_off_v, y_scale_v, rnd_v);
 
       // --- hi group: pixels x+16..x+31 -----------------------------------
-      let (y_hi_vec, u_hi_vec, v_hi_vec) =
-        unpack_y216_16px_avx2(packed.as_ptr().add(x * 2 + 32));
+      let (y_hi_vec, u_hi_vec, v_hi_vec) = unpack_y216_16px_avx2(packed.as_ptr().add(x * 2 + 32));
 
       let u_hi_i16 = _mm256_sub_epi16(u_hi_vec, bias16_v);
       let v_hi_i16 = _mm256_sub_epi16(v_hi_vec, bias16_v);
@@ -193,10 +203,22 @@ pub(crate) unsafe fn y216_to_rgb_or_rgba_row<const ALPHA: bool>(
       let v_hi_a = _mm256_cvtepi16_epi32(_mm256_castsi256_si128(v_hi_i16));
       let v_hi_b = _mm256_cvtepi16_epi32(_mm256_extracti128_si256::<1>(v_hi_i16));
 
-      let u_d_hi_a = q15_shift(_mm256_add_epi32(_mm256_mullo_epi32(u_hi_a, c_scale_v), rnd_v));
-      let u_d_hi_b = q15_shift(_mm256_add_epi32(_mm256_mullo_epi32(u_hi_b, c_scale_v), rnd_v));
-      let v_d_hi_a = q15_shift(_mm256_add_epi32(_mm256_mullo_epi32(v_hi_a, c_scale_v), rnd_v));
-      let v_d_hi_b = q15_shift(_mm256_add_epi32(_mm256_mullo_epi32(v_hi_b, c_scale_v), rnd_v));
+      let u_d_hi_a = q15_shift(_mm256_add_epi32(
+        _mm256_mullo_epi32(u_hi_a, c_scale_v),
+        rnd_v,
+      ));
+      let u_d_hi_b = q15_shift(_mm256_add_epi32(
+        _mm256_mullo_epi32(u_hi_b, c_scale_v),
+        rnd_v,
+      ));
+      let v_d_hi_a = q15_shift(_mm256_add_epi32(
+        _mm256_mullo_epi32(v_hi_a, c_scale_v),
+        rnd_v,
+      ));
+      let v_d_hi_b = q15_shift(_mm256_add_epi32(
+        _mm256_mullo_epi32(v_hi_b, c_scale_v),
+        rnd_v,
+      ));
 
       let r_chroma_hi = chroma_i16x16(cru, crv, u_d_hi_a, v_d_hi_a, u_d_hi_b, v_d_hi_b, rnd_v);
       let g_chroma_hi = chroma_i16x16(cgu, cgv, u_d_hi_a, v_d_hi_a, u_d_hi_b, v_d_hi_b, rnd_v);
@@ -306,8 +328,14 @@ pub(crate) unsafe fn y216_to_rgb_u16_or_rgba_u16_row<const ALPHA: bool>(
       let v_i32 = _mm256_cvtepi16_epi32(_mm256_castsi256_si128(v_i16));
 
       // Scale UV in i32 (8 lanes; |chroma_centered × c_scale| fits i32).
-      let u_d = q15_shift(_mm256_add_epi32(_mm256_mullo_epi32(u_i32, c_scale_v), rnd32_v));
-      let v_d = q15_shift(_mm256_add_epi32(_mm256_mullo_epi32(v_i32, c_scale_v), rnd32_v));
+      let u_d = q15_shift(_mm256_add_epi32(
+        _mm256_mullo_epi32(u_i32, c_scale_v),
+        rnd32_v,
+      ));
+      let v_d = q15_shift(_mm256_add_epi32(
+        _mm256_mullo_epi32(v_i32, c_scale_v),
+        rnd32_v,
+      ));
 
       // i64 chroma: even/odd i32 lanes via 0xF5 shuffle.
       let u_d_odd = _mm256_shuffle_epi32::<0xF5>(u_d);
@@ -507,8 +535,8 @@ pub(crate) unsafe fn y216_to_luma_u16_row(packed: &[u16], out: &mut [u16], width
   unsafe {
     // Per-lane Y permute mask (same as luma_row above).
     let split_idx = _mm256_setr_epi8(
-      0, 1, 4, 5, 8, 9, 12, 13, -1, -1, -1, -1, -1, -1, -1, -1,
-      0, 1, 4, 5, 8, 9, 12, 13, -1, -1, -1, -1, -1, -1, -1, -1,
+      0, 1, 4, 5, 8, 9, 12, 13, -1, -1, -1, -1, -1, -1, -1, -1, 0, 1, 4, 5, 8, 9, 12, 13, -1, -1,
+      -1, -1, -1, -1, -1, -1,
     );
 
     let mut x = 0usize;

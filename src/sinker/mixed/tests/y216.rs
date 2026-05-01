@@ -383,8 +383,5 @@ fn y216_planar_parity_with_yuv422p16() {
     .unwrap();
   yuv422p16_to(&planar, false, ColorMatrix::Bt709, &mut p_sink2).unwrap();
   y216_to(&y216, false, ColorMatrix::Bt709, &mut y_sink2).unwrap();
-  assert_eq!(
-    p_rgb_u16, y_rgb_u16,
-    "Y216 vs Yuv422p16 u16 RGB diverges"
-  );
+  assert_eq!(p_rgb_u16, y_rgb_u16, "Y216 vs Yuv422p16 u16 RGB diverges");
 }

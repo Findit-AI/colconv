@@ -164,7 +164,10 @@ pub(crate) unsafe fn y216_to_rgb_or_rgba_row<const ALPHA: bool>(
           uint8x8x4_t(r_hi_u8, g_hi_u8, b_hi_u8, alpha),
         );
       } else {
-        vst3_u8(out.as_mut_ptr().add(x * 3), uint8x8x3_t(r_lo_u8, g_lo_u8, b_lo_u8));
+        vst3_u8(
+          out.as_mut_ptr().add(x * 3),
+          uint8x8x3_t(r_lo_u8, g_lo_u8, b_lo_u8),
+        );
         vst3_u8(
           out.as_mut_ptr().add(x * 3 + 24),
           uint8x8x3_t(r_hi_u8, g_hi_u8, b_hi_u8),

@@ -151,18 +151,9 @@ pub(crate) unsafe fn y216_to_rgb_or_rgba_row<const ALPHA: bool>(
       let y_lo_scaled = scale_y_u16(y_lo_vec, y_off_v, y_scale_v, rnd_v);
 
       // Saturating add and narrow to u8.
-      let r_lo_u8 = _mm_packus_epi16(
-        _mm_adds_epi16(y_lo_scaled, r_dup_lo),
-        _mm_setzero_si128(),
-      );
-      let g_lo_u8 = _mm_packus_epi16(
-        _mm_adds_epi16(y_lo_scaled, g_dup_lo),
-        _mm_setzero_si128(),
-      );
-      let b_lo_u8 = _mm_packus_epi16(
-        _mm_adds_epi16(y_lo_scaled, b_dup_lo),
-        _mm_setzero_si128(),
-      );
+      let r_lo_u8 = _mm_packus_epi16(_mm_adds_epi16(y_lo_scaled, r_dup_lo), _mm_setzero_si128());
+      let g_lo_u8 = _mm_packus_epi16(_mm_adds_epi16(y_lo_scaled, g_dup_lo), _mm_setzero_si128());
+      let b_lo_u8 = _mm_packus_epi16(_mm_adds_epi16(y_lo_scaled, b_dup_lo), _mm_setzero_si128());
 
       // --- hi group: pixels x+8..x+15 ---------------------------------
       let lo2 = _mm_loadu_si128(packed.as_ptr().add(x * 2 + 16).cast());
@@ -202,18 +193,9 @@ pub(crate) unsafe fn y216_to_rgb_or_rgba_row<const ALPHA: bool>(
 
       let y_hi_scaled = scale_y_u16(y_hi_vec, y_off_v, y_scale_v, rnd_v);
 
-      let r_hi_u8 = _mm_packus_epi16(
-        _mm_adds_epi16(y_hi_scaled, r_dup_hi),
-        _mm_setzero_si128(),
-      );
-      let g_hi_u8 = _mm_packus_epi16(
-        _mm_adds_epi16(y_hi_scaled, g_dup_hi),
-        _mm_setzero_si128(),
-      );
-      let b_hi_u8 = _mm_packus_epi16(
-        _mm_adds_epi16(y_hi_scaled, b_dup_hi),
-        _mm_setzero_si128(),
-      );
+      let r_hi_u8 = _mm_packus_epi16(_mm_adds_epi16(y_hi_scaled, r_dup_hi), _mm_setzero_si128());
+      let g_hi_u8 = _mm_packus_epi16(_mm_adds_epi16(y_hi_scaled, g_dup_hi), _mm_setzero_si128());
+      let b_hi_u8 = _mm_packus_epi16(_mm_adds_epi16(y_hi_scaled, b_dup_hi), _mm_setzero_si128());
 
       // Combine two 8-pixel groups into 16-pixel output.
       // Each *_lo_u8 / *_hi_u8 holds 8 valid u8 in its low 8 bytes.
