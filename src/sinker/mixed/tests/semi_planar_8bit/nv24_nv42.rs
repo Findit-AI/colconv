@@ -2,7 +2,9 @@ use super::{
   super::{
     packed_yuv_8bit::{solid_uyvy422_frame, solid_yuyv422_frame, solid_yvyu422_frame},
     planar_other_8bit_9bit::{solid_yuv422p_frame, solid_yuv440p_frame, solid_yuv444p_frame},
+    v30x::solid_v30x_frame,
     v210::solid_v210_frame,
+    v410::solid_v410_frame,
     y210::solid_y210_frame,
     y212::solid_y212_frame,
     y216::solid_y216_frame,
@@ -826,6 +828,39 @@ fn strategy_a_rgb_and_rgba_byte_identical_for_all_wired_families() {
     y216_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
     assert_match(&rgb, &rgba, "Y216");
   }
+
+  {
+    // V410 carries 10-bit samples; pick mid-range values inside 0..1024
+    // so the gray-derived RGB stays sensible on the u8 path.
+    let buf = solid_v410_frame(w, h, 200, 700, 400);
+    let src = V410Frame::new(&buf, w, h, w);
+    let mut rgb = std::vec![0u8; ws * hs * 3];
+    let mut rgba = std::vec![0u8; ws * hs * 4];
+    let mut sink = MixedSinker::<V410>::new(ws, hs)
+      .with_rgb(&mut rgb)
+      .unwrap()
+      .with_rgba(&mut rgba)
+      .unwrap();
+    v410_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    assert_match(&rgb, &rgba, "V410");
+  }
+
+  {
+    // V30X carries 10-bit samples (padding at LSB instead of MSB vs V410);
+    // pick mid-range values inside 0..1024 so the gray-derived RGB stays
+    // sensible on the u8 path.
+    let buf = solid_v30x_frame(w, h, 200, 700, 400);
+    let src = V30XFrame::new(&buf, w, h, w);
+    let mut rgb = std::vec![0u8; ws * hs * 3];
+    let mut rgba = std::vec![0u8; ws * hs * 4];
+    let mut sink = MixedSinker::<V30X>::new(ws, hs)
+      .with_rgb(&mut rgb)
+      .unwrap()
+      .with_rgba(&mut rgba)
+      .unwrap();
+    v30x_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    assert_match(&rgb, &rgba, "V30X");
+  }
 }
 
 // Cross-format Strategy A invariant on the **u16 RGB / u16 RGBA** path.
@@ -914,5 +949,35 @@ fn strategy_a_rgb_u16_and_rgba_u16_byte_identical_for_all_wired_families() {
       .unwrap();
     y216_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
     assert_match_u16(&rgb, &rgba, "Y216", 0xFFFF);
+  }
+
+  {
+    // V410 is 10-bit low-bit-packed; alpha_max = 0x3FF.
+    let buf = solid_v410_frame(w, h, 200, 700, 400);
+    let src = V410Frame::new(&buf, w, h, w);
+    let mut rgb = std::vec![0u16; ws * hs * 3];
+    let mut rgba = std::vec![0u16; ws * hs * 4];
+    let mut sink = MixedSinker::<V410>::new(ws, hs)
+      .with_rgb_u16(&mut rgb)
+      .unwrap()
+      .with_rgba_u16(&mut rgba)
+      .unwrap();
+    v410_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    assert_match_u16(&rgb, &rgba, "V410", 0x3FF);
+  }
+
+  {
+    // V30X is 10-bit low-bit-packed (padding at LSB); alpha_max = 0x3FF.
+    let buf = solid_v30x_frame(w, h, 200, 700, 400);
+    let src = V30XFrame::new(&buf, w, h, w);
+    let mut rgb = std::vec![0u16; ws * hs * 3];
+    let mut rgba = std::vec![0u16; ws * hs * 4];
+    let mut sink = MixedSinker::<V30X>::new(ws, hs)
+      .with_rgb_u16(&mut rgb)
+      .unwrap()
+      .with_rgba_u16(&mut rgba)
+      .unwrap();
+    v30x_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    assert_match_u16(&rgb, &rgba, "V30X", 0x3FF);
   }
 }

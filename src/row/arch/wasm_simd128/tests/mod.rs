@@ -5,6 +5,8 @@ mod high_bit_4_4_4_and_pn;
 mod packed_yuv_8bit;
 mod planar_8bit_and_nv;
 mod v210;
+mod v30x;
+mod v410;
 mod y216;
 mod y2xx;
 mod yuva;

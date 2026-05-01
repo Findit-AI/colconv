@@ -638,6 +638,33 @@ pub enum RowSlice {
   /// Packed `y216` row — same shape as Y210 with BITS=16.
   #[display("Y216 packed")]
   Y216Packed,
+  /// Packed `v410` row of a `V410` source — Tier 5 10-bit 4:4:4
+  /// packed format. One `u32` word per pixel; row length: `width`
+  /// `u32` elements (= `4 * width` bytes).
+  #[display("V410 packed")]
+  V410Packed,
+  /// Packed `v30x` row of a `V30X` source — Tier 5 10-bit 4:4:4
+  /// packed format, sibling of V410 with 2-bit padding at the
+  /// **low** end. One `u32` word per pixel; row length: `width`
+  /// `u32` elements (= `4 * width` bytes).
+  #[display("V30X packed")]
+  V30XPacked,
+  /// Packed `xv36` row of an `Xv36` source — Tier 5 16-bit 4:4:4
+  /// packed format. Four `u16` elements per pixel (one per channel);
+  /// row length: `4 * width` `u16` elements (= `8 * width` bytes).
+  #[display("XV36 packed")]
+  Xv36Packed,
+  /// Packed `vuya` row of a `Vuya` source — Tier 5 8-bit 4:4:4
+  /// packed format. Four bytes per pixel in V/U/Y/A order; row
+  /// length: `4 * width` bytes.
+  #[display("VUYA packed")]
+  VuyaPacked,
+  /// Packed `ayuv64` row of an `Ayuv64` source — Tier 5 16-bit
+  /// 4:4:4 packed format. Four `u16` elements per pixel in A/Y/U/V
+  /// order; row length: `4 * width` `u16` elements (= `8 * width`
+  /// bytes).
+  #[display("AYUV64 packed")]
+  Ayuv64Packed,
 }
 
 /// A sink that writes any subset of `{RGB, Luma, HSV}` into
@@ -1454,6 +1481,8 @@ mod subsampled_4_2_0_high_bit;
 mod subsampled_4_2_2_high_bit;
 mod subsampled_4_4_4_high_bit;
 mod v210;
+mod v30x;
+mod v410;
 mod y210;
 mod y212;
 mod y216;

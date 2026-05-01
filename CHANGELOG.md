@@ -1,5 +1,28 @@
 # CHANGELOG
 
+## 0.13.0 — Ship 12a (Tier 5 V410 + V30X, first tranche)
+
+- Add `V410Frame` (10-bit packed YUV 4:4:4 in 32-bit words; FFmpeg
+  `AV_PIX_FMT_V410` = XV30 alias) — first Tier 5 tranche.
+- Add `V30XFrame` (10-bit packed YUV 4:4:4 in 32-bit words; FFmpeg
+  `AV_PIX_FMT_V30XLE`) — sibling of V410 with opposite padding position
+  (`(msb) 10V | 10Y | 10U | 2X (lsb)` instead of V410's
+  `(msb) 2X | 10V | 10Y | 10U (lsb)`).
+- 5-backend SIMD for both formats: NEON (4 px/iter), SSE4.1 (8 px/iter),
+  AVX2 (8 px/iter), AVX-512 (16 px/iter), wasm-simd128 (4 px/iter).
+- `MixedSinker<V410>` and `MixedSinker<V30X>` with `with_rgb` /
+  `with_rgba` / `with_rgb_u16` / `with_rgba_u16` / `with_luma` /
+  `with_hsv`. (`with_luma_u16` deferred — no library consumer ask.)
+- Cross-tranche infrastructure: 4 new `RowSlice` variants (`V410Packed`,
+  `Xv36Packed`, `VuyaPacked`, `Ayuv64Packed`) + `V30XPacked` (added
+  with V30X) for Ship 12b/c/d.
+- V410 ↔ Yuv444p10 + V30X ↔ Yuv444p10 planar parity oracles validate
+  both SIMD paths byte-for-byte against the established planar 4:4:4
+  reference.
+- Opens Tier 5 (remaining tranches: 12b XV36, 12c VUYA, 12d AYUV64).
+
+---
+
 ## 0.12.0 — Ship 11d (Tier 4 Y216, closes Tier 4)
 
 - Add `Y216Frame` (16-bit packed YUV 4:2:2, full-range u16 samples).
