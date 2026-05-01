@@ -57,7 +57,7 @@ unsafe fn unpack_v410_16px_avx512(ptr: *const u32) -> (__m512i, __m512i, __m512i
     let mask = _mm512_set1_epi32(0x3FF);
 
     // Extract 10-bit fields in i32x16 (values ≤ 1023 — no overflow risk).
-    let u_i32 = _mm512_and_si512(words, mask);                          // bits [9:0]
+    let u_i32 = _mm512_and_si512(words, mask); // bits [9:0]
     let y_i32 = _mm512_and_si512(_mm512_srli_epi32::<10>(words), mask); // bits [19:10]
     let v_i32 = _mm512_and_si512(_mm512_srli_epi32::<20>(words), mask); // bits [29:20]
 
@@ -134,10 +134,22 @@ pub(crate) unsafe fn v410_to_rgb_or_rgba_row<const ALPHA: bool>(
       let v_lo_i32 = _mm512_cvtepi16_epi32(_mm512_castsi512_si256(v_sub));
       let v_hi_i32 = _mm512_cvtepi16_epi32(_mm512_extracti64x4_epi64::<1>(v_sub));
 
-      let u_d_lo = q15_shift(_mm512_add_epi32(_mm512_mullo_epi32(u_lo_i32, c_scale_v), rnd_v));
-      let u_d_hi = q15_shift(_mm512_add_epi32(_mm512_mullo_epi32(u_hi_i32, c_scale_v), rnd_v));
-      let v_d_lo = q15_shift(_mm512_add_epi32(_mm512_mullo_epi32(v_lo_i32, c_scale_v), rnd_v));
-      let v_d_hi = q15_shift(_mm512_add_epi32(_mm512_mullo_epi32(v_hi_i32, c_scale_v), rnd_v));
+      let u_d_lo = q15_shift(_mm512_add_epi32(
+        _mm512_mullo_epi32(u_lo_i32, c_scale_v),
+        rnd_v,
+      ));
+      let u_d_hi = q15_shift(_mm512_add_epi32(
+        _mm512_mullo_epi32(u_hi_i32, c_scale_v),
+        rnd_v,
+      ));
+      let v_d_lo = q15_shift(_mm512_add_epi32(
+        _mm512_mullo_epi32(v_lo_i32, c_scale_v),
+        rnd_v,
+      ));
+      let v_d_hi = q15_shift(_mm512_add_epi32(
+        _mm512_mullo_epi32(v_hi_i32, c_scale_v),
+        rnd_v,
+      ));
 
       // chroma_i16x32: 32-lane vector; lanes 0..16 carry valid data
       // (V410 is 4:4:4 — no duplication needed). Lanes 16..32 are
@@ -256,10 +268,22 @@ pub(crate) unsafe fn v410_to_rgb_u16_or_rgba_u16_row<const ALPHA: bool>(
       let v_lo_i32 = _mm512_cvtepi16_epi32(_mm512_castsi512_si256(v_sub));
       let v_hi_i32 = _mm512_cvtepi16_epi32(_mm512_extracti64x4_epi64::<1>(v_sub));
 
-      let u_d_lo = q15_shift(_mm512_add_epi32(_mm512_mullo_epi32(u_lo_i32, c_scale_v), rnd_v));
-      let u_d_hi = q15_shift(_mm512_add_epi32(_mm512_mullo_epi32(u_hi_i32, c_scale_v), rnd_v));
-      let v_d_lo = q15_shift(_mm512_add_epi32(_mm512_mullo_epi32(v_lo_i32, c_scale_v), rnd_v));
-      let v_d_hi = q15_shift(_mm512_add_epi32(_mm512_mullo_epi32(v_hi_i32, c_scale_v), rnd_v));
+      let u_d_lo = q15_shift(_mm512_add_epi32(
+        _mm512_mullo_epi32(u_lo_i32, c_scale_v),
+        rnd_v,
+      ));
+      let u_d_hi = q15_shift(_mm512_add_epi32(
+        _mm512_mullo_epi32(u_hi_i32, c_scale_v),
+        rnd_v,
+      ));
+      let v_d_lo = q15_shift(_mm512_add_epi32(
+        _mm512_mullo_epi32(v_lo_i32, c_scale_v),
+        rnd_v,
+      ));
+      let v_d_hi = q15_shift(_mm512_add_epi32(
+        _mm512_mullo_epi32(v_hi_i32, c_scale_v),
+        rnd_v,
+      ));
 
       // 10-bit chroma: i32 arithmetic is sufficient (no overflow at 10-bit).
       let r_chroma = chroma_i16x32(cru, crv, u_d_lo, v_d_lo, u_d_hi, v_d_hi, rnd_v, pack_fixup);

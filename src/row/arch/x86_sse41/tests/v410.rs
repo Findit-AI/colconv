@@ -115,9 +115,7 @@ fn sse41_v410_matches_scalar_widths() {
   }
   // Includes widths with SIMD main loop (multiples of 8), scalar tails
   // (1..7), and large production widths (1920p, 1921 = 1920+1 tail).
-  for w in [
-    1usize, 2, 3, 4, 5, 6, 7, 8, 9, 15, 16, 17, 1920, 1921, 1923,
-  ] {
+  for w in [1usize, 2, 3, 4, 5, 6, 7, 8, 9, 15, 16, 17, 1920, 1921, 1923] {
     check_rgb::<false>(w, ColorMatrix::Bt709, false);
     check_rgb::<true>(w, ColorMatrix::Bt709, true);
     check_rgb_u16::<false>(w, ColorMatrix::Bt2020Ncl, true);
@@ -134,9 +132,7 @@ fn sse41_v410_luma_matches_scalar_widths() {
   if !std::arch::is_x86_feature_detected!("sse4.1") {
     return;
   }
-  for w in [
-    1usize, 2, 3, 4, 5, 6, 7, 8, 9, 15, 16, 17, 1920, 1921, 1923,
-  ] {
+  for w in [1usize, 2, 3, 4, 5, 6, 7, 8, 9, 15, 16, 17, 1920, 1921, 1923] {
     check_luma(w);
     check_luma_u16(w);
   }

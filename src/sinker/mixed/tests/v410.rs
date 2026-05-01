@@ -108,11 +108,7 @@ fn v410_rgb_u16_only_converts_gray_to_gray_native_depth() {
     .unwrap();
   v410_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
   for px in rgb.chunks(3) {
-    assert!(
-      px[0].abs_diff(512) <= 16,
-      "expected ~512, got {}",
-      px[0]
-    );
+    assert!(px[0].abs_diff(512) <= 16, "expected ~512, got {}", px[0]);
   }
 }
 
