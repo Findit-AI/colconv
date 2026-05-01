@@ -1,3 +1,17 @@
+# CHANGELOG
+
+## 0.12.0 — Ship 11d (Tier 4 Y216, closes Tier 4)
+
+- Add `Y216Frame` (16-bit packed YUV 4:2:2, full-range u16 samples).
+- Parallel `y216_*` kernel family separate from `y2xx_n_to_*<BITS>` for the
+  i64 chroma u16 path (BITS=16 overflows i32 on Q15 chroma sums).
+- 5-backend SIMD: NEON, SSE4.1, AVX2, AVX-512, wasm-simd128.
+- `MixedSinker<Y216>` with `with_rgb` / `with_rgba` / `with_rgb_u16` /
+  `with_rgba_u16` / `with_luma` (generic) / `with_luma_u16` / `with_hsv`.
+- Closes Tier 4 (packed YUV 4:2:2 high-bit-depth: v210, Y210, Y212, Y216).
+
+---
+
 # UNRELEASED
 
 ## Tier 14 (in progress) — Bayer demosaic + WB + CCM
