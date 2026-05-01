@@ -35,7 +35,6 @@ pub(crate) use rgb_expand::*;
 pub(crate) use semi_planar_8bit::*;
 pub(crate) use subsampled_high_bit_pn::*;
 pub(crate) use v210::*;
-#[allow(unused_imports)]
 pub(crate) use v410::*;
 pub(crate) use y2xx::*;
 pub(crate) use y216::*;

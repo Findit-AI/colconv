@@ -126,9 +126,10 @@ impl<'a> V410Frame<'a> {
     }
   }
 
-  /// Packed plane: `width × height` u32 words per row × stride rows.
-  /// Each word holds one pixel `(U, Y, V, padding)` per the V410
-  /// layout described above.
+  /// Packed plane: `stride * height` total u32 elements, with
+  /// `width` active pixels per row and `stride` u32 elements per
+  /// row. Each word holds one pixel `(U, Y, V, padding)` per the
+  /// V410 layout described above.
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn packed(&self) -> &'a [u32] {
     self.packed
