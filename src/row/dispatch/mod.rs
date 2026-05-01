@@ -16,6 +16,7 @@ pub(super) mod rgb_ops;
 pub(super) mod v210;
 pub(super) mod y210;
 pub(super) mod y212;
+pub(super) mod y216;
 pub(super) mod yuv420;
 pub(super) mod yuv444;
 pub(super) mod yuva;

@@ -65,6 +65,10 @@
 //! | [`P410`]         | 10        | 4:4:4       | semi-planar, high-packed | `p410le`              |
 //! | [`P412`]         | 12        | 4:4:4       | semi-planar, high-packed | `p412le`              |
 //! | [`P416`]         | 16        | 4:4:4       | semi-planar              | `p416le`              |
+//! | [`V210`]         | 10        | 4:2:2       | packed (3 × 10-bit/u32)  | `v210`                |
+//! | [`Y210`]         | 10        | 4:2:2       | packed, MSB-aligned u16  | `y210le`              |
+//! | [`Y212`]         | 12        | 4:2:2       | packed, MSB-aligned u16  | `y212le`              |
+//! | [`Y216`]         | 16        | 4:2:2       | packed, full-range u16   | `y216le`              |
 //!
 //! ## RAW (Bayer) sources
 //!
@@ -140,9 +144,11 @@
 //!
 //! - **Packed RGB sources** (`Rgb24`, `Bgr24`, `Rgba`, `Bgra`,
 //!   `Rgba1010102`, etc.) — Tier 6+.
-//! - **Packed YUV** (Tier 3 `YUY2` / `UYVY` / `YVYU`; Tier 4
-//!   `V210` / `Y210` / `Y212` / `Y216`; Tier 5
-//!   `V410` / `XV36` / `VUYA` / `AYUV64` / `UYYVYY411`).
+//! - **Additional packed YUV** — Tiers 3 and 4 are already supported
+//!   ([`yuv::Yuyv422`] / [`yuv::Uyvy422`] / [`yuv::Yvyu422`] in Tier
+//!   3; [`V210`] / [`Y210`] / [`Y212`] / [`Y216`] in Tier 4). Remaining
+//!   follow-up: Tier 5 (`V410` / `XV36` / `VUYA` / `AYUV64` /
+//!   `UYYVYY411`).
 //! - **Alpha + RGBA output** (Ship 8) — `with_rgba` /
 //!   `with_rgba_u16` `MixedSinker` accessors plus native YUVA
 //!   frame types.
@@ -191,6 +197,10 @@
 //! [`P410`]: crate::yuv::P410
 //! [`P412`]: crate::yuv::P412
 //! [`P416`]: crate::yuv::P416
+//! [`V210`]: crate::yuv::V210
+//! [`Y210`]: crate::yuv::Y210
+//! [`Y212`]: crate::yuv::Y212
+//! [`Y216`]: crate::yuv::Y216
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(docsrs, feature(doc_cfg))]

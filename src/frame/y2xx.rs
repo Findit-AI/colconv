@@ -42,6 +42,11 @@ pub type Y210Frame<'a> = Y2xxFrame<'a, 10>;
 /// Y212 alias — 12-bit MSB-aligned packed YUV 4:2:2.
 pub type Y212Frame<'a> = Y2xxFrame<'a, 12>;
 
+/// Y216 alias — 16-bit packed YUV 4:2:2 (full-range u16 samples,
+/// no MSB-alignment shift). For Y216, [`Self::try_new_checked`] is
+/// equivalent to [`Self::try_new`] (no low bits to verify).
+pub type Y216Frame<'a> = Y2xxFrame<'a, 16>;
+
 /// Errors returned by [`Y2xxFrame::try_new`] and
 /// [`Y2xxFrame::try_new_checked`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Error)]
