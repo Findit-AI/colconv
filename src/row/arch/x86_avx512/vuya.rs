@@ -20,7 +20,7 @@
 //!     [V0..V3, _, _, _, V4..V7, _, _, _, V8..V11, _, _, _, V12..V15, _, _, _]
 //! ```
 //! (lane 0 holds the 4-byte i32 packing `V0|V1|V2|V3`; lanes 1, 2, 3
-//! are zero; lane 4 holds `V4|V5|V6|V7`; etc.) Three rounds of
+//! are zero; lane 4 holds `V4|V5|V6|V7`; etc.) Two rounds of
 //! `_mm512_permutex2var_epi32` (cross-vector i32 gather) then
 //! consolidate the 16 valid i32 lanes scattered across the four
 //! per-load partials into a single naturally-ordered 64-byte channel
@@ -82,7 +82,7 @@ use crate::{ColorMatrix, row::scalar};
 // lanes 0, 4, 8, 12 (one valid i32 per 128-bit lane). All other i32
 // lanes are zero.
 //
-// Three rounds of `_mm512_permutex2var_epi32` then consolidate four
+// Two rounds of `_mm512_permutex2var_epi32` then consolidate four
 // such per-load partials into a single 16-lane (i32) channel vector
 // holding 64 bytes in natural pixel order.
 
