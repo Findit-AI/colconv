@@ -290,6 +290,95 @@ fn xv36_with_simd_false_matches_with_simd_true() {
   }
 }
 
+// ---- Planar parity oracle ---------------------------------------------------
+
+/// Pack three 12-bit planes (Y / U / V at 4:4:4, low-bit-packed u16) into
+/// XV36 quadruple layout: `[u << 4, y << 4, v << 4, 0]` per pixel
+/// (MSB-aligned at 12-bit, low 4 bits zero).
+/// Yuv444p12 stores 12-bit values low-bit-packed (high 4 bits zero).
+/// XV36 stores them MSB-aligned (low 4 bits zero). Convert via `<< 4`.
+fn pack_yuv444p12_to_xv36(
+  y_plane: &[u16],
+  u_plane: &[u16],
+  v_plane: &[u16],
+  width: usize,
+  height: usize,
+) -> Vec<u16> {
+  let mut packed = Vec::with_capacity(width * 4 * height);
+  for r in 0..height {
+    for c in 0..width {
+      let y = (y_plane[r * width + c] & 0x0FFF) << 4;
+      let u = (u_plane[r * width + c] & 0x0FFF) << 4;
+      let v = (v_plane[r * width + c] & 0x0FFF) << 4;
+      packed.push(u);
+      packed.push(y);
+      packed.push(v);
+      packed.push(0); // padding A
+    }
+  }
+  packed
+}
+
+#[test]
+#[cfg(all(test, feature = "std"))]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn xv36_planar_parity_with_yuv444p12() {
+  // Oracle: Yuv444p12 (separate planes) and XV36 (packed u16 quadruples)
+  // carry identical logical 12-bit samples — both paths MUST produce
+  // byte-identical RGB output (u8 and u16).
+  let width = 16usize;
+  let height = 4usize;
+  let mut yp = std::vec![0u16; width * height];
+  let mut up = std::vec![0u16; width * height];
+  let mut vp = std::vec![0u16; width * height];
+  pseudo_random_u16_low_n_bits(&mut yp, 0xC0FFEE, 12);
+  pseudo_random_u16_low_n_bits(&mut up, 0xBADF00D, 12);
+  pseudo_random_u16_low_n_bits(&mut vp, 0xFEEDFACE, 12);
+
+  let planar = Yuv444p12Frame::new(
+    &yp,
+    &up,
+    &vp,
+    width as u32,
+    height as u32,
+    width as u32,
+    width as u32,
+    width as u32,
+  );
+  let packed = pack_yuv444p12_to_xv36(&yp, &up, &vp, width, height);
+  let xv36 = Xv36Frame::new(&packed, width as u32, height as u32, (width * 4) as u32);
+
+  // u8 RGB parity
+  let mut p_rgb = std::vec![0u8; width * height * 3];
+  let mut x_rgb = std::vec![0u8; width * height * 3];
+  let mut p_sink = MixedSinker::<Yuv444p12>::new(width, height)
+    .with_rgb(&mut p_rgb)
+    .unwrap();
+  let mut x_sink = MixedSinker::<Xv36>::new(width, height)
+    .with_rgb(&mut x_rgb)
+    .unwrap();
+  yuv444p12_to(&planar, false, ColorMatrix::Bt709, &mut p_sink).unwrap();
+  xv36_to(&xv36, false, ColorMatrix::Bt709, &mut x_sink).unwrap();
+  assert_eq!(p_rgb, x_rgb, "XV36 ↔ Yuv444p12 u8 RGB diverges");
+
+  // u16 RGB parity (validates the BITS=12 path against the established
+  // planar reference)
+  let mut p_rgb_u16 = std::vec![0u16; width * height * 3];
+  let mut x_rgb_u16 = std::vec![0u16; width * height * 3];
+  let mut p_sink2 = MixedSinker::<Yuv444p12>::new(width, height)
+    .with_rgb_u16(&mut p_rgb_u16)
+    .unwrap();
+  let mut x_sink2 = MixedSinker::<Xv36>::new(width, height)
+    .with_rgb_u16(&mut x_rgb_u16)
+    .unwrap();
+  yuv444p12_to(&planar, false, ColorMatrix::Bt709, &mut p_sink2).unwrap();
+  xv36_to(&xv36, false, ColorMatrix::Bt709, &mut x_sink2).unwrap();
+  assert_eq!(p_rgb_u16, x_rgb_u16, "XV36 ↔ Yuv444p12 u16 RGB diverges");
+}
+
 // ---- Error-path tests --------------------------------------------------
 
 #[test]
