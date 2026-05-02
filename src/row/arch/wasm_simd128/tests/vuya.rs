@@ -110,13 +110,10 @@ fn wasm_vuya_luma_lane_order_per_pixel() {
   unsafe {
     vuya_to_luma_row(&packed, &mut luma, 16);
   }
-  for n in 0..16usize {
-    assert_eq!(
-      luma[n],
-      (n + 1) as u8,
-      "wasm vuya luma lane order wrong at pixel {n}: expected {}, got {}",
-      n + 1,
-      luma[n]
-    );
-  }
+  let expected: std::vec::Vec<u8> = (1..=16u8).collect();
+  assert_eq!(
+    luma, expected,
+    "wasm vuya→luma pixel reorder bug: {:?} != {:?}",
+    luma, expected
+  );
 }
