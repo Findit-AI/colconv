@@ -53,7 +53,8 @@ use crate::{ColorMatrix, row::scalar};
 ///
 /// Returns `(u_raw, y_raw, v_raw)` — u16x8 with MSB-aligned values;
 /// caller must `u16x8_shr(v, 4)` to drop the 4 padding LSBs.
-#[inline(always)]
+#[inline]
+#[target_feature(enable = "simd128")]
 unsafe fn deinterleave_xv36_8px(ptr: *const u16) -> (v128, v128, v128) {
   unsafe {
     // Load 4 × v128, each covering 2 pixels.

@@ -69,7 +69,8 @@ use crate::{ColorMatrix, row::scalar};
 ///
 /// `ptr` must point to at least 64 readable bytes (32 `u16` elements).
 /// Caller's `target_feature` must include SSE4.1.
-#[inline(always)]
+#[inline]
+#[target_feature(enable = "sse4.1")]
 unsafe fn deinterleave_xv36(ptr: *const u16) -> (__m128i, __m128i, __m128i) {
   unsafe {
     // Load 4 × __m128i (8 pixels × 4 channels × u16 = 64 bytes).
