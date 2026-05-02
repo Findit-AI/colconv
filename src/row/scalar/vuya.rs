@@ -14,7 +14,6 @@
 //! The dispatch layer (`src/row/dispatch/vuya.rs`) and sinker
 //! implementations are added in later tasks (Tasks 5-13). Until then
 //! the `pub(crate)` symbols are forward-declared here.
-#![allow(dead_code)]
 
 use super::*;
 

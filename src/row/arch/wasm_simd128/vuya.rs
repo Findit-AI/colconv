@@ -1,4 +1,3 @@
-#![allow(dead_code)] // dispatcher (Tasks 10-13) not yet wired
 //! wasm-simd128 kernels for VUYA / VUYX packed YUV 4:4:4 8-bit family.
 //!
 //! ## Layout
