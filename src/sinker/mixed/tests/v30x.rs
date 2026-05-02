@@ -1,17 +1,14 @@
-//! Tier 5 V30X sinker tests — Ship 12a.
+//! Tier 5 V30X sinker tests — Ship 12a / 12b.
 //!
 //! Coverage matrix:
-//! - Single-output paths (luma u8, rgb, rgba, rgb_u16, rgba_u16, hsv)
-//!   on solid-gray frames.
+//! - Single-output paths (luma u8, luma u16, rgb, rgba, rgb_u16,
+//!   rgba_u16, hsv) on solid-gray frames.
 //! - Strategy A invariant (`with_rgb` + `with_rgba` byte-identical;
 //!   same for the u16 variants).
 //! - SIMD-vs-scalar parity across multiple widths covering the main
 //!   loop + scalar tail of every backend block size.
 //! - Three error-path tests: short packed slice, row index out of
 //!   range, and short rgba_u16 buffer.
-//!
-//! Note: `with_luma_u16` is NOT tested here — V30X does not expose
-//! that accessor (deferred per Spec § 11).
 
 #[cfg(all(test, feature = "std"))]
 use super::*;
@@ -49,6 +46,31 @@ fn v30x_luma_only_extracts_y_bytes_downshifted() {
   v30x_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
   // 10-bit Y=256 → 8-bit (256 >> 2) = 64.
   assert!(luma.iter().all(|&y| y == 64), "luma {luma:?}");
+}
+
+#[test]
+#[cfg(all(test, feature = "std"))]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn v30x_with_luma_u16_extracts_y_native_depth() {
+  // Y=0x3FC (10-bit near-max value). V30X word: (V << 22) | (Y << 12) | (U << 2)
+  // with Y=0x3FC → bits [21:12] = 0x3FC, so the full word (neutral U/V=512)
+  // is (512 << 22) | (0x3FC << 12) | (512 << 2).
+  // luma_u16 kernel extracts bits [21:12] → yields 0x3FC = 1020 in each slot.
+  let buf = solid_v30x_frame(6, 8, 512, 0x3FC, 512);
+  let src = V30XFrame::new(&buf, 6, 8, 6);
+  let mut luma = std::vec![0u16; 6 * 8];
+  let mut sink = MixedSinker::<V30X>::new(6, 8)
+    .with_luma_u16(&mut luma)
+    .unwrap();
+  v30x_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  assert!(
+    luma.iter().all(|&y| y == 0x3FC),
+    "luma_u16 expected 0x3FC, got {:?}",
+    &luma[..8]
+  );
 }
 
 #[test]
