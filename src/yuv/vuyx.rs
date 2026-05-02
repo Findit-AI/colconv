@@ -50,13 +50,13 @@ pub struct VuyxRow<'a> {
 
 impl<'a> VuyxRow<'a> {
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub(crate) fn new(
-    packed: &'a [u8],
-    row: usize,
-    matrix: ColorMatrix,
-    full_range: bool,
-  ) -> Self {
-    Self { packed, row, matrix, full_range }
+  pub(crate) fn new(packed: &'a [u8], row: usize, matrix: ColorMatrix, full_range: bool) -> Self {
+    Self {
+      packed,
+      row,
+      matrix,
+      full_range,
+    }
   }
   /// Packed VUYX row — `width × 4` bytes (4 channels per pixel:
   /// V, U, Y, A).

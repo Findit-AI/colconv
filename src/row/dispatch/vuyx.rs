@@ -21,7 +21,10 @@ use crate::row::neon_available;
 use crate::row::simd128_available;
 #[cfg(target_arch = "x86_64")]
 use crate::row::{avx2_available, avx512_available, sse41_available};
-use crate::{ColorMatrix, row::{rgba_row_bytes, scalar}};
+use crate::{
+  ColorMatrix,
+  row::{rgba_row_bytes, scalar},
+};
 
 // ---- Re-exports (bit-identical kernels) ------------------------------------
 
@@ -153,16 +156,17 @@ mod tests {
     let mut rgba = [0u8; 4 * 4];
     vuyx_to_rgba_row(&buf, &mut rgba, 4, ColorMatrix::Bt709, true, false);
     for px in rgba.chunks(4) {
-      assert_eq!(px[3], 0xFF, "VUYX output alpha must be 0xFF even when padding=0");
+      assert_eq!(
+        px[3], 0xFF,
+        "VUYX output alpha must be 0xFF even when padding=0"
+      );
     }
   }
 
   // ---- 32-bit width × 4 overflow guard ------------------------------------
 
   #[cfg(target_pointer_width = "32")]
-  const OVERFLOW_WIDTH_TIMES_4: usize = {
-    (usize::MAX / 4) + 1
-  };
+  const OVERFLOW_WIDTH_TIMES_4: usize = { (usize::MAX / 4) + 1 };
 
   #[cfg(target_pointer_width = "32")]
   #[test]

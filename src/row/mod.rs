@@ -55,9 +55,8 @@ pub(crate) use scalar::expand_rgb_to_rgba_row;
 pub(crate) use scalar::expand_rgb_u16_to_rgba_u16_row;
 
 pub use dispatch::{
-  bayer::*, nv::*, packed_yuv422::*, pn::*, rgb_ops::*, v30x::*, v210::*, v410::*,
-  vuya::*, vuyx::*, xv36::*,
-  y210::*, y212::*, y216::*, yuv420::*, yuv444::*, yuva::*,
+  bayer::*, nv::*, packed_yuv422::*, pn::*, rgb_ops::*, v30x::*, v210::*, v410::*, vuya::*,
+  vuyx::*, xv36::*, y210::*, y212::*, y216::*, yuv420::*, yuv444::*, yuva::*,
 };
 
 // `yuv_444p_n_to_rgb_u16_row` is consumed by the 32-bit overflow test

@@ -161,7 +161,10 @@ pub(crate) unsafe fn vuya_to_rgb_or_rgba_row<const ALPHA: bool, const ALPHA_SRC:
         } else {
           vdupq_n_u8(0xFFu8) // opaque (VUYX)
         };
-        vst4q_u8(out.as_mut_ptr().add(off), uint8x16x4_t(r_u8, g_u8, b_u8, a_vec));
+        vst4q_u8(
+          out.as_mut_ptr().add(off),
+          uint8x16x4_t(r_u8, g_u8, b_u8, a_vec),
+        );
       } else {
         vst3q_u8(out.as_mut_ptr().add(off), uint8x16x3_t(r_u8, g_u8, b_u8));
       }
@@ -198,7 +201,9 @@ pub(crate) unsafe fn vuya_to_rgb_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  unsafe { vuya_to_rgb_or_rgba_row::<false, false>(packed, rgb_out, width, matrix, full_range); }
+  unsafe {
+    vuya_to_rgb_or_rgba_row::<false, false>(packed, rgb_out, width, matrix, full_range);
+  }
 }
 
 /// NEON VUYA → packed **RGBA** (4 bpp). Source A byte is passed through
@@ -212,7 +217,9 @@ pub(crate) unsafe fn vuya_to_rgba_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  unsafe { vuya_to_rgb_or_rgba_row::<true, true>(packed, rgba_out, width, matrix, full_range); }
+  unsafe {
+    vuya_to_rgb_or_rgba_row::<true, true>(packed, rgba_out, width, matrix, full_range);
+  }
 }
 
 /// NEON VUYX → packed **RGBA** (4 bpp). Source A byte is padding;
@@ -226,7 +233,9 @@ pub(crate) unsafe fn vuyx_to_rgba_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  unsafe { vuya_to_rgb_or_rgba_row::<true, false>(packed, rgba_out, width, matrix, full_range); }
+  unsafe {
+    vuya_to_rgb_or_rgba_row::<true, false>(packed, rgba_out, width, matrix, full_range);
+  }
 }
 
 // ---- luma extraction ----------------------------------------------------

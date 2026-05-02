@@ -185,12 +185,11 @@ pub(crate) unsafe fn vuya_to_rgb_or_rgba_row<const ALPHA: bool, const ALPHA_SRC:
     let mut x = 0usize;
     while x + 16 <= width {
       // Deinterleave 16 VUYA pixels (64 bytes) into V/U/Y/A channel vectors.
-      let (v_raw, u_raw, y_raw, a_raw) =
-        deinterleave_vuya_16px(packed.as_ptr().add(x * 4));
+      let (v_raw, u_raw, y_raw, a_raw) = deinterleave_vuya_16px(packed.as_ptr().add(x * 4));
 
       // Zero-extend U/V/Y bytes to i16x8 (low half and high half).
       // u8_low_to_i16x8 / u8_high_to_i16x8 are defined in mod.rs.
-      let u_lo = u8_low_to_i16x8(u_raw);  // lanes 0-7 of U, as i16
+      let u_lo = u8_low_to_i16x8(u_raw); // lanes 0-7 of U, as i16
       let u_hi = u8_high_to_i16x8(u_raw); // lanes 8-15 of U, as i16
       let v_lo = u8_low_to_i16x8(v_raw);
       let v_hi = u8_high_to_i16x8(v_raw);
@@ -298,7 +297,9 @@ pub(crate) unsafe fn vuya_to_rgb_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  unsafe { vuya_to_rgb_or_rgba_row::<false, false>(packed, rgb_out, width, matrix, full_range); }
+  unsafe {
+    vuya_to_rgb_or_rgba_row::<false, false>(packed, rgb_out, width, matrix, full_range);
+  }
 }
 
 /// wasm-simd128 VUYA → packed **RGBA** (4 bpp).
@@ -318,7 +319,9 @@ pub(crate) unsafe fn vuya_to_rgba_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  unsafe { vuya_to_rgb_or_rgba_row::<true, true>(packed, rgba_out, width, matrix, full_range); }
+  unsafe {
+    vuya_to_rgb_or_rgba_row::<true, true>(packed, rgba_out, width, matrix, full_range);
+  }
 }
 
 /// wasm-simd128 VUYX → packed **RGBA** (4 bpp).
@@ -338,7 +341,9 @@ pub(crate) unsafe fn vuyx_to_rgba_row(
   matrix: ColorMatrix,
   full_range: bool,
 ) {
-  unsafe { vuya_to_rgb_or_rgba_row::<true, false>(packed, rgba_out, width, matrix, full_range); }
+  unsafe {
+    vuya_to_rgb_or_rgba_row::<true, false>(packed, rgba_out, width, matrix, full_range);
+  }
 }
 
 // ---- luma extraction -------------------------------------------------------

@@ -138,9 +138,7 @@ static COMBINE_IDX: [i32; 16] = [
 /// provides `_mm512_shuffle_epi8`; F provides `_mm512_permutex2var_epi32`).
 #[inline]
 #[target_feature(enable = "avx512f,avx512bw")]
-unsafe fn deinterleave_vuya_avx512(
-  ptr: *const u8,
-) -> (__m512i, __m512i, __m512i, __m512i) {
+unsafe fn deinterleave_vuya_avx512(ptr: *const u8) -> (__m512i, __m512i, __m512i, __m512i) {
   // SAFETY: caller obligation — `ptr` has 256 bytes readable; AVX-512F
   // + AVX-512BW are available.
   unsafe {
@@ -162,18 +160,10 @@ unsafe fn deinterleave_vuya_avx512(
     //
     // `_mm512_broadcast_i32x4` replicates a 16-byte mask across all four
     // 128-bit lanes of the __m512i.
-    let v_lane_mask = _mm_setr_epi8(
-      0, 4, 8, 12, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-    );
-    let u_lane_mask = _mm_setr_epi8(
-      1, 5, 9, 13, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-    );
-    let y_lane_mask = _mm_setr_epi8(
-      2, 6, 10, 14, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-    );
-    let a_lane_mask = _mm_setr_epi8(
-      3, 7, 11, 15, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-    );
+    let v_lane_mask = _mm_setr_epi8(0, 4, 8, 12, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
+    let u_lane_mask = _mm_setr_epi8(1, 5, 9, 13, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
+    let y_lane_mask = _mm_setr_epi8(2, 6, 10, 14, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
+    let a_lane_mask = _mm_setr_epi8(3, 7, 11, 15, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
     let v_mask = _mm512_broadcast_i32x4(v_lane_mask);
     let u_mask = _mm512_broadcast_i32x4(u_lane_mask);
     let y_mask = _mm512_broadcast_i32x4(y_lane_mask);

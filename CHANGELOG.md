@@ -1,5 +1,26 @@
 # CHANGELOG
 
+## 0.15.0 — Tier 5 third tranche: VUYA + VUYX (8-bit packed YUV 4:4:4)
+
+- Added `Vuya` and `Vuyx` source markers (FFmpeg `AV_PIX_FMT_VUYA` and
+  `AV_PIX_FMT_VUYX`).
+- `Vuya` is 8-bit packed YUV 4:4:4 with **source alpha** — the per-
+  pixel A byte is passed through to RGBA outputs.
+- `Vuyx` shares the byte layout but treats the A slot as **padding**
+  — RGBA outputs always force α=`0xFF` regardless of source.
+- 5-backend SIMD: NEON (16 px/iter), SSE4.1 (16 px/iter), AVX2
+  (32 px/iter), AVX-512 (64 px/iter), wasm-simd128 (16 px/iter).
+- u8 RGB / RGBA / luma / HSV outputs only — no u16 paths (8-bit
+  source).
+- Cross-format invariants: `Vuya ↔ Yuva444p` planar parity test
+  validates the source-α pass-through; `Vuyx` force-α-max test
+  validates padding-byte ignore.
+- AVX2 and AVX-512 backends ship with day-1 lane-order regression
+  tests (the pattern that surfaced Ship 12b's AVX2 deinterleave bug
+  retroactively — these tests catch it on first commit).
+
+---
+
 ## 0.14.0 — Ship 12b (Tier 5 XV36, second tranche)
 
 - Add `Xv36Frame` (12-bit packed YUV 4:4:4 with α-as-padding; FFmpeg

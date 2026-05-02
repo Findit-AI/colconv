@@ -45,7 +45,10 @@ fn check_luma(width: usize) {
 }
 
 #[test]
-#[cfg_attr(miri, ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri")]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
 fn neon_vuya_rgb_matches_scalar_all_matrices() {
   for m in [
     ColorMatrix::Bt601,
@@ -58,14 +61,17 @@ fn neon_vuya_rgb_matches_scalar_all_matrices() {
     for full in [true, false] {
       // All 3 valid (ALPHA, ALPHA_SRC) combinations.
       check_rgb::<false, false>(16, m, full); // RGB
-      check_rgb::<true, true>(16, m, full);   // RGBA + source alpha (VUYA)
-      check_rgb::<true, false>(16, m, full);  // RGBA + forced 0xFF (VUYX)
+      check_rgb::<true, true>(16, m, full); // RGBA + source alpha (VUYA)
+      check_rgb::<true, false>(16, m, full); // RGBA + forced 0xFF (VUYX)
     }
   }
 }
 
 #[test]
-#[cfg_attr(miri, ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri")]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
 fn neon_vuya_matches_scalar_widths() {
   for w in [
     1usize, 2, 3, 7, 8, 9, 15, 16, 17, 31, 32, 33, 1920, 1921, 1923,

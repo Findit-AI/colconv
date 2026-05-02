@@ -45,12 +45,17 @@ fn check_luma(width: usize) {
 }
 
 #[test]
-#[cfg_attr(miri, ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri")]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
 fn sse41_vuya_matches_scalar_widths() {
   if !std::arch::is_x86_feature_detected!("sse4.1") {
     return;
   }
-  for w in [1usize, 2, 3, 7, 8, 9, 15, 16, 17, 31, 32, 33, 1920, 1921, 1923] {
+  for w in [
+    1usize, 2, 3, 7, 8, 9, 15, 16, 17, 31, 32, 33, 1920, 1921, 1923,
+  ] {
     check_rgb::<false, false>(w, ColorMatrix::Bt709, false);
     check_rgb::<true, true>(w, ColorMatrix::Bt709, true);
     check_rgb::<true, false>(w, ColorMatrix::Bt2020Ncl, true);
@@ -59,7 +64,10 @@ fn sse41_vuya_matches_scalar_widths() {
 }
 
 #[test]
-#[cfg_attr(miri, ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri")]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
 fn sse41_vuya_rgb_matches_scalar_all_matrices() {
   if !std::arch::is_x86_feature_detected!("sse4.1") {
     return;

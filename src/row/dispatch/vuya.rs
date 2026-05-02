@@ -310,9 +310,7 @@ mod tests {
   // ---- 32-bit width × 4 overflow guard ------------------------------------
 
   #[cfg(target_pointer_width = "32")]
-  const OVERFLOW_WIDTH_TIMES_4: usize = {
-    (usize::MAX / 4) + 1
-  };
+  const OVERFLOW_WIDTH_TIMES_4: usize = { (usize::MAX / 4) + 1 };
 
   #[cfg(target_pointer_width = "32")]
   #[test]

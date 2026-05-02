@@ -26,14 +26,7 @@ use super::*;
 /// Builds a solid-color VUYA plane. Each pixel is `[v_val, u_val, y_val,
 /// a_val]`. Row stride equals `width × 4` bytes (no padding).
 #[cfg(all(test, feature = "std"))]
-pub(super) fn solid_vuya_frame(
-  width: u32,
-  height: u32,
-  v: u8,
-  u: u8,
-  y: u8,
-  a: u8,
-) -> Vec<u8> {
+pub(super) fn solid_vuya_frame(width: u32, height: u32, v: u8, u: u8, y: u8, a: u8) -> Vec<u8> {
   let quad = [v, u, y, a];
   (0..(width as usize) * (height as usize))
     .flat_map(|_| quad)
@@ -119,9 +112,7 @@ fn vuya_with_rgba_passes_source_alpha() {
   }
   let src = VuyaFrame::try_new(&buf, 4, 1, 16).unwrap();
   let mut rgba = std::vec![0u8; 4 * 4];
-  let mut sink = MixedSinker::<Vuya>::new(4, 1)
-    .with_rgba(&mut rgba)
-    .unwrap();
+  let mut sink = MixedSinker::<Vuya>::new(4, 1).with_rgba(&mut rgba).unwrap();
   vuya_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
   for (i, &expected_a) in alphas.iter().enumerate() {
     assert_eq!(
@@ -146,9 +137,7 @@ fn vuya_with_luma_extracts_y_byte() {
   let buf = solid_vuya_frame(8, 2, 128, 128, 0xC0, 0xFF);
   let src = VuyaFrame::try_new(&buf, 8, 2, 32).unwrap();
   let mut luma = std::vec![0u8; 8 * 2];
-  let mut sink = MixedSinker::<Vuya>::new(8, 2)
-    .with_luma(&mut luma)
-    .unwrap();
+  let mut sink = MixedSinker::<Vuya>::new(8, 2).with_luma(&mut luma).unwrap();
   vuya_to(&src, false, ColorMatrix::Bt709, &mut sink).unwrap();
   assert!(
     luma.iter().all(|&y| y == 0xC0),
@@ -200,30 +189,40 @@ fn vuya_with_rgb_and_rgba_preserves_source_alpha() {
   // Build a packed VUYA row with distinct source α bytes
   let mut packed = std::vec![0u8; width * 4];
   for n in 0..width {
-    packed[n * 4]     = 128;   // V (neutral chroma)
-    packed[n * 4 + 1] = 128;   // U (neutral chroma)
-    packed[n * 4 + 2] = 128;   // Y (mid gray)
+    packed[n * 4] = 128; // V (neutral chroma)
+    packed[n * 4 + 1] = 128; // U (neutral chroma)
+    packed[n * 4 + 2] = 128; // Y (mid gray)
     packed[n * 4 + 3] = (n as u8) * 32 + 1; // distinct A: 1, 33, 65, ..., 225
   }
   let frame = VuyaFrame::try_new(&packed, width as u32, height as u32, (width * 4) as u32).unwrap();
   let mut rgb = std::vec![0u8; width * height * 3];
   let mut rgba = std::vec![0u8; width * height * 4];
   let mut sinker = MixedSinker::<Vuya>::new(width, height)
-    .with_rgb(&mut rgb).unwrap()
-    .with_rgba(&mut rgba).unwrap();
+    .with_rgb(&mut rgb)
+    .unwrap()
+    .with_rgba(&mut rgba)
+    .unwrap();
   vuya_to(&frame, true, ColorMatrix::Bt709, &mut sinker).unwrap();
 
   // Each pixel: RGB matches the YUV→RGB output for gray Y=128
   for n in 0..width {
     // RGB and RGBA's first 3 bytes are bit-identical (both kernels run on same packed input)
-    assert_eq!(&rgb[n*3..n*3+3], &rgba[n*4..n*4+3],
+    assert_eq!(
+      &rgb[n * 3..n * 3 + 3],
+      &rgba[n * 4..n * 4 + 3],
       "pixel {n}: RGB and RGBA RGB-channels diverge (RGB={:?} RGBA={:?})",
-      &rgb[n*3..n*3+3], &rgba[n*4..n*4+3]);
+      &rgb[n * 3..n * 3 + 3],
+      &rgba[n * 4..n * 4 + 3]
+    );
     // RGBA α byte = source α (NOT 0xFF — per spec § 7.2 the direct kernel runs)
     let expected_alpha = (n as u8) * 32 + 1;
-    assert_eq!(rgba[n*4 + 3], expected_alpha,
+    assert_eq!(
+      rgba[n * 4 + 3],
+      expected_alpha,
       "pixel {n}: source α was discarded (got {}, expected {})",
-      rgba[n*4 + 3], expected_alpha);
+      rgba[n * 4 + 3],
+      expected_alpha
+    );
   }
 }
 
@@ -278,7 +277,7 @@ fn vuya_width_mismatch_returns_error() {
     MixedSinkerError::RowShapeMismatch {
       which: RowSlice::VuyaPacked,
       row: 0,
-      expected: 64 * 4,  // 256
+      expected: 64 * 4, // 256
       actual: 512,
     }
   );
@@ -501,14 +500,16 @@ fn vuya_planar_parity_with_yuva444p() {
     .unwrap();
   vuya_to(&packed_frame, full_range, ColorMatrix::Bt709, &mut x_sink2).unwrap();
 
-  assert_eq!(p_rgba, x_rgba, "VUYA ↔ Yuva444p u8 RGBA diverges (source-alpha path)");
+  assert_eq!(
+    p_rgba, x_rgba,
+    "VUYA ↔ Yuva444p u8 RGBA diverges (source-alpha path)"
+  );
 
   // Spot-check alpha bytes equal the source alpha plane.
   for (i, &src_a) in ap.iter().enumerate() {
     let alpha_out = x_rgba[i * 4 + 3];
     assert_eq!(
-      alpha_out,
-      src_a,
+      alpha_out, src_a,
       "VUYA RGBA alpha at pixel {i}: expected {src_a:#X}, got {alpha_out:#X}"
     );
   }

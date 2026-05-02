@@ -188,8 +188,7 @@ fn vuyx_with_rgb_and_rgba_strategy_a_byte_identical() {
     packed[n * 4 + 2] = 200; // Y (bright luma)
     packed[n * 4 + 3] = (n as u8) * 30; // X: padding (0, 30, 60, 90, …)
   }
-  let frame =
-    VuyxFrame::try_new(&packed, width as u32, height as u32, (width * 4) as u32).unwrap();
+  let frame = VuyxFrame::try_new(&packed, width as u32, height as u32, (width * 4) as u32).unwrap();
   let mut rgb = std::vec![0u8; width * height * 3];
   let mut rgba = std::vec![0u8; width * height * 4];
   let mut sinker = MixedSinker::<Vuyx>::new(width, height)
@@ -208,7 +207,8 @@ fn vuyx_with_rgb_and_rgba_strategy_a_byte_identical() {
     );
     // RGBA α byte = 0xFF (padding X byte must NOT bleed through).
     assert_eq!(
-      rgba[n * 4 + 3], 0xFF,
+      rgba[n * 4 + 3],
+      0xFF,
       "pixel {n}: RGBA α must be 0xFF, got {:#X}",
       rgba[n * 4 + 3],
     );
@@ -402,8 +402,7 @@ fn vuyx_force_alpha_max_independent_of_source() {
     packed[i * 4 + 2] = 128; // Y (neutral gray)
     packed[i * 4 + 3] = x_pattern[i % x_pattern.len()]; // X: distinct per pixel
   }
-  let src =
-    VuyxFrame::try_new(&packed, width as u32, height as u32, (width * 4) as u32).unwrap();
+  let src = VuyxFrame::try_new(&packed, width as u32, height as u32, (width * 4) as u32).unwrap();
   let mut rgba = std::vec![0u8; n * 4];
   let mut sink = MixedSinker::<Vuyx>::new(width, height)
     .with_rgba(&mut rgba)
