@@ -15,7 +15,7 @@
 //!
 //! VUYA has no u16 output paths — it is an 8-bit source.
 
-use crate::{PixelSink, SourceFormat, frame::VuyaFrame, sealed::Sealed};
+use crate::{ColorMatrix, PixelSink, SourceFormat, frame::VuyaFrame, sealed::Sealed};
 
 /// Zero-sized marker for the packed **VUYA** source format.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
@@ -44,12 +44,20 @@ pub struct VuyaRow<'a> {
   packed: &'a [u8],
   width: u32,
   row: u32,
+  matrix: ColorMatrix,
+  full_range: bool,
 }
 
 impl<'a> VuyaRow<'a> {
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub(crate) fn new(packed: &'a [u8], width: u32, row: u32) -> Self {
-    Self { packed, width, row }
+  pub(crate) fn new(
+    packed: &'a [u8],
+    width: u32,
+    row: u32,
+    matrix: ColorMatrix,
+    full_range: bool,
+  ) -> Self {
+    Self { packed, width, row, matrix, full_range }
   }
   /// Packed VUYA row — `width × 4` bytes (4 channels per pixel:
   /// V, U, Y, A).
@@ -67,13 +75,29 @@ impl<'a> VuyaRow<'a> {
   pub const fn row(&self) -> u32 {
     self.row
   }
+  /// YUV → RGB matrix carried through.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn matrix(&self) -> ColorMatrix {
+    self.matrix
+  }
+  /// `true` iff Y ∈ `[0, 255]` full range (8-bit). Limited range is
+  /// Y `[16, 235]`, chroma `[16, 240]`.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn full_range(&self) -> bool {
+    self.full_range
+  }
 }
 
 /// Sinks that consume [`VuyaRow`].
 pub trait VuyaSink: for<'a> PixelSink<Input<'a> = VuyaRow<'a>> {}
 
 /// Walks a [`VuyaFrame`] row by row into the sink.
-pub fn vuya_to<S: VuyaSink>(frame: VuyaFrame<'_>, sink: &mut S) -> Result<(), S::Error> {
+pub fn vuya_to<S: VuyaSink>(
+  frame: VuyaFrame<'_>,
+  full_range: bool,
+  matrix: ColorMatrix,
+  sink: &mut S,
+) -> Result<(), S::Error> {
   sink.begin_frame(frame.width(), frame.height())?;
 
   let h = frame.height() as usize;
@@ -84,7 +108,7 @@ pub fn vuya_to<S: VuyaSink>(frame: VuyaFrame<'_>, sink: &mut S) -> Result<(), S:
   for row in 0..h {
     let start = row * stride;
     let packed = &plane[start..start + row_bytes];
-    sink.process(VuyaRow::new(packed, frame.width(), row as u32))?;
+    sink.process(VuyaRow::new(packed, frame.width(), row as u32, matrix, full_range))?;
   }
   Ok(())
 }
@@ -92,7 +116,7 @@ pub fn vuya_to<S: VuyaSink>(frame: VuyaFrame<'_>, sink: &mut S) -> Result<(), S:
 #[cfg(all(test, feature = "std"))]
 mod tests {
   use super::*;
-  use crate::{PixelSink, frame::VuyaFrame};
+  use crate::{ColorMatrix, PixelSink, frame::VuyaFrame};
   use core::convert::Infallible;
 
   struct CountingSink {
@@ -128,7 +152,7 @@ mod tests {
       last_width: 0,
       last_row_idx: 0,
     };
-    vuya_to(frame, &mut sink).unwrap();
+    vuya_to(frame, false, ColorMatrix::Bt709, &mut sink).unwrap();
     assert_eq!(sink.rows_seen, 4);
     assert_eq!(sink.last_packed_len, 16); // width × 4 bytes per row
     assert_eq!(sink.last_width, 4);
