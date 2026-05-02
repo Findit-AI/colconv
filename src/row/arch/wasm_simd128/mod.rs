@@ -66,7 +66,6 @@ pub(crate) use subsampled_high_bit_pn_4_4_4::*;
 pub(crate) use v30x::*;
 pub(crate) use v210::*;
 pub(crate) use v410::*;
-#[allow(unused_imports)]
 pub(crate) use vuya::*;
 pub(crate) use xv36::*;
 pub(crate) use y2xx::*;
