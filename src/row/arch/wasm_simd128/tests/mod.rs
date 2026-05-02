@@ -7,6 +7,7 @@ mod planar_8bit_and_nv;
 mod v210;
 mod v30x;
 mod v410;
+mod xv36;
 mod y216;
 mod y2xx;
 mod yuva;

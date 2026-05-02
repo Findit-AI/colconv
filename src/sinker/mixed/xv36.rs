@@ -1,32 +1,28 @@
-//! Sinker impl for the packed V30X source format — Ship 12a (Tier 5
-//! 10-bit packed YUV 4:4:4). Full output coverage: u8 + native-depth
+//! Sinker impl for the packed XV36 source format — Ship 12b (Tier 5
+//! 12-bit packed YUV 4:4:4). Full output coverage: u8 + native-depth
 //! u16 RGB / RGBA + u8 / u16 luma + u8 HSV.
 //!
-//! V30X is a **sibling of V410** with the opposite padding position.
-//! V410 packs `(V << 20) | (Y << 10) | U` (2-bit pad at the top),
-//! while V30X packs `(V << 22) | (Y << 12) | (U << 2)` (2-bit pad at
-//! the bottom). Both use one `u32` word per pixel with 10-bit channels
-//! and no chroma subsampling (4:4:4). The packed slice type is `&[u32]`
-//! in both formats.
-//!
-//! The **numerical contract is identical to V410**: `BITS = 10`, the
-//! u16 alpha constant is `0x3FF` (10-bit max), and `expand_rgb_u16_to_rgba_u16_row::<10>`
-//! is used for the Strategy A u16 fan-out. Dispatcher functions are the
-//! `v30x_to_*` family exported from `crate::row::dispatch::v30x`.
+//! XV36 (FFmpeg `AV_PIX_FMT_XV36LE`) packs **four u16 slots per pixel**
+//! (`[U, Y, V, A]`) with each channel MSB-aligned at 12-bit (low 4 bits
+//! zero per sample). The `X` prefix means the A slot is padding — it is
+//! read but always discarded; RGBA outputs force α to the 12-bit opaque
+//! maximum. The packed slice type is `&[u16]`, with `4 × width` u16
+//! elements per row. There is no chroma subsampling — every pixel
+//! carries its own independent U / Y / V triplet (4:4:4).
 //!
 //! Outputs map to the sink's standard channels:
 //! - `with_rgb` / `with_rgba` — packed YUV → RGB Q15 pipeline at
-//!   `BITS = 10`, downshifted to u8; RGBA alpha is forced to `0xFF`
-//!   (V30X has no alpha channel).
+//!   `BITS = 12`, downshifted to u8; RGBA alpha is forced to `0xFF`
+//!   (XV36 A slot is padding, not a real alpha channel).
 //! - `with_rgb_u16` / `with_rgba_u16` — same pipeline at native
-//!   10-bit depth, low-bit-packed in `u16` (`[0, 1023]`); RGBA alpha
-//!   is `0x3FF` (10-bit max).
-//! - `with_luma` — extracts the 10-bit Y values from each V30X word
-//!   and downshifts `>> 2` to u8.
-//! - `with_luma_u16` — extracts the 10-bit Y values at native depth,
-//!   low-bit-packed in `u16` (`[0, 1023]`). Each 10-bit Y is read
-//!   directly from bits `[21:12]` of the V30X word (no shift beyond
-//!   the bit-field extraction), yielding values in `[0, 0x3FF]`.
+//!   12-bit depth, low-bit-packed in `u16` (`[0, 4095]`); RGBA alpha
+//!   is `0x0FFF` (12-bit max).
+//! - `with_luma` — extracts the 12-bit Y values from each XV36
+//!   quadruple and downshifts `>> 8` to u8 (MSB-aligned 12-bit →
+//!   `>> 4` to unpack → `>> 4` to drop low bits ≡ `>> 8` total).
+//! - `with_luma_u16` — extracts the 12-bit Y values via `>> 4`
+//!   (drops the 4 low padding bits) into u16 (low-bit-packed at 12-bit,
+//!   `[0, 4095]`).
 //! - `with_hsv` — stages an internal RGB scratch (or the user's RGB
 //!   buffer if attached) and runs the existing `rgb_to_hsv_row`
 //!   kernel on the staged u8 RGB.
@@ -35,7 +31,7 @@
 //! is derived from the just-computed u8 RGB row via
 //! [`expand_rgb_to_rgba_row`] (Strategy A) instead of running a
 //! second YUV→RGB kernel. The same Strategy A applies on the u16
-//! path via [`expand_rgb_u16_to_rgba_u16_row::<10>`]. When only the
+//! path via [`expand_rgb_u16_to_rgba_u16_row::<12>`]. When only the
 //! RGBA variant is wanted, the dedicated `_to_rgba_row` /
 //! `_to_rgba_u16_row` kernel writes the output buffer directly
 //! without staging RGB.
@@ -47,16 +43,17 @@ use super::{
 use crate::{
   PixelSink,
   row::{
-    expand_rgb_to_rgba_row, expand_rgb_u16_to_rgba_u16_row, rgb_to_hsv_row, v30x_to_luma_row,
-    v30x_to_luma_u16_row, v30x_to_rgb_row, v30x_to_rgb_u16_row, v30x_to_rgba_row,
-    v30x_to_rgba_u16_row,
+    expand_rgb_to_rgba_row, expand_rgb_u16_to_rgba_u16_row, rgb_to_hsv_row, xv36_to_luma_row,
+    xv36_to_luma_u16_row, xv36_to_rgb_row, xv36_to_rgb_u16_row, xv36_to_rgba_row,
+    xv36_to_rgba_u16_row,
   },
-  yuv::{V30X, V30XRow, V30XSink},
+  yuv::{Xv36, Xv36Row, Xv36Sink},
 };
 
-impl<'a> MixedSinker<'a, V30X> {
+impl<'a> MixedSinker<'a, Xv36> {
   /// Attaches a packed **8-bit** RGBA output buffer. Alpha is filled
-  /// with constant `0xFF` (V30X has no alpha channel).
+  /// with constant `0xFF` (XV36 A slot is padding — not a real alpha
+  /// channel).
   ///
   /// Returns `Err(RgbaBufferTooShort)` if
   /// `buf.len() < width × height × 4`, or `Err(GeometryOverflow)` on
@@ -80,8 +77,8 @@ impl<'a> MixedSinker<'a, V30X> {
     Ok(self)
   }
 
-  /// Attaches a packed **`u16`** RGB output buffer. 10-bit
-  /// low-bit-packed (`[0, 1023]`); length is measured in `u16`
+  /// Attaches a packed **`u16`** RGB output buffer. 12-bit
+  /// low-bit-packed (`[0, 4095]`); length is measured in `u16`
   /// **elements** (`width × height × 3`).
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub fn with_rgb_u16(mut self, buf: &'a mut [u16]) -> Result<Self, MixedSinkerError> {
@@ -102,8 +99,8 @@ impl<'a> MixedSinker<'a, V30X> {
     Ok(self)
   }
 
-  /// Attaches a packed **`u16`** RGBA output buffer. 10-bit
-  /// low-bit-packed (`[0, 1023]`); alpha element is `0x3FF` (10-bit
+  /// Attaches a packed **`u16`** RGBA output buffer. 12-bit
+  /// low-bit-packed (`[0, 4095]`); alpha element is `0x0FFF` (12-bit
   /// max). Length is measured in `u16` **elements**
   /// (`width × height × 4`).
   #[cfg_attr(not(tarpaulin), inline(always))]
@@ -125,10 +122,11 @@ impl<'a> MixedSinker<'a, V30X> {
     Ok(self)
   }
 
-  /// Attaches a native-depth **`u16`** luma output buffer. The 10-bit
-  /// Y samples are extracted from each V30X word at native depth,
-  /// low-bit-packed in `u16` (`[0, 1023]`). Length is measured in
-  /// `u16` **elements** (`width × height`).
+  /// Attaches a native-depth **`u16`** luma output buffer. The 12-bit
+  /// Y samples are extracted from each XV36 quadruple by shifting
+  /// `>> 4` (removes the 4 low padding bits), yielding low-bit-packed
+  /// 12-bit values in `[0, 4095]`. Length is measured in `u16`
+  /// **elements** (`width × height`).
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub fn with_luma_u16(mut self, buf: &'a mut [u16]) -> Result<Self, MixedSinkerError> {
     self.set_luma_u16(buf)?;
@@ -149,10 +147,10 @@ impl<'a> MixedSinker<'a, V30X> {
   }
 }
 
-impl V30XSink for MixedSinker<'_, V30X> {}
+impl Xv36Sink for MixedSinker<'_, Xv36> {}
 
-impl PixelSink for MixedSinker<'_, V30X> {
-  type Input<'r> = V30XRow<'r>;
+impl PixelSink for MixedSinker<'_, Xv36> {
+  type Input<'r> = Xv36Row<'r>;
   type Error = MixedSinkerError;
 
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
@@ -160,18 +158,22 @@ impl PixelSink for MixedSinker<'_, V30X> {
     Ok(())
   }
 
-  fn process(&mut self, row: V30XRow<'_>) -> Result<(), Self::Error> {
-    const BITS: u32 = 10;
+  fn process(&mut self, row: Xv36Row<'_>) -> Result<(), Self::Error> {
+    const BITS: u32 = 12;
     let w = self.width;
     let h = self.height;
     let idx = row.row();
     let use_simd = self.simd;
 
-    // V30X row = `width` u32 elements (one pixel per word).
-    let packed_expected = w;
+    // XV36 row = `width × 4` u16 elements (one quadruple per pixel).
+    let packed_expected = w.checked_mul(4).ok_or(MixedSinkerError::GeometryOverflow {
+      width: w,
+      height: h,
+      channels: 4,
+    })?;
     if row.packed().len() != packed_expected {
       return Err(MixedSinkerError::RowShapeMismatch {
-        which: RowSlice::V30XPacked,
+        which: RowSlice::Xv36Packed,
         row: idx,
         expected: packed_expected,
         actual: row.packed().len(),
@@ -199,20 +201,20 @@ impl PixelSink for MixedSinker<'_, V30X> {
     let one_plane_end = one_plane_start + w;
     let packed = row.packed();
 
-    // Luma u8 — extract 8-bit Y bytes from the V30X plane via the
-    // dedicated kernel (downshifts 10-bit Y >> 2 to u8).
+    // Luma u8 — extract 8-bit Y bytes from the XV36 plane via the
+    // dedicated kernel (downshifts 12-bit MSB-aligned Y >> 8 to u8).
     if let Some(buf) = luma.as_deref_mut() {
-      v30x_to_luma_row(
+      xv36_to_luma_row(
         packed,
         &mut buf[one_plane_start..one_plane_end],
         w,
         use_simd,
       );
     }
-    // Luma u16 — extract 10-bit Y values at native depth (low-bit-packed
-    // in u16, range [0, 0x3FF]).
+    // Luma u16 — extract 12-bit Y values at native depth (shift >> 4
+    // to drop the MSB-alignment padding, yielding low-bit-packed u16).
     if let Some(buf) = luma_u16.as_deref_mut() {
-      v30x_to_luma_u16_row(
+      xv36_to_luma_u16_row(
         packed,
         &mut buf[one_plane_start..one_plane_end],
         w,
@@ -230,7 +232,7 @@ impl PixelSink for MixedSinker<'_, V30X> {
       let rgba_u16_buf = rgba_u16.as_deref_mut().unwrap();
       let rgba_u16_row =
         rgba_u16_plane_row_slice(rgba_u16_buf, one_plane_start, one_plane_end, w, h)?;
-      v30x_to_rgba_u16_row(
+      xv36_to_rgba_u16_row(
         packed,
         rgba_u16_row,
         w,
@@ -250,7 +252,7 @@ impl PixelSink for MixedSinker<'_, V30X> {
           })?;
       let rgb_plane_start = one_plane_start * 3;
       let rgb_u16_row = &mut rgb_u16_buf[rgb_plane_start..rgb_plane_end];
-      v30x_to_rgb_u16_row(
+      xv36_to_rgb_u16_row(
         packed,
         rgb_u16_row,
         w,
@@ -280,7 +282,7 @@ impl PixelSink for MixedSinker<'_, V30X> {
     if want_rgba && !need_u8_rgb_kernel {
       let rgba_buf = rgba.as_deref_mut().unwrap();
       let rgba_row = rgba_plane_row_slice(rgba_buf, one_plane_start, one_plane_end, w, h)?;
-      v30x_to_rgba_row(
+      xv36_to_rgba_row(
         packed,
         rgba_row,
         w,
@@ -303,7 +305,7 @@ impl PixelSink for MixedSinker<'_, V30X> {
       w,
       h,
     )?;
-    v30x_to_rgb_row(packed, rgb_row, w, row.matrix(), row.full_range(), use_simd);
+    xv36_to_rgb_row(packed, rgb_row, w, row.matrix(), row.full_range(), use_simd);
 
     if let Some(hsv) = hsv.as_mut() {
       rgb_to_hsv_row(

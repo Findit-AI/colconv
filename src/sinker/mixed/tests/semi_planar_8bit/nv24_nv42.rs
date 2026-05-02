@@ -5,6 +5,7 @@ use super::{
     v30x::solid_v30x_frame,
     v210::solid_v210_frame,
     v410::solid_v410_frame,
+    xv36::solid_xv36_frame,
     y210::solid_y210_frame,
     y212::solid_y212_frame,
     y216::solid_y216_frame,
@@ -861,6 +862,23 @@ fn strategy_a_rgb_and_rgba_byte_identical_for_all_wired_families() {
     v30x_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
     assert_match(&rgb, &rgba, "V30X");
   }
+
+  {
+    // XV36 carries 12-bit samples (MSB-aligned u16 quadruples);
+    // pick mid-range 12-bit values so the gray-derived RGB stays
+    // sensible on the u8 path. alpha_max = 0xFF for the u8 path.
+    let buf = solid_xv36_frame(w, h, 0x300, 0x700, 0x500, 0);
+    let src = Xv36Frame::new(&buf, w, h, w * 4);
+    let mut rgb = std::vec![0u8; ws * hs * 3];
+    let mut rgba = std::vec![0u8; ws * hs * 4];
+    let mut sink = MixedSinker::<Xv36>::new(ws, hs)
+      .with_rgb(&mut rgb)
+      .unwrap()
+      .with_rgba(&mut rgba)
+      .unwrap();
+    xv36_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    assert_match(&rgb, &rgba, "Xv36");
+  }
 }
 
 // Cross-format Strategy A invariant on the **u16 RGB / u16 RGBA** path.
@@ -979,5 +997,20 @@ fn strategy_a_rgb_u16_and_rgba_u16_byte_identical_for_all_wired_families() {
       .unwrap();
     v30x_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
     assert_match_u16(&rgb, &rgba, "V30X", 0x3FF);
+  }
+
+  {
+    // XV36 is 12-bit low-bit-packed in the output; alpha_max = 0x0FFF.
+    let buf = solid_xv36_frame(w, h, 0x300, 0x700, 0x500, 0);
+    let src = Xv36Frame::new(&buf, w, h, w * 4);
+    let mut rgb = std::vec![0u16; ws * hs * 3];
+    let mut rgba = std::vec![0u16; ws * hs * 4];
+    let mut sink = MixedSinker::<Xv36>::new(ws, hs)
+      .with_rgb_u16(&mut rgb)
+      .unwrap()
+      .with_rgba_u16(&mut rgba)
+      .unwrap();
+    xv36_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    assert_match_u16(&rgb, &rgba, "Xv36", 0x0FFF);
   }
 }
