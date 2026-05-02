@@ -46,6 +46,7 @@ mod subsampled_high_bit_pn_4_4_4;
 mod v210;
 mod v30x;
 mod v410;
+mod vuya;
 mod xv36;
 mod y216;
 mod y2xx;
@@ -62,6 +63,8 @@ pub(crate) use subsampled_high_bit_pn_4_4_4::*;
 pub(crate) use v30x::*;
 pub(crate) use v210::*;
 pub(crate) use v410::*;
+#[allow(unused_imports)] // dispatcher (Tasks 10-13) not yet wired
+pub(crate) use vuya::*;
 pub(crate) use xv36::*;
 pub(crate) use y2xx::*;
 pub(crate) use y216::*;
