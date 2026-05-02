@@ -129,3 +129,30 @@ fn avx2_xv36_luma_matches_scalar_widths() {
     check_luma_u16(w);
   }
 }
+
+/// Encodes pixel index `n` (0..15) into Y so we can detect lane reordering
+/// bugs in the deinterleave. The luma kernel just shifts Y >> 8, so output[n]
+/// must equal `n + 1` for naturally-ordered AVX2 output.
+#[test]
+#[cfg_attr(miri, ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri")]
+fn avx2_xv36_luma_lane_order_per_pixel() {
+  if !std::arch::is_x86_feature_detected!("avx2") {
+    return;
+  }
+  // 16 pixels: pixel n has Y = (n + 1) << 8 (so Y >> 8 = n + 1).
+  // Other channels = 0.
+  let mut packed = std::vec![0u16; 16 * 4];
+  for n in 0..16 {
+    packed[n * 4 + 1] = ((n as u16 + 1) << 8) << 4; // Y, MSB-aligned at 12-bit
+  }
+  let mut out = std::vec![0u8; 16];
+  unsafe {
+    xv36_to_luma_row(&packed, &mut out, 16);
+  }
+  let expected: std::vec::Vec<u8> = (1..=16u8).collect();
+  assert_eq!(
+    out, expected,
+    "AVX2 xv36→luma pixel reorder bug: {:?} != {:?}",
+    out, expected
+  );
+}

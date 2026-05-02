@@ -10,17 +10,20 @@
 //!
 //! ## Per-iter pipeline (16 px / iter)
 //!
-//! Four `_mm256_loadu_si256` loads fetch 64 u16 lanes (16 pixels × 4
-//! channels). A cascade of `_mm256_unpacklo_epi16` / `_mm256_unpackhi_epi16`
-//! deinterleaves them into four channel vectors (U, Y, V, A) of 16 u16
-//! lanes each, followed by `_mm256_permute4x64_epi64` lane-fixup to
-//! restore natural order across the two 128-bit AVX2 lanes:
+//! Four contiguous `_mm256_loadu_si256` loads fetch 64 u16 lanes (16 pixels
+//! × 4 channels). Four `_mm256_permute2x128_si256` calls reshape the
+//! registers into the strided layout the 3-level `_mm256_unpacklo/hi_epi16`
+//! cascade expects (lo of each register = pixels n,n+1; hi = pixels n+8,n+9).
+//! Finally `_mm256_permute4x64_epi64` lane-fixup restores natural order:
 //!
 //! ```text
-//! raw0 = [U0..U3,Y0..Y3,V0..V3,A0..A3, U8..U11,Y8..Y11,V8..V11,A8..A11]  (pixels 0-3, 8-11)
-//! raw1 = [U4..U7,Y4..Y7,V4..V7,A4..A7, U12..U15,…]                       (pixels 4-7, 12-15)
-//! raw2 = similar for pixels 0-3, 8-11 (second half of 4-u16 groups)
-//! raw3 = similar for pixels 4-7, 12-15
+//! After contiguous loads:
+//!   raw_c0 lo=P0,P1  hi=P2,P3    raw_c1 lo=P4,P5   hi=P6,P7
+//!   raw_c2 lo=P8,P9  hi=P10,P11  raw_c3 lo=P12,P13 hi=P14,P15
+//!
+//! After permute2x128 reshape (cascade input):
+//!   raw0 lo=P0,P1 hi=P8,P9      raw1 lo=P2,P3  hi=P10,P11
+//!   raw2 lo=P4,P5 hi=P12,P13   raw3 lo=P6,P7  hi=P14,P15
 //!
 //! (3-level unpack cascade per SSE4.1 shape, lifted to 256-bit)
 //!
@@ -56,11 +59,15 @@ use crate::{ColorMatrix, row::scalar};
 /// `u16` samples **after** the 4-bit right-shift to drop padding LSBs.
 /// The A channel is computed but discarded by the caller.
 ///
-/// Strategy: 4 × `_mm256_loadu_si256` + 3-level `_mm256_unpacklo/hi_epi16`
-/// cascade + `_mm256_permute4x64_epi64::<0xD8>` lane-fixup on each result.
+/// Strategy: 4 × contiguous `_mm256_loadu_si256` loads reshaped via
+/// `_mm256_permute2x128_si256` into the lane layout the 3-level
+/// `_mm256_unpacklo/hi_epi16` cascade expects, then
+/// `_mm256_permute4x64_epi64::<0xD8>` lane-fixup on each result.
 ///
-/// Each 256-bit register holds data from two 128-bit halves, each half
-/// being a natural continuation of the SSE4.1 deinterleave for 4 pixels.
+/// Contiguous loads give each register 4 adjacent pixels (lo=P_n,P_{n+1};
+/// hi=P_{n+2},P_{n+3}). The cascade requires a strided layout
+/// (lo=P_n,P_{n+1}; hi=P_{n+8},P_{n+9}). The cross-lane permutes below
+/// reshape the 4 registers into that expected layout before the cascade runs.
 /// The AVX2 unpack ops are per-128-bit-lane, producing lane-split results
 /// that need the 0xD8 permute to restore natural [0..16) order.
 ///
@@ -74,14 +81,32 @@ unsafe fn unpack_xv36_16px_avx2(ptr: *const u16) -> (__m256i, __m256i, __m256i) 
   // SAFETY: caller obligation — `ptr` has 128 bytes readable; AVX2 is
   // available.
   unsafe {
-    // Load 4 × __m256i (16 pixels × 4 channels × u16 = 128 bytes).
-    // Each 256-bit register holds 16 u16 lanes split across two 128-bit
-    // halves. Within each half, the layout is identical to one SSE4.1
-    // load: [U_n, Y_n, V_n, A_n, U_{n+1}, Y_{n+1}, V_{n+1}, A_{n+1}].
-    let raw0 = _mm256_loadu_si256(ptr.cast()); // pixels 0-1 (lo), 8-9  (hi)
-    let raw1 = _mm256_loadu_si256(ptr.add(16).cast()); // pixels 2-3 (lo), 10-11 (hi)
-    let raw2 = _mm256_loadu_si256(ptr.add(32).cast()); // pixels 4-5 (lo), 12-13 (hi)
-    let raw3 = _mm256_loadu_si256(ptr.add(48).cast()); // pixels 6-7 (lo), 14-15 (hi)
+    // Load 4 × __m256i contiguously (16 pixels × 4 channels × u16 = 128 bytes).
+    //
+    // Each load covers 4 contiguous pixels (16 u16 elements):
+    //   raw_c0 = pixels 0..3   (lo=P0,P1; hi=P2,P3)
+    //   raw_c1 = pixels 4..7   (lo=P4,P5; hi=P6,P7)
+    //   raw_c2 = pixels 8..11  (lo=P8,P9; hi=P10,P11)
+    //   raw_c3 = pixels 12..15 (lo=P12,P13; hi=P14,P15)
+    let raw_c0 = _mm256_loadu_si256(ptr.cast());
+    let raw_c1 = _mm256_loadu_si256(ptr.add(16).cast());
+    let raw_c2 = _mm256_loadu_si256(ptr.add(32).cast());
+    let raw_c3 = _mm256_loadu_si256(ptr.add(48).cast());
+
+    // Reshape via cross-lane permute so each register holds the layout the
+    // per-128-bit-lane cascade below expects:
+    //   raw0: lo=P0,P1 hi=P8,P9
+    //   raw1: lo=P2,P3 hi=P10,P11
+    //   raw2: lo=P4,P5 hi=P12,P13
+    //   raw3: lo=P6,P7 hi=P14,P15
+    //
+    // `_mm256_permute2x128_si256::<imm>` selects 128-bit halves; imm=0x20
+    // picks lo from src1 + lo from src2 (bits [3:0]=0 → src1 lo, bits [7:4]=2
+    // → src2 lo); imm=0x31 picks hi from src1 + hi from src2.
+    let raw0 = _mm256_permute2x128_si256::<0x20>(raw_c0, raw_c2);
+    let raw1 = _mm256_permute2x128_si256::<0x31>(raw_c0, raw_c2);
+    let raw2 = _mm256_permute2x128_si256::<0x20>(raw_c1, raw_c3);
+    let raw3 = _mm256_permute2x128_si256::<0x31>(raw_c1, raw_c3);
 
     // Level 1: unpack pairs (0-1, 2-3) and (4-5, 6-7) within each lane.
     // Per-lane result per 128 bits mirrors SSE4.1 step 1:
