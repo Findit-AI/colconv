@@ -142,11 +142,23 @@ fn avx2_xv36_luma_lane_order_per_pixel() {
   if !std::arch::is_x86_feature_detected!("avx2") {
     return;
   }
-  // 16 pixels: pixel n has Y = (n + 1) << 8 (so Y >> 8 = n + 1).
-  // Other channels = 0.
+  // 16 pixels: encode pixel index n into Y so the luma kernel's `>> 8`
+  // produces (n + 1) for natural-ordered output.
+  //
+  // The XV36 layout is MSB-aligned: a 12-bit channel value `V` is stored
+  // as the u16 `V << 4` (low 4 bits are padding). The luma u8 kernel does
+  // `>> 8` on that u16, yielding `(V << 4) >> 8 = V >> 4`.
+  //
+  // We want the kernel output at lane n to be `n + 1`, so we need
+  // `V >> 4 = n + 1`, i.e. 12-bit `V = (n + 1) << 4`, i.e. u16
+  // packed value = `((n + 1) << 4) << 4 = (n + 1) << 8`. The u16 max
+  // (n=15) is `16 << 8 = 4096 = 0x1000`, comfortably within u16 range.
+  //
+  // Earlier draft had `((n + 1) << 8) << 4` which was off by 4 bits AND
+  // overflowed u16 at n=15 — the spurious extra `<< 4` is dropped here.
   let mut packed = std::vec![0u16; 16 * 4];
   for n in 0..16 {
-    packed[n * 4 + 1] = ((n as u16 + 1) << 8) << 4; // Y, MSB-aligned at 12-bit
+    packed[n * 4 + 1] = (n as u16 + 1) << 8;
   }
   let mut out = std::vec![0u8; 16];
   unsafe {
