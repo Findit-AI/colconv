@@ -1,5 +1,27 @@
 # CHANGELOG
 
+## 0.14.0 — Ship 12b (Tier 5 XV36, second tranche)
+
+- Add `Xv36Frame` (12-bit packed YUV 4:4:4 with α-as-padding; FFmpeg
+  `AV_PIX_FMT_XV36LE`). Each pixel is a u16 quadruple
+  `U(16) ‖ Y(16) ‖ V(16) ‖ A(16)` with each channel using high 12 bits
+  (low 4 bits zero, MSB-aligned). The `X` prefix means the A slot is
+  padding; RGBA outputs force α = max regardless of source A.
+- 5-backend SIMD: NEON (8 px/iter), SSE4.1 (8 px/iter), AVX2
+  (16 px/iter), AVX-512 (32 px/iter), wasm-simd128 (8 px/iter). Each
+  backend uses a u16x4 deinterleave (`vld4q_u16` on NEON / four-way
+  u16 shuffle on x86 / wasm) + right-shift by 4 to drop padding bits.
+- `MixedSinker<Xv36>` with `with_rgb` / `with_rgba` / `with_rgb_u16` /
+  `with_rgba_u16` / `with_luma` / **`with_luma_u16`** / `with_hsv`.
+- Retroactively wired `with_luma_u16` for V410 and V30X (Ship 12a
+  formats) for cross-format symmetry — kernels were already shipped
+  in 12a; only sinker accessor was missing.
+- Xv36 ↔ Yuv444p12 planar parity oracle validates the SIMD path
+  byte-for-byte against the established planar 4:4:4 12-bit reference.
+- Tier 5 remaining: 12c VUYA / VUYX, 12d AYUV64.
+
+---
+
 ## 0.13.0 — Ship 12a (Tier 5 V410 + V30X, first tranche)
 
 - Add `V410Frame` (10-bit packed YUV 4:4:4 in 32-bit words; FFmpeg
