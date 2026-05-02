@@ -1,5 +1,6 @@
 use crate::frame::{
-  V30XFrame, V30XFrameError, V410Frame, V410FrameError, Xv36Frame, Xv36FrameError,
+  V30XFrame, V30XFrameError, V410Frame, V410FrameError, VuyaFrame, VuyaFrameError, VuyxFrame,
+  VuyxFrameError, Xv36Frame, Xv36FrameError,
 };
 
 const fn zero_buf<const N: usize>() -> [u32; N] {
@@ -245,4 +246,144 @@ fn xv36_frame_accessors_round_trip() {
   assert_eq!(f.width(), 4);
   assert_eq!(f.height(), 4);
   assert_eq!(f.stride(), 16);
+}
+
+#[test]
+fn vuya_frame_try_new_accepts_valid_tight() {
+  let buf = vec![0u8; 4 * 4 * 4]; // 4 px × 4 bytes × 4 rows
+  let f = VuyaFrame::try_new(&buf, 4, 4, 16).unwrap();
+  assert_eq!(f.width(), 4);
+  assert_eq!(f.height(), 4);
+  assert_eq!(f.stride(), 16);
+  assert_eq!(f.packed().len(), 64);
+}
+
+#[test]
+fn vuya_frame_try_new_accepts_oversized_stride() {
+  let buf = vec![0u8; 4 * 4 * 8]; // stride=32 > width*4=16
+  VuyaFrame::try_new(&buf, 4, 4, 32).unwrap();
+}
+
+#[test]
+fn vuya_frame_try_new_rejects_zero_dimension() {
+  let buf = vec![0u8; 64];
+  assert!(matches!(
+    VuyaFrame::try_new(&buf, 0, 4, 16),
+    Err(VuyaFrameError::ZeroDimension {
+      width: 0,
+      height: 4
+    })
+  ));
+  assert!(matches!(
+    VuyaFrame::try_new(&buf, 4, 0, 16),
+    Err(VuyaFrameError::ZeroDimension {
+      width: 4,
+      height: 0
+    })
+  ));
+}
+
+#[test]
+fn vuya_frame_try_new_rejects_stride_too_small() {
+  let buf = vec![0u8; 64];
+  // width=4, width*4=16 bytes; stride=12 < 16
+  assert!(matches!(
+    VuyaFrame::try_new(&buf, 4, 4, 12),
+    Err(VuyaFrameError::StrideTooSmall {
+      min_stride: 16,
+      stride: 12
+    })
+  ));
+}
+
+#[test]
+fn vuya_frame_try_new_rejects_short_plane() {
+  let buf = vec![0u8; 32]; // need 16*4 = 64 bytes
+  assert!(matches!(
+    VuyaFrame::try_new(&buf, 4, 4, 16),
+    Err(VuyaFrameError::PlaneTooShort {
+      expected: 64,
+      actual: 32
+    })
+  ));
+}
+
+#[test]
+fn vuya_frame_accessors_round_trip() {
+  let buf = vec![0u8; 128]; // stride=32, height=4 → 128 bytes
+  let f = VuyaFrame::try_new(&buf, 4, 4, 32).unwrap();
+  assert_eq!(f.packed().len(), 128);
+  assert_eq!(f.width(), 4);
+  assert_eq!(f.height(), 4);
+  assert_eq!(f.stride(), 32);
+}
+
+#[test]
+fn vuyx_frame_try_new_accepts_valid_tight() {
+  let buf = vec![0u8; 4 * 4 * 4]; // 4 px × 4 bytes × 4 rows
+  let f = VuyxFrame::try_new(&buf, 4, 4, 16).unwrap();
+  assert_eq!(f.width(), 4);
+  assert_eq!(f.height(), 4);
+  assert_eq!(f.stride(), 16);
+  assert_eq!(f.packed().len(), 64);
+}
+
+#[test]
+fn vuyx_frame_try_new_accepts_oversized_stride() {
+  let buf = vec![0u8; 4 * 4 * 8]; // stride=32 > width*4=16
+  VuyxFrame::try_new(&buf, 4, 4, 32).unwrap();
+}
+
+#[test]
+fn vuyx_frame_try_new_rejects_zero_dimension() {
+  let buf = vec![0u8; 64];
+  assert!(matches!(
+    VuyxFrame::try_new(&buf, 0, 4, 16),
+    Err(VuyxFrameError::ZeroDimension {
+      width: 0,
+      height: 4
+    })
+  ));
+  assert!(matches!(
+    VuyxFrame::try_new(&buf, 4, 0, 16),
+    Err(VuyxFrameError::ZeroDimension {
+      width: 4,
+      height: 0
+    })
+  ));
+}
+
+#[test]
+fn vuyx_frame_try_new_rejects_stride_too_small() {
+  let buf = vec![0u8; 64];
+  // width=4, width*4=16 bytes; stride=12 < 16
+  assert!(matches!(
+    VuyxFrame::try_new(&buf, 4, 4, 12),
+    Err(VuyxFrameError::StrideTooSmall {
+      min_stride: 16,
+      stride: 12
+    })
+  ));
+}
+
+#[test]
+fn vuyx_frame_try_new_rejects_short_plane() {
+  let buf = vec![0u8; 32]; // need 16*4 = 64 bytes
+  assert!(matches!(
+    VuyxFrame::try_new(&buf, 4, 4, 16),
+    Err(VuyxFrameError::PlaneTooShort {
+      expected: 64,
+      actual: 32
+    })
+  ));
+}
+
+#[test]
+fn vuyx_frame_accessors_round_trip() {
+  let buf = vec![0u8; 128]; // stride=32, height=4 → 128 bytes
+  let f = VuyxFrame::try_new(&buf, 4, 4, 32).unwrap();
+  assert_eq!(f.packed().len(), 128);
+  assert_eq!(f.width(), 4);
+  assert_eq!(f.height(), 4);
+  assert_eq!(f.stride(), 32);
 }
