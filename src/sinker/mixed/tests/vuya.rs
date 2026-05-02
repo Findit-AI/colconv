@@ -5,8 +5,8 @@
 //! 2. `vuya_with_rgba_passes_source_alpha` — α byte preserved per pixel.
 //! 3. `vuya_with_luma_extracts_y_byte` — luma == source Y byte.
 //! 4. `vuya_with_hsv_smoke` — gray row → HSV S = 0.
-//! 5. `vuya_with_rgb_and_rgba_strategy_a_byte_identical` — Strategy A
-//!    invariant: RGB channels are bit-identical in both outputs; α=0xFF.
+//! 5. `vuya_with_rgb_and_rgba_preserves_source_alpha` — spec § 7.2:
+//!    both kernels run independently; RGBA α equals source α, not 0xFF.
 //! 6. `vuya_simd_vs_scalar_parity_at_1922` — SIMD path == scalar.
 //! 7. `vuya_width_mismatch_returns_error` — wrong row width → error.
 //! 8. `vuya_row_index_oor_returns_error` — idx >= height → error.
@@ -182,7 +182,7 @@ fn vuya_with_hsv_smoke() {
   }
 }
 
-// ---- 5: Strategy A invariant (rgb + rgba byte-identical; α=0xFF) ----------
+// ---- 5: RGB + RGBA combined path preserves source alpha (spec § 7.2) --------
 
 #[test]
 #[cfg(all(test, feature = "std"))]
@@ -190,31 +190,40 @@ fn vuya_with_hsv_smoke() {
   miri,
   ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
 )]
-fn vuya_with_rgb_and_rgba_strategy_a_byte_identical() {
-  // When BOTH with_rgb and with_rgba are attached, Strategy A applies:
-  // RGBA RGB channels must be byte-identical to the RGB output, and
-  // alpha must be 0xFF (NOT the source alpha byte).
-  let w = 8u32;
-  let h = 2u32;
-  let buf = solid_vuya_frame(w, h, 60, 100, 180, 0x42); // A=0x42 != 0xFF
-  let src = VuyaFrame::try_new(&buf, w, h, w * 4).unwrap();
-  let mut rgb = std::vec![0u8; (w * h) as usize * 3];
-  let mut rgba = std::vec![0u8; (w * h) as usize * 4];
-  let mut sink = MixedSinker::<Vuya>::new(w as usize, h as usize)
-    .with_rgb(&mut rgb)
-    .unwrap()
-    .with_rgba(&mut rgba)
-    .unwrap();
-  vuya_to(&src, false, ColorMatrix::Bt709, &mut sink).unwrap();
-  for i in 0..(w * h) as usize {
-    assert_eq!(rgba[i * 4], rgb[i * 3], "R mismatch at pixel {i}");
-    assert_eq!(rgba[i * 4 + 1], rgb[i * 3 + 1], "G mismatch at pixel {i}");
-    assert_eq!(rgba[i * 4 + 2], rgb[i * 3 + 2], "B mismatch at pixel {i}");
-    assert_eq!(
-      rgba[i * 4 + 3],
-      0xFF,
-      "Strategy A: alpha must be 0xFF at pixel {i}, not source 0x42"
-    );
+fn vuya_with_rgb_and_rgba_preserves_source_alpha() {
+  // When BOTH with_rgb AND with_rgba are attached, VUYA must run
+  // both direct kernels — RGB drops α, RGBA passes source α through.
+  // The RGBA path must NOT use Strategy A's α=0xFF fan-out (per spec § 7.2).
+
+  let width = 8usize;
+  let height = 1usize;
+  // Build a packed VUYA row with distinct source α bytes
+  let mut packed = std::vec![0u8; width * 4];
+  for n in 0..width {
+    packed[n * 4]     = 128;   // V (neutral chroma)
+    packed[n * 4 + 1] = 128;   // U (neutral chroma)
+    packed[n * 4 + 2] = 128;   // Y (mid gray)
+    packed[n * 4 + 3] = (n as u8) * 32 + 1; // distinct A: 1, 33, 65, ..., 225
+  }
+  let frame = VuyaFrame::try_new(&packed, width as u32, height as u32, (width * 4) as u32).unwrap();
+  let mut rgb = std::vec![0u8; width * height * 3];
+  let mut rgba = std::vec![0u8; width * height * 4];
+  let mut sinker = MixedSinker::<Vuya>::new(width, height)
+    .with_rgb(&mut rgb).unwrap()
+    .with_rgba(&mut rgba).unwrap();
+  vuya_to(&frame, true, ColorMatrix::Bt709, &mut sinker).unwrap();
+
+  // Each pixel: RGB matches the YUV→RGB output for gray Y=128
+  for n in 0..width {
+    // RGB and RGBA's first 3 bytes are bit-identical (both kernels run on same packed input)
+    assert_eq!(&rgb[n*3..n*3+3], &rgba[n*4..n*4+3],
+      "pixel {n}: RGB and RGBA RGB-channels diverge (RGB={:?} RGBA={:?})",
+      &rgb[n*3..n*3+3], &rgba[n*4..n*4+3]);
+    // RGBA α byte = source α (NOT 0xFF — per spec § 7.2 the direct kernel runs)
+    let expected_alpha = (n as u8) * 32 + 1;
+    assert_eq!(rgba[n*4 + 3], expected_alpha,
+      "pixel {n}: source α was discarded (got {}, expected {})",
+      rgba[n*4 + 3], expected_alpha);
   }
 }
 
@@ -405,19 +414,20 @@ fn vuya_planar_parity_with_yuva444p() {
   //   path bit-identical. We therefore use full_range=true.
   //
   // Alpha semantics:
-  //   - VUYA with_rgb + with_rgba → Strategy A (expand_rgb_to_rgba,
-  //     α=0xFF). Source alpha is NOT preserved in the combined path.
+  //   - VUYA with_rgb + with_rgba → each runs its own independent kernel
+  //     (spec § 7.2). Source alpha IS preserved via the direct
+  //     vuya_to_rgba_row call. Strategy A fan-out is never used for VUYA.
   //   - Yuva444p with_rgb + with_rgba → Strategy B fork (runs the alpha-
   //     aware kernel for RGBA regardless of RGB attachment). Source alpha
   //     IS preserved from the source plane.
   //
-  //   Because the two formats use different alpha strategies when both
-  //   RGB and RGBA are attached, we verify each separately:
+  //   Both formats preserve source alpha in all paths. We verify each
+  //   format separately for both outputs:
   //     * RGB parity: `with_rgb` only on both — validates the shared
   //       YUV→RGB math is bit-identical.
   //     * RGBA parity (source-alpha path): `with_rgba` only on both
   //       (standalone) — invokes the direct RGBA kernel with source-α
-  //       pass-through for VUYA and the alpha-aware kernel for Yuva444p.
+  //       pass-through for both formats.
   //
   // Use width=64 × height=4 (covers SIMD main loop + scalar tail).
   let width = 64usize;

@@ -24,11 +24,13 @@
 //! - **Standalone RGBA** (`with_rgba` attached, no `with_rgb`, no
 //!   `with_hsv`): `vuya_to_rgba_row` runs directly — source α passes
 //!   through via the kernel.
-//! - **RGB + RGBA** (both attached, or HSV alongside RGBA): the RGB
-//!   kernel runs first, then `expand_rgb_to_rgba_row` fans the RGB row
-//!   out to RGBA with α = `0xFF` (Strategy A). Source α is **not**
-//!   preserved in this branch — the spec permits this and callers
-//!   needing source α without RGB / HSV must use the standalone path.
+//! - **RGB + RGBA** (both attached, with or without HSV): each output
+//!   runs its own independent kernel call reading from the same packed
+//!   input. `with_rgb` calls `vuya_to_rgb_row` (α discarded);
+//!   `with_rgba` calls `vuya_to_rgba_row` directly (source α preserved,
+//!   per spec § 7.2). Strategy A fan-out (`expand_rgb_to_rgba_row`) is
+//!   **never** used for VUYA — that path is reserved for VUYX where
+//!   α = `0xFF` is the correct semantic.
 
 use super::{
   MixedSinker, MixedSinkerError, RowSlice, check_dimensions_match, rgb_row_buf_or_scratch,
@@ -36,7 +38,7 @@ use super::{
 };
 use crate::{
   PixelSink,
-  row::{expand_rgb_to_rgba_row, rgb_to_hsv_row, vuya_to_luma_row, vuya_to_rgb_row, vuya_to_rgba_row},
+  row::{rgb_to_hsv_row, vuya_to_luma_row, vuya_to_rgb_row, vuya_to_rgba_row},
   yuv::{Vuya, VuyaRow, VuyaSink},
 };
 
@@ -51,10 +53,10 @@ impl<'a> MixedSinker<'a, Vuya> {
   ///
   /// ## Strategy note
   ///
-  /// Source-α pass-through is only guaranteed when this is the **sole**
-  /// output (no `with_rgb` and no `with_hsv`). When combined with RGB or
-  /// HSV, the RGBA buffer is filled via `expand_rgb_to_rgba_row` which
-  /// forces α to `0xFF` (Strategy A — see spec § 7.2).
+  /// Source-α pass-through is guaranteed in **all** paths (standalone or
+  /// combined with `with_rgb` / `with_hsv`). When combined, `with_rgba`
+  /// runs its own `vuya_to_rgba_row` kernel call directly from the packed
+  /// source — it is never derived from the RGB output (spec § 7.2).
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub fn with_rgba(mut self, buf: &'a mut [u8]) -> Result<Self, MixedSinkerError> {
     self.set_rgba(buf)?;
@@ -142,10 +144,36 @@ impl PixelSink for MixedSinker<'_, Vuya> {
     let want_hsv = hsv.is_some();
     let need_rgb_kernel = want_rgb || want_hsv;
 
-    // Standalone RGBA direct path — no RGB / HSV requested. Run the
-    // dedicated RGBA kernel directly into the output buffer; source α
-    // passes through verbatim, and no scratch allocation occurs.
-    if want_rgba && !need_rgb_kernel {
+    // RGB kernel — write into the user's RGB buffer (if attached) or the
+    // internal scratch buffer. Required when with_rgb or with_hsv is set.
+    if need_rgb_kernel {
+      let rgb_row = rgb_row_buf_or_scratch(
+        rgb.as_deref_mut(),
+        rgb_scratch,
+        one_plane_start,
+        one_plane_end,
+        w,
+        h,
+      )?;
+      vuya_to_rgb_row(packed, rgb_row, w, row.matrix(), row.full_range(), use_simd);
+
+      if let Some(hsv) = hsv.as_mut() {
+        rgb_to_hsv_row(
+          rgb_row,
+          &mut hsv.h[one_plane_start..one_plane_end],
+          &mut hsv.s[one_plane_start..one_plane_end],
+          &mut hsv.v[one_plane_start..one_plane_end],
+          w,
+          use_simd,
+        );
+      }
+    }
+
+    // RGBA direct path — spec § 7.2: always run vuya_to_rgba_row directly
+    // from the packed source, preserving source α verbatim. This applies
+    // whether or not with_rgb / with_hsv are also attached. Strategy A
+    // fan-out (expand_rgb_to_rgba_row, α=0xFF) is NEVER used for VUYA.
+    if want_rgba {
       let rgba_buf = rgba.as_deref_mut().unwrap();
       let rgba_row = rgba_plane_row_slice(rgba_buf, one_plane_start, one_plane_end, w, h)?;
       vuya_to_rgba_row(
@@ -156,42 +184,6 @@ impl PixelSink for MixedSinker<'_, Vuya> {
         row.full_range(),
         use_simd,
       );
-      return Ok(());
-    }
-
-    if !need_rgb_kernel {
-      return Ok(());
-    }
-
-    // RGB kernel — write into the user's RGB buffer (if attached) or the
-    // internal scratch buffer.
-    let rgb_row = rgb_row_buf_or_scratch(
-      rgb.as_deref_mut(),
-      rgb_scratch,
-      one_plane_start,
-      one_plane_end,
-      w,
-      h,
-    )?;
-    vuya_to_rgb_row(packed, rgb_row, w, row.matrix(), row.full_range(), use_simd);
-
-    if let Some(hsv) = hsv.as_mut() {
-      rgb_to_hsv_row(
-        rgb_row,
-        &mut hsv.h[one_plane_start..one_plane_end],
-        &mut hsv.s[one_plane_start..one_plane_end],
-        &mut hsv.v[one_plane_start..one_plane_end],
-        w,
-        use_simd,
-      );
-    }
-
-    // Strategy A u8 fan-out — derive RGBA from the just-computed RGB
-    // row (α = 0xFF). Source α is not preserved here; callers that
-    // need source α must use the standalone RGBA path (no RGB / HSV).
-    if let Some(buf) = rgba.as_deref_mut() {
-      let rgba_row = rgba_plane_row_slice(buf, one_plane_start, one_plane_end, w, h)?;
-      expand_rgb_to_rgba_row(rgb_row, rgba_row, w);
     }
 
     Ok(())
