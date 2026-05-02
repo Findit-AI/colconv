@@ -38,7 +38,6 @@ use crate::{ColorMatrix, row::scalar};
 /// 1. NEON must be available.
 /// 2. `packed.len() >= width * 4`.
 /// 3. `out.len() >= width * (if ALPHA { 4 } else { 3 })`.
-#[allow(dead_code)]
 #[inline]
 #[target_feature(enable = "neon")]
 pub(crate) unsafe fn xv36_to_rgb_or_rgba_row<const ALPHA: bool>(
@@ -148,7 +147,6 @@ pub(crate) unsafe fn xv36_to_rgb_or_rgba_row<const ALPHA: bool>(
 /// 1. NEON must be available.
 /// 2. `packed.len() >= width * 4`.
 /// 3. `out.len() >= width * (if ALPHA { 4 } else { 3 })` (u16 elements).
-#[allow(dead_code)]
 #[inline]
 #[target_feature(enable = "neon")]
 pub(crate) unsafe fn xv36_to_rgb_u16_or_rgba_u16_row<const ALPHA: bool>(
@@ -261,7 +259,6 @@ pub(crate) unsafe fn xv36_to_rgb_u16_or_rgba_u16_row<const ALPHA: bool>(
 /// 1. NEON must be available.
 /// 2. `packed.len() >= width * 4`.
 /// 3. `out.len() >= width`.
-#[allow(dead_code)]
 #[inline]
 #[target_feature(enable = "neon")]
 pub(crate) unsafe fn xv36_to_luma_row(packed: &[u16], out: &mut [u8], width: usize) {
@@ -298,7 +295,6 @@ pub(crate) unsafe fn xv36_to_luma_row(packed: &[u16], out: &mut [u8], width: usi
 /// 1. NEON must be available.
 /// 2. `packed.len() >= width * 4`.
 /// 3. `out.len() >= width`.
-#[allow(dead_code)]
 #[inline]
 #[target_feature(enable = "neon")]
 pub(crate) unsafe fn xv36_to_luma_u16_row(packed: &[u16], out: &mut [u16], width: usize) {
