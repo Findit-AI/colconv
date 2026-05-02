@@ -130,21 +130,24 @@ unsafe fn unpack_xv36_16px_avx2(ptr: *const u16) -> (__m256i, __m256i, __m256i) 
     let s4_lo = _mm256_unpacklo_epi16(s2_lo, s2_hi);
     let s4_hi = _mm256_unpackhi_epi16(s2_lo, s2_hi);
 
-    // Level 3: combine two groups to get full 16-lane channel vectors
-    // (still lane-split — each 256-bit result has the first group's data
-    // in the low 64 bits of each 128-bit lane and the second group's data
-    // in the high 64 bits of each 128-bit lane).
-    // _mm256_unpacklo_epi64 per-lane → [U0..U3, U4..U7] (lo lane: px0-7)
-    //                                   [U8..U11, U12..U15] (hi lane: px8-15)
-    // _mm256_permute4x64_epi64::<0xD8> reorders 64-bit chunks [0,2,1,3]
-    // → brings the two "px0..7" 64-bit blocks together in the low 128,
-    // and the "px8..15" 64-bit blocks together in the high 128, giving
-    // natural order [U0..U7, U8..U15].
-    let u_raw = _mm256_permute4x64_epi64::<0xD8>(_mm256_unpacklo_epi64(s3_lo, s4_lo));
-    let y_raw = _mm256_permute4x64_epi64::<0xD8>(_mm256_unpackhi_epi64(s3_lo, s4_lo));
-    let v_raw = _mm256_permute4x64_epi64::<0xD8>(_mm256_unpacklo_epi64(s3_hi, s4_hi));
-    // a_raw would be: _mm256_permute4x64_epi64::<0xD8>(_mm256_unpackhi_epi64(s3_hi, s4_hi))
-    // Discarded.
+    // Level 3: combine two groups to get full 16-lane channel vectors.
+    //
+    // Because the load step reshaped via `_mm256_permute2x128_si256` so
+    // raw0..raw3 hold strided lanes (raw0: lo=P0,P1 hi=P8,P9; raw1: lo=P2,P3
+    // hi=P10,P11; raw2: lo=P4,P5 hi=P12,P13; raw3: lo=P6,P7 hi=P14,P15),
+    // the cascade above already accumulates the per-pixel channels into
+    // natural [0..15] order. Specifically `_mm256_unpacklo_epi64(s3_lo, s4_lo)`
+    // produces:
+    //   lo lane (px 0..7): [U0, U1, U2, U3, U4, U5, U6, U7]
+    //   hi lane (px 8..15): [U8, U9, U10, U11, U12, U13, U14, U15]
+    //
+    // No 4x64 cross-lane permute is needed — applying one would scramble
+    // the result to [0..3, 8..11, 4..7, 12..15] (Codex review caught this
+    // dead permute that shipped with the original reshape fix).
+    let u_raw = _mm256_unpacklo_epi64(s3_lo, s4_lo);
+    let y_raw = _mm256_unpackhi_epi64(s3_lo, s4_lo);
+    let v_raw = _mm256_unpacklo_epi64(s3_hi, s4_hi);
+    // a_raw would be _mm256_unpackhi_epi64(s3_hi, s4_hi) — discarded.
 
     // Right-shift by 4 to drop MSB-alignment padding → 12-bit range [0, 4095].
     let u_vec = _mm256_srli_epi16::<4>(u_raw);
