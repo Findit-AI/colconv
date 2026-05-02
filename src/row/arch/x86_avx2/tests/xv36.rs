@@ -134,7 +134,10 @@ fn avx2_xv36_luma_matches_scalar_widths() {
 /// bugs in the deinterleave. The luma kernel just shifts Y >> 8, so output[n]
 /// must equal `n + 1` for naturally-ordered AVX2 output.
 #[test]
-#[cfg_attr(miri, ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri")]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
 fn avx2_xv36_luma_lane_order_per_pixel() {
   if !std::arch::is_x86_feature_detected!("avx2") {
     return;
