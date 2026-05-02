@@ -42,8 +42,7 @@ impl SourceFormat for Vuya {}
 #[derive(Debug, Clone, Copy)]
 pub struct VuyaRow<'a> {
   packed: &'a [u8],
-  width: u32,
-  row: u32,
+  row: usize,
   matrix: ColorMatrix,
   full_range: bool,
 }
@@ -52,12 +51,11 @@ impl<'a> VuyaRow<'a> {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(crate) fn new(
     packed: &'a [u8],
-    width: u32,
-    row: u32,
+    row: usize,
     matrix: ColorMatrix,
     full_range: bool,
   ) -> Self {
-    Self { packed, width, row, matrix, full_range }
+    Self { packed, row, matrix, full_range }
   }
   /// Packed VUYA row — `width × 4` bytes (4 channels per pixel:
   /// V, U, Y, A).
@@ -65,14 +63,9 @@ impl<'a> VuyaRow<'a> {
   pub fn packed(&self) -> &'a [u8] {
     self.packed
   }
-  /// Frame width in pixels.
-  #[cfg_attr(not(tarpaulin), inline(always))]
-  pub const fn width(&self) -> u32 {
-    self.width
-  }
   /// Row index.
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub const fn row(&self) -> u32 {
+  pub const fn row(&self) -> usize {
     self.row
   }
   /// YUV → RGB matrix carried through.
@@ -93,22 +86,22 @@ pub trait VuyaSink: for<'a> PixelSink<Input<'a> = VuyaRow<'a>> {}
 
 /// Walks a [`VuyaFrame`] row by row into the sink.
 pub fn vuya_to<S: VuyaSink>(
-  frame: VuyaFrame<'_>,
+  src: &VuyaFrame<'_>,
   full_range: bool,
   matrix: ColorMatrix,
   sink: &mut S,
 ) -> Result<(), S::Error> {
-  sink.begin_frame(frame.width(), frame.height())?;
+  sink.begin_frame(src.width(), src.height())?;
 
-  let h = frame.height() as usize;
-  let stride = frame.stride() as usize;
-  let row_bytes = (frame.width() as usize) * 4;
-  let plane = frame.packed();
+  let h = src.height() as usize;
+  let stride = src.stride() as usize;
+  let row_bytes = (src.width() as usize) * 4;
+  let plane = src.packed();
 
   for row in 0..h {
     let start = row * stride;
     let packed = &plane[start..start + row_bytes];
-    sink.process(VuyaRow::new(packed, frame.width(), row as u32, matrix, full_range))?;
+    sink.process(VuyaRow::new(packed, row, matrix, full_range))?;
   }
   Ok(())
 }
@@ -122,8 +115,7 @@ mod tests {
   struct CountingSink {
     rows_seen: usize,
     last_packed_len: usize,
-    last_width: u32,
-    last_row_idx: u32,
+    last_row_idx: usize,
   }
   impl PixelSink for CountingSink {
     type Input<'r> = VuyaRow<'r>;
@@ -134,7 +126,6 @@ mod tests {
     fn process(&mut self, row: VuyaRow<'_>) -> Result<(), Infallible> {
       self.rows_seen += 1;
       self.last_packed_len = row.packed().len();
-      self.last_width = row.width();
       self.last_row_idx = row.row();
       Ok(())
     }
@@ -149,13 +140,11 @@ mod tests {
     let mut sink = CountingSink {
       rows_seen: 0,
       last_packed_len: 0,
-      last_width: 0,
       last_row_idx: 0,
     };
-    vuya_to(frame, false, ColorMatrix::Bt709, &mut sink).unwrap();
+    vuya_to(&frame, false, ColorMatrix::Bt709, &mut sink).unwrap();
     assert_eq!(sink.rows_seen, 4);
     assert_eq!(sink.last_packed_len, 16); // width × 4 bytes per row
-    assert_eq!(sink.last_width, 4);
     assert_eq!(sink.last_row_idx, 3);
   }
 }
