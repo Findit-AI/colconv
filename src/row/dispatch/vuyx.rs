@@ -26,12 +26,12 @@ use crate::{ColorMatrix, row::{rgba_row_bytes, scalar}};
 // ---- Re-exports (bit-identical kernels) ------------------------------------
 
 /// Converts one row of VUYX to packed RGB (u8). Identical to
-/// [`vuya_to_rgb_row`] — the padding byte is irrelevant when there is no
+/// [`crate::row::vuya_to_rgb_row`] — the padding byte is irrelevant when there is no
 /// α channel in the output. See that function for full documentation.
 pub use super::vuya::vuya_to_rgb_row as vuyx_to_rgb_row;
 
 /// Extracts one row of 8-bit luma from a packed VUYX buffer. Identical to
-/// [`vuya_to_luma_row`] — Y is at byte offset 2 of each quadruple
+/// [`crate::row::vuya_to_luma_row`] — Y is at byte offset 2 of each quadruple
 /// regardless of α semantics. See that function for full documentation.
 pub use super::vuya::vuya_to_luma_row as vuyx_to_luma_row;
 

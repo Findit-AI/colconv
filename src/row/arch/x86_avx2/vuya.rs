@@ -69,8 +69,6 @@
 //!
 //! `width % 32` remaining pixels fall through to
 //! `scalar::vuya_to_rgb_or_rgba_row`.
-#![allow(dead_code)] // dispatcher (Tasks 10-13) not yet wired
-
 use core::arch::x86_64::*;
 
 use super::*;
