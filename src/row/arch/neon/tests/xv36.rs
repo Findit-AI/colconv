@@ -91,7 +91,9 @@ fn neon_xv36_rgb_matches_scalar_all_matrices() {
 #[test]
 #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
 fn neon_xv36_matches_scalar_widths() {
-  for w in [1usize, 2, 3, 7, 8, 9, 15, 16, 17, 31, 32, 33, 1920, 1921, 1923] {
+  for w in [
+    1usize, 2, 3, 7, 8, 9, 15, 16, 17, 31, 32, 33, 1920, 1921, 1923,
+  ] {
     check_rgb::<false>(w, ColorMatrix::Bt709, false);
     check_rgb::<true>(w, ColorMatrix::Bt709, true);
     check_rgb_u16::<false>(w, ColorMatrix::Bt2020Ncl, true);
@@ -102,7 +104,9 @@ fn neon_xv36_matches_scalar_widths() {
 #[test]
 #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
 fn neon_xv36_luma_matches_scalar_widths() {
-  for w in [1usize, 2, 3, 7, 8, 9, 15, 16, 17, 31, 32, 33, 1920, 1921, 1923] {
+  for w in [
+    1usize, 2, 3, 7, 8, 9, 15, 16, 17, 31, 32, 33, 1920, 1921, 1923,
+  ] {
     check_luma(w);
     check_luma_u16(w);
   }

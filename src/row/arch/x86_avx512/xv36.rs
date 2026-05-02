@@ -488,10 +488,7 @@ pub(crate) unsafe fn xv36_to_luma_row(packed: &[u16], out: &mut [u8], width: usi
       let y_u8 = narrow_u8x64(y_shr, zero, pack_fixup);
 
       // Store 32 valid bytes via the low 256-bit half.
-      _mm256_storeu_si256(
-        out.as_mut_ptr().add(x).cast(),
-        _mm512_castsi512_si256(y_u8),
-      );
+      _mm256_storeu_si256(out.as_mut_ptr().add(x).cast(), _mm512_castsi512_si256(y_u8));
 
       x += 32;
     }

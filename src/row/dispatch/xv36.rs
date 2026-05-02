@@ -53,7 +53,10 @@ pub fn xv36_to_rgb_row(
   full_range: bool,
   use_simd: bool,
 ) {
-  assert!(packed.len() >= xv36_packed_elems(width), "packed row too short");
+  assert!(
+    packed.len() >= xv36_packed_elems(width),
+    "packed row too short"
+  );
   assert!(
     rgb_out.len() >= rgb_row_bytes(width),
     "rgb_out row too short"
@@ -109,7 +112,10 @@ pub fn xv36_to_rgba_row(
   full_range: bool,
   use_simd: bool,
 ) {
-  assert!(packed.len() >= xv36_packed_elems(width), "packed row too short");
+  assert!(
+    packed.len() >= xv36_packed_elems(width),
+    "packed row too short"
+  );
   assert!(
     rgba_out.len() >= rgba_row_bytes(width),
     "rgba_out row too short"
@@ -166,7 +172,10 @@ pub fn xv36_to_rgb_u16_row(
   full_range: bool,
   use_simd: bool,
 ) {
-  assert!(packed.len() >= xv36_packed_elems(width), "packed row too short");
+  assert!(
+    packed.len() >= xv36_packed_elems(width),
+    "packed row too short"
+  );
   assert!(
     rgb_out.len() >= rgb_row_elems(width),
     "rgb_out row too short"
@@ -223,7 +232,10 @@ pub fn xv36_to_rgba_u16_row(
   full_range: bool,
   use_simd: bool,
 ) {
-  assert!(packed.len() >= xv36_packed_elems(width), "packed row too short");
+  assert!(
+    packed.len() >= xv36_packed_elems(width),
+    "packed row too short"
+  );
   assert!(
     rgba_out.len() >= rgba_row_elems(width),
     "rgba_out row too short"
@@ -273,7 +285,10 @@ pub fn xv36_to_rgba_u16_row(
 /// Y values are downshifted from 12-bit MSB-aligned to 8-bit via `>> 8`.
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub fn xv36_to_luma_row(packed: &[u16], luma_out: &mut [u8], width: usize, use_simd: bool) {
-  assert!(packed.len() >= xv36_packed_elems(width), "packed row too short");
+  assert!(
+    packed.len() >= xv36_packed_elems(width),
+    "packed row too short"
+  );
   assert!(luma_out.len() >= width, "luma_out row too short");
 
   if use_simd {
@@ -321,7 +336,10 @@ pub fn xv36_to_luma_row(packed: &[u16], luma_out: &mut [u8], width: usize, use_s
 /// its low 12 bits).
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub fn xv36_to_luma_u16_row(packed: &[u16], luma_out: &mut [u16], width: usize, use_simd: bool) {
-  assert!(packed.len() >= xv36_packed_elems(width), "packed row too short");
+  assert!(
+    packed.len() >= xv36_packed_elems(width),
+    "packed row too short"
+  );
   assert!(luma_out.len() >= width, "luma_out row too short");
 
   if use_simd {

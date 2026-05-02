@@ -74,10 +74,10 @@ use crate::{ColorMatrix, row::scalar};
 unsafe fn deinterleave_xv36(ptr: *const u16) -> (__m128i, __m128i, __m128i) {
   unsafe {
     // Load 4 × __m128i (8 pixels × 4 channels × u16 = 64 bytes).
-    let raw0 = _mm_loadu_si128(ptr.cast());           // U0,Y0,V0,A0,U1,Y1,V1,A1
-    let raw1 = _mm_loadu_si128(ptr.add(8).cast());    // U2,Y2,V2,A2,U3,Y3,V3,A3
-    let raw2 = _mm_loadu_si128(ptr.add(16).cast());   // U4,Y4,V4,A4,U5,Y5,V5,A5
-    let raw3 = _mm_loadu_si128(ptr.add(24).cast());   // U6,Y6,V6,A6,U7,Y7,V7,A7
+    let raw0 = _mm_loadu_si128(ptr.cast()); // U0,Y0,V0,A0,U1,Y1,V1,A1
+    let raw1 = _mm_loadu_si128(ptr.add(8).cast()); // U2,Y2,V2,A2,U3,Y3,V3,A3
+    let raw2 = _mm_loadu_si128(ptr.add(16).cast()); // U4,Y4,V4,A4,U5,Y5,V5,A5
+    let raw3 = _mm_loadu_si128(ptr.add(24).cast()); // U6,Y6,V6,A6,U7,Y7,V7,A7
 
     // Level 1 unpack (pairs 0-1, pairs 2-3).
     let s1_lo = _mm_unpacklo_epi16(raw0, raw1); // U0,U2,Y0,Y2,V0,V2,A0,A2

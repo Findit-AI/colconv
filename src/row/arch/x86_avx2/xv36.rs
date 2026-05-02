@@ -78,10 +78,10 @@ unsafe fn unpack_xv36_16px_avx2(ptr: *const u16) -> (__m256i, __m256i, __m256i) 
     // Each 256-bit register holds 16 u16 lanes split across two 128-bit
     // halves. Within each half, the layout is identical to one SSE4.1
     // load: [U_n, Y_n, V_n, A_n, U_{n+1}, Y_{n+1}, V_{n+1}, A_{n+1}].
-    let raw0 = _mm256_loadu_si256(ptr.cast());           // pixels 0-1 (lo), 8-9  (hi)
-    let raw1 = _mm256_loadu_si256(ptr.add(16).cast());   // pixels 2-3 (lo), 10-11 (hi)
-    let raw2 = _mm256_loadu_si256(ptr.add(32).cast());   // pixels 4-5 (lo), 12-13 (hi)
-    let raw3 = _mm256_loadu_si256(ptr.add(48).cast());   // pixels 6-7 (lo), 14-15 (hi)
+    let raw0 = _mm256_loadu_si256(ptr.cast()); // pixels 0-1 (lo), 8-9  (hi)
+    let raw1 = _mm256_loadu_si256(ptr.add(16).cast()); // pixels 2-3 (lo), 10-11 (hi)
+    let raw2 = _mm256_loadu_si256(ptr.add(32).cast()); // pixels 4-5 (lo), 12-13 (hi)
+    let raw3 = _mm256_loadu_si256(ptr.add(48).cast()); // pixels 6-7 (lo), 14-15 (hi)
 
     // Level 1: unpack pairs (0-1, 2-3) and (4-5, 6-7) within each lane.
     // Per-lane result per 128 bits mirrors SSE4.1 step 1:

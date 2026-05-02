@@ -117,7 +117,10 @@ pub(crate) unsafe fn xv36_to_rgb_or_rgba_row<const ALPHA: bool>(
       let off = x * bpp;
       if ALPHA {
         let alpha = vdup_n_u8(0xFF);
-        vst4_u8(out.as_mut_ptr().add(off), uint8x8x4_t(r_u8, g_u8, b_u8, alpha));
+        vst4_u8(
+          out.as_mut_ptr().add(off),
+          uint8x8x4_t(r_u8, g_u8, b_u8, alpha),
+        );
       } else {
         vst3_u8(out.as_mut_ptr().add(off), uint8x8x3_t(r_u8, g_u8, b_u8));
       }

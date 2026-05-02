@@ -106,28 +106,19 @@ unsafe fn deinterleave_xv36_8px(ptr: *const u16) -> (v128, v128, v128) {
     // fragments into the full 8-lane vector.
 
     // Combine pixels {0,1} and {2,3} for U → bytes 0..7 hold U0,U1,U2,U3.
-    let u01 =
-      i8x16_shuffle::<0, 1, 2, 3, 16, 17, 18, 19, 0, 0, 0, 0, 0, 0, 0, 0>(u0, u1);
+    let u01 = i8x16_shuffle::<0, 1, 2, 3, 16, 17, 18, 19, 0, 0, 0, 0, 0, 0, 0, 0>(u0, u1);
     // Combine pixels {4,5} and {6,7} for U → bytes 0..7 hold U4,U5,U6,U7.
-    let u23 =
-      i8x16_shuffle::<0, 1, 2, 3, 16, 17, 18, 19, 0, 0, 0, 0, 0, 0, 0, 0>(u2, u3);
+    let u23 = i8x16_shuffle::<0, 1, 2, 3, 16, 17, 18, 19, 0, 0, 0, 0, 0, 0, 0, 0>(u2, u3);
     // Full U vector: u16x8 [U0..U7] — low 8 bytes from u01, high 8 from u23.
-    let u_raw =
-      i8x16_shuffle::<0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23>(u01, u23);
+    let u_raw = i8x16_shuffle::<0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23>(u01, u23);
 
-    let y01 =
-      i8x16_shuffle::<0, 1, 2, 3, 16, 17, 18, 19, 0, 0, 0, 0, 0, 0, 0, 0>(y0, y1);
-    let y23 =
-      i8x16_shuffle::<0, 1, 2, 3, 16, 17, 18, 19, 0, 0, 0, 0, 0, 0, 0, 0>(y2, y3);
-    let y_raw =
-      i8x16_shuffle::<0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23>(y01, y23);
+    let y01 = i8x16_shuffle::<0, 1, 2, 3, 16, 17, 18, 19, 0, 0, 0, 0, 0, 0, 0, 0>(y0, y1);
+    let y23 = i8x16_shuffle::<0, 1, 2, 3, 16, 17, 18, 19, 0, 0, 0, 0, 0, 0, 0, 0>(y2, y3);
+    let y_raw = i8x16_shuffle::<0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23>(y01, y23);
 
-    let v01 =
-      i8x16_shuffle::<0, 1, 2, 3, 16, 17, 18, 19, 0, 0, 0, 0, 0, 0, 0, 0>(v0, v1);
-    let v23 =
-      i8x16_shuffle::<0, 1, 2, 3, 16, 17, 18, 19, 0, 0, 0, 0, 0, 0, 0, 0>(v2, v3);
-    let v_raw =
-      i8x16_shuffle::<0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23>(v01, v23);
+    let v01 = i8x16_shuffle::<0, 1, 2, 3, 16, 17, 18, 19, 0, 0, 0, 0, 0, 0, 0, 0>(v0, v1);
+    let v23 = i8x16_shuffle::<0, 1, 2, 3, 16, 17, 18, 19, 0, 0, 0, 0, 0, 0, 0, 0>(v2, v3);
+    let v_raw = i8x16_shuffle::<0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23>(v01, v23);
 
     (u_raw, y_raw, v_raw)
   }
@@ -417,13 +408,10 @@ pub(crate) unsafe fn xv36_to_luma_row(packed: &[u16], out: &mut [u8], width: usi
       let y3 = u8x16_swizzle(raw3, y_idx); // [Y6,Y7, 0..12]
 
       // Concatenate pairs: [bytes 0..3 of y0] + [bytes 0..3 of y1] → 8 bytes.
-      let y01 =
-        i8x16_shuffle::<0, 1, 2, 3, 16, 17, 18, 19, 0, 0, 0, 0, 0, 0, 0, 0>(y0, y1);
-      let y23 =
-        i8x16_shuffle::<0, 1, 2, 3, 16, 17, 18, 19, 0, 0, 0, 0, 0, 0, 0, 0>(y2, y3);
+      let y01 = i8x16_shuffle::<0, 1, 2, 3, 16, 17, 18, 19, 0, 0, 0, 0, 0, 0, 0, 0>(y0, y1);
+      let y23 = i8x16_shuffle::<0, 1, 2, 3, 16, 17, 18, 19, 0, 0, 0, 0, 0, 0, 0, 0>(y2, y3);
       // Full 8-lane Y vector.
-      let y_vec =
-        i8x16_shuffle::<0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23>(y01, y23);
+      let y_vec = i8x16_shuffle::<0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23>(y01, y23);
 
       // >> 8: drop 4 padding LSBs + 4 more → 8-bit value.
       let y_shr = u16x8_shr(y_vec, 8);
@@ -477,12 +465,9 @@ pub(crate) unsafe fn xv36_to_luma_u16_row(packed: &[u16], out: &mut [u16], width
       let y2 = u8x16_swizzle(raw2, y_idx);
       let y3 = u8x16_swizzle(raw3, y_idx);
 
-      let y01 =
-        i8x16_shuffle::<0, 1, 2, 3, 16, 17, 18, 19, 0, 0, 0, 0, 0, 0, 0, 0>(y0, y1);
-      let y23 =
-        i8x16_shuffle::<0, 1, 2, 3, 16, 17, 18, 19, 0, 0, 0, 0, 0, 0, 0, 0>(y2, y3);
-      let y_vec =
-        i8x16_shuffle::<0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23>(y01, y23);
+      let y01 = i8x16_shuffle::<0, 1, 2, 3, 16, 17, 18, 19, 0, 0, 0, 0, 0, 0, 0, 0>(y0, y1);
+      let y23 = i8x16_shuffle::<0, 1, 2, 3, 16, 17, 18, 19, 0, 0, 0, 0, 0, 0, 0, 0>(y2, y3);
+      let y_vec = i8x16_shuffle::<0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23>(y01, y23);
 
       // >> 4 to drop 4 padding LSBs → 12-bit value in low 12 bits.
       let y_low = u16x8_shr(y_vec, 4);
