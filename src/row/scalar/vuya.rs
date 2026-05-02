@@ -9,11 +9,11 @@
 //!
 //! One shared kernel template (`vuya_to_rgb_or_rgba_row`) covers all
 //! RGB / RGBA conversions via `const` generics. Four public thin
-//! wrappers expose the concrete monomorphizations.
-//!
-//! The dispatch layer (`src/row/dispatch/vuya.rs`) and sinker
-//! implementations are added in later tasks (Tasks 5-13). Until then
-//! the `pub(crate)` symbols are forward-declared here.
+//! wrappers expose the concrete monomorphizations and are consumed by
+//! the per-arch SIMD tail handlers, the public dispatchers in
+//! [`crate::row::dispatch::vuya`] / [`crate::row::dispatch::vuyx`],
+//! and the [`MixedSinker<Vuya>`](crate::sinker::MixedSinker) /
+//! [`MixedSinker<Vuyx>`](crate::sinker::MixedSinker) impls.
 
 use super::*;
 

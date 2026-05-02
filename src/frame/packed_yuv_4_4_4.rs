@@ -1,10 +1,13 @@
-//! Packed YUV 4:4:4 high-bit-depth frame types — Tier 5.
+//! Packed YUV 4:4:4 frame types — Tier 5.
 //!
 //! This module is the container for the Tier 5 packed-YUV-4:4:4
-//! family (`v410`, `xv36`, `vuya` / `vuyx`, `ayuv64`). Ship 12a
-//! adds [`V410Frame`] and [`V30XFrame`] (sibling formats with opposite
-//! padding positions); Ship 12b adds [`Xv36Frame`]; Ship 12c adds
-//! [`VuyaFrame`] and [`VuyxFrame`]; siblings land in 12d.
+//! family across all bit depths (8 / 10 / 12 / 16-bit): `v410`,
+//! `xv36`, `vuya` / `vuyx`, `ayuv64`. Ship 12a adds [`V410Frame`]
+//! and [`V30XFrame`] (10-bit, sibling formats with opposite padding
+//! positions); Ship 12b adds [`Xv36Frame`] (12-bit MSB-aligned);
+//! Ship 12c adds [`VuyaFrame`] and [`VuyxFrame`] (8-bit native, with
+//! source α / α-as-padding semantics); the 16-bit `ayuv64` lands
+//! in 12d.
 
 use derive_more::IsVariant;
 use thiserror::Error;
