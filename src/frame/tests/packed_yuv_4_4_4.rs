@@ -1,4 +1,6 @@
-use crate::frame::{V30XFrame, V30XFrameError, V410Frame, V410FrameError, Xv36Frame, Xv36FrameError};
+use crate::frame::{
+  V30XFrame, V30XFrameError, V410Frame, V410FrameError, Xv36Frame, Xv36FrameError,
+};
 
 const fn zero_buf<const N: usize>() -> [u32; N] {
   [0u32; N]
@@ -179,11 +181,17 @@ fn xv36_frame_try_new_rejects_zero_dimension() {
   let buf = vec![0u16; 16];
   assert!(matches!(
     Xv36Frame::try_new(&buf, 0, 4, 16),
-    Err(Xv36FrameError::ZeroDimension { width: 0, height: 4 })
+    Err(Xv36FrameError::ZeroDimension {
+      width: 0,
+      height: 4
+    })
   ));
   assert!(matches!(
     Xv36Frame::try_new(&buf, 4, 0, 16),
-    Err(Xv36FrameError::ZeroDimension { width: 4, height: 0 })
+    Err(Xv36FrameError::ZeroDimension {
+      width: 4,
+      height: 0
+    })
   ));
 }
 
@@ -193,7 +201,10 @@ fn xv36_frame_try_new_rejects_stride_too_small() {
   // width=4, width*4=16; stride=12 < 16
   assert!(matches!(
     Xv36Frame::try_new(&buf, 4, 4, 12),
-    Err(Xv36FrameError::StrideTooSmall { min_stride: 16, stride: 12 })
+    Err(Xv36FrameError::StrideTooSmall {
+      min_stride: 16,
+      stride: 12
+    })
   ));
 }
 
@@ -202,7 +213,10 @@ fn xv36_frame_try_new_rejects_short_plane() {
   let buf = vec![0u16; 32]; // need 16*4 = 64
   assert!(matches!(
     Xv36Frame::try_new(&buf, 4, 4, 16),
-    Err(Xv36FrameError::PlaneTooShort { expected: 64, actual: 32 })
+    Err(Xv36FrameError::PlaneTooShort {
+      expected: 64,
+      actual: 32
+    })
   ));
 }
 
