@@ -17,6 +17,8 @@ mod subsampled_high_bit_pn;
 mod v210;
 mod v30x;
 mod v410;
+mod vuya;
+mod vuyx;
 mod xv36;
 mod y210;
 mod y212;

@@ -1,10 +1,13 @@
-//! Packed YUV 4:4:4 high-bit-depth frame types — Tier 5.
+//! Packed YUV 4:4:4 frame types — Tier 5.
 //!
 //! This module is the container for the Tier 5 packed-YUV-4:4:4
-//! family (`v410`, `xv36`, `vuya` / `vuyx`, `ayuv64`). Ship 12a
-//! adds [`V410Frame`] and [`V30XFrame`] (sibling formats with opposite
-//! padding positions); Ship 12b adds [`Xv36Frame`]; siblings land in
-//! 12c / 12d.
+//! family across all bit depths (8 / 10 / 12 / 16-bit): `v410`,
+//! `xv36`, `vuya` / `vuyx`, `ayuv64`. Ship 12a adds [`V410Frame`]
+//! and [`V30XFrame`] (10-bit, sibling formats with opposite padding
+//! positions); Ship 12b adds [`Xv36Frame`] (12-bit MSB-aligned);
+//! Ship 12c adds [`VuyaFrame`] and [`VuyxFrame`] (8-bit native, with
+//! source α / α-as-padding semantics); the 16-bit `ayuv64` lands
+//! in 12d.
 
 use derive_more::IsVariant;
 use thiserror::Error;
@@ -501,6 +504,323 @@ impl<'a> Xv36Frame<'a> {
   }
   /// Stride in u16 elements (NOT bytes — the number of u16 slots per
   /// row, ≥ `width × 4`).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn stride(&self) -> u32 {
+    self.stride
+  }
+}
+
+/// Validated wrapper around a packed YUV 4:4:4 8-bit `VUYA` plane.
+///
+/// `VUYA` (FFmpeg `AV_PIX_FMT_VUYA`) packs **four bytes per pixel**
+/// as `V(8) ‖ U(8) ‖ Y(8) ‖ A(8)` little-endian, where the A byte is
+/// the **source alpha** (passed through to RGBA outputs). For the
+/// α-as-padding sibling — A is ignored on read and RGBA outputs
+/// force α=`0xFF` — see [`VuyxFrame`].
+///
+/// Per-pixel byte layout:
+///
+/// | Byte offset | Field |
+/// |-------------|-------|
+/// | 0           | V     |
+/// | 1           | U     |
+/// | 2           | Y     |
+/// | 3           | A (source alpha) |
+///
+/// Each row holds exactly `width × 4` bytes (`stride >= width × 4`);
+/// the plane occupies `stride * height` bytes total.
+#[derive(Debug, Clone, Copy)]
+pub struct VuyaFrame<'a> {
+  packed: &'a [u8],
+  width: u32,
+  height: u32,
+  stride: u32,
+}
+
+/// Errors returned by [`VuyaFrame::try_new`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Error)]
+#[non_exhaustive]
+pub enum VuyaFrameError {
+  /// `width == 0` or `height == 0`.
+  #[error("VuyaFrame: zero dimension width={width} height={height}")]
+  ZeroDimension {
+    /// Configured width.
+    width: u32,
+    /// Configured height.
+    height: u32,
+  },
+  /// `width × 4` overflows `u32`. Only reachable on 32-bit targets
+  /// with extreme widths.
+  #[error("VuyaFrame: width {width} × 4 overflows u32 (per-row byte count)")]
+  WidthOverflow {
+    /// Configured width.
+    width: u32,
+  },
+  /// `stride < width × 4` (bytes). Each row needs at least
+  /// `width × 4` bytes to hold all pixels.
+  #[error("VuyaFrame: stride {stride} bytes is below the minimum {min_stride}")]
+  StrideTooSmall {
+    /// Minimum required stride in bytes (`width × 4`).
+    min_stride: u32,
+    /// Caller-supplied stride.
+    stride: u32,
+  },
+  /// `packed.len() < expected`. The packed plane is too short.
+  #[error("VuyaFrame: plane too short: expected >= {expected} bytes, got {actual}")]
+  PlaneTooShort {
+    /// Minimum required plane length in bytes (`stride * height`).
+    expected: usize,
+    /// Caller-supplied plane length in bytes.
+    actual: usize,
+  },
+  /// `stride * height` overflows `usize`. Only reachable on 32-bit
+  /// targets with extreme dimensions.
+  #[error("VuyaFrame: stride × height overflows usize (stride={stride}, rows={rows})")]
+  GeometryOverflow {
+    /// Configured stride.
+    stride: u32,
+    /// Configured height.
+    rows: u32,
+  },
+}
+
+impl<'a> VuyaFrame<'a> {
+  /// Validates and constructs a [`VuyaFrame`].
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn try_new(
+    packed: &'a [u8],
+    width: u32,
+    height: u32,
+    stride: u32,
+  ) -> Result<Self, VuyaFrameError> {
+    if width == 0 || height == 0 {
+      return Err(VuyaFrameError::ZeroDimension { width, height });
+    }
+    let min_stride = match width.checked_mul(4) {
+      Some(n) => n,
+      None => return Err(VuyaFrameError::WidthOverflow { width }),
+    };
+    if stride < min_stride {
+      return Err(VuyaFrameError::StrideTooSmall { min_stride, stride });
+    }
+    let plane_min = match (stride as usize).checked_mul(height as usize) {
+      Some(n) => n,
+      None => {
+        return Err(VuyaFrameError::GeometryOverflow {
+          stride,
+          rows: height,
+        });
+      }
+    };
+    if packed.len() < plane_min {
+      return Err(VuyaFrameError::PlaneTooShort {
+        expected: plane_min,
+        actual: packed.len(),
+      });
+    }
+    Ok(Self {
+      packed,
+      width,
+      height,
+      stride,
+    })
+  }
+
+  /// Panicking convenience over [`Self::try_new`]. Per-variant panic
+  /// messages mirror [`crate::frame::V410Frame::new`].
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn new(packed: &'a [u8], width: u32, height: u32, stride: u32) -> Self {
+    match Self::try_new(packed, width, height, stride) {
+      Ok(f) => f,
+      Err(e) => match e {
+        VuyaFrameError::ZeroDimension { .. } => panic!("invalid VuyaFrame: zero dimension"),
+        VuyaFrameError::WidthOverflow { .. } => panic!("invalid VuyaFrame: width overflow"),
+        VuyaFrameError::StrideTooSmall { .. } => panic!("invalid VuyaFrame: stride too small"),
+        VuyaFrameError::PlaneTooShort { .. } => panic!("invalid VuyaFrame: plane too short"),
+        VuyaFrameError::GeometryOverflow { .. } => {
+          panic!("invalid VuyaFrame: geometry overflow")
+        }
+      },
+    }
+  }
+
+  /// Packed plane: `stride * height` total bytes, with `width × 4`
+  /// active bytes per row (4 channels per pixel) and `stride` bytes
+  /// per row. Byte layout per pixel: `V(8) ‖ U(8) ‖ Y(8) ‖ A(8)`.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn packed(&self) -> &'a [u8] {
+    self.packed
+  }
+  /// Frame width in pixels.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn width(&self) -> u32 {
+    self.width
+  }
+  /// Frame height in rows.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn height(&self) -> u32 {
+    self.height
+  }
+  /// Stride in bytes (the number of bytes per row, ≥ `width × 4`).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn stride(&self) -> u32 {
+    self.stride
+  }
+}
+
+/// Validated wrapper around a packed YUV 4:4:4 8-bit `VUYX` plane.
+///
+/// `VUYX` (FFmpeg `AV_PIX_FMT_VUYX`) packs **four bytes per pixel**
+/// as `V(8) ‖ U(8) ‖ Y(8) ‖ X(8)` little-endian. The `X` byte is
+/// **padding** — values are ignored on read and RGBA outputs always
+/// force α = `0xFF`. For the source-alpha sibling where the fourth
+/// byte carries meaningful alpha, see [`VuyaFrame`].
+///
+/// Per-pixel byte layout:
+///
+/// | Byte offset | Field |
+/// |-------------|-------|
+/// | 0           | V     |
+/// | 1           | U     |
+/// | 2           | Y     |
+/// | 3           | X (padding) |
+///
+/// Each row holds exactly `width × 4` bytes (`stride >= width × 4`);
+/// the plane occupies `stride * height` bytes total.
+#[derive(Debug, Clone, Copy)]
+pub struct VuyxFrame<'a> {
+  packed: &'a [u8],
+  width: u32,
+  height: u32,
+  stride: u32,
+}
+
+/// Errors returned by [`VuyxFrame::try_new`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Error)]
+#[non_exhaustive]
+pub enum VuyxFrameError {
+  /// `width == 0` or `height == 0`.
+  #[error("VuyxFrame: zero dimension width={width} height={height}")]
+  ZeroDimension {
+    /// Configured width.
+    width: u32,
+    /// Configured height.
+    height: u32,
+  },
+  /// `width × 4` overflows `u32`. Only reachable on 32-bit targets
+  /// with extreme widths.
+  #[error("VuyxFrame: width {width} × 4 overflows u32 (per-row byte count)")]
+  WidthOverflow {
+    /// Configured width.
+    width: u32,
+  },
+  /// `stride < width × 4` (bytes). Each row needs at least
+  /// `width × 4` bytes to hold all pixels.
+  #[error("VuyxFrame: stride {stride} bytes is below the minimum {min_stride}")]
+  StrideTooSmall {
+    /// Minimum required stride in bytes (`width × 4`).
+    min_stride: u32,
+    /// Caller-supplied stride.
+    stride: u32,
+  },
+  /// `packed.len() < expected`. The packed plane is too short.
+  #[error("VuyxFrame: plane too short: expected >= {expected} bytes, got {actual}")]
+  PlaneTooShort {
+    /// Minimum required plane length in bytes (`stride * height`).
+    expected: usize,
+    /// Caller-supplied plane length in bytes.
+    actual: usize,
+  },
+  /// `stride * height` overflows `usize`. Only reachable on 32-bit
+  /// targets with extreme dimensions.
+  #[error("VuyxFrame: stride × height overflows usize (stride={stride}, rows={rows})")]
+  GeometryOverflow {
+    /// Configured stride.
+    stride: u32,
+    /// Configured height.
+    rows: u32,
+  },
+}
+
+impl<'a> VuyxFrame<'a> {
+  /// Validates and constructs a [`VuyxFrame`].
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn try_new(
+    packed: &'a [u8],
+    width: u32,
+    height: u32,
+    stride: u32,
+  ) -> Result<Self, VuyxFrameError> {
+    if width == 0 || height == 0 {
+      return Err(VuyxFrameError::ZeroDimension { width, height });
+    }
+    let min_stride = match width.checked_mul(4) {
+      Some(n) => n,
+      None => return Err(VuyxFrameError::WidthOverflow { width }),
+    };
+    if stride < min_stride {
+      return Err(VuyxFrameError::StrideTooSmall { min_stride, stride });
+    }
+    let plane_min = match (stride as usize).checked_mul(height as usize) {
+      Some(n) => n,
+      None => {
+        return Err(VuyxFrameError::GeometryOverflow {
+          stride,
+          rows: height,
+        });
+      }
+    };
+    if packed.len() < plane_min {
+      return Err(VuyxFrameError::PlaneTooShort {
+        expected: plane_min,
+        actual: packed.len(),
+      });
+    }
+    Ok(Self {
+      packed,
+      width,
+      height,
+      stride,
+    })
+  }
+
+  /// Panicking convenience over [`Self::try_new`]. Per-variant panic
+  /// messages mirror [`crate::frame::V410Frame::new`].
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn new(packed: &'a [u8], width: u32, height: u32, stride: u32) -> Self {
+    match Self::try_new(packed, width, height, stride) {
+      Ok(f) => f,
+      Err(e) => match e {
+        VuyxFrameError::ZeroDimension { .. } => panic!("invalid VuyxFrame: zero dimension"),
+        VuyxFrameError::WidthOverflow { .. } => panic!("invalid VuyxFrame: width overflow"),
+        VuyxFrameError::StrideTooSmall { .. } => panic!("invalid VuyxFrame: stride too small"),
+        VuyxFrameError::PlaneTooShort { .. } => panic!("invalid VuyxFrame: plane too short"),
+        VuyxFrameError::GeometryOverflow { .. } => {
+          panic!("invalid VuyxFrame: geometry overflow")
+        }
+      },
+    }
+  }
+
+  /// Packed plane: `stride * height` total bytes, with `width × 4`
+  /// active bytes per row (4 channels per pixel) and `stride` bytes
+  /// per row. Byte layout per pixel: `V(8) ‖ U(8) ‖ Y(8) ‖ X(8)`
+  /// (X = padding).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn packed(&self) -> &'a [u8] {
+    self.packed
+  }
+  /// Frame width in pixels.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn width(&self) -> u32 {
+    self.width
+  }
+  /// Frame height in rows.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn height(&self) -> u32 {
+    self.height
+  }
+  /// Stride in bytes (the number of bytes per row, ≥ `width × 4`).
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn stride(&self) -> u32 {
     self.stride

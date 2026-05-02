@@ -659,6 +659,11 @@ pub enum RowSlice {
   /// length: `4 * width` bytes.
   #[display("VUYA packed")]
   VuyaPacked,
+  /// Packed `vuyx` row of a `Vuyx` source — Tier 5 8-bit 4:4:4
+  /// packed format. Four bytes per pixel in V/U/Y/X order (X is
+  /// padding); row length: `4 * width` bytes.
+  #[display("VUYX packed")]
+  VuyxPacked,
   /// Packed `ayuv64` row of an `Ayuv64` source — Tier 5 16-bit
   /// 4:4:4 packed format. Four `u16` elements per pixel in A/Y/U/V
   /// order; row length: `4 * width` `u16` elements (= `8 * width`
@@ -1483,6 +1488,8 @@ mod subsampled_4_4_4_high_bit;
 mod v210;
 mod v30x;
 mod v410;
+mod vuya;
+mod vuyx;
 mod xv36;
 mod y210;
 mod y212;

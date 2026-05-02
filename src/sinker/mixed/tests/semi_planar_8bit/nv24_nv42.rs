@@ -5,6 +5,7 @@ use super::{
     v30x::solid_v30x_frame,
     v210::solid_v210_frame,
     v410::solid_v410_frame,
+    vuyx::solid_vuyx_frame,
     xv36::solid_xv36_frame,
     y210::solid_y210_frame,
     y212::solid_y212_frame,
@@ -878,6 +879,24 @@ fn strategy_a_rgb_and_rgba_byte_identical_for_all_wired_families() {
       .unwrap();
     xv36_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
     assert_match(&rgb, &rgba, "Xv36");
+  }
+
+  {
+    // VUYX carries 8-bit samples; the A (padding) byte is ignored and
+    // output α is always 0xFF. Strategy A applies: RGBA is derived from
+    // the RGB row via expand_rgb_to_rgba_row (α=0xFF — no semantic
+    // conflict). Use mid-range Y so the gray-derived RGB is sensible.
+    let buf = solid_vuyx_frame(w, h, 128, 128, 200, 0x42);
+    let src = VuyxFrame::try_new(&buf, w, h, w * 4).unwrap();
+    let mut rgb = std::vec![0u8; ws * hs * 3];
+    let mut rgba = std::vec![0u8; ws * hs * 4];
+    let mut sink = MixedSinker::<Vuyx>::new(ws, hs)
+      .with_rgb(&mut rgb)
+      .unwrap()
+      .with_rgba(&mut rgba)
+      .unwrap();
+    vuyx_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    assert_match(&rgb, &rgba, "Vuyx");
   }
 }
 
