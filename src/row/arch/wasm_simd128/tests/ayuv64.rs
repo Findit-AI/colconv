@@ -125,6 +125,54 @@ fn wasm_ayuv64_matches_scalar_widths() {
   }
 }
 
+/// Strengthens the lane-order regression test by encoding values
+/// with bit 15 set (≥ 0x8000) so that any logical-vs-arithmetic
+/// shift bug at the u16 → u8 narrow step manifests as wrong values.
+///
+/// The original `wasm_ayuv64_lane_order_per_pixel_y_and_a` test uses
+/// small values (max 31) which silently passes if the shift is the
+/// wrong type — sign-extension only matters for inputs ≥ 0x8000.
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn wasm_ayuv64_lane_order_high_bit_set_values() {
+  const W: usize = 16;
+  let mut packed = std::vec![0u16; W * 4];
+  for n in 0..W {
+    packed[n * 4] = 0x8000 + (n as u16); // A: high-bit-set, distinct per pixel
+    packed[n * 4 + 1] = 0x8001; // Y: high-bit-set, constant
+    packed[n * 4 + 2] = 32768; // U neutral
+    packed[n * 4 + 3] = 32768; // V neutral
+  }
+
+  // luma u8 high-byte extraction: 0x8001 >> 8 = 0x80 for every pixel
+  let mut luma_u8 = std::vec![0u8; W];
+  unsafe {
+    ayuv64_to_luma_row(&packed, &mut luma_u8, W);
+  }
+  let expected_luma: std::vec::Vec<u8> = std::vec![0x80; W];
+  assert_eq!(
+    luma_u8,
+    expected_luma,
+    "wasm ayuv64→luma_u8 sign-extension bug — Y bytes ≥ 0x8000 corrupted"
+  );
+
+  // u8 RGBA α depth-convert: 0x8000+n >> 8 = 0x80 for n in 0..16 (since n < 256)
+  let mut rgba_u8 = std::vec![0u8; W * 4];
+  unsafe {
+    ayuv64_to_rgb_or_rgba_row::<true, true>(&packed, &mut rgba_u8, W, ColorMatrix::Bt709, true);
+  }
+  let alpha_out: std::vec::Vec<u8> = (0..W).map(|n| rgba_u8[n * 4 + 3]).collect();
+  let expected_alpha: std::vec::Vec<u8> = std::vec![0x80; W];
+  assert_eq!(
+    alpha_out,
+    expected_alpha,
+    "wasm ayuv64→rgba α sign-extension bug — A bytes ≥ 0x8000 corrupted"
+  );
+}
+
 /// Multi-channel Y+A lane-order regression test.
 ///
 /// Encodes Y[n] = n + 1 (range 1..=16) AND A[n] = 2n + 1 (range 1..=31)

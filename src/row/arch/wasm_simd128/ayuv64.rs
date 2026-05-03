@@ -25,8 +25,11 @@
 //!    8-lane u16x8 channel vector (same 3-level pattern as XV36).
 //! 4. Chroma bias via wrapping 0x8000 i16 trick; Q15 pipeline.
 //! 5. Y scaled via `scale_y_u16_wasm` (unsigned widening).
-//! 6. Source α (A channel): `i16x8_shr(a_u16, 8)` → high byte in low byte
+//! 6. Source α (A channel): `u16x8_shr(a_u16, 8)` → high byte in low byte
 //!    slot, then `u8x16_narrow_i16x8` to narrow to u8.
+//!    MUST be logical (u16x8_shr), not arithmetic (i16x8_shr): for A ≥ 0x8000
+//!    the arithmetic shift sign-extends to a negative i16, and
+//!    `u8x16_narrow_i16x8` then saturates to 0 — corrupting ~50 % of values.
 //! 7. `write_rgba_16` / `write_rgb_16`.
 //!
 //! ## u16 pipeline (8 px / iter)
@@ -256,11 +259,14 @@ pub(crate) unsafe fn ayuv64_to_rgb_or_rgba_row<const ALPHA: bool, const ALPHA_SR
       let out_ptr = out.as_mut_ptr().add(x * bpp);
       if ALPHA {
         // Depth-convert u16 → u8 via >> 8 (take high byte).
-        // i16x8_shr shifts each u16 right by 8; values land in [0, 255].
-        // u8x16_narrow_i16x8 narrows (saturating, but values already 0..255).
+        // u16x8_shr is a LOGICAL shift — high byte lands in [0, 255].
+        // Must NOT use i16x8_shr (arithmetic): for A ≥ 0x8000 the sign bit
+        // propagates, making the result a negative i16 that u8x16_narrow_i16x8
+        // saturates to 0 — corrupting all alpha values in the upper half of
+        // the range. See xv36.rs:417 for the same correct pattern.
         let a_vec: v128 = if ALPHA_SRC {
-          let a_lo_shr = i16x8_shr(a_lo_u16, 8);
-          let a_hi_shr = i16x8_shr(a_hi_u16, 8);
+          let a_lo_shr = u16x8_shr(a_lo_u16, 8);
+          let a_hi_shr = u16x8_shr(a_hi_u16, 8);
           u8x16_narrow_i16x8(a_lo_shr, a_hi_shr)
         } else {
           u8x16_splat(0xFF)
@@ -572,8 +578,11 @@ pub(crate) unsafe fn ayuv64_to_luma_row(packed: &[u16], luma_out: &mut [u8], wid
         deinterleave_ayuv64_8px(packed.as_ptr().add(x * 4 + 32));
 
       // >> 8 to get u8 luma (high byte of each Y u16 sample).
-      let y_lo_shr = i16x8_shr(y_lo, 8);
-      let y_hi_shr = i16x8_shr(y_hi, 8);
+      // Logical shift (u16x8_shr) — arithmetic shift (i16x8_shr) would
+      // sign-extend Y ≥ 0x8000 to a negative i16, which u8x16_narrow_i16x8
+      // would then saturate to 0, corrupting half the luma range.
+      let y_lo_shr = u16x8_shr(y_lo, 8);
+      let y_hi_shr = u16x8_shr(y_hi, 8);
       // Pack 16 × i16 → 16 × u8.
       let y_u8 = u8x16_narrow_i16x8(y_lo_shr, y_hi_shr);
       v128_store(luma_out.as_mut_ptr().add(x).cast(), y_u8);
