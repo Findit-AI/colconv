@@ -19,7 +19,7 @@ without the prior workaround.
 
 Migrated kernels: `yuv_planar_8bit`, `semi_planar_8bit`,
 `packed_yuv_8bit` across the scalar reference and all 5 SIMD backends
-(NEON, SSE4.1, AVX2, AVX-512, wasm-simd128) — 31 call sites total.
+(NEON, SSE4.1, AVX2, AVX-512, wasm-simd128) — 30 call sites total.
 
 The legacy `range_params` function (hardcoded 8-bit constants) has been
 removed; all callers now use `range_params_n::<8, 8>`.
