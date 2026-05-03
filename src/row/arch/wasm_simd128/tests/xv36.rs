@@ -125,3 +125,75 @@ fn wasm_simd128_xv36_luma_matches_scalar_widths() {
     check_luma_u16(w);
   }
 }
+
+/// Build an XV36 packed buffer for `width` pixels where:
+/// - Y[n] = (n + 1) << 4 (12-bit `n+1` MSB-aligned in slot 1)
+/// - U[n] = (2n + 1) << 4 (12-bit `2n+1` MSB-aligned; XV36 is 4:4:4)
+/// - V    = 0x800 << 4 = 0x8000 (neutral 12-bit midpoint, MSB-aligned)
+/// - A    = 0 (slot 3 is padding for the X-prefix variant)
+///
+/// XV36 layout (per pixel, four contiguous u16):
+///   slot 0 = U (12-bit value MSB-aligned: bits[15:4] = value, bits[3:0] = 0)
+///   slot 1 = Y (12-bit value MSB-aligned)
+///   slot 2 = V (12-bit value MSB-aligned)
+///   slot 3 = A (padding for XV36 — read but discarded)
+fn build_xv36_packed_y_n_plus_1_u_2n_plus_1_v_neutral_a_zero(width: usize) -> std::vec::Vec<u16> {
+  let mut packed = std::vec::Vec::with_capacity(width * 4);
+  for n in 0..width {
+    let y = ((n as u16) + 1) << 4; // slot 1: Y = (n+1) MSB-aligned
+    let u = ((2 * (n as u16)) + 1) << 4; // slot 0: U = (2n+1) MSB-aligned
+    packed.push(u);
+    packed.push(y);
+    packed.push(0x8000u16); // slot 2: V = 0x800 << 4 (neutral)
+    packed.push(0u16); // slot 3: A = padding
+  }
+  packed
+}
+
+/// Multi-channel lane-order regression — encodes pixel index in BOTH Y AND U
+/// so we catch per-channel asymmetric mask bugs that a Y-only test would miss.
+/// Pattern from Ship 12d AYUV64 backport.
+///
+/// Asserts:
+/// - `luma_u16_row` output = [1..=W] (Y values direct after `>> 4`)
+/// - SIMD u16 RGB output == scalar u16 RGB output (any lane-order or
+///   per-channel mask bug diverges between SIMD and scalar)
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn wasm_simd128_xv36_lane_order_per_pixel_y_and_u() {
+  // W = 2 × SIMD entry threshold (8) so we exercise ≥2 main-loop iterations.
+  const W: usize = 16;
+  let packed = build_xv36_packed_y_n_plus_1_u_2n_plus_1_v_neutral_a_zero(W);
+
+  // Part 1: Luma natural-order at u16 (drops the 4-bit padding to recover n+1)
+  let mut luma_u16 = std::vec![0u16; W];
+  unsafe {
+    xv36_to_luma_u16_row(&packed, &mut luma_u16, W);
+  }
+  let expected_luma: std::vec::Vec<u16> = (1..=W as u16).collect();
+  assert_eq!(
+    luma_u16, expected_luma,
+    "wasm_simd128 xv36 luma_u16 reorder bug"
+  );
+
+  // Part 2: SIMD vs scalar parity at u16 RGB (catches U/Y channel swap bugs)
+  let mut simd_rgb = std::vec![0u16; W * 3];
+  let mut scalar_rgb = std::vec![0u16; W * 3];
+  unsafe {
+    xv36_to_rgb_u16_or_rgba_u16_row::<false>(&packed, &mut simd_rgb, W, ColorMatrix::Bt709, false);
+  }
+  scalar::xv36_to_rgb_u16_or_rgba_u16_row::<false>(
+    &packed,
+    &mut scalar_rgb,
+    W,
+    ColorMatrix::Bt709,
+    false,
+  );
+  assert_eq!(
+    simd_rgb, scalar_rgb,
+    "wasm_simd128 xv36 SIMD vs scalar diverges (u16 RGB) — lane-order bug"
+  );
+}
