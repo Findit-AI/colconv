@@ -201,21 +201,37 @@ fn build_v210_packed_y_n_plus_1_u_2k_plus_1_v_neutral(w: usize) -> std::vec::Vec
 ///
 /// This catches asymmetric per-channel mask bugs that a Y-only test would miss.
 #[test]
-#[cfg_attr(miri, ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri")]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
 fn neon_v210_lane_order_per_pixel_y_and_u() {
   const W: usize = 6;
   let packed = build_v210_packed_y_n_plus_1_u_2k_plus_1_v_neutral(W);
 
   // Part 1: Luma natural-order (u16, no shift loss)
   let mut luma = std::vec![0u16; W];
-  unsafe { v210_to_luma_u16_row(&packed, &mut luma, W); }
+  unsafe {
+    v210_to_luma_u16_row(&packed, &mut luma, W);
+  }
   let expected_luma: std::vec::Vec<u16> = (1..=W as u16).collect();
   assert_eq!(luma, expected_luma, "neon v210 luma reorder bug");
 
   // Part 2: SIMD vs scalar parity (catches chroma deinterleave bugs)
   let mut simd_rgb = std::vec![0u8; W * 3];
   let mut scalar_rgb = std::vec![0u8; W * 3];
-  unsafe { v210_to_rgb_or_rgba_row::<false>(&packed, &mut simd_rgb, W, crate::ColorMatrix::Bt709, false); }
-  scalar::v210_to_rgb_or_rgba_row::<false>(&packed, &mut scalar_rgb, W, crate::ColorMatrix::Bt709, false);
-  assert_eq!(simd_rgb, scalar_rgb, "neon v210 SIMD vs scalar diverges — chroma deinterleave bug");
+  unsafe {
+    v210_to_rgb_or_rgba_row::<false>(&packed, &mut simd_rgb, W, crate::ColorMatrix::Bt709, false);
+  }
+  scalar::v210_to_rgb_or_rgba_row::<false>(
+    &packed,
+    &mut scalar_rgb,
+    W,
+    crate::ColorMatrix::Bt709,
+    false,
+  );
+  assert_eq!(
+    simd_rgb, scalar_rgb,
+    "neon v210 SIMD vs scalar diverges — chroma deinterleave bug"
+  );
 }

@@ -189,6 +189,10 @@ fn build_v210_packed_y_n_plus_1_u_2k_plus_1_v_neutral(w: usize) -> std::vec::Vec
   let groups = w / 6;
   let mut out = std::vec::Vec::with_capacity(groups * 16);
   for g in 0..groups {
+    // Within each group of 6 pixels:
+    //   Y: y0=6g+1, y1=6g+2, y2=6g+3, y3=6g+4, y4=6g+5, y5=6g+6
+    //   U (Cb): u0=2*(3g)+1, u1=2*(3g+1)+1, u2=2*(3g+2)+1
+    //   V (Cr): 512 (neutral)
     let y0 = (g * 6 + 1) as u32;
     let y1 = (g * 6 + 2) as u32;
     let y2 = (g * 6 + 3) as u32;
@@ -245,14 +249,27 @@ fn avx512_v210_lane_order_per_pixel_y_and_u() {
 
   // Part 1: Luma natural-order (u16, no shift loss)
   let mut luma = std::vec![0u16; W];
-  unsafe { v210_to_luma_u16_row(&packed, &mut luma, W); }
+  unsafe {
+    v210_to_luma_u16_row(&packed, &mut luma, W);
+  }
   let expected_luma: std::vec::Vec<u16> = (1..=W as u16).collect();
   assert_eq!(luma, expected_luma, "avx512 v210 luma reorder bug");
 
   // Part 2: SIMD vs scalar parity (catches chroma deinterleave bugs)
   let mut simd_rgb = std::vec![0u8; W * 3];
   let mut scalar_rgb = std::vec![0u8; W * 3];
-  unsafe { v210_to_rgb_or_rgba_row::<false>(&packed, &mut simd_rgb, W, crate::ColorMatrix::Bt709, false); }
-  scalar::v210_to_rgb_or_rgba_row::<false>(&packed, &mut scalar_rgb, W, crate::ColorMatrix::Bt709, false);
-  assert_eq!(simd_rgb, scalar_rgb, "avx512 v210 SIMD vs scalar diverges — chroma deinterleave bug");
+  unsafe {
+    v210_to_rgb_or_rgba_row::<false>(&packed, &mut simd_rgb, W, crate::ColorMatrix::Bt709, false);
+  }
+  scalar::v210_to_rgb_or_rgba_row::<false>(
+    &packed,
+    &mut scalar_rgb,
+    W,
+    crate::ColorMatrix::Bt709,
+    false,
+  );
+  assert_eq!(
+    simd_rgb, scalar_rgb,
+    "avx512 v210 SIMD vs scalar diverges — chroma deinterleave bug"
+  );
 }
