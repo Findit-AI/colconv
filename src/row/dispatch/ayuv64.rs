@@ -502,7 +502,10 @@ mod tests {
         "R near-white expected, got {}",
         px[0]
       );
-      assert_eq!(px[3], 0xABu8, "source α must be depth-converted (>> 8) for u8 RGBA");
+      assert_eq!(
+        px[3], 0xABu8,
+        "source α must be depth-converted (>> 8) for u8 RGBA"
+      );
     }
 
     // u16 RGB — near-white (65535 or close)

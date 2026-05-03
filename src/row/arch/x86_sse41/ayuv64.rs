@@ -185,12 +185,18 @@ pub(crate) unsafe fn ayuv64_to_rgb_or_rgba_row<const ALPHA: bool, const ALPHA_SR
       let y_lo_scaled = scale_y_u16(y_lo_u16, y_off_v, y_scale_v, rnd_v);
 
       // Saturate-narrow to u8x8 (lo 8 bytes of packus result are valid).
-      let r_lo_u8 =
-        _mm_packus_epi16(_mm_adds_epi16(y_lo_scaled, r_chroma_lo), _mm_setzero_si128());
-      let g_lo_u8 =
-        _mm_packus_epi16(_mm_adds_epi16(y_lo_scaled, g_chroma_lo), _mm_setzero_si128());
-      let b_lo_u8 =
-        _mm_packus_epi16(_mm_adds_epi16(y_lo_scaled, b_chroma_lo), _mm_setzero_si128());
+      let r_lo_u8 = _mm_packus_epi16(
+        _mm_adds_epi16(y_lo_scaled, r_chroma_lo),
+        _mm_setzero_si128(),
+      );
+      let g_lo_u8 = _mm_packus_epi16(
+        _mm_adds_epi16(y_lo_scaled, g_chroma_lo),
+        _mm_setzero_si128(),
+      );
+      let b_lo_u8 = _mm_packus_epi16(
+        _mm_adds_epi16(y_lo_scaled, b_chroma_lo),
+        _mm_setzero_si128(),
+      );
 
       // --- hi half: pixels x+8..x+15 ------------------------------------
       let (a_hi_u16, y_hi_u16, u_hi_u16, v_hi_u16) =
@@ -215,12 +221,18 @@ pub(crate) unsafe fn ayuv64_to_rgb_or_rgba_row<const ALPHA: bool, const ALPHA_SR
 
       let y_hi_scaled = scale_y_u16(y_hi_u16, y_off_v, y_scale_v, rnd_v);
 
-      let r_hi_u8 =
-        _mm_packus_epi16(_mm_adds_epi16(y_hi_scaled, r_chroma_hi), _mm_setzero_si128());
-      let g_hi_u8 =
-        _mm_packus_epi16(_mm_adds_epi16(y_hi_scaled, g_chroma_hi), _mm_setzero_si128());
-      let b_hi_u8 =
-        _mm_packus_epi16(_mm_adds_epi16(y_hi_scaled, b_chroma_hi), _mm_setzero_si128());
+      let r_hi_u8 = _mm_packus_epi16(
+        _mm_adds_epi16(y_hi_scaled, r_chroma_hi),
+        _mm_setzero_si128(),
+      );
+      let g_hi_u8 = _mm_packus_epi16(
+        _mm_adds_epi16(y_hi_scaled, g_chroma_hi),
+        _mm_setzero_si128(),
+      );
+      let b_hi_u8 = _mm_packus_epi16(
+        _mm_adds_epi16(y_hi_scaled, b_chroma_hi),
+        _mm_setzero_si128(),
+      );
 
       // Combine lo+hi 8-byte halves into 16-byte vectors for write helpers.
       let r_u8 = _mm_unpacklo_epi64(r_lo_u8, r_hi_u8);
@@ -562,7 +574,11 @@ pub(crate) unsafe fn ayuv64_to_luma_row(packed: &[u16], luma_out: &mut [u8], wid
 
     // Scalar tail.
     if x < width {
-      scalar::ayuv64_to_luma_row(&packed[x * 4..width * 4], &mut luma_out[x..width], width - x);
+      scalar::ayuv64_to_luma_row(
+        &packed[x * 4..width * 4],
+        &mut luma_out[x..width],
+        width - x,
+      );
     }
   }
 }

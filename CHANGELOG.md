@@ -1,5 +1,51 @@
 # CHANGELOG
 
+## 0.16.0 — Tier 5 closed: AYUV64 (16-bit packed YUV 4:4:4 + α)
+
+- Added `Ayuv64` source marker (FFmpeg `AV_PIX_FMT_AYUV64LE`).
+- 16-bit packed YUV 4:4:4 with **source α** — A byte at slot 0,
+  followed by Y/U/V at slots 1/2/3 (channel order differs from
+  VUYA's V/U/Y/A).
+- u8 output path: i32 chroma; α depth-converted u16 → u8 via `>> 8`.
+- u16 output path: **i64 chroma** (BT.2020 sums overflow i32 at
+  BITS=16; reuses `chroma_i64x*` helpers from Y216 / `yuv_420p16` /
+  Yuva444p16). α written direct as u16 (no conversion).
+- 5-backend SIMD: NEON (16/16 px/iter), SSE4.1 (16/8), AVX2 (32/16),
+  AVX-512 (64/32, F+BW baseline), wasm-simd128 (16/8).
+- 7 sinker accessors: `with_rgb`, `with_rgba`, `with_rgb_u16`,
+  `with_rgba_u16`, `with_luma`, `with_luma_u16`, `with_hsv`.
+- Cross-format invariant: `Ayuv64 ↔ Yuva444p16` planar parity test
+  validates source-α pass-through at both u8 and u16 paths
+  (limited-range — no scale-constant divergence; first place
+  i64 chroma + `ALPHA_SRC` at u16 meets cross-format parity for
+  a packed format).
+- Day-1 multi-channel lane-order regression tests (encode pixel
+  index in BOTH Y AND A) on every backend — catches per-channel
+  asymmetric mask bugs that the Y-only Ship 12c pattern would
+  miss.
+
+### Tier 5 closed
+
+This release closes Tier 5 (Packed YUV 4:4:4). All four tranches
+shipped:
+- Ship 12a (v0.13): V410 + V30X (10-bit, MSB / LSB padded)
+- Ship 12b (v0.14): XV36 (12-bit MSB-aligned + α-as-padding)
+- Ship 12c (v0.15): VUYA + VUYX (8-bit source α / α-as-padding)
+- Ship 12d (v0.16): AYUV64 (16-bit + source α) — this release
+
+Three follow-up cleanup PRs are queued (per the Tier 5 closure
+megaship plan):
+- Multi-channel lane-order backport to existing Tier 4 / 5
+  formats × every backend
+- 8-bit planar `range_params` → `range_params_n::<8, 8>` migration
+- Strategy A+ design + impl (post-Strategy-A α-overwrite hook
+  across all source-α formats)
+
+Next tier-of-formats work: Tier 9 + Tier 10 floats (rgbf16 /
+rgbf32 / gbrpf32 — VFX archetype's biggest unmet need).
+
+---
+
 ## 0.15.0 — Tier 5 third tranche: VUYA + VUYX (8-bit packed YUV 4:4:4)
 
 - Added `Vuya` and `Vuyx` source markers (FFmpeg `AV_PIX_FMT_VUYA` and

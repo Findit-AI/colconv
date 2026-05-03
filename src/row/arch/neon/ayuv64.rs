@@ -178,7 +178,10 @@ pub(crate) unsafe fn ayuv64_to_rgb_or_rgba_row<const ALPHA: bool, const ALPHA_SR
         } else {
           vdupq_n_u8(0xFF) // opaque (unused — no AYUV64x sibling, but allowed)
         };
-        vst4q_u8(out.as_mut_ptr().add(off), uint8x16x4_t(r_u8, g_u8, b_u8, a_vec));
+        vst4q_u8(
+          out.as_mut_ptr().add(off),
+          uint8x16x4_t(r_u8, g_u8, b_u8, a_vec),
+        );
       } else {
         vst3q_u8(out.as_mut_ptr().add(off), uint8x16x3_t(r_u8, g_u8, b_u8));
       }
@@ -280,10 +283,22 @@ pub(crate) unsafe fn ayuv64_to_rgb_u16_or_rgba_u16_row<const ALPHA: bool, const 
       let v_lo0_i32 = vreinterpretq_s32_u32(vmovl_u16(vget_low_u16(v_lo_u16)));
       let v_lo1_i32 = vreinterpretq_s32_u32(vmovl_u16(vget_high_u16(v_lo_u16)));
 
-      let u_d_lo0 = q15_shift(vaddq_s32(vmulq_s32(vsubq_s32(u_lo0_i32, bias_v), c_scale_v), rnd_v));
-      let u_d_lo1 = q15_shift(vaddq_s32(vmulq_s32(vsubq_s32(u_lo1_i32, bias_v), c_scale_v), rnd_v));
-      let v_d_lo0 = q15_shift(vaddq_s32(vmulq_s32(vsubq_s32(v_lo0_i32, bias_v), c_scale_v), rnd_v));
-      let v_d_lo1 = q15_shift(vaddq_s32(vmulq_s32(vsubq_s32(v_lo1_i32, bias_v), c_scale_v), rnd_v));
+      let u_d_lo0 = q15_shift(vaddq_s32(
+        vmulq_s32(vsubq_s32(u_lo0_i32, bias_v), c_scale_v),
+        rnd_v,
+      ));
+      let u_d_lo1 = q15_shift(vaddq_s32(
+        vmulq_s32(vsubq_s32(u_lo1_i32, bias_v), c_scale_v),
+        rnd_v,
+      ));
+      let v_d_lo0 = q15_shift(vaddq_s32(
+        vmulq_s32(vsubq_s32(v_lo0_i32, bias_v), c_scale_v),
+        rnd_v,
+      ));
+      let v_d_lo1 = q15_shift(vaddq_s32(
+        vmulq_s32(vsubq_s32(v_lo1_i32, bias_v), c_scale_v),
+        rnd_v,
+      ));
 
       // hi half: pixels 8..15.
       let u_hi0_i32 = vreinterpretq_s32_u32(vmovl_u16(vget_low_u16(u_hi_u16)));
@@ -291,10 +306,22 @@ pub(crate) unsafe fn ayuv64_to_rgb_u16_or_rgba_u16_row<const ALPHA: bool, const 
       let v_hi0_i32 = vreinterpretq_s32_u32(vmovl_u16(vget_low_u16(v_hi_u16)));
       let v_hi1_i32 = vreinterpretq_s32_u32(vmovl_u16(vget_high_u16(v_hi_u16)));
 
-      let u_d_hi0 = q15_shift(vaddq_s32(vmulq_s32(vsubq_s32(u_hi0_i32, bias_v), c_scale_v), rnd_v));
-      let u_d_hi1 = q15_shift(vaddq_s32(vmulq_s32(vsubq_s32(u_hi1_i32, bias_v), c_scale_v), rnd_v));
-      let v_d_hi0 = q15_shift(vaddq_s32(vmulq_s32(vsubq_s32(v_hi0_i32, bias_v), c_scale_v), rnd_v));
-      let v_d_hi1 = q15_shift(vaddq_s32(vmulq_s32(vsubq_s32(v_hi1_i32, bias_v), c_scale_v), rnd_v));
+      let u_d_hi0 = q15_shift(vaddq_s32(
+        vmulq_s32(vsubq_s32(u_hi0_i32, bias_v), c_scale_v),
+        rnd_v,
+      ));
+      let u_d_hi1 = q15_shift(vaddq_s32(
+        vmulq_s32(vsubq_s32(u_hi1_i32, bias_v), c_scale_v),
+        rnd_v,
+      ));
+      let v_d_hi0 = q15_shift(vaddq_s32(
+        vmulq_s32(vsubq_s32(v_hi0_i32, bias_v), c_scale_v),
+        rnd_v,
+      ));
+      let v_d_hi1 = q15_shift(vaddq_s32(
+        vmulq_s32(vsubq_s32(v_hi1_i32, bias_v), c_scale_v),
+        rnd_v,
+      ));
 
       // i64 chroma: 4 values each → i32x4 (via vmull_s32 widening).
       // 4:4:4 — no duplication needed; each pixel has unique U/V.
@@ -492,7 +519,11 @@ pub(crate) unsafe fn ayuv64_to_luma_row(packed: &[u16], luma_out: &mut [u8], wid
     }
     // Scalar tail.
     if x < width {
-      scalar::ayuv64_to_luma_row(&packed[x * 4..width * 4], &mut luma_out[x..width], width - x);
+      scalar::ayuv64_to_luma_row(
+        &packed[x * 4..width * 4],
+        &mut luma_out[x..width],
+        width - x,
+      );
     }
   }
 }

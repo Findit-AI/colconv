@@ -154,8 +154,7 @@ fn wasm_ayuv64_lane_order_high_bit_set_values() {
   }
   let expected_luma: std::vec::Vec<u8> = std::vec![0x80; W];
   assert_eq!(
-    luma_u8,
-    expected_luma,
+    luma_u8, expected_luma,
     "wasm ayuv64→luma_u8 sign-extension bug — Y bytes ≥ 0x8000 corrupted"
   );
 
@@ -167,8 +166,7 @@ fn wasm_ayuv64_lane_order_high_bit_set_values() {
   let alpha_out: std::vec::Vec<u8> = (0..W).map(|n| rgba_u8[n * 4 + 3]).collect();
   let expected_alpha: std::vec::Vec<u8> = std::vec![0x80; W];
   assert_eq!(
-    alpha_out,
-    expected_alpha,
+    alpha_out, expected_alpha,
     "wasm ayuv64→rgba α sign-extension bug — A bytes ≥ 0x8000 corrupted"
   );
 }
@@ -228,5 +226,8 @@ fn wasm_ayuv64_lane_order_per_pixel_y_and_a() {
   // α is at slot 3 (index 3) of each RGBA quadruple in the output.
   let alpha_out: std::vec::Vec<u16> = (0..W).map(|n| rgba_out[n * 4 + 3]).collect();
   let expected_alpha: std::vec::Vec<u16> = (0..W as u16).map(|n| 2 * n + 1).collect();
-  assert_eq!(alpha_out, expected_alpha, "wasm ayuv64→rgba_u16 A lane reorder bug");
+  assert_eq!(
+    alpha_out, expected_alpha,
+    "wasm ayuv64→rgba_u16 A lane reorder bug"
+  );
 }

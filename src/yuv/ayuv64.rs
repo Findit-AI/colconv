@@ -67,12 +67,7 @@ pub struct Ayuv64Row<'a> {
 
 impl<'a> Ayuv64Row<'a> {
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub(crate) fn new(
-    packed: &'a [u16],
-    row: usize,
-    matrix: ColorMatrix,
-    full_range: bool,
-  ) -> Self {
+  pub(crate) fn new(packed: &'a [u16], row: usize, matrix: ColorMatrix, full_range: bool) -> Self {
     Self {
       packed,
       row,

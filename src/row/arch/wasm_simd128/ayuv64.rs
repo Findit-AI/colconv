@@ -120,14 +120,10 @@ unsafe fn deinterleave_ayuv64_8px(ptr: *const u16) -> (v128, v128, v128, v128) {
     let v23 = i8x16_shuffle::<0, 1, 2, 3, 16, 17, 18, 19, 0, 0, 0, 0, 0, 0, 0, 0>(v2, v3);
 
     // Level 2: combine two 8-byte fragments into full 8-lane u16x8 vectors.
-    let a_vec =
-      i8x16_shuffle::<0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23>(a01, a23);
-    let y_vec =
-      i8x16_shuffle::<0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23>(y01, y23);
-    let u_vec =
-      i8x16_shuffle::<0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23>(u01, u23);
-    let v_vec =
-      i8x16_shuffle::<0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23>(v01, v23);
+    let a_vec = i8x16_shuffle::<0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23>(a01, a23);
+    let y_vec = i8x16_shuffle::<0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23>(y01, y23);
+    let u_vec = i8x16_shuffle::<0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23>(u01, u23);
+    let v_vec = i8x16_shuffle::<0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23>(v01, v23);
 
     (a_vec, y_vec, u_vec, v_vec)
   }
@@ -406,18 +402,14 @@ pub(crate) unsafe fn ayuv64_to_rgb_u16_or_rgba_u16_row<const ALPHA: bool, const 
       // Widen low 4 chroma lanes to i32x4.
       let u_lo_i32 = i32x4_extend_low_i16x8(u_i16);
       let v_lo_i32 = i32x4_extend_low_i16x8(v_i16);
-      let u_d_lo =
-        i32x4_shr(i32x4_add(i32x4_mul(u_lo_i32, c_scale_i32), rnd_i32), 15);
-      let v_d_lo =
-        i32x4_shr(i32x4_add(i32x4_mul(v_lo_i32, c_scale_i32), rnd_i32), 15);
+      let u_d_lo = i32x4_shr(i32x4_add(i32x4_mul(u_lo_i32, c_scale_i32), rnd_i32), 15);
+      let v_d_lo = i32x4_shr(i32x4_add(i32x4_mul(v_lo_i32, c_scale_i32), rnd_i32), 15);
 
       // Widen high 4 chroma lanes to i32x4.
       let u_hi_i32 = i32x4_extend_high_i16x8(u_i16);
       let v_hi_i32 = i32x4_extend_high_i16x8(v_i16);
-      let u_d_hi =
-        i32x4_shr(i32x4_add(i32x4_mul(u_hi_i32, c_scale_i32), rnd_i32), 15);
-      let v_d_hi =
-        i32x4_shr(i32x4_add(i32x4_mul(v_hi_i32, c_scale_i32), rnd_i32), 15);
+      let u_d_hi = i32x4_shr(i32x4_add(i32x4_mul(u_hi_i32, c_scale_i32), rnd_i32), 15);
+      let v_d_hi = i32x4_shr(i32x4_add(i32x4_mul(v_hi_i32, c_scale_i32), rnd_i32), 15);
 
       // Widen i32x4 chroma deltas to 2 × i64x2 for i64 chroma pipeline.
       let u_d_lo_lo = i64x2_extend_low_i32x4(u_d_lo);
@@ -572,8 +564,7 @@ pub(crate) unsafe fn ayuv64_to_luma_row(packed: &[u16], luma_out: &mut [u8], wid
     while x + 16 <= width {
       // Two deinterleaves for 8 pixels each.
       let (_a_lo, y_lo, _u_lo, _v_lo) = deinterleave_ayuv64_8px(packed.as_ptr().add(x * 4));
-      let (_a_hi, y_hi, _u_hi, _v_hi) =
-        deinterleave_ayuv64_8px(packed.as_ptr().add(x * 4 + 32));
+      let (_a_hi, y_hi, _u_hi, _v_hi) = deinterleave_ayuv64_8px(packed.as_ptr().add(x * 4 + 32));
 
       // >> 8 to get u8 luma (high byte of each Y u16 sample).
       // Logical shift (u16x8_shr) — arithmetic shift (i16x8_shr) would
@@ -590,7 +581,11 @@ pub(crate) unsafe fn ayuv64_to_luma_row(packed: &[u16], luma_out: &mut [u8], wid
 
     // Scalar tail.
     if x < width {
-      scalar::ayuv64_to_luma_row(&packed[x * 4..width * 4], &mut luma_out[x..width], width - x);
+      scalar::ayuv64_to_luma_row(
+        &packed[x * 4..width * 4],
+        &mut luma_out[x..width],
+        width - x,
+      );
     }
   }
 }
@@ -618,8 +613,7 @@ pub(crate) unsafe fn ayuv64_to_luma_u16_row(packed: &[u16], luma_out: &mut [u16]
     while x + 16 <= width {
       // Two deinterleaves for 8 pixels each.
       let (_a_lo, y_lo, _u_lo, _v_lo) = deinterleave_ayuv64_8px(packed.as_ptr().add(x * 4));
-      let (_a_hi, y_hi, _u_hi, _v_hi) =
-        deinterleave_ayuv64_8px(packed.as_ptr().add(x * 4 + 32));
+      let (_a_hi, y_hi, _u_hi, _v_hi) = deinterleave_ayuv64_8px(packed.as_ptr().add(x * 4 + 32));
 
       // Direct copy — Y samples are 16-bit native (no shift needed).
       v128_store(luma_out.as_mut_ptr().add(x).cast(), y_lo);
