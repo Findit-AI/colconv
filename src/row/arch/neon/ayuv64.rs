@@ -1,5 +1,3 @@
-#![allow(dead_code)] // dispatcher (Tasks 9-13) not yet wired
-
 //! NEON kernels for AYUV64 packed YUV 4:4:4 16-bit family
 //! (FFmpeg `AV_PIX_FMT_AYUV64LE`).
 //!

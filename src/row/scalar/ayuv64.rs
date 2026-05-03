@@ -1,5 +1,3 @@
-#![allow(dead_code)] // dispatcher (Tasks 4-13) not yet wired
-
 //! Scalar reference kernels for the AYUV64 packed YUV 4:4:4 16-bit
 //! family (FFmpeg `AV_PIX_FMT_AYUV64LE`). Each pixel is a 4-u16
 //! quadruple `A(16) ‖ Y(16) ‖ U(16) ‖ V(16)`.

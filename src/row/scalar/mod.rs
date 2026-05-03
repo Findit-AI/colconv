@@ -30,7 +30,6 @@ mod yuv_planar_16bit;
 mod yuv_planar_8bit;
 mod yuv_planar_high_bit;
 
-#[allow(unused_imports)]
 pub(crate) use ayuv64::*;
 pub(crate) use bayer::*;
 pub(crate) use hsv::*;
