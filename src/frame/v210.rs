@@ -25,6 +25,22 @@
 //! subsampling still mandates the 2-pixel pair, but a partial last
 //! word with 2 or 4 valid samples is fully supported. The minimum
 //! row size is computed as `width.div_ceil(6) * 16`.
+//!
+//! ### Stride permissiveness vs FFmpeg's canonical 128-byte alignment
+//!
+//! FFmpeg / SMPTE-272M's canonical V210 row stride is
+//! `((width + 47) / 48) * 128` bytes — i.e. round width up to the next
+//! multiple of 48 pixels (8 word groups), then 128 bytes per group.
+//! For width=1920 this is `40 * 128 = 5120` bytes; for width=1280 it
+//! is `27 * 128 = 3456` bytes (vs the crate's tight minimum of 3424).
+//!
+//! [`V210Frame`] accepts **both** the canonical FFmpeg stride AND any
+//! tighter caller-supplied stride down to `width.div_ceil(6) * 16`.
+//! Real V210 plane buffers produced by FFmpeg / DeckLink / NDI carry
+//! the canonical 128-aligned stride; the crate parses them faithfully.
+//! The discrepancy only matters if a caller hand-builds a tightly-
+//! packed buffer and then byte-compares against an FFmpeg-produced
+//! reference at the canonical stride.
 
 use derive_more::IsVariant;
 use thiserror::Error;

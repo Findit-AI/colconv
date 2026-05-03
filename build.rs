@@ -1,31 +1,18 @@
-use std::env::{self, var};
+use std::env;
 
 fn main() {
-  // Don't rerun this on changes other than build.rs, as we only depend on
-  // the rustc version.
+  // Don't rerun this on changes other than build.rs.
   println!("cargo:rerun-if-changed=build.rs");
 
-  // Check for `--features=tarpaulin`.
-  let tarpaulin = var("CARGO_FEATURE_TARPAULIN").is_ok();
+  // Detect cargo-tarpaulin by the env vars it sets at coverage-collection
+  // time. There is no `tarpaulin` Cargo feature defined in `Cargo.toml`
+  // (the `cfg(tarpaulin)` annotations throughout the crate are set HERE,
+  // not via a feature toggle), so the env-var check is the active
+  // mechanism.
+  println!("cargo:rerun-if-env-changed=CARGO_TARPAULIN");
+  println!("cargo:rerun-if-env-changed=CARGO_CFG_TARPAULIN");
 
-  if tarpaulin {
-    use_feature("tarpaulin");
-  } else {
-    // Always rerun if these env vars change.
-    println!("cargo:rerun-if-env-changed=CARGO_TARPAULIN");
-    println!("cargo:rerun-if-env-changed=CARGO_CFG_TARPAULIN");
-
-    // Detect tarpaulin by environment variable
-    if env::var("CARGO_TARPAULIN").is_ok() || env::var("CARGO_CFG_TARPAULIN").is_ok() {
-      use_feature("tarpaulin");
-    }
+  if env::var("CARGO_TARPAULIN").is_ok() || env::var("CARGO_CFG_TARPAULIN").is_ok() {
+    println!("cargo:rustc-cfg=tarpaulin");
   }
-
-  // Rerun this script if any of our features or configuration flags change,
-  // or if the toolchain we used for feature detection changes.
-  println!("cargo:rerun-if-env-changed=CARGO_FEATURE_TARPAULIN");
-}
-
-fn use_feature(feature: &str) {
-  println!("cargo:rustc-cfg={}", feature);
 }

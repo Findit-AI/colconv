@@ -233,9 +233,18 @@ jobs:
           rustup default stable
           rustup target add wasm32-wasip1
       - name: Install wasmtime
+        # Pinned to a specific release because the upstream
+        # `wasmtime.dev/install.sh` script can break when its
+        # version-detection logic fails to substitute the latest tag
+        # (e.g. emitting `{` as a literal placeholder), producing an
+        # invalid download URL. Direct GitHub release download is more
+        # reliable and reproducible.
         run: |
-          curl https://wasmtime.dev/install.sh -sSf | bash
-          echo "$HOME/.wasmtime/bin" >> "$GITHUB_PATH"
+          WASMTIME_VERSION=v44.0.1
+          ARCHIVE="wasmtime-${WASMTIME_VERSION}-x86_64-linux"
+          curl -sSfL "https://github.com/bytecodealliance/wasmtime/releases/download/${WASMTIME_VERSION}/${ARCHIVE}.tar.xz" \
+            | tar -xJ -C "$HOME"
+          echo "$HOME/${ARCHIVE}" >> "$GITHUB_PATH"
       - name: Run lib tests under wasmtime (simd128)
         env:
           # `cargo test` hands the compiled `.wasm` test binary as the
