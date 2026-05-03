@@ -139,3 +139,70 @@ fn avx2_v30x_luma_matches_scalar_widths() {
     check_luma_u16(w);
   }
 }
+
+/// Build a V30X packed buffer for `width` pixels where:
+/// - Y[n] = n + 1 (10-bit value; luma_u16 output = n+1 directly)
+/// - U[n] = 2n + 1 (10-bit value; one U per pixel — V30X is 4:4:4)
+/// - V[n] = 512 (neutral 10-bit midpoint, bias-subtracted = 0)
+///
+/// V30X layout (per u32 word):
+///   bits[31:22] = V (10-bit)
+///   bits[21:12] = Y (10-bit)
+///   bits[11:2]  = U (10-bit)
+///   bits[1:0]   = padding (zero)
+fn build_v30x_packed_y_n_plus_1_u_2n_plus_1_v_neutral(width: usize) -> std::vec::Vec<u32> {
+  (0..width)
+    .map(|n| {
+      let y = (n as u32) + 1;
+      let u = 2 * (n as u32) + 1;
+      let v = 512u32;
+      (v << 22) | (y << 12) | (u << 2)
+    })
+    .collect()
+}
+
+/// Multi-channel lane-order regression — encodes pixel index in BOTH Y AND U
+/// so we catch per-channel asymmetric mask bugs that a Y-only test would miss.
+/// Pattern from Ship 12d AYUV64 backport.
+///
+/// Asserts:
+/// - `luma_u16_row` output = [1..=W] (Y values direct, no shift)
+/// - SIMD RGB output == scalar RGB output (any lane-order bug diverges)
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn avx2_v30x_lane_order_per_pixel_y_and_u() {
+  if !std::arch::is_x86_feature_detected!("avx2") {
+    return;
+  }
+  const W: usize = 8;
+  let packed = build_v30x_packed_y_n_plus_1_u_2n_plus_1_v_neutral(W);
+
+  // Part 1: Luma natural-order (u16, no shift loss)
+  let mut luma = std::vec![0u16; W];
+  unsafe {
+    v30x_to_luma_u16_row(&packed, &mut luma, W);
+  }
+  let expected_luma: std::vec::Vec<u16> = (1..=W as u16).collect();
+  assert_eq!(luma, expected_luma, "avx2 v30x luma reorder bug");
+
+  // Part 2: SIMD vs scalar parity (catches U/Y channel swap bugs)
+  let mut simd_rgb = std::vec![0u8; W * 3];
+  let mut scalar_rgb = std::vec![0u8; W * 3];
+  unsafe {
+    v30x_to_rgb_or_rgba_row::<false>(&packed, &mut simd_rgb, W, crate::ColorMatrix::Bt709, false);
+  }
+  scalar::v30x_to_rgb_or_rgba_row::<false>(
+    &packed,
+    &mut scalar_rgb,
+    W,
+    crate::ColorMatrix::Bt709,
+    false,
+  );
+  assert_eq!(
+    simd_rgb, scalar_rgb,
+    "avx2 v30x SIMD vs scalar diverges — lane-order bug"
+  );
+}
