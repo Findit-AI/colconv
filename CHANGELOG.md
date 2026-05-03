@@ -3,7 +3,7 @@
 ## 0.16.0 — Tier 5 closed: AYUV64 (16-bit packed YUV 4:4:4 + α)
 
 - Added `Ayuv64` source marker (FFmpeg `AV_PIX_FMT_AYUV64LE`).
-- 16-bit packed YUV 4:4:4 with **source α** — A byte at slot 0,
+- 16-bit packed YUV 4:4:4 with **source α** — A 16-bit A component at slot 0,
   followed by Y/U/V at slots 1/2/3 (channel order differs from
   VUYA's V/U/Y/A).
 - u8 output path: i32 chroma; α depth-converted u16 → u8 via `>> 8`.
