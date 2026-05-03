@@ -154,7 +154,7 @@ unsafe fn yuv_420_to_rgb_or_rgba_row<const ALPHA: bool, const ALPHA_SRC: bool>(
   }
 
   let coeffs = scalar::Coefficients::for_matrix(matrix);
-  let (y_off, y_scale, c_scale) = scalar::range_params(full_range);
+  let (y_off, y_scale, c_scale) = scalar::range_params_n::<8, 8>(full_range);
   const RND: i32 = 1 << 14;
 
   // SAFETY: AVX‑512BW availability is the caller's obligation per the
@@ -418,7 +418,7 @@ unsafe fn yuv_444_to_rgb_or_rgba_row<const ALPHA: bool, const ALPHA_SRC: bool>(
   }
 
   let coeffs = scalar::Coefficients::for_matrix(matrix);
-  let (y_off, y_scale, c_scale) = scalar::range_params(full_range);
+  let (y_off, y_scale, c_scale) = scalar::range_params_n::<8, 8>(full_range);
   const RND: i32 = 1 << 14;
 
   unsafe {

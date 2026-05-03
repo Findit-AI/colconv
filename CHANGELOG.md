@@ -1,5 +1,35 @@
 # CHANGELOG
 
+## 0.17.0 — 8-bit planar scale-constant migration (Tier 5 closure megaship PR 3)
+
+**Behavior change at limited-range:** all 8-bit YUV→RGB paths now use
+`range_params_n::<8, 8>(...)` for scale constants, replacing the legacy
+hardcoded `range_params(...)` (Ship 8 era). The new constants are
+derived from BITS_IN/BITS_OUT and match the rest of the
+10/12/16-bit family.
+
+For limited-range output, individual channel bytes may differ from
+v0.16.x by ≤1 LSB. Full-range output is byte-identical (both functions
+reduce to scale=1<<15 at full range).
+
+This unifies scale-constant computation across all bit depths into a
+single source of truth. Cross-format planar parity tests
+(`Vuya ↔ Yuva444p`) now exercise both full-range AND limited-range
+without the prior workaround.
+
+Migrated kernels: `yuv_planar_8bit`, `semi_planar_8bit`,
+`packed_yuv_8bit` across the scalar reference and all 5 SIMD backends
+(NEON, SSE4.1, AVX2, AVX-512, wasm-simd128) — 31 call sites total.
+
+The legacy `range_params` function (hardcoded 8-bit constants) has been
+removed; all callers now use `range_params_n::<8, 8>`.
+
+This is **PR 3 of the 4-PR Tier 5 closure megaship**:
+- ✅ PR 1 (v0.16.0): AYUV64 + Tier 5 closure
+- ✅ PR 2 (v0.16.1): Multi-channel lane-order test backport
+- ✅ PR 3 (this release): 8-bit planar scale-constant migration
+- PR 4 (queued): Strategy A+ design + impl across source-α formats
+
 ## 0.16.1 — Multi-channel lane-order regression test backport
 
 Pure test additions; no public API or behavior change.

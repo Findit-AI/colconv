@@ -656,9 +656,9 @@ fn ayuv64_planar_parity_with_yuva444p16() {
   //   the AYUV64 sinker use `range_params_n::<16, BITS_OUT>` — the same
   //   constants for both formats at 16-bit source depth. This means
   //   u8 RGB / RGBA and u16 RGB / RGBA output must be BYTE-IDENTICAL
-  //   between the two formats (unlike the VUYA ↔ Yuva444p parity test
-  //   which required full_range=true to achieve bit-identity due to
-  //   divergent 8-bit constant tables).
+  //   between the two formats. (The analogous VUYA ↔ Yuva444p 8-bit parity
+  //   test also uses limited range after the v0.17.0 range_params_n::<8, 8>
+  //   migration which unified 8-bit constants.)
   //
   // Alpha semantics:
   //   - AYUV64 with_rgba → ayuv64_to_rgba_row: source α >> 8 → u8.

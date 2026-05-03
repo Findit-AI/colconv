@@ -399,18 +399,13 @@ fn vuya_planar_parity_with_yuva444p() {
   // carry identical logical YUVA 8-bit samples. Both sinks run with
   // `with_rgb` AND `with_rgba` attached (plus the standalone-RGBA path).
   //
-  // Design note on byte-identity vs 1-LSB tolerance:
+  // Design note on byte-identity:
   //
-  //   The Yuva444p sinker uses `yuv_444_to_rgb_or_rgba_row` (which calls
-  //   `range_params` → limited-range scales `38142 / 37306`), while VUYA
-  //   uses `vuya_to_rgb_or_rgba_row` (which calls `range_params_n::<8,8>`
-  //   → limited-range scales computed from first principles, yielding
-  //   slightly different constants). These two implementations are
-  //   semantically equivalent but *not* bit-identical under limited range.
-  //
-  //   Full-range (full_range=true) avoids the issue: at 8-bit full-range
-  //   both kernels reduce to scale = 1 << 15 (exact), making the math
-  //   path bit-identical. We therefore use full_range=true.
+  //   After the range_params_n::<8, 8> migration (v0.17.0), both the
+  //   Yuva444p sinker (`yuv_444_to_rgb_or_rgba_row`) and the VUYA sinker
+  //   (`vuya_to_rgb_or_rgba_row`) use `range_params_n::<8, 8>` for scale
+  //   constants. Both paths are now byte-identical at full range AND limited
+  //   range. The prior full_range=true workaround has been removed.
   //
   // Alpha semantics:
   //   - VUYA with_rgb + with_rgba → each runs its own independent kernel
@@ -463,8 +458,9 @@ fn vuya_planar_parity_with_yuva444p() {
   let packed_frame =
     VuyaFrame::try_new(&vuya_buf, width as u32, height as u32, (width * 4) as u32).unwrap();
 
-  // full_range=true so both kernels use scale = 1 << 15 (bit-identical).
-  let full_range = true;
+  // Use limited range (full_range=false) — both kernels now use
+  // range_params_n::<8, 8> yielding byte-identical output at all ranges.
+  let full_range = false;
 
   // --- Part 1: RGB parity (`with_rgb` only — no RGBA, no alpha divergence) ---
   let mut p_rgb = std::vec![0u8; n * 3];

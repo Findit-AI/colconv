@@ -49,7 +49,7 @@ pub(crate) fn yuv422_packed_to_rgb_or_rgba_row<const Y_LSB: bool, const SWAP_UV:
   debug_assert!(out.len() >= width * bpp, "out row too short for {bpp}bpp");
 
   let coeffs = Coefficients::for_matrix(matrix);
-  let (y_off, y_scale, c_scale) = range_params(full_range);
+  let (y_off, y_scale, c_scale) = range_params_n::<8, 8>(full_range);
 
   // Round-to-nearest Q15.
   const RND: i32 = 1 << 14;
