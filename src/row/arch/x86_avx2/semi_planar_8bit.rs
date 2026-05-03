@@ -140,7 +140,7 @@ unsafe fn nv12_or_nv21_to_rgb_or_rgba_row_impl<const SWAP_UV: bool, const ALPHA:
   debug_assert!(out.len() >= width * bpp);
 
   let coeffs = scalar::Coefficients::for_matrix(matrix);
-  let (y_off, y_scale, c_scale) = scalar::range_params(full_range);
+  let (y_off, y_scale, c_scale) = scalar::range_params_n::<8, 8>(full_range);
   const RND: i32 = 1 << 14;
 
   // SAFETY: AVX2 availability is the caller's obligation; all pointer
@@ -388,7 +388,7 @@ unsafe fn nv24_or_nv42_to_rgb_or_rgba_row_impl<const SWAP_UV: bool, const ALPHA:
   debug_assert!(out.len() >= width * bpp);
 
   let coeffs = scalar::Coefficients::for_matrix(matrix);
-  let (y_off, y_scale, c_scale) = scalar::range_params(full_range);
+  let (y_off, y_scale, c_scale) = scalar::range_params_n::<8, 8>(full_range);
   const RND: i32 = 1 << 14;
 
   // SAFETY: AVX2 availability is the caller's obligation; all pointer

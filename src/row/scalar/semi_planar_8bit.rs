@@ -97,7 +97,7 @@ fn nv12_or_nv21_to_rgb_or_rgba_row_impl<const SWAP_UV: bool, const ALPHA: bool>(
   debug_assert!(out.len() >= width * bpp, "out row too short for {bpp}bpp");
 
   let coeffs = Coefficients::for_matrix(matrix);
-  let (y_off, y_scale, c_scale) = range_params(full_range);
+  let (y_off, y_scale, c_scale) = range_params_n::<8, 8>(full_range);
   const RND: i32 = 1 << 14;
 
   let mut x = 0;
@@ -229,7 +229,7 @@ fn nv24_or_nv42_to_rgb_or_rgba_row_impl<const SWAP_UV: bool, const ALPHA: bool>(
   debug_assert!(out.len() >= width * bpp, "out row too short for {bpp}bpp");
 
   let coeffs = Coefficients::for_matrix(matrix);
-  let (y_off, y_scale, c_scale) = range_params(full_range);
+  let (y_off, y_scale, c_scale) = range_params_n::<8, 8>(full_range);
   const RND: i32 = 1 << 14;
 
   for x in 0..width {

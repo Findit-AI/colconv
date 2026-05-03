@@ -174,24 +174,6 @@ pub(super) const fn range_params_n<const BITS: u32, const OUT_BITS: u32>(
   }
 }
 
-/// Range-scaling params: `(y_off, y_scale_q15, c_scale_q15)`.
-///
-/// Full range: no offset, unit scales (Q15 = 2^15).
-///
-/// Limited range: map Y from `[16, 235]` to `[0, 255]` via
-/// `y_scaled = (y - 16) * (255 / 219)`; map chroma from `[16, 240]`
-/// to `[0, 255]` via `c_scaled = (c - 128) * (255 / 224)`.
-#[cfg_attr(not(tarpaulin), inline(always))]
-pub(super) const fn range_params(full_range: bool) -> (i32, i32, i32) {
-  if full_range {
-    (0, 1 << 15, 1 << 15)
-  } else {
-    //  255 / 219 ≈ 1.164383; * 2^15 ≈ 38142.
-    //  255 / 224 ≈ 1.138393; * 2^15 ≈ 37306.
-    (16, 38142, 37306)
-  }
-}
-
 /// Q15 YUV → RGB coefficients for a given matrix.
 ///
 /// Full generalized 3×3 matrix:
