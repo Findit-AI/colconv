@@ -1,5 +1,6 @@
 use super::*;
 
+mod ayuv64;
 mod high_bit_4_2_0;
 mod high_bit_4_4_4_and_pn;
 mod packed_rgb;
