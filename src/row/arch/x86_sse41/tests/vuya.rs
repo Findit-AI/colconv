@@ -1,6 +1,25 @@
 use super::super::*;
 use crate::{ColorMatrix, row::scalar};
 
+/// Build a VUYA packed stream with Y[n] = n+1, A[n] = 2n+1, V=U=128.
+///
+/// VUYA layout per pixel: `[V(8), U(8), Y(8), A(8)]`. Source α is real
+/// (not padding). Encoding:
+/// - V = 128 (neutral 8-bit midpoint)
+/// - U = 128 (neutral)
+/// - Y[n] = n + 1
+/// - A[n] = 2n + 1  (source α — distinct values per pixel)
+fn build_vuya_packed_y_n_plus_1_a_2n_plus_1_u_v_neutral(width: usize) -> std::vec::Vec<u8> {
+  let mut packed = std::vec![0u8; width * 4];
+  for n in 0..width {
+    packed[n * 4] = 128; // V
+    packed[n * 4 + 1] = 128; // U
+    packed[n * 4 + 2] = (n as u8) + 1; // Y = n+1
+    packed[n * 4 + 3] = (n as u8) * 2 + 1; // A = 2n+1
+  }
+  packed
+}
+
 /// Build a deterministic pseudo-random VUYA packed stream.
 /// Returns `width * 4` bytes with channels varying across all 8-bit values.
 fn pseudo_random_vuya(width: usize, seed: usize) -> std::vec::Vec<u8> {
@@ -86,4 +105,42 @@ fn sse41_vuya_rgb_matches_scalar_all_matrices() {
       check_rgb::<true, false>(16, m, full);
     }
   }
+}
+
+/// Multi-channel lane-order regression — encodes pixel index in
+/// BOTH Y AND A so we catch per-channel asymmetric mask bugs that
+/// a Y-only test would miss. Pattern from Ship 12d AYUV64 backport.
+/// VUYA has source α — assert the α slot directly.
+///
+/// SSE4.1 SIMD threshold: 16 px/iter. W=32 covers exactly 2 full
+/// SIMD iterations.
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn sse41_vuya_lane_order_per_pixel_y_and_a() {
+  if !std::arch::is_x86_feature_detected!("sse4.1") {
+    return;
+  }
+  const W: usize = 32;
+  let packed = build_vuya_packed_y_n_plus_1_a_2n_plus_1_u_v_neutral(W);
+
+  // Part 1: Luma natural-order (u8 path, Y is direct).
+  let mut luma = std::vec![0u8; W];
+  unsafe {
+    vuya_to_luma_row(&packed, &mut luma, W);
+  }
+  let expected_luma: std::vec::Vec<u8> = (1..=W as u8).collect();
+  assert_eq!(luma, expected_luma, "sse41 vuya luma reorder bug");
+
+  // Part 2: u8 RGBA — α slot (every 4th byte) directly verifies
+  // A-channel deinterleave. neutral U/V → chroma contribution is zero.
+  let mut rgba = std::vec![0u8; W * 4];
+  unsafe {
+    vuya_to_rgb_or_rgba_row::<true, true>(&packed, &mut rgba, W, ColorMatrix::Bt709, false);
+  }
+  let alpha_out: std::vec::Vec<u8> = (0..W).map(|n| rgba[n * 4 + 3]).collect();
+  let expected_alpha: std::vec::Vec<u8> = (0..W).map(|n| (n as u8) * 2 + 1).collect();
+  assert_eq!(alpha_out, expected_alpha, "sse41 vuya rgba α reorder bug");
 }

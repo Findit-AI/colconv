@@ -1,5 +1,54 @@
 # CHANGELOG
 
+## 0.16.1 — Multi-channel lane-order regression test backport
+
+Pure test additions; no public API or behavior change.
+
+Backports the multi-channel lane-order regression test pattern from
+Ship 12d (AYUV64) to all existing SIMD-deinterleave formats × every
+backend. The new pattern encodes the pixel index in TWO channels
+independently (Y + U for non-α formats, Y + A for VUYA) and asserts:
+
+- Luma output is in natural pixel order (catches Y-channel reorder bugs)
+- SIMD RGB output is byte-identical to scalar RGB output (catches
+  per-channel asymmetric mask bugs that would diverge from scalar)
+
+Formats covered: V210, V410, V30X, XV36, VUYA, Y210, Y212, Y216.
+(VUYX is excluded — its deinterleave kernel is shared with VUYA via
+`vuya_to_rgb_or_rgba_row<ALPHA, ALPHA_SRC>`.)
+
+Two real bugs were caught in this PR's audit:
+- V410 SSE4.1 lane-order test was using W=4 but the SSE4.1 V410 kernel
+  main loop is `while x + 8 <= width` — the test never entered the
+  SIMD path. Fixed by bumping W to 16 (≥2 SIMD iterations).
+- V30X SSE4.1 had the same issue and was fixed identically.
+
+All lane-order tests now use W = 2× SIMD entry threshold, so each
+test exercises ≥2 full SIMD main-loop iterations rather than only
+the scalar tail.
+
+This is **PR 2 of the 4-PR Tier 5 closure megaship**:
+- ✅ PR 1 (Ship 12d v0.16.0): AYUV64 + Tier 5 closure
+- ✅ PR 2 (this release): Multi-channel lane-order test backport
+- PR 3 (next): 8-bit planar `range_params` → `range_params_n::<8, 8>` migration
+- PR 4 (queued): Strategy A+ design + impl across source-α formats
+
+After this release, all SIMD-deinterleave families share the same
+lane-order regression test discipline. Asymmetric per-channel mask
+bugs are now catchable across the entire packed-YUV family.
+
+### Follow-up — coverage gap (not blocking)
+
+Code-quality reviewers noted that for 4:2:2 formats (Y2xx, Y216) the
+encoded values `Y[2k] = 2k+1` and `U[k] = 2k+1` happen to be equal,
+so Part 1 (luma assertion) alone cannot distinguish a Y0↔U slot swap
+bug. Part 2 (SIMD-vs-scalar parity) catches this bug class fully, so
+the tests are correct, but a future cleanup could change the U-encoding
+formula to a non-overlapping range (e.g. `U[k] = 0x80 + k`) so Part 1
+provides additional coverage independent of the scalar reference.
+
+---
+
 ## 0.16.0 — Tier 5 closed: AYUV64 (16-bit packed YUV 4:4:4 + α)
 
 - Added `Ayuv64` source marker (FFmpeg `AV_PIX_FMT_AYUV64LE`).

@@ -123,3 +123,69 @@ fn sse41_y216_luma_matches_scalar_widths() {
     check_luma_u16(w);
   }
 }
+
+/// Multi-channel lane-order regression — encodes pixel index in
+/// BOTH Y AND U so we catch per-channel asymmetric mask bugs that
+/// a Y-only test would miss. Pattern from Ship 12d AYUV64 backport.
+///
+/// Y216 is 16-bit native (no MSB shift) — exercises the i64 chroma
+/// path at u16 RGB output.
+///
+/// Y216 layout: YUYV-shape u16x2 `[Y0, U, Y1, V]` per 2 pixels.
+/// - `Y[n] = (n + 1) as u16` (16-bit native, no shift)
+/// - `U[k] = (2k + 1) as u16` (one U per pair)
+/// - `V = 0x8000` (neutral u16 midpoint)
+///
+/// SSE4.1 u16-RGB path threshold: 8 px/iter. W=16 covers 2 full iterations.
+fn build_y216_packed_y_n_plus_1_u_2k_plus_1_v_neutral(width: usize) -> std::vec::Vec<u16> {
+  let mut packed = std::vec![0u16; width * 2];
+  for k in 0..(width / 2) {
+    let y0 = (2 * k as u16) + 1;
+    let y1 = (2 * k as u16) + 2;
+    let u = (2 * k as u16) + 1;
+    packed[k * 4] = y0;
+    packed[k * 4 + 1] = u;
+    packed[k * 4 + 2] = y1;
+    packed[k * 4 + 3] = 0x8000; // V neutral
+  }
+  packed
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn sse41_y216_lane_order_per_pixel_y_and_u() {
+  if !std::arch::is_x86_feature_detected!("sse4.1") {
+    return;
+  }
+  const W: usize = 16;
+  let packed = build_y216_packed_y_n_plus_1_u_2k_plus_1_v_neutral(W);
+
+  // Part 1: Luma natural-order at u16
+  let mut luma_u16 = std::vec![0u16; W];
+  unsafe {
+    y216_to_luma_u16_row(&packed, &mut luma_u16, W);
+  }
+  let expected_luma: std::vec::Vec<u16> = (1..=W as u16).collect();
+  assert_eq!(luma_u16, expected_luma, "SSE4.1 y216 luma_u16 reorder bug");
+
+  // Part 2: SIMD vs scalar parity at u16 RGB (i64 chroma path)
+  let mut simd_rgb = std::vec![0u16; W * 3];
+  let mut scalar_rgb = std::vec![0u16; W * 3];
+  unsafe {
+    y216_to_rgb_u16_or_rgba_u16_row::<false>(&packed, &mut simd_rgb, W, ColorMatrix::Bt709, false);
+  }
+  scalar::y216_to_rgb_u16_or_rgba_u16_row::<false>(
+    &packed,
+    &mut scalar_rgb,
+    W,
+    ColorMatrix::Bt709,
+    false,
+  );
+  assert_eq!(
+    simd_rgb, scalar_rgb,
+    "SSE4.1 y216 SIMD vs scalar diverges (u16 RGB, i64 chroma)"
+  );
+}

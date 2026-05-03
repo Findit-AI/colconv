@@ -1,6 +1,6 @@
 [package]
 name = "colconv"
-version = "0.16.0"
+version = "0.16.1"
 edition = "2024"
 repository = "https://github.com/findit-ai/colconv"
 homepage = "https://github.com/findit-ai/colconv"

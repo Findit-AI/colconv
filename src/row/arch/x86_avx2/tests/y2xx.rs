@@ -1,6 +1,95 @@
 use super::super::*;
 use crate::{ColorMatrix, row::scalar};
 
+/// Verify multi-channel Y+U lane order for Y2xx (BITS-generic Y210/Y212).
+///
+/// Y2xx YUYV-shape u16x2: `[Y0, U, Y1, V]` per 2 pixels (4:2:2).
+/// MSB-aligned: low `(16 - BITS)` bits are zero, active value in high BITS.
+/// - `Y[n] = ((n + 1) as u16) << shift`
+/// - `U[k] = ((2k + 1) as u16) << shift`  (one U per pair)
+/// - `V = 0x8000` (neutral midpoint, same for BITS=10 and BITS=12)
+///
+/// Part 1: luma u16 natural-order check.
+/// Part 2: SIMD vs scalar parity on u16 RGB output.
+///
+/// AVX2 threshold: 16 px/iter. W=32 covers exactly 2 full SIMD iterations.
+fn check_y2xx_lane_order_per_pixel_y_and_u<const BITS: u32>() {
+  const W: usize = 32;
+  let shift: u16 = (16 - BITS) as u16;
+  let neutral_chroma: u16 = (1u16 << (BITS - 1)) << shift; // 0x8000 for both BITS=10,12
+
+  // Build Y2xx YUYV-shape: [Y0, U, Y1, V] per 2-pixel pair.
+  let mut packed = std::vec![0u16; W * 2];
+  for k in 0..(W / 2) {
+    let y0 = ((2 * k) as u16 + 1) << shift;
+    let y1 = ((2 * k) as u16 + 2) << shift;
+    let u = ((2 * k) as u16 + 1) << shift;
+    packed[k * 4] = y0;
+    packed[k * 4 + 1] = u;
+    packed[k * 4 + 2] = y1;
+    packed[k * 4 + 3] = neutral_chroma;
+  }
+
+  // Part 1: luma u16 natural-order (low-bit-packed: active BITS in low bits).
+  let mut luma_u16 = std::vec![0u16; W];
+  unsafe {
+    y2xx_n_to_luma_u16_row::<BITS>(&packed, &mut luma_u16, W);
+  }
+  let expected_luma: std::vec::Vec<u16> = (1..=W as u16).collect();
+  assert_eq!(
+    luma_u16, expected_luma,
+    "y2xx<BITS={BITS}> luma_u16 reorder bug"
+  );
+
+  // Part 2: SIMD vs scalar parity at u16 RGB.
+  let mut simd_rgb = std::vec![0u16; W * 3];
+  let mut scalar_rgb = std::vec![0u16; W * 3];
+  unsafe {
+    y2xx_n_to_rgb_u16_or_rgba_u16_row::<BITS, false>(
+      &packed,
+      &mut simd_rgb,
+      W,
+      ColorMatrix::Bt709,
+      false,
+    );
+  }
+  scalar::y2xx_n_to_rgb_u16_or_rgba_u16_row::<BITS, false>(
+    &packed,
+    &mut scalar_rgb,
+    W,
+    ColorMatrix::Bt709,
+    false,
+  );
+  assert_eq!(
+    simd_rgb, scalar_rgb,
+    "y2xx<BITS={BITS}> SIMD vs scalar diverges (u16 RGB)"
+  );
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn avx2_y2xx_lane_order_per_pixel_y_and_u_bits10() {
+  if !std::arch::is_x86_feature_detected!("avx2") {
+    return;
+  }
+  check_y2xx_lane_order_per_pixel_y_and_u::<10>();
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn avx2_y2xx_lane_order_per_pixel_y_and_u_bits12() {
+  if !std::arch::is_x86_feature_detected!("avx2") {
+    return;
+  }
+  check_y2xx_lane_order_per_pixel_y_and_u::<12>();
+}
+
 /// Builds a deterministic pseudo-random Y210-shaped u16 buffer with
 /// `width * 2` u16 samples (one quadruple = 4 u16 = 2 pixels). Each
 /// u16 sample has 10 active bits sitting in the high bits, low 6

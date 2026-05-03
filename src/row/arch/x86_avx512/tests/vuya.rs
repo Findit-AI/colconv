@@ -44,38 +44,64 @@ fn check_luma(width: usize) {
   assert_eq!(s, k, "AVX-512 vuya→luma diverges (width={width})");
 }
 
-/// Encodes pixel index `n` (0..64) into Y so we can detect lane
-/// reordering bugs in the AVX-512 deinterleave. The luma kernel just
-/// copies Y bytes through, so output[n] must equal `n + 1` for
-/// naturally-ordered AVX-512 output. For 64 pixels, n ranges 0..63 so
-/// `(n + 1)` is 1..64 — fits in u8.
+/// Build a VUYA packed stream with Y[n] = n+1, A[n] = 2n+1, V=U=128.
+///
+/// VUYA layout per pixel: `[V(8), U(8), Y(8), A(8)]`. Source α is real
+/// (not padding). Encoding:
+/// - V = 128 (neutral 8-bit midpoint)
+/// - U = 128 (neutral)
+/// - Y[n] = n + 1
+/// - A[n] = 2n + 1  (source α — distinct values per pixel)
+fn build_vuya_packed_y_n_plus_1_a_2n_plus_1_u_v_neutral(width: usize) -> std::vec::Vec<u8> {
+  let mut packed = std::vec![0u8; width * 4];
+  for n in 0..width {
+    packed[n * 4] = 128; // V
+    packed[n * 4 + 1] = 128; // U
+    packed[n * 4 + 2] = (n as u8) + 1; // Y = n+1
+    packed[n * 4 + 3] = (n as u8) * 2 + 1; // A = 2n+1
+  }
+  packed
+}
+
+/// Multi-channel lane-order regression — encodes pixel index in
+/// BOTH Y AND A so we catch per-channel asymmetric mask bugs that
+/// the previous Y-only test would miss. Pattern from Ship 12d
+/// AYUV64 backport. VUYA has source α — assert the α slot directly.
+///
+/// AVX-512 SIMD threshold: 64 px/iter. W=128 covers exactly 2 full
+/// SIMD iterations. For n in 0..127: Y[n]=n+1 ≤ 128 and A[n]=2n+1 ≤ 255
+/// — both fit in u8.
 #[test]
 #[cfg_attr(
   miri,
   ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
 )]
-fn avx512_vuya_luma_lane_order_per_pixel() {
+fn avx512_vuya_lane_order_per_pixel_y_and_a() {
   if !std::arch::is_x86_feature_detected!("avx512f")
     || !std::arch::is_x86_feature_detected!("avx512bw")
   {
     return;
   }
-  // 64 pixels: encode pixel index n into Y byte (n + 1 to avoid 0).
-  // Y is at byte offset 2 of each pixel quadruple.
-  let mut packed = std::vec![0u8; 64 * 4];
-  for n in 0..64 {
-    packed[n * 4 + 2] = (n as u8) + 1;
-  }
-  let mut out = std::vec![0u8; 64];
+  const W: usize = 128;
+  let packed = build_vuya_packed_y_n_plus_1_a_2n_plus_1_u_v_neutral(W);
+
+  // Part 1: Luma natural-order (u8 path, Y is direct).
+  let mut luma = std::vec![0u8; W];
   unsafe {
-    vuya_to_luma_row(&packed, &mut out, 64);
+    vuya_to_luma_row(&packed, &mut luma, W);
   }
-  let expected: std::vec::Vec<u8> = (1..=64u8).collect();
-  assert_eq!(
-    out, expected,
-    "AVX-512 vuya→luma pixel reorder bug: {:?} != {:?}",
-    out, expected
-  );
+  let expected_luma: std::vec::Vec<u8> = (1..=W as u8).collect();
+  assert_eq!(luma, expected_luma, "avx512 vuya luma reorder bug");
+
+  // Part 2: u8 RGBA — α slot (every 4th byte) directly verifies
+  // A-channel deinterleave. neutral U/V → chroma contribution is zero.
+  let mut rgba = std::vec![0u8; W * 4];
+  unsafe {
+    vuya_to_rgb_or_rgba_row::<true, true>(&packed, &mut rgba, W, ColorMatrix::Bt709, false);
+  }
+  let alpha_out: std::vec::Vec<u8> = (0..W).map(|n| rgba[n * 4 + 3]).collect();
+  let expected_alpha: std::vec::Vec<u8> = (0..W).map(|n| (n as u8) * 2 + 1).collect();
+  assert_eq!(alpha_out, expected_alpha, "avx512 vuya rgba α reorder bug");
 }
 
 #[test]
