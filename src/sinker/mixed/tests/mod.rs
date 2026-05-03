@@ -6,6 +6,7 @@ use crate::{ColorMatrix, frame::*, raw::*, yuv::*};
 // (`pseudo_random_u8`, `pseudo_random_u16_low_n_bits`) live at
 // module scope below and are re-exported as `pub(super)` so the
 // submodules can pull them via `use super::*;`.
+mod ayuv64;
 mod bayer;
 mod packed_rgb_10bit;
 mod packed_rgb_8bit;

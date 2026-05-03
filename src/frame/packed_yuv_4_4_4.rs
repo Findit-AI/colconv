@@ -6,8 +6,8 @@
 //! and [`V30XFrame`] (10-bit, sibling formats with opposite padding
 //! positions); Ship 12b adds [`Xv36Frame`] (12-bit MSB-aligned);
 //! Ship 12c adds [`VuyaFrame`] and [`VuyxFrame`] (8-bit native, with
-//! source α / α-as-padding semantics); the 16-bit `ayuv64` lands
-//! in 12d.
+//! source α / α-as-padding semantics); Ship 12d adds [`Ayuv64Frame`]
+//! (16-bit native, source α).
 
 use derive_more::IsVariant;
 use thiserror::Error;
@@ -821,6 +821,166 @@ impl<'a> VuyxFrame<'a> {
     self.height
   }
   /// Stride in bytes (the number of bytes per row, ≥ `width × 4`).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn stride(&self) -> u32 {
+    self.stride
+  }
+}
+
+/// Validated wrapper around a packed YUV 4:4:4 16-bit `AYUV64` plane.
+///
+/// `AYUV64` (FFmpeg `AV_PIX_FMT_AYUV64LE`) packs **four u16 channels
+/// per pixel** as `A(16) ‖ Y(16) ‖ U(16) ‖ V(16)` little-endian.
+/// Each channel uses the full u16 range (16-bit native — no padding
+/// bits). Source α is real and pass-through to RGBA outputs.
+///
+/// Per-pixel layout (LE, MSB → LSB inside each u16):
+///
+/// | u16 slot | Field | Active bits           |
+/// |----------|-------|-----------------------|
+/// | 0        | A     | bits\[15:0\] (source) |
+/// | 1        | Y     | bits\[15:0\] (16-bit) |
+/// | 2        | U     | bits\[15:0\] (16-bit) |
+/// | 3        | V     | bits\[15:0\] (16-bit) |
+///
+/// Each row holds exactly `width × 4` u16 elements (`stride >=
+/// width × 4`); the plane occupies `stride * height` u16 elements.
+#[derive(Debug, Clone, Copy)]
+pub struct Ayuv64Frame<'a> {
+  packed: &'a [u16],
+  width: u32,
+  height: u32,
+  stride: u32,
+}
+
+/// Errors returned by [`Ayuv64Frame::try_new`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Error)]
+#[non_exhaustive]
+pub enum Ayuv64FrameError {
+  /// `width == 0` or `height == 0`.
+  #[error("Ayuv64Frame: zero dimension width={width} height={height}")]
+  ZeroDimension {
+    /// Configured width.
+    width: u32,
+    /// Configured height.
+    height: u32,
+  },
+  /// `width × 4` overflows `u32`. Only reachable on 32-bit targets
+  /// with extreme widths.
+  #[error("Ayuv64Frame: width {width} × 4 overflows u32 (per-row u16 element count)")]
+  WidthOverflow {
+    /// Configured width.
+    width: u32,
+  },
+  /// `stride < width × 4` (u16 elements). Each row needs at least
+  /// `width × 4` u16 elements (= `width × 8` bytes) to hold all
+  /// pixels.
+  #[error("Ayuv64Frame: stride {stride} u16 elements is below the minimum {min_stride}")]
+  StrideTooSmall {
+    /// Minimum required stride in u16 elements (`width × 4`).
+    min_stride: u32,
+    /// Caller-supplied stride.
+    stride: u32,
+  },
+  /// `packed.len() < expected`. The packed plane is too short.
+  #[error("Ayuv64Frame: plane too short: expected >= {expected} u16 elements, got {actual}")]
+  PlaneTooShort {
+    /// Minimum required plane length in u16 elements (`stride * height`).
+    expected: usize,
+    /// Caller-supplied plane length in u16 elements.
+    actual: usize,
+  },
+  /// `stride * height` overflows `usize`. Only reachable on 32-bit
+  /// targets with extreme dimensions.
+  #[error("Ayuv64Frame: stride × height overflows usize (stride={stride}, rows={rows})")]
+  GeometryOverflow {
+    /// Configured stride.
+    stride: u32,
+    /// Configured height.
+    rows: u32,
+  },
+}
+
+impl<'a> Ayuv64Frame<'a> {
+  /// Validates and constructs an [`Ayuv64Frame`].
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn try_new(
+    packed: &'a [u16],
+    width: u32,
+    height: u32,
+    stride: u32,
+  ) -> Result<Self, Ayuv64FrameError> {
+    if width == 0 || height == 0 {
+      return Err(Ayuv64FrameError::ZeroDimension { width, height });
+    }
+    let min_stride = match width.checked_mul(4) {
+      Some(n) => n,
+      None => return Err(Ayuv64FrameError::WidthOverflow { width }),
+    };
+    if stride < min_stride {
+      return Err(Ayuv64FrameError::StrideTooSmall { min_stride, stride });
+    }
+    let plane_min = match (stride as usize).checked_mul(height as usize) {
+      Some(n) => n,
+      None => {
+        return Err(Ayuv64FrameError::GeometryOverflow {
+          stride,
+          rows: height,
+        });
+      }
+    };
+    if packed.len() < plane_min {
+      return Err(Ayuv64FrameError::PlaneTooShort {
+        expected: plane_min,
+        actual: packed.len(),
+      });
+    }
+    Ok(Self {
+      packed,
+      width,
+      height,
+      stride,
+    })
+  }
+
+  /// Panicking convenience over [`Self::try_new`]. Per-variant panic
+  /// messages mirror [`crate::frame::V410Frame::new`].
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn new(packed: &'a [u16], width: u32, height: u32, stride: u32) -> Self {
+    match Self::try_new(packed, width, height, stride) {
+      Ok(f) => f,
+      Err(e) => match e {
+        Ayuv64FrameError::ZeroDimension { .. } => panic!("invalid Ayuv64Frame: zero dimension"),
+        Ayuv64FrameError::WidthOverflow { .. } => panic!("invalid Ayuv64Frame: width overflow"),
+        Ayuv64FrameError::StrideTooSmall { .. } => panic!("invalid Ayuv64Frame: stride too small"),
+        Ayuv64FrameError::PlaneTooShort { .. } => panic!("invalid Ayuv64Frame: plane too short"),
+        Ayuv64FrameError::GeometryOverflow { .. } => {
+          panic!("invalid Ayuv64Frame: geometry overflow")
+        }
+      },
+    }
+  }
+
+  /// Packed plane: `stride * height` total u16 elements, with
+  /// `width × 4` active u16 elements per row (4 channels per pixel)
+  /// and `stride` u16 elements per row. Channel layout per pixel:
+  /// `A(16) ‖ Y(16) ‖ U(16) ‖ V(16)`.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn packed(&self) -> &'a [u16] {
+    self.packed
+  }
+  /// Frame width in pixels.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn width(&self) -> u32 {
+    self.width
+  }
+  /// Frame height in rows.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn height(&self) -> u32 {
+    self.height
+  }
+  /// Stride in u16 elements (NOT bytes — the number of u16 slots per
+  /// row, ≥ `width × 4`).
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn stride(&self) -> u32 {
     self.stride

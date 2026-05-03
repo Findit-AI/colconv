@@ -1,5 +1,8 @@
+#![allow(dead_code)] // dispatcher (Tasks 9-13) not yet wired
+
 use super::*;
 
+mod ayuv64;
 mod high_bit_4_2_0;
 mod high_bit_4_4_4_and_pn;
 mod packed_yuv_8bit;

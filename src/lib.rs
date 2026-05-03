@@ -74,6 +74,7 @@
 //! | [`Xv36`]         | 12        | 4:4:4       | packed u16 quadruple     | `xv36le`              |
 //! | [`Vuya`]         |  8        | 4:4:4       | packed byte quadruple, source α | `vuya`         |
 //! | [`Vuyx`]         |  8        | 4:4:4       | packed byte quadruple, α-as-padding | `vuyx`     |
+//! | [`Ayuv64`]       | 16        | 4:4:4       | packed u16 quadruple, source α  | `ayuv64le`     |
 //!
 //! ## RAW (Bayer) sources
 //!
@@ -151,11 +152,11 @@
 //!   `Rgba1010102`, etc.) — Tier 6+.
 //! - **Additional packed YUV** — Tiers 3 and 4 are already supported
 //!   ([`yuv::Yuyv422`] / [`yuv::Uyvy422`] / [`yuv::Yvyu422`] in Tier
-//!   3; [`V210`] / [`Y210`] / [`Y212`] / [`Y216`] in Tier 4). Tier 5
-//!   first tranche ([`V410`] / [`V30X`]) shipped in 0.13.0; Tier 5
-//!   second tranche ([`Xv36`]) shipped in 0.14.0; Tier 5 third tranche
-//!   ([`Vuya`] / [`Vuyx`]) ships in this release; remaining follow-up:
-//!   `AYUV64` / `UYYVYY411`.
+//!   3; [`V210`] / [`Y210`] / [`Y212`] / [`Y216`] in Tier 4). **Tier 5
+//!   is now CLOSED**: first tranche ([`V410`] / [`V30X`]) shipped in
+//!   0.13.0; second tranche ([`Xv36`]) in 0.14.0; third tranche
+//!   ([`Vuya`] / [`Vuyx`]) in 0.15.0; fourth and final tranche
+//!   ([`Ayuv64`]) in 0.16.0. Remaining follow-up: `UYYVYY411`.
 //! - **Alpha + RGBA output** (Ship 8) — `with_rgba` /
 //!   `with_rgba_u16` `MixedSinker` accessors plus native YUVA
 //!   frame types.
@@ -213,6 +214,7 @@
 //! [`Xv36`]: crate::yuv::Xv36
 //! [`Vuya`]: crate::yuv::Vuya
 //! [`Vuyx`]: crate::yuv::Vuyx
+//! [`Ayuv64`]: crate::yuv::Ayuv64
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
@@ -454,3 +456,6 @@ struct HsvBuffers<'a> {
   s: &'a mut [u8],
   v: &'a mut [u8],
 }
+
+pub use frame::{Ayuv64Frame, Ayuv64FrameError};
+pub use yuv::{Ayuv64, Ayuv64Row, Ayuv64Sink, ayuv64_to};
