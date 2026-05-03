@@ -57,6 +57,7 @@ pub(super) use crate::{
   },
 };
 
+mod ayuv64;
 mod hsv;
 mod packed_rgb;
 mod packed_yuv_8bit;
@@ -74,6 +75,8 @@ mod yuv_planar_16bit;
 mod yuv_planar_8bit;
 mod yuv_planar_high_bit;
 
+#[allow(unused_imports)]
+pub(crate) use ayuv64::*;
 pub(crate) use hsv::*;
 pub(crate) use packed_rgb::*;
 pub(crate) use packed_yuv_8bit::*;
