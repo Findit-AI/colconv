@@ -175,6 +175,7 @@
 
 mod abgr;
 mod argb;
+mod ayuv64;
 mod bgr24;
 mod bgra;
 mod bgrx;
@@ -250,6 +251,7 @@ mod yvyu422;
 
 pub use abgr::{Abgr, AbgrRow, AbgrSink, abgr_to};
 pub use argb::{Argb, ArgbRow, ArgbSink, argb_to};
+pub use ayuv64::{Ayuv64, Ayuv64Row, Ayuv64Sink, ayuv64_to};
 pub use bgr24::{Bgr24, Bgr24Row, Bgr24Sink, bgr24_to};
 pub use bgra::{Bgra, BgraRow, BgraSink, bgra_to};
 pub use bgrx::{Bgrx, BgrxRow, BgrxSink, bgrx_to};
