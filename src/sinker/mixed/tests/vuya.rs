@@ -458,55 +458,61 @@ fn vuya_planar_parity_with_yuva444p() {
   let packed_frame =
     VuyaFrame::try_new(&vuya_buf, width as u32, height as u32, (width * 4) as u32).unwrap();
 
-  // Use limited range (full_range=false) — both kernels now use
-  // range_params_n::<8, 8> yielding byte-identical output at all ranges.
-  let full_range = false;
+  // Both kernels now use `range_params_n::<8, 8>` so we exercise BOTH
+  // full-range AND limited-range — the prior `full_range=true`-only
+  // workaround is gone. Both ranges must be byte-identical between the
+  // VUYA and Yuva444p paths.
+  for full_range in [true, false] {
+    // --- Part 1: RGB parity (`with_rgb` only — no RGBA, no alpha divergence) ---
+    let mut p_rgb = std::vec![0u8; n * 3];
+    let mut x_rgb = std::vec![0u8; n * 3];
 
-  // --- Part 1: RGB parity (`with_rgb` only — no RGBA, no alpha divergence) ---
-  let mut p_rgb = std::vec![0u8; n * 3];
-  let mut x_rgb = std::vec![0u8; n * 3];
+    let mut p_sink = MixedSinker::<Yuva444p>::new(width, height)
+      .with_rgb(&mut p_rgb)
+      .unwrap();
+    yuva444p_to(&planar, full_range, ColorMatrix::Bt709, &mut p_sink).unwrap();
 
-  let mut p_sink = MixedSinker::<Yuva444p>::new(width, height)
-    .with_rgb(&mut p_rgb)
-    .unwrap();
-  yuva444p_to(&planar, full_range, ColorMatrix::Bt709, &mut p_sink).unwrap();
+    let mut x_sink = MixedSinker::<Vuya>::new(width, height)
+      .with_rgb(&mut x_rgb)
+      .unwrap();
+    vuya_to(&packed_frame, full_range, ColorMatrix::Bt709, &mut x_sink).unwrap();
 
-  let mut x_sink = MixedSinker::<Vuya>::new(width, height)
-    .with_rgb(&mut x_rgb)
-    .unwrap();
-  vuya_to(&packed_frame, full_range, ColorMatrix::Bt709, &mut x_sink).unwrap();
-
-  assert_eq!(p_rgb, x_rgb, "VUYA ↔ Yuva444p u8 RGB diverges");
-
-  // --- Part 2: Standalone RGBA source-alpha pass-through parity ---
-  // Both formats run the standalone-RGBA path (no RGB, no HSV attached),
-  // which invokes the source-alpha-aware kernel for each. The RGB channels
-  // must be bit-identical (same math); the alpha channels must equal the
-  // source A bytes (`ap`).
-  let mut p_rgba = std::vec![0u8; n * 4];
-  let mut x_rgba = std::vec![0u8; n * 4];
-
-  let mut p_sink2 = MixedSinker::<Yuva444p>::new(width, height)
-    .with_rgba(&mut p_rgba)
-    .unwrap();
-  yuva444p_to(&planar, full_range, ColorMatrix::Bt709, &mut p_sink2).unwrap();
-
-  let mut x_sink2 = MixedSinker::<Vuya>::new(width, height)
-    .with_rgba(&mut x_rgba)
-    .unwrap();
-  vuya_to(&packed_frame, full_range, ColorMatrix::Bt709, &mut x_sink2).unwrap();
-
-  assert_eq!(
-    p_rgba, x_rgba,
-    "VUYA ↔ Yuva444p u8 RGBA diverges (source-alpha path)"
-  );
-
-  // Spot-check alpha bytes equal the source alpha plane.
-  for (i, &src_a) in ap.iter().enumerate() {
-    let alpha_out = x_rgba[i * 4 + 3];
     assert_eq!(
-      alpha_out, src_a,
-      "VUYA RGBA alpha at pixel {i}: expected {src_a:#X}, got {alpha_out:#X}"
+      p_rgb, x_rgb,
+      "VUYA ↔ Yuva444p u8 RGB diverges (full_range={full_range})"
     );
+
+    // --- Part 2: Standalone RGBA source-alpha pass-through parity ---
+    // Both formats run the standalone-RGBA path (no RGB, no HSV attached),
+    // which invokes the source-alpha-aware kernel for each. The RGB channels
+    // must be bit-identical (same math); the alpha channels must equal the
+    // source A bytes (`ap`).
+    let mut p_rgba = std::vec![0u8; n * 4];
+    let mut x_rgba = std::vec![0u8; n * 4];
+
+    let mut p_sink2 = MixedSinker::<Yuva444p>::new(width, height)
+      .with_rgba(&mut p_rgba)
+      .unwrap();
+    yuva444p_to(&planar, full_range, ColorMatrix::Bt709, &mut p_sink2).unwrap();
+
+    let mut x_sink2 = MixedSinker::<Vuya>::new(width, height)
+      .with_rgba(&mut x_rgba)
+      .unwrap();
+    vuya_to(&packed_frame, full_range, ColorMatrix::Bt709, &mut x_sink2).unwrap();
+
+    assert_eq!(
+      p_rgba, x_rgba,
+      "VUYA ↔ Yuva444p u8 RGBA diverges (source-alpha path, full_range={full_range})"
+    );
+
+    // Spot-check alpha bytes equal the source alpha plane.
+    for (i, &src_a) in ap.iter().enumerate() {
+      let alpha_out = x_rgba[i * 4 + 3];
+      assert_eq!(
+        alpha_out, src_a,
+        "VUYA RGBA alpha at pixel {i}: expected {src_a:#X}, got {alpha_out:#X} \
+         (full_range={full_range})"
+      );
+    }
   }
 }
