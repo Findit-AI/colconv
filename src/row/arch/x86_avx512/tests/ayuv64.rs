@@ -99,14 +99,17 @@ fn avx512_ayuv64_rgb_matches_scalar_all_matrices() {
     ColorMatrix::YCgCo,
   ] {
     for full in [true, false] {
-      // Width 32 = one main-loop iteration of the u16 path (no tail).
-      // Width 32 < 64 = pure scalar tail of the u8 path; the u8 path
-      // is exercised via the wider widths in
-      // `avx512_ayuv64_matches_scalar_widths`.
-      check_rgb::<false, false>(32, m, full); // RGB (tail-only at width 32)
-      check_rgb::<true, true>(32, m, full); // RGBA + source alpha (tail-only)
-      check_rgb_u16::<false, false>(32, m, full); // RGB u16 (one main-loop iter)
-      check_rgb_u16::<true, true>(32, m, full); // RGBA u16 + source alpha (one main-loop iter)
+      // u8 path: SIMD main loop has block size 64 — width 64 = one main-loop
+      // iteration with no scalar tail, so this exercises the AVX-512 u8 SIMD
+      // code under EVERY matrix × range combo (not just BT.709 from the
+      // width-sweep test). Required to catch matrix-specific coefficient /
+      // sign / lane bugs in the 64-pixel u8 SIMD path.
+      check_rgb::<false, false>(64, m, full); // u8 RGB (one main-loop iter)
+      check_rgb::<true, true>(64, m, full); // u8 RGBA + source α (one main-loop iter)
+      // u16 path: SIMD main loop has block size 32 — width 32 = one main-loop
+      // iteration with no scalar tail, exercises the i64-chroma u16 SIMD code.
+      check_rgb_u16::<false, false>(32, m, full); // u16 RGB (one main-loop iter)
+      check_rgb_u16::<true, true>(32, m, full); // u16 RGBA + source α (one main-loop iter)
     }
   }
 }
