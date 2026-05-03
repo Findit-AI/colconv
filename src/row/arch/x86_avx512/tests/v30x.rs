@@ -209,7 +209,7 @@ fn avx512_v30x_lane_order_per_pixel_y_and_u() {
   {
     return;
   }
-  const W: usize = 16;
+  const W: usize = 32;
   let packed = build_v30x_packed_y_n_plus_1_u_2n_plus_1_v_neutral(W);
 
   // Part 1: Luma natural-order (u16, no shift loss)

@@ -177,7 +177,7 @@ fn avx2_v30x_lane_order_per_pixel_y_and_u() {
   if !std::arch::is_x86_feature_detected!("avx2") {
     return;
   }
-  const W: usize = 8;
+  const W: usize = 16;
   let packed = build_v30x_packed_y_n_plus_1_u_2n_plus_1_v_neutral(W);
 
   // Part 1: Luma natural-order (u16, no shift loss)

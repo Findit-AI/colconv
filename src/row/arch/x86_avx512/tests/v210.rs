@@ -224,12 +224,12 @@ fn build_v210_packed_y_n_plus_1_u_2k_plus_1_v_neutral(w: usize) -> std::vec::Vec
 /// Multi-channel Y+U lane-order regression test.
 ///
 /// Encodes Y[n] = n + 1 (10-bit value, luma u16 output direct) AND
-/// U[k] = 2k + 1 (one chroma sample per 2 pixels at 4:2:2) for four
-/// V210 6-pixel groups (24 px = one AVX-512 main-loop quad). V = 512
+/// U[k] = 2k + 1 (one chroma sample per 2 pixels at 4:2:2) for eight
+/// V210 6-pixel groups (48 px = two AVX-512 main-loop quads). V = 512
 /// (neutral midpoint, bias-subtracted = 0).
 ///
 /// Asserts:
-/// - `luma_u16_row` output = [1..=24] (Y values direct, no shift)
+/// - `luma_u16_row` output = [1..=48] (Y values direct, no shift)
 /// - SIMD RGB output == scalar RGB output (any chroma deinterleave bug diverges)
 ///
 /// This catches asymmetric per-channel mask bugs that a Y-only test would miss.
@@ -244,7 +244,7 @@ fn avx512_v210_lane_order_per_pixel_y_and_u() {
   {
     return;
   }
-  const W: usize = 24;
+  const W: usize = 48;
   let packed = build_v210_packed_y_n_plus_1_u_2k_plus_1_v_neutral(W);
 
   // Part 1: Luma natural-order (u16, no shift loss)

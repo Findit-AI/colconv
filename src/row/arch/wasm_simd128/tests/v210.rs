@@ -206,11 +206,12 @@ fn build_v210_packed_y_n_plus_1_u_2k_plus_1_v_neutral(w: usize) -> std::vec::Vec
 /// Multi-channel Y+U lane-order regression test.
 ///
 /// Encodes Y[n] = n + 1 (10-bit value, luma u16 output direct) AND
-/// U[k] = 2k + 1 (one chroma sample per 2 pixels at 4:2:2) for a
-/// V210 6-pixel group. V = 512 (neutral midpoint, bias-subtracted = 0).
+/// U[k] = 2k + 1 (one chroma sample per 2 pixels at 4:2:2) for two
+/// V210 6-pixel groups (12 px = 2 wasm_simd128 main-loop iterations). V = 512
+/// (neutral midpoint, bias-subtracted = 0).
 ///
 /// Asserts:
-/// - `luma_u16_row` output = [1, 2, 3, 4, 5, 6] (Y values direct, no shift)
+/// - `luma_u16_row` output = [1..=12] (Y values direct, no shift)
 /// - SIMD RGB output == scalar RGB output (any chroma deinterleave bug diverges)
 ///
 /// This catches asymmetric per-channel mask bugs that a Y-only test would miss.
@@ -220,7 +221,7 @@ fn build_v210_packed_y_n_plus_1_u_2k_plus_1_v_neutral(w: usize) -> std::vec::Vec
   ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
 )]
 fn wasm_simd128_v210_lane_order_per_pixel_y_and_u() {
-  const W: usize = 6;
+  const W: usize = 12;
   let packed = build_v210_packed_y_n_plus_1_u_2k_plus_1_v_neutral(W);
 
   // Part 1: Luma natural-order (u16, no shift loss)
