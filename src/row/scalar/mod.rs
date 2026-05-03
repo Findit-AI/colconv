@@ -4,6 +4,30 @@
 //! to these as their tail fallback. Per-call dispatch in
 //! [`super`]`::{yuv_420_to_rgb_row, rgb_to_hsv_row}` picks the best
 //! backend at the module boundary.
+//!
+//! # Rounding convention
+//!
+//! The crate uses two distinct rounding strategies — choose based on
+//! whether the operation is *precision-critical* or *bookkeeping*:
+//!
+//! - **Q15 chroma + Y arithmetic (final RGB output)**: round-to-nearest,
+//!   implemented as `(value + (1 << 14)) >> 15` (or via the `q15_shift`
+//!   helper). Maximum error: ±0.5 LSB symmetric. Used in every YUV→RGB
+//!   pixel computation across all formats × backends.
+//!
+//! - **Narrow→wider depth conversions** (e.g., 16-bit luma → 8-bit
+//!   luma via `Y_u16 >> 8`, or 10-bit packed → 8-bit RGB via `>> 2`):
+//!   plain truncation, no rounding bias. Maximum error: -0.5 to 0 LSB
+//!   (uniformly downward bias). Used in every `*_to_luma_row` (u8
+//!   variant) for high-bit-depth sources, and in the `X2RGB10`/`X2BGR10`
+//!   → u8 RGB conversion at the last narrow step.
+//!
+//! The asymmetry is intentional: precision-critical arithmetic earns
+//! the rounding bias's symmetric error bound; depth-conversion is
+//! bookkeeping where consistent downward-truncation matches FFmpeg's
+//! `swscale` behavior and preserves "no-clip-into-overflow" guarantees.
+//! Cross-format consistency on this distinction is verified by the
+//! per-arch SIMD-vs-scalar parity tests.
 
 use crate::ColorMatrix;
 
@@ -219,6 +243,13 @@ impl Coefficients {
         b_v: 0,
       },
       // SMPTE 240M: r_v=1.576, g_u=-0.2253, g_v=-0.4767, b_u=1.826.
+      // Coefficients are taken from the SMPTE 240M-1999 published rounded
+      // table values, NOT re-derived from KR/KB. Re-derivation from
+      // KR=0.212, KB=0.087, KG=0.701 yields g_u ≈ -0.2266 (Q15 ≈ -7423),
+      // which differs by ~0.13% (~43 LSB pre-Q15-shift). This is well
+      // within rounding tolerance and matches the standard's published
+      // text — do not "fix" to the analytic value without coordinating
+      // with downstream pipelines that also use the published table.
       ColorMatrix::Smpte240m => Self {
         r_u: 0,
         r_v: 51642,
