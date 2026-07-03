@@ -2688,6 +2688,17 @@ pub struct MixedSinker<'a, F: SourceFormat, R = NoopResampler> {
   /// frame never bins a mixture of phases; cleared each `begin_frame`.
   #[cfg(feature = "yuv-planar")]
   frozen_chroma_centered: Option<bool>,
+  /// RFC #238 S4-B companion to [`Self::frozen_chroma_centered`]: the effective
+  /// 4:2:0 **vertical** chroma phase (`true` = `Bottom` `v = 1`, `false` =
+  /// co-sited vertical) frozen on the first output-bearing row of the current
+  /// frame. `Center` and `Bottom` are BOTH horizontally centered, so the
+  /// centered flag alone cannot tell them apart; freezing the vertical phase
+  /// too rejects a mid-frame `Center` ⇆ `Bottom` flip with
+  /// [`MixedSinkerError::ChromaSitingChanged`]. Only the `Yuv420p` dispatch
+  /// (the sole vertical-siting reader) sets it; every other format leaves it
+  /// `None` and passes `v_phase = 0`. Cleared each `begin_frame`.
+  #[cfg(feature = "yuv-planar")]
+  frozen_chroma_bottom_v: Option<bool>,
   /// Lazily grown to `3 * width` bytes when HSV is requested without a
   /// user RGB buffer. Empty otherwise.
   ///
@@ -3823,6 +3834,8 @@ impl<F: SourceFormat, R> MixedSinker<'_, F, R> {
       frozen_domain: None,
       #[cfg(feature = "yuv-planar")]
       frozen_chroma_centered: None,
+      #[cfg(feature = "yuv-planar")]
+      frozen_chroma_bottom_v: None,
       #[cfg(any(
         feature = "bayer",
         feature = "gbr",
