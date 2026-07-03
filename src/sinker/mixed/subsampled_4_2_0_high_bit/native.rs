@@ -109,6 +109,13 @@ pub(crate) struct NativeYuv420U16 {
   staged: [[bool; 2]; 3],
   /// Next output row to finalize.
   next_emit: usize,
+  /// Whether the cached chroma plan was built with a non-zero chroma phase
+  /// (RFC #238 centered siting). The join is built once and only `reset`
+  /// between frames, so a reused sink whose `chroma_location` moved to a
+  /// different phase must REBUILD it — the caller compares this against the
+  /// current siting and drops the join on a mismatch. `false` for a luma-only
+  /// join (no chroma plan) and for every co-sited / unphased layout.
+  chroma_centered: bool,
 }
 
 /// Chroma-grid streams, source de-interleave scratch, and staging of
@@ -126,7 +133,13 @@ struct NativeChromaU16 {
 }
 
 impl NativeYuv420U16 {
-  fn new(plan: &ResamplePlan, w: usize, h: usize, need_color: bool) -> Result<Self, ResampleError> {
+  fn new(
+    plan: &ResamplePlan,
+    build_chroma_plan: impl FnOnce() -> Result<ResamplePlan, ResampleError>,
+    w: usize,
+    h: usize,
+    need_color: bool,
+  ) -> Result<Self, ResampleError> {
     // The native high-bit 4:2:0 join is integer area-only; reject a filter
     // plan before building any plane's area stream.
     if plan.kind().is_filter() {
@@ -138,12 +151,15 @@ impl NativeYuv420U16 {
     let stage_len = plan.out_w().checked_mul(2).ok_or_else(|| {
       ResampleError::Overflow(PlanGeometry::new(w, h, plan.out_w(), plan.out_h()))
     })?;
+    // Recorded so a reused sink rebuilds (not merely resets) the join when the
+    // frame's chroma siting phase changes; stays `false` for a luma-only join.
+    let mut chroma_centered = false;
     let chroma = if need_color {
-      let cw = w / 2;
-      // Vertical chroma weighting runs in the LUMA domain so an odd
-      // trailing luma row weights its chroma row by half; the plan's
-      // stored dims (cw, h) are the per-plane denominators.
-      let cplan = ResamplePlan::area_chroma_420(cw, h, plan.out_w(), plan.out_h(), 0.0, 0.0)?;
+      // Vertical chroma weighting runs in the LUMA domain so an odd trailing
+      // luma row weights its chroma row by half; the plan's stored dims are the
+      // per-plane denominators (scaled on the H axis for the centered fold).
+      let cplan = build_chroma_plan()?;
+      chroma_centered = cplan.has_chroma_phase();
       Some(NativeChromaU16 {
         u: AreaStream::new(cplan.h(), cplan.v(), cplan.src_w(), cplan.src_h(), 1)?,
         v: AreaStream::new(cplan.h(), cplan.v(), cplan.src_w(), cplan.src_h(), 1)?,
@@ -162,6 +178,7 @@ impl NativeYuv420U16 {
       chroma,
       staged: [[false; 2]; 3],
       next_emit: 0,
+      chroma_centered,
     })
   }
 
@@ -177,8 +194,16 @@ impl NativeYuv420U16 {
 
   /// Next Y source row this join expects — the per-row sequence counter
   /// (the native path bins Y on every output-bearing row, luma implicit).
-  fn next_y(&self) -> usize {
+  pub(crate) fn next_y(&self) -> usize {
     self.y.next_y()
+  }
+
+  /// The cached chroma plan's centered-phase flag (RFC #238), `Some` only when
+  /// a chroma half is present — a luma-only join carries no phase, so its
+  /// siting is irrelevant. The native call site drops-and-rebuilds a reused
+  /// join whose horizontal chroma phase no longer matches the frame's siting.
+  pub(crate) fn chroma_phase_centered(&self) -> Option<bool> {
+    self.chroma.as_ref().map(|_| self.chroma_centered)
   }
 
   /// Sequencing preflight across all three plane streams — checked before
@@ -305,6 +330,11 @@ pub(crate) fn yuv420p16_process_native<const BITS: u32, const BE: bool>(
   idx: usize,
   w: usize,
   h: usize,
+  // Lazily builds the 4:2:0 chroma grid against the SAME output geometry as
+  // `plan`; the per-frame caller folds the RFC #238 horizontal chroma phase into
+  // it ([`ResamplePlan::area_chroma_420`]). At phase 0 it is byte-identical to
+  // the pre-closure co-sited grid, and it is invoked ONLY when colour is needed.
+  build_chroma_plan: impl FnOnce() -> Result<ResamplePlan, ResampleError>,
   use_simd: bool,
 ) -> Result<(), MixedSinkerError> {
   const {
@@ -366,7 +396,7 @@ pub(crate) fn yuv420p16_process_native<const BITS: u32, const BE: bool>(
       // OOM). Both fallible steps run BEFORE `native_420_u16.insert`, so a
       // refusal at either returns `Err` with the field still `None` — no caller
       // output is touched and the next row retries (first-row-transactional).
-      let join = NativeYuv420U16::new(plan, w, h, need_color)?;
+      let join = NativeYuv420U16::new(plan, build_chroma_plan, w, h, need_color)?;
       let boxed = try_box(join).map_err(|_| {
         MixedSinkerError::Resample(ResampleError::AllocationFailed(PlanGeometry::new(
           w,
@@ -467,6 +497,9 @@ pub(crate) fn yuv420p16_process_native<const BITS: u32, const BE: bool>(
     chroma,
     staged,
     next_emit,
+    // Cache key read only at build / the native call site; the feed loop
+    // ignores it.
+    chroma_centered: _,
   } = &mut **join;
   y.feed_row(idx, &y_src[..w], use_simd, |oy, out_row| {
     let slot = oy & 1;
