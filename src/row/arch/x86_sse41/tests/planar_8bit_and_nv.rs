@@ -1436,3 +1436,61 @@ fn sse41_yuv411_rgba_matches_scalar_widths() {
     }
   }
 }
+
+// ---- 4:4:0 bottom-sited vertical chroma reconstruction ----------------------
+//
+// Direct backend parity for the full-width vertical rounding-average kernels
+// (`out[j] = (prev[j] + cur[j] + 1) >> 1`), scalar vs the SSE4.1 `_mm_avg`
+// path, across widths that straddle every SIMD chunk boundary + scalar tail.
+
+#[cfg(feature = "yuv-planar")]
+fn check_440_bottom_v_equivalence(width: usize) {
+  let prev: std::vec::Vec<u8> = (0..width).map(|i| ((i * 37 + 11) & 0xFF) as u8).collect();
+  // even `cur` constant → prev/cur have opposite column parity, so every sum
+  // is odd and the `+ 1` rounding is exercised (a truncating avg would pass).
+  let cur: std::vec::Vec<u8> = (0..width).map(|i| ((i * 53 + 198) & 0xFF) as u8).collect();
+  let mut out_scalar = std::vec![0u8; width];
+  let mut out_sse41 = std::vec![0u8; width];
+  scalar::chroma_upsample_440_bottom_v(&prev, &cur, &mut out_scalar, width);
+  unsafe {
+    chroma_upsample_440_bottom_v(&prev, &cur, &mut out_sse41, width);
+  }
+  assert_eq!(
+    out_scalar, out_sse41,
+    "SSE4.1 440 bottom-v u8 diverges (width={width})"
+  );
+}
+
+#[cfg(feature = "yuv-planar")]
+fn check_440_bottom_v_u16_equivalence(width: usize) {
+  let prev: std::vec::Vec<u16> = (0..width)
+    .map(|i| ((i as u32).wrapping_mul(2654435761) & 0xFFFF) as u16)
+    .collect();
+  let cur: std::vec::Vec<u16> = (0..width)
+    .map(|i| ((i as u32).wrapping_mul(40503).wrapping_add(12345) & 0xFFFF) as u16)
+    .collect();
+  let mut out_scalar = std::vec![0u16; width];
+  let mut out_sse41 = std::vec![0u16; width];
+  scalar::chroma_upsample_440_bottom_v_u16(&prev, &cur, &mut out_scalar, width);
+  unsafe {
+    chroma_upsample_440_bottom_v_u16(&prev, &cur, &mut out_sse41, width);
+  }
+  assert_eq!(
+    out_scalar, out_sse41,
+    "SSE4.1 440 bottom-v u16 diverges (width={width})"
+  );
+}
+
+#[cfg(feature = "yuv-planar")]
+#[test]
+fn sse41_440_bottom_v_matches_scalar() {
+  if !std::arch::is_x86_feature_detected!("sse4.1") {
+    return;
+  }
+  for w in [
+    1usize, 2, 7, 8, 15, 16, 17, 31, 32, 33, 63, 64, 65, 128, 129, 1920,
+  ] {
+    check_440_bottom_v_equivalence(w);
+    check_440_bottom_v_u16_equivalence(w);
+  }
+}

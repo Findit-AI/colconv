@@ -1420,3 +1420,84 @@ pub(crate) unsafe fn yuv_411_to_hsv_row(
     });
   }
 }
+
+/// AVX2 full-width vertical chroma rounding-average for the **bottom-sited**
+/// even output luma row of a 4:4:0 source. Byte-identical to
+/// [`chroma_upsample_440_bottom_v`](crate::row::scalar::chroma_upsample_440_bottom_v):
+/// `out[j] = (prev[j] + cur[j] + 1) >> 1` via `_mm256_avg_epu8` (32 lanes per
+/// iteration) with a scalar tail.
+///
+/// # Safety
+///
+/// 1. **AVX2 must be available on the current CPU** (the dispatcher verifies it
+///    with `is_x86_feature_detected!("avx2")`).
+/// 2. `prev.len() >= width`, `cur.len() >= width`, `out.len() >= width`.
+#[inline]
+#[target_feature(enable = "avx2")]
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) unsafe fn chroma_upsample_440_bottom_v(
+  prev: &[u8],
+  cur: &[u8],
+  out: &mut [u8],
+  width: usize,
+) {
+  debug_assert!(prev.len() >= width, "prev row too short");
+  debug_assert!(cur.len() >= width, "cur row too short");
+  debug_assert!(out.len() >= width, "out row too short");
+
+  let mut j = 0;
+  // SAFETY: each iteration reads/writes 32 bytes at offset `j` with
+  // `j + 32 <= width <= len`, so every access stays in bounds.
+  unsafe {
+    while j + 32 <= width {
+      let p = _mm256_loadu_si256(prev.as_ptr().add(j).cast());
+      let c = _mm256_loadu_si256(cur.as_ptr().add(j).cast());
+      _mm256_storeu_si256(out.as_mut_ptr().add(j).cast(), _mm256_avg_epu8(p, c));
+      j += 32;
+    }
+  }
+  // Scalar tail (`j < width <= len`, so the indexing cannot panic).
+  while j < width {
+    out[j] = (((prev[j] as u16) + (cur[j] as u16) + 1) >> 1) as u8;
+    j += 1;
+  }
+}
+
+/// AVX2 `u16` twin of [`chroma_upsample_440_bottom_v`], byte-identical to
+/// [`chroma_upsample_440_bottom_v_u16`](crate::row::scalar::chroma_upsample_440_bottom_v_u16)
+/// on host-native `u16` chroma: `out[j] = (prev[j] + cur[j] + 1) >> 1` via
+/// `_mm256_avg_epu16` (16 lanes per iteration) with a scalar tail.
+///
+/// # Safety
+///
+/// 1. **AVX2 must be available on the current CPU.**
+/// 2. `prev.len() >= width`, `cur.len() >= width`, `out.len() >= width`.
+#[inline]
+#[target_feature(enable = "avx2")]
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) unsafe fn chroma_upsample_440_bottom_v_u16(
+  prev: &[u16],
+  cur: &[u16],
+  out: &mut [u16],
+  width: usize,
+) {
+  debug_assert!(prev.len() >= width, "prev row too short");
+  debug_assert!(cur.len() >= width, "cur row too short");
+  debug_assert!(out.len() >= width, "out row too short");
+
+  let mut j = 0;
+  // SAFETY: each iteration reads/writes 16 u16 lanes at offset `j` with
+  // `j + 16 <= width <= len`, so every access stays in bounds.
+  unsafe {
+    while j + 16 <= width {
+      let p = _mm256_loadu_si256(prev.as_ptr().add(j).cast());
+      let c = _mm256_loadu_si256(cur.as_ptr().add(j).cast());
+      _mm256_storeu_si256(out.as_mut_ptr().add(j).cast(), _mm256_avg_epu16(p, c));
+      j += 16;
+    }
+  }
+  while j < width {
+    out[j] = (((prev[j] as u32) + (cur[j] as u32) + 1) >> 1) as u16;
+    j += 1;
+  }
+}
