@@ -278,6 +278,10 @@ fn p0xx_process_native<const BITS: u32, const BE: bool>(
     idx,
     w,
     h,
+    // P010 / P012 / P016 semi-planar 4:2:0 keeps the co-sited (phase 0) chroma
+    // grid — RFC #238 centered siting for the packed high-bit family is a later
+    // PR; passing phase 0 here is byte-identical to the pre-closure internal plan.
+    || ResamplePlan::area_chroma_420(w / 2, h, plan.out_w(), plan.out_h(), 0.0, 0.0),
     use_simd,
   )
 }
