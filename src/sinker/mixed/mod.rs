@@ -10504,6 +10504,17 @@ pub(super) fn reset_high_bit_yuva_streams<F: SourceFormat, R>(sink: &mut MixedSi
   // (mirrors the planar `reset_high_bit_yuv_streams`). Untouched by the 4:2:2 /
   // 4:4:4 YUVA families that share this reset (they never set it).
   sink.frozen_chroma_centered = None;
+  // RFC #238 S6f: clear the frozen VERTICAL (`Bottom`) chroma phase too, so the
+  // next frame may pick Center or Bottom while a mid-frame Center ⇆ Bottom flip
+  // stays rejected; and invalidate the high-bit YUVA bottom-sited vertical
+  // lookback via its validity tag (`chroma_prev_row`) so frame N+1's first even
+  // row can never box-blend frame N's last chroma row. The `chroma_prev_u16`
+  // bytes are re-overwritten before any trusted read, so only the tag is
+  // load-bearing (mirrors the planar `reset_high_bit_yuv_streams`). Both stay
+  // `None` for the non-`Bottom` / 4:2:2 / 4:4:4 YUVA families that share this
+  // reset (they never set them).
+  sink.frozen_chroma_bottom_v = None;
+  sink.chroma_prev_row = None;
   sink.frozen_alpha_mode = Some(sink.alpha_mode);
 }
 

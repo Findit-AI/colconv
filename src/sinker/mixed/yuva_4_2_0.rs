@@ -16,17 +16,37 @@
 //!   silently accept a buffer and never write it.
 
 use super::{
-  ChromaSitingChanged, GeometryOverflow, InsufficientBuffer, MixedSinker, MixedSinkerError,
-  NativeRouteChanged, RowIndexOutOfRange, RowShapeMismatch, RowSlice, WidthAlignment,
-  check_dimensions_match, check_frozen_alpha_mode, chroma_420_bottom_sited_v,
-  chroma_420_center_sited_h, deinterleave_y_high_bit_masked, packed_yuva444_filter_resample,
+  ChromaSitingChanged,
+  GeometryOverflow,
+  InsufficientBuffer,
+  MixedSinker,
+  MixedSinkerError,
+  NativeRouteChanged,
+  RowIndexOutOfRange,
+  RowShapeMismatch,
+  RowSlice,
+  WidthAlignment,
+  check_dimensions_match,
+  check_frozen_alpha_mode,
+  chroma_420_bottom_sited_v,
+  chroma_420_center_sited_h,
+  deinterleave_y_high_bit_masked,
+  packed_yuva444_filter_resample,
   packed_yuva444_resample,
   planar_8bit::{
     YUV422P_CENTERED_H_PHASE, reserve_420_chroma_full, reserve_420_chroma_prev,
     stage_420_chroma_prev, upsample_420_chroma_sited, yuva420p_process_native,
   },
-  reset_high_bit_yuva_streams, rgb_row_buf_or_scratch, rgba_plane_row_slice,
+  reset_high_bit_yuva_streams,
+  rgb_row_buf_or_scratch,
+  rgba_plane_row_slice,
   rgba_u16_plane_row_slice,
+  // RFC #238 S6f — the planar `Yuv420pN` u16 `Bottom` (v = 1) reconstruction +
+  // one-row chroma lookback, REUSED here (YUVA is planar, so the same separate-
+  // plane helpers apply); NOT the p0xx interleaved kernel.
+  subsampled_4_2_0_high_bit::{
+    reserve_420_chroma_prev_u16, stage_420_chroma_prev_u16, upsample_420_chroma_sited_u16,
+  },
 };
 use crate::{
   PixelSink,
@@ -50,7 +70,7 @@ const YUVA420P_STRAIGHT_NATIVE_ELIGIBLE: bool = true;
 /// [`reserve_420_chroma_full`](super::reserve_420_chroma_full), identical to
 /// the high-bit planar `Yuv420p9` … `Yuv420p16` sinks' private helper. Grows
 /// `chroma_full` to the checked `2 * width` `u16` so the later infallible
-/// [`upsample_420_chroma_center_h_u16`] reuses an already-sized buffer. Split
+/// [`upsample_420_chroma_sited_u16`] reuses an already-sized buffer. Split
 /// out from the upsample so it can run **before any output row is written**
 /// (luma included) — the crate's preflight-ordering atomicity contract (cf.
 /// the #180 resample fix): an allocator refusal must leave the output frame
@@ -88,40 +108,6 @@ fn reserve_420_chroma_full_u16(
     chroma_full.resize(needed, 0);
   }
   Ok(())
-}
-
-/// Horizontally upsamples the half-width `u16` U / V rows of a centered-siting
-/// high-bit YUVA 4:2:0 source to full width into the **already-reserved**
-/// `chroma_full` (#302), returning the two full-width chroma slices
-/// `(u_full, v_full)`. The buffer is split `[0..width]` = U,
-/// `[width..2*width]` = V; each half is filled by
-/// [`chroma_upsample_2to1_center_h_u16`](crate::row::scalar::chroma_upsample_2to1_center_h_u16)
-/// (the MPEG-1 / JPEG phase-0.5 reconstruction — masking each sample to the low
-/// `BITS` and operating in the source's wire byte order), then fed to the
-/// high-bit 4:4:4 (+ source-alpha) decode kernels with the same `big_endian`
-/// flag — so the centered path reuses their SIMD backends and stays
-/// bit-identical per tier. Planar YUVA stores Y / U / V / A as **low-packed**
-/// logical `u16` (the `& bits_mask::<BITS>()` convention, like `Yuv420p9` …
-/// `Yuv420p16`), NOT the MSB-aligned p0xx convention; `BITS` threads the
-/// per-sample mask so it matches the decode kernels (a no-op at `BITS = 16`).
-///
-/// **Infallible**: the caller must have run [`reserve_420_chroma_full_u16`] up
-/// front (every centered-siting output path does, before any output write).
-fn upsample_420_chroma_center_h_u16<'s, const BITS: u32>(
-  chroma_full: &'s mut [u16],
-  u_half: &[u16],
-  v_half: &[u16],
-  width: usize,
-  big_endian: bool,
-) -> (&'s [u16], &'s [u16]) {
-  debug_assert!(
-    chroma_full.len() >= 2 * width,
-    "chroma_full must be reserved via reserve_420_chroma_full_u16 first"
-  );
-  let (u_full, v_full) = chroma_full[..2 * width].split_at_mut(width);
-  crate::row::scalar::chroma_upsample_2to1_center_h_u16::<BITS>(u_half, u_full, width, big_endian);
-  crate::row::scalar::chroma_upsample_2to1_center_h_u16::<BITS>(v_half, v_full, width, big_endian);
-  (u_full, v_full)
 }
 
 // ---- Yuva420p impl (8-bit) ---------------------------------------------
@@ -1960,20 +1946,44 @@ fn yuva420p_high_bit_process<const BITS: u32, const BE: bool, F: crate::SourceFo
     hsv,
     rgb_scratch,
     chroma_full_u16,
+    chroma_prev_u16,
+    chroma_prev_row,
     ..
   } = sinker;
-  let one_plane_start = idx * w;
-  let one_plane_end = one_plane_start + w;
 
   let want_rgb = rgb.is_some();
   let want_rgba = rgba.is_some();
   let want_hsv = hsv.is_some();
   let want_rgb_u16 = rgb_u16.is_some();
   let want_rgba_u16 = rgba_u16.is_some();
+  // Any colour output drives the centered / bottom chroma reconstruction; the
+  // full-resolution α plane is siting-independent and never gates it.
+  let want_color = want_rgb || want_rgba || want_hsv || want_rgb_u16 || want_rgba_u16;
+  // Repo-wide no-output invariant (RFC #238 S6f, mirroring the 8-bit YUVA /
+  // `Yuv420p` direct decode): a `process` call carrying NO output — no colour, no
+  // luma — runs NOTHING (no per-row offset arithmetic, no allocation, no
+  // bottom-sited lookback prime). Returning HERE, before the `idx * w` offsets,
+  // keeps the invariant overflow-safe (a no-output call never ran an attach-time
+  // `w x h` validation, so `idx * w` could overflow on a 32-bit target) AND means
+  // such a row never reserves `chroma_prev_u16` nor primes the lookback (so it can
+  // never make a later colour even row box-blend through an invisible row).
+  let need_output = want_color || luma.is_some() || luma_u16.is_some();
+  if !need_output {
+    return Ok(());
+  }
+
+  let one_plane_start = idx * w;
+  let one_plane_end = one_plane_start + w;
+
   // Chroma siting (#302): the centered horizontal sitings reconstruct chroma
   // at the phase-0.5 position then feed the 4:4:4 (+ source-alpha) kernels; the
   // default / co-sited path keeps the byte-identical fused 4:2:0 decode.
   let center_sited = chroma_420_center_sited_h(chroma_location);
+  // RFC #238 S6f: `Bottom` (a strict sub-case of `center_sited` — h = 0.5, v = 1)
+  // additionally box-blends the even output row's chroma with the previous chroma
+  // row via the `chroma_prev_u16` lookback maintained below; `Center` / `Top` keep
+  // the vertical-replicate (co-sited) decode, byte-identical to S6c.
+  let bottom_v = chroma_420_bottom_sited_v(chroma_location);
   // HSV-without-RGB-or-RGBA goes through the direct alpha-drop
   // `hsv_dispatch` kernel (no source-width RGB scratch). HSV is
   // colour-only — the source alpha plane is dropped — so a high-bit YUVA
@@ -1988,16 +1998,23 @@ fn yuva420p_high_bit_process<const BITS: u32, const BE: bool, F: crate::SourceFo
   // Atomicity preflight (#302, cf. the crate's #180 resample fix): reserve
   // EVERY fallible row scratch this identity row needs BEFORE any output row
   // (luma included) is written, so an allocator refusal returns a typed error
-  // leaving the output frame untouched, never partially mutated. Two scratches
+  // leaving the output frame untouched, never partially mutated. Three scratches
   // can grow: the centered-siting full-width `u16` chroma (`chroma_full_u16`),
   // needed by ANY colour output (u8 OR u16 RGB / RGBA / HSV — the alpha plane
-  // is full-resolution, so siting-independent); and the u8 RGB row scratch
-  // (below). The later `upsample_420_chroma_center_h_u16` reuses the
-  // already-sized buffer.
-  let need_centered_chroma =
-    center_sited && (want_rgb || want_rgba || want_hsv || want_rgb_u16 || want_rgba_u16);
+  // is full-resolution, so siting-independent); (RFC #238 S6f) the bottom-sited
+  // one-row chroma lookback (`chroma_prev_u16`), on EVERY Bottom OUTPUT row; and
+  // the u8 RGB row scratch (below). The later `upsample_420_chroma_sited_u16`
+  // reuses the already-sized buffers.
+  let need_centered_chroma = center_sited && want_color;
   if need_centered_chroma {
     reserve_420_chroma_full_u16(chroma_full_u16, w, h)?;
+  }
+  // Reserve the bottom-sited lookback on EVERY bottom-sited OUTPUT row — colour OR
+  // luma-only — because it is maintained so a LATER colour even row can box-blend
+  // it (the luma-only staging below runs before any luma write). A no-output row
+  // returned early above and never primes it.
+  if bottom_v {
+    reserve_420_chroma_prev_u16(chroma_prev_u16, w, h)?;
   }
 
   // Acquire the u8 RGB row buffer (caller plane or growing scratch) up
@@ -2020,22 +2037,50 @@ fn yuva420p_high_bit_process<const BITS: u32, const BE: bool, F: crate::SourceFo
     None
   };
 
-  // Centered full-width chroma (phase-0.5), reconstructed ONCE per row from the
-  // wire-format half-width U / V and reused by every colour decode (u16 and
-  // u8). Infallible — the scratch was reserved above. The default
-  // left/unspecified siting leaves it `None`, so the fused 4:2:0 kernels
-  // upsample chroma in-register and the output stays byte-identical.
+  // Centered full-width chroma, reconstructed ONCE per row from the wire-format
+  // half-width U / V and reused by every colour decode (u16 and u8). Infallible —
+  // both scratches were reserved above. The default left/unspecified siting leaves
+  // it `None`, so the fused 4:2:0 kernels upsample chroma in-register and the
+  // output stays byte-identical. `Center` / `Top` take the plain horizontal
+  // phase-0.5 fold; `Bottom` (RFC #238 S6f) additionally box-blends the even
+  // output row with the previous chroma row (`stage = true` — the direct decode's
+  // post-reconstruction work is infallible, so advancing the lookback here is
+  // safe).
   let centered = if need_centered_chroma {
-    Some(upsample_420_chroma_center_h_u16::<BITS>(
+    Some(upsample_420_chroma_sited_u16::<BITS>(
       chroma_full_u16,
+      chroma_prev_u16,
+      chroma_prev_row,
       u_half_row,
       v_half_row,
+      idx,
+      bottom_v,
+      true,
       w,
       BE,
     ))
   } else {
     None
   };
+
+  // Bottom-sited LUMA-ONLY row (RFC #238 S6f): the colour upsample above — which
+  // refreshes the lookback via `stage = true` — did not run (`centered` is
+  // `None`), so stage the current chroma row HERE, after its reservation and
+  // BEFORE any luma write, so a LATER colour row in the same frame box-blends it
+  // (a luma-only-then-colour in-order walk reconstructs the same Bottom phase as
+  // the all-output walk). A colour row staged inside the sited upsample, so gate
+  // on `!want_color`; the `chroma_prev_row` tag still guards out-of-sequence /
+  // cross-frame reads (→ clamp, never stale).
+  if bottom_v && !want_color {
+    stage_420_chroma_prev_u16(
+      chroma_prev_u16,
+      chroma_prev_row,
+      u_half_row,
+      v_half_row,
+      idx,
+      w,
+    );
+  }
 
   // ---- luma (native Y; luma narrows `>> (BITS - 8)`, luma_u16 is the
   // host-native logical Y) ---------------------------------------------
@@ -2416,18 +2461,28 @@ fn yuva420p_high_bit_resample<const BITS: u32, const BE: bool>(
     resample_outputs,
     frozen_alpha_mode,
     frozen_chroma_centered,
+    frozen_chroma_bottom_v,
+    chroma_prev_u16,
+    chroma_prev_row,
     ..
   } = sinker;
   let plan = plan.as_ref().expect("plan.is_some() checked by the caller");
   check_frozen_alpha_mode(*frozen_alpha_mode, alpha_mode, idx)?;
-  // RFC #238 S6c — 4:2:0 HORIZONTAL chroma siting for the high-bit alpha-bearing
-  // source. The centered group (`chroma_420_center_sited_h` — chroma at `+0.5`
-  // luma horizontally) reconstructs full-width chroma then feeds the 4:4:4
-  // (+ source-alpha) twins; the co-sited / unspecified group is phase 0 (today's
-  // fused 4:2:0 decode, byte-identical). The full-resolution α plane is never
-  // subsampled, so it is siting-independent and passes through the 4:4:4 twins
-  // UNCHANGED. Vertical stays co-sited (the `Bottom` v-fold is a later PR).
+  // RFC #238 S6c / S6f — 4:2:0 HORIZONTAL + VERTICAL `Bottom` chroma siting for the
+  // high-bit alpha-bearing source. The centered group (`chroma_420_center_sited_h`
+  // — chroma at `+0.5` luma horizontally) reconstructs full-width chroma then feeds
+  // the 4:4:4 (+ source-alpha) twins; the co-sited / unspecified group is phase 0
+  // (today's fused 4:2:0 decode, byte-identical). The full-resolution α plane is
+  // never subsampled, so it is siting-independent and passes through the 4:4:4
+  // twins UNCHANGED. RFC #238 S6f adds the VERTICAL `Bottom` (`v = 1`) fold on top
+  // ([`chroma_420_bottom_sited_v`], a strict sub-case of `center_sited`): the
+  // reconstruction additionally box-blends the even output row's chroma with the
+  // previous chroma row via the `chroma_prev_u16` lookback. `Center` / `Top` keep
+  // `v_phase = 0` (co-sited vertical, byte-identical to S6c). This sink is
+  // packed-only (no native code-domain tier), so `Bottom` folds via the RGB-domain
+  // reconstruct-then-bin, never a native `area_chroma_phased_v` plan.
   let center_sited = chroma_420_center_sited_h(chroma_location);
+  let bottom_v = chroma_420_bottom_sited_v(chroma_location);
   // A colour output drives the centered chroma reconstruction (u8 OR native
   // u16); a luma-only row bins the native Y (siting-independent) and never
   // reconstructs chroma, so it stays on the co-sited fused arm.
@@ -2438,13 +2493,16 @@ fn yuva420p_high_bit_resample<const BITS: u32, const BE: bool>(
   // state) freezes nothing. MUST include the u16 colour outputs — a u16-only
   // sink still advances a stream and must freeze the siting.
   let need_output = want_color || luma.is_some() || luma_u16.is_some();
-  // Freeze the effective horizontal siting on the first output-bearing row: a
-  // later row observing a different phase — in sequence or not — would bin a
-  // mixture of co-sited and centered chroma, so it is rejected here before any
-  // reconstruction. The matching SET rides each accepted output row below.
+  // Freeze the effective siting on the first output-bearing row: a later row
+  // observing a different phase — in sequence or not — would bin a mixture of
+  // co-sited and centered chroma, so it is rejected here before any
+  // reconstruction. The matching SET rides each accepted output row below. RFC
+  // #238 S6f also freezes the VERTICAL phase: `Center` and `Bottom` are both
+  // horizontally centered, so a mid-frame Center ⇆ Bottom flip is invisible to
+  // `center_sited` alone and is caught by the `frozen_chroma_bottom_v` companion.
   if need_output
     && let Some(frozen) = *frozen_chroma_centered
-    && frozen != center_sited
+    && (frozen != center_sited || *frozen_chroma_bottom_v != Some(bottom_v))
   {
     return Err(MixedSinkerError::ChromaSitingChanged(
       ChromaSitingChanged::new(idx),
@@ -2498,14 +2556,28 @@ fn yuva420p_high_bit_resample<const BITS: u32, const BE: bool>(
           core::ops::ControlFlow::Break(()) => Ok(()),
           core::ops::ControlFlow::Continue(()) => {
             reserve_420_chroma_full_u16(chroma_full_u16, w, h)?;
-            let (u_full, v_full) = upsample_420_chroma_center_h_u16::<BITS>(
+            // RFC #238 S6f: the `Bottom` even output row box-blends its chroma with
+            // the previous chroma row, so reserve the lookback up front — AFTER the
+            // preflight, BEFORE the commit (#180).
+            if bottom_v {
+              reserve_420_chroma_prev_u16(chroma_prev_u16, w, h)?;
+            }
+            // `stage = false`: DEFER the lookback advance until AFTER the fallible
+            // packed commit accepts the row (below), so a rejected row leaves the
+            // predecessor for a clean retry (#180 state-atomicity).
+            let (u_full, v_full) = upsample_420_chroma_sited_u16::<BITS>(
               chroma_full_u16,
+              chroma_prev_u16,
+              chroma_prev_row,
               u_half_row,
               v_half_row,
+              idx,
+              bottom_v,
+              false,
               w,
               BE,
             );
-            packed_yuva444_resample::<BITS>(
+            let r = packed_yuva444_resample::<BITS>(
               rgba_stream,
               rgba_stream_u16,
               luma_stream_u16,
@@ -2538,7 +2610,21 @@ fn yuva420p_high_bit_resample<const BITS: u32, const BE: bool>(
                 )
               },
               |dst| deinterleave_y_high_bit_masked::<BITS, BE>(y_row, dst, w),
-            )
+            );
+            // Bottom lookback: advance ONLY after the packed area resample accepts
+            // the row, so a rejected row leaves the predecessor for a clean retry —
+            // the sited reconstruction read it above but did not stage (deferred).
+            if r.is_ok() && bottom_v {
+              stage_420_chroma_prev_u16(
+                chroma_prev_u16,
+                chroma_prev_row,
+                u_half_row,
+                v_half_row,
+                idx,
+                w,
+              );
+            }
+            r
           }
         }
       } else {
@@ -2658,14 +2744,27 @@ fn yuva420p_high_bit_resample<const BITS: u32, const BE: bool>(
           core::ops::ControlFlow::Break(()) => Ok(()),
           core::ops::ControlFlow::Continue(()) => {
             reserve_420_chroma_full_u16(chroma_full_u16, w, h)?;
-            let (u_full, v_full) = upsample_420_chroma_center_h_u16::<BITS>(
+            // RFC #238 S6f: reserve the bottom-sited lookback the even output row
+            // box-blends against — AFTER the preflight, BEFORE the commit (#180).
+            if bottom_v {
+              reserve_420_chroma_prev_u16(chroma_prev_u16, w, h)?;
+            }
+            // `stage = false`: DEFER the lookback advance until AFTER the fallible
+            // filter commit accepts the row (below), so a rejected row leaves the
+            // predecessor for a clean retry (#180 state-atomicity).
+            let (u_full, v_full) = upsample_420_chroma_sited_u16::<BITS>(
               chroma_full_u16,
+              chroma_prev_u16,
+              chroma_prev_row,
               u_half_row,
               v_half_row,
+              idx,
+              bottom_v,
+              false,
               w,
               BE,
             );
-            packed_yuva444_filter_resample::<BITS, false, false>(
+            let r = packed_yuva444_filter_resample::<BITS, false, false>(
               rgba_filter_stream,
               rgba_filter_stream_u16,
               &mut None,
@@ -2701,7 +2800,21 @@ fn yuva420p_high_bit_resample<const BITS: u32, const BE: bool>(
               },
               |dst| deinterleave_y_high_bit_masked::<BITS, BE>(y_row, dst, w),
               |_dst: &mut [u8]| {},
-            )
+            );
+            // Bottom lookback: advance ONLY after the filter resample accepts the
+            // row, so a rejected row leaves the predecessor for a clean retry — the
+            // sited reconstruction read it above but did not stage (deferred, #180).
+            if r.is_ok() && bottom_v {
+              stage_420_chroma_prev_u16(
+                chroma_prev_u16,
+                chroma_prev_row,
+                u_half_row,
+                v_half_row,
+                idx,
+                w,
+              );
+            }
+            r
           }
         }
       } else {
@@ -2751,10 +2864,12 @@ fn yuva420p_high_bit_resample<const BITS: u32, const BE: bool>(
   };
   // RFC #238 S6c: freeze the horizontal 4:2:0 chroma siting on the first
   // ACCEPTED output-bearing resampled row (a rejected row returns Err above and
-  // leaves it unset for a corrected retry). Both packed tails carry one plan
-  // kind for the frame, so there is no native/row-stage route to co-freeze here.
+  // leaves it unset for a corrected retry); S6f freezes the vertical `Bottom`
+  // phase alongside it. Both packed tails carry one plan kind for the frame, so
+  // there is no native/row-stage route to co-freeze here.
   if r.is_ok() && need_output && frozen_chroma_centered.is_none() {
     *frozen_chroma_centered = Some(center_sited);
+    *frozen_chroma_bottom_v = Some(bottom_v);
   }
   r
 }

@@ -45,3 +45,14 @@ pub(crate) use yuv420p::reserve_420_chroma_full_u16;
 // see it as unused. (PR-S7 repoints YUVA too and retires this re-export.)
 #[cfg(feature = "yuva")]
 pub(crate) use yuv420p::upsample_420_chroma_center_h_u16;
+// RFC #238 S6f: the high-bit YUVA 4:2:0 `Bottom` (v = 1) vertical fold reuses the
+// planar `Yuv420pN` u16 sited reconstruction ([`yuv420p::upsample_420_chroma_sited_u16`])
+// and its one-row chroma lookback ([`yuv420p::reserve_420_chroma_prev_u16`] /
+// [`yuv420p::stage_420_chroma_prev_u16`]) rather than duplicating the kernel —
+// gated to the sole `yuva` consumer (`yuva` implies `yuv-planar`, so `yuv420p`
+// exists). `Yuv420pN` itself uses them in-module, so they are live under
+// `yuv-planar` without this re-export.
+#[cfg(feature = "yuva")]
+pub(crate) use yuv420p::{
+  reserve_420_chroma_prev_u16, stage_420_chroma_prev_u16, upsample_420_chroma_sited_u16,
+};

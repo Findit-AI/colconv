@@ -639,6 +639,48 @@ macro_rules! hibit_yuva420_chroma_tests {
         (u444, v444)
       }
 
+      /// The full-resolution U / V a bottom-sited (`v = 1`) high-bit 4:2:0 decode
+      /// reconstructs (logical `u16`): the even luma row box-blends its predecessor
+      /// chroma row (round-half-up), the odd row takes the current chroma row, each
+      /// then horizontally centered — the RFC #238 S6f vertical fold.
+      fn ref_full_chroma_bottom(u420: &[u16], v420: &[u16]) -> (Vec<u16>, Vec<u16>) {
+        let w = W as usize;
+        let h = H as usize;
+        let cw = w / 2;
+        let mut u444 = std::vec![0u16; w * h];
+        let mut v444 = std::vec![0u16; w * h];
+        let vblend = |plane: &[u16], cr: usize, prev: usize| -> Vec<u32> {
+          (0..cw)
+            .map(|c| (u32::from(plane[prev * cw + c]) + u32::from(plane[cr * cw + c]) + 1) >> 1)
+            .collect()
+        };
+        for r in 0..h {
+          let cr = r / 2;
+          let (urow, vrow) = if r & 1 == 0 {
+            let prev = cr.saturating_sub(1);
+            (vblend(u420, cr, prev), vblend(v420, cr, prev))
+          } else {
+            (
+              u420[cr * cw..cr * cw + cw]
+                .iter()
+                .map(|&x| u32::from(x))
+                .collect(),
+              v420[cr * cw..cr * cw + cw]
+                .iter()
+                .map(|&x| u32::from(x))
+                .collect(),
+            )
+          };
+          let uo = ref_upsample_center_h(&urow, w);
+          let vo = ref_upsample_center_h(&vrow, w);
+          for c in 0..w {
+            u444[r * w + c] = uo[c] as u16;
+            v444[r * w + c] = vo[c] as u16;
+          }
+        }
+        (u444, v444)
+      }
+
       fn frame<'a>(
         y: &'a [u16],
         u: &'a [u16],
@@ -886,10 +928,65 @@ macro_rules! hibit_yuva420_chroma_tests {
         miri,
         ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
       )]
-      fn top_and_bottom_route_like_center_horizontally() {
+      fn top_routes_like_center_and_bottom_folds_vertically() {
+        // Top shares the horizontal centered phase AND keeps the vertical pairing
+        // co-sited (RFC #238 S6f folds only Bottom's `v = 1`), so Top == Center
+        // byte-for-byte. Bottom additionally applies the vertical `v = 1` blend, so
+        // on the vertically-varying fixture it diverges from Center — asserted at
+        // NATIVE u16 depth: at high bit depths the fold's sub-LSB effect can round
+        // away in the 8-bit RGBA, but it is exact in the native-depth output.
         let center = convert_rgba(ChromaLocation::Center, true);
         assert_eq!(convert_rgba(ChromaLocation::Top, true), center);
-        assert_eq!(convert_rgba(ChromaLocation::Bottom, true), center);
+        let (y, u, v, a) = ramp_planes();
+        let decode_u16 = |loc: ChromaLocation| -> Vec<u16> {
+          let mut rgba = std::vec![0u16; (W * H * 4) as usize];
+          let mut sink = MixedSinker::<$Marker>::new(W as usize, H as usize)
+            .with_rgba_u16(&mut rgba)
+            .unwrap()
+            .with_chroma_location(loc);
+          $walker(&frame(&y, &u, &v, &a), false, ColorMatrix::Bt601, &mut sink).unwrap();
+          rgba
+        };
+        assert_eq!(
+          decode_u16(ChromaLocation::Top),
+          decode_u16(ChromaLocation::Center),
+          "Top must route like Center at native depth (co-sited vertical)"
+        );
+        assert_ne!(
+          decode_u16(ChromaLocation::Bottom),
+          decode_u16(ChromaLocation::Center),
+          "Bottom must fold vertically (diverge from Center) at native depth"
+        );
+      }
+
+      #[test]
+      #[cfg_attr(
+        miri,
+        ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+      )]
+      fn bottom_rgba_matches_vfold_upsample_then_444_with_real_alpha() {
+        // RFC #238 S6f: the `Bottom` (`v = 1`) high-bit direct decode reconstructs
+        // chroma with the vertical box-blend + centered horizontal upsample, so its
+        // RGBA equals a `Yuva444pN` decode on that v-fold-reconstructed chroma + the
+        // SAME full-res source alpha — on BOTH the SIMD and scalar tiers (0-ULP).
+        let (y, u, v, a) = ramp_planes();
+        let (u444, v444) = ref_full_chroma_bottom(&u, &v);
+        let ref_src = $RefFrame::try_new(&y, &u444, &v444, &a, W, H, W, W, W, W).unwrap();
+        let mut rgba_ref = std::vec![0u8; (W * H * 4) as usize];
+        let mut ref_sink = MixedSinker::<$Ref>::new(W as usize, H as usize)
+          .with_rgba(&mut rgba_ref)
+          .unwrap();
+        $ref_walker(&ref_src, false, ColorMatrix::Bt601, &mut ref_sink).unwrap();
+        assert_eq!(
+          convert_rgba(ChromaLocation::Bottom, true),
+          rgba_ref,
+          "bottom high-bit YUVA RGBA (SIMD) must equal v-fold-upsample-then-4:4:4"
+        );
+        assert_eq!(
+          convert_rgba(ChromaLocation::Bottom, false),
+          rgba_ref,
+          "bottom high-bit YUVA RGBA (scalar) must equal v-fold-upsample-then-4:4:4"
+        );
       }
 
       #[test]
