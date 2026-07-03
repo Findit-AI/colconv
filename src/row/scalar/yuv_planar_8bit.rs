@@ -575,6 +575,87 @@ pub(crate) fn chroma_upsample_420_bottom_even_h_u16<const BITS: u32>(
   }
 }
 
+/// Full-width vertical chroma reconstruction for the **bottom-sited** vertical
+/// phase of an *even* output luma row of a **4:4:0** (`Yuv440p`) source (RFC
+/// #238). 4:4:0 keeps FULL-width chroma (no horizontal subsampling), so —
+/// unlike the 4:2:0 sibling [`chroma_upsample_420_bottom_even_h`] — there is no
+/// horizontal `1/4`–`3/4` reconstruction: each output column is purely the
+/// vertical box average of the previous and current full-width chroma rows,
+///
+/// ```text
+///   out[j] = (prev[j] + cur[j] + 1) >> 1      (top edge: prev clamped to cur)
+/// ```
+///
+/// for every `j in 0..width` — the FFmpeg `AVCHROMA_LOC_BOTTOM` (`Bottom`)
+/// vertical position `v = 1`, where the even luma row `2i` sits halfway between
+/// chroma rows `i-1` and `i`. The rounding average `(a + b + 1) >> 1` is
+/// precisely the hardware rounding-average (`vrhaddq_u8` / `_mm_avg_epu8` /
+/// `u8x16_avgr` …), so each SIMD backend is one `avg` instruction per lane. The
+/// **odd** luma row `2i+1` is co-sited with chroma row `i` (`v = 1`), so it
+/// needs no vertical blend and the orchestrator passes `cur` straight through —
+/// only the even row routes here. The result is a full-width chroma row the
+/// caller feeds to the existing 4:4:4 decode, so the bottom-sited 4:4:0 path
+/// reuses the fully-SIMD 4:4:4 kernels and stays bit-identical per tier.
+///
+/// # Panics (debug builds)
+///
+/// - `prev.len() >= width`, `cur.len() >= width`, `out.len() >= width`.
+// Gated like [`chroma_upsample_420_bottom_even_h`]: reachable only through the
+// bottom-sited `Yuv440p` identity path, which stages the full-width chroma in a
+// `Vec` scratch (so heap allocation is available).
+#[cfg(any(feature = "std", feature = "alloc"))]
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn chroma_upsample_440_bottom_v(prev: &[u8], cur: &[u8], out: &mut [u8], width: usize) {
+  debug_assert!(prev.len() >= width, "prev row too short");
+  debug_assert!(cur.len() >= width, "cur row too short");
+  debug_assert!(out.len() >= width, "out row too short");
+
+  for j in 0..width {
+    out[j] = (((prev[j] as u16) + (cur[j] as u16) + 1) >> 1) as u8;
+  }
+}
+
+/// `u16` twin of [`chroma_upsample_440_bottom_v`] for the **high-bit** planar
+/// 4:4:0 formats (`Yuv440p9` … `Yuv440p16`, RFC #238): the EVEN output luma
+/// row's bottom-sited (`v = 1`) full-width vertical box-blend of the previous
+/// (`prev`) and current (`cur`) chroma rows,
+///
+/// ```text
+///   out[j] = (prev[j] + cur[j] + 1) >> 1      (top edge: prev clamped to cur)
+/// ```
+///
+/// Operates on **host-native** logical `u16` samples. The rounding average is
+/// bit-depth-independent (`a, b < 2^BITS ⇒ (a + b + 1) >> 1 < 2^BITS`, no
+/// overflow and no clamp for any `BITS`), so the kernel needs no `BITS`
+/// generic, and — because a pure vertical average never mixes one sample's bits
+/// into a neighbour's, unlike the horizontally-reconstructing 4:2:0 sibling
+/// [`chroma_upsample_420_bottom_even_h_u16`] — no low-`BITS` masking is fused in
+/// here: the caller normalizes wire→host byte order and masks (if needed)
+/// before calling. Each backend maps to one `avg` instruction per lane
+/// (`vrhaddq_u16` / `_mm_avg_epu16` / …).
+///
+/// # Panics (debug builds)
+///
+/// - `prev.len() >= width`, `cur.len() >= width`, `out.len() >= width`.
+#[cfg(any(feature = "std", feature = "alloc"))]
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn chroma_upsample_440_bottom_v_u16(
+  prev: &[u16],
+  cur: &[u16],
+  out: &mut [u16],
+  width: usize,
+) {
+  debug_assert!(prev.len() >= width, "prev row too short");
+  debug_assert!(cur.len() >= width, "cur row too short");
+  debug_assert!(out.len() >= width, "out row too short");
+
+  for j in 0..width {
+    out[j] = (((prev[j] as u32) + (cur[j] as u32) + 1) >> 1) as u16;
+  }
+}
+
 // ---- YUV 4:1:0 → RGB (fused: 4x horizontal upsample + convert) -------
 
 /// Converts one row of 4:1:0 YUV — Y at full width, U/V at

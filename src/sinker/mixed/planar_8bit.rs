@@ -3533,6 +3533,18 @@ pub(super) struct NativePlanarYuv {
   /// current siting and drops the join on a mismatch. `false` for a luma-only
   /// join (no chroma plan) and for every co-sited / non-4:2:2 layout.
   chroma_centered: bool,
+  /// Whether the cached chroma plan folded the `Bottom` vertical chroma phase
+  /// (`v = 1`, RFC #238). A vertical-co-sited plan and a `Bottom` one leave
+  /// the horizontal `chroma_centered` flag identical, so the vertical axis is
+  /// recorded separately here — letting a reused sink tell the two apart and
+  /// rebuild the join when the vertical siting moves. Only the
+  /// vertically-subsampled 4:4:0 layout folds it; `false` for a luma-only join
+  /// and every vertical-co-sited layout.
+  #[cfg_attr(
+    not(any(feature = "yuv-semi-planar", feature = "yuv-packed")),
+    allow(dead_code)
+  )]
+  chroma_bottom: bool,
 }
 
 /// Chroma-grid streams and staging of [`NativePlanarYuv`].
@@ -3661,6 +3673,10 @@ impl NativePlanarYuv {
       staged: [[false; 2]; 3],
       next_emit: 0,
       chroma_centered,
+      // Vertical siting is not yet folded into this join's chroma plan; the
+      // only vertically-subsampled sharer (4:4:0) always co-sites here, so the
+      // flag stays inert until a `Bottom` vertical phase is routed in.
+      chroma_bottom: false,
     })
   }
 
@@ -3694,6 +3710,18 @@ impl NativePlanarYuv {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(super) const fn chroma_centered(&self) -> bool {
     self.chroma_centered
+  }
+
+  /// Whether the cached chroma plan folded the `Bottom` vertical chroma phase
+  /// (`v = 1`) — see [`chroma_bottom`](Self#structfield.chroma_bottom).
+  /// `Center` and `Bottom` leave [`chroma_centered`](Self::chroma_centered)
+  /// identical, so a caller distinguishing them on the vertical axis compares
+  /// this too.
+  #[cfg(any(feature = "yuv-semi-planar", feature = "yuv-packed"))]
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  #[allow(dead_code)]
+  pub(super) const fn chroma_bottom(&self) -> bool {
+    self.chroma_bottom
   }
 
   /// Next source row this join expects (0 at a fresh frame). Read by the
@@ -3926,8 +3954,9 @@ pub(super) fn yuv_planar_process_native(
     chroma_vsub,
     staged,
     next_emit,
-    // Cache key read only at build / begin_frame; the feed loop ignores it.
+    // Cache keys read only at build / begin_frame; the feed loop ignores them.
     chroma_centered: _,
+    chroma_bottom: _,
   } = &mut **join;
   y.feed_row(idx, y_row, use_simd, |oy, out_row| {
     let slot = oy & 1;

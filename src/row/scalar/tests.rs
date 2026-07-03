@@ -1554,3 +1554,59 @@ fn chroma_derived_ncl_bt470bg_row_matches_independent_derivation() {
     }
   }
 }
+
+// ---- 4:4:0 bottom-sited vertical chroma reconstruction ----------------------
+
+#[cfg(feature = "yuv-planar")]
+#[test]
+fn chroma_upsample_440_bottom_v_matches_oracle() {
+  // Full-width vertical rounding-average `(prev + cur + 1) >> 1`, across widths
+  // that straddle every SIMD chunk boundary the arch backends use. `prev` and
+  // `cur` carry OPPOSITE column parity (the even `+ 198` makes `cur ≡ i` mod 2
+  // against `prev ≡ i + 1`), so every `prev[j] + cur[j]` is ODD — this
+  // exercises the `+ 1` rounding a truncating `(a + b) >> 1` backend gets wrong.
+  for width in [1usize, 2, 7, 15, 16, 17, 31, 33, 64, 65, 129] {
+    let prev: std::vec::Vec<u8> = (0..width).map(|i| ((i * 37 + 11) & 0xFF) as u8).collect();
+    let cur: std::vec::Vec<u8> = (0..width).map(|i| ((i * 53 + 198) & 0xFF) as u8).collect();
+    let mut out = std::vec![0u8; width];
+    chroma_upsample_440_bottom_v(&prev, &cur, &mut out, width);
+    for j in 0..width {
+      let expected = (((prev[j] as u16) + (cur[j] as u16) + 1) >> 1) as u8;
+      assert_eq!(out[j], expected, "width={width} j={j}");
+    }
+  }
+}
+
+#[cfg(feature = "yuv-planar")]
+#[test]
+fn chroma_upsample_440_bottom_v_prev_equals_cur_is_identity() {
+  // The top-edge clamp replicates the previous chroma row from the current one;
+  // with `prev == cur` the box average collapses to `cur` exactly.
+  let cur: std::vec::Vec<u8> = (0..40).map(|i| ((i * 7 + 3) & 0xFF) as u8).collect();
+  let mut out = std::vec![0u8; 40];
+  chroma_upsample_440_bottom_v(&cur, &cur, &mut out, 40);
+  assert_eq!(out, cur, "prev == cur must reproduce cur exactly");
+}
+
+#[cfg(feature = "yuv-planar")]
+#[test]
+fn chroma_upsample_440_bottom_v_u16_matches_oracle_all_depths() {
+  // The average is bit-depth-independent, so the same pure `(prev + cur + 1)
+  // >> 1` holds for any sample range; exercise a 10-bit and a full 16-bit one.
+  for &mask in &[0x3FFu32, 0xFFFFu32] {
+    for width in [1usize, 7, 8, 9, 15, 16, 17, 33, 64, 65, 129] {
+      let prev: std::vec::Vec<u16> = (0..width)
+        .map(|i| ((i as u32).wrapping_mul(2654435761) & mask) as u16)
+        .collect();
+      let cur: std::vec::Vec<u16> = (0..width)
+        .map(|i| ((i as u32).wrapping_mul(40503).wrapping_add(12345) & mask) as u16)
+        .collect();
+      let mut out = std::vec![0u16; width];
+      chroma_upsample_440_bottom_v_u16(&prev, &cur, &mut out, width);
+      for j in 0..width {
+        let expected = (((prev[j] as u32) + (cur[j] as u32) + 1) >> 1) as u16;
+        assert_eq!(out[j], expected, "mask={mask:#x} width={width} j={j}");
+      }
+    }
+  }
+}
