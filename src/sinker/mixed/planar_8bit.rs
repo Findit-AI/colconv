@@ -111,8 +111,12 @@ pub(super) fn reserve_420_chroma_full(
 /// resize (→ [`ResampleError::AllocationFailed`]); `width` already fits `usize`
 /// (the Y plane is `width * height`), so no `checked_mul` is needed. `height`
 /// feeds the error payload.
+///
+/// `pub(super)` so the sibling-module `Yuva420p` 4:2:0 sink (RFC #238 S4-D)
+/// reuses this shared bottom-sited lookback reservation for its resample
+/// reconstruction arms and direct decode.
 #[cfg(feature = "yuv-planar")]
-fn reserve_420_chroma_prev(
+pub(super) fn reserve_420_chroma_prev(
   chroma_prev: &mut std::vec::Vec<u8>,
   width: usize,
   height: usize,
@@ -153,9 +157,12 @@ fn reserve_420_chroma_prev(
 /// **Infallible**: the caller must have run [`reserve_420_chroma_prev`] up front
 /// (the luma-only path does so before its luma write), so `chroma_prev` is
 /// guaranteed `>= width` here.
+///
+/// `pub(super)` so the sibling-module `Yuva420p` 4:2:0 sink (RFC #238 S4-D)
+/// stages the same lookback after its deferred, commit-accepted bottom rows.
 #[cfg(feature = "yuv-planar")]
 #[inline]
-fn stage_420_chroma_prev(
+pub(super) fn stage_420_chroma_prev(
   chroma_prev: &mut [u8],
   chroma_prev_row: &mut Option<usize>,
   u_half: &[u8],
@@ -251,9 +258,13 @@ pub(super) fn upsample_420_chroma_center_h<'s>(
 /// The caller must have run [`reserve_420_chroma_full`] (always) and, when
 /// `bottom_v`, [`reserve_420_chroma_prev`] up front, so both buffers are sized
 /// here and this is infallible.
+///
+/// `pub(super)` so the sibling-module `Yuva420p` 4:2:0 sink (RFC #238 S4-D)
+/// reconstructs the same bottom-sited full-width chroma before its alpha-aware
+/// 4:4:4 convert (the α plane is siting-independent and never routed here).
 #[cfg(feature = "yuv-planar")]
 #[allow(clippy::too_many_arguments)]
-fn upsample_420_chroma_sited<'s>(
+pub(super) fn upsample_420_chroma_sited<'s>(
   chroma_full: &'s mut [u8],
   chroma_prev: &mut [u8],
   chroma_prev_row: &mut Option<usize>,
@@ -3048,17 +3059,28 @@ impl NativeYuva420 {
     need_color: bool,
     need_alpha: bool,
     chroma_h_phase: f64,
+    chroma_v_phase: f64,
   ) -> Result<Self, ResampleError> {
     // The embedded no-alpha 4:2:0 join folds the RFC #238 horizontal chroma
     // sampling phase (`chroma_h_phase`: `0.25` centered, `0.0` co-sited) into the
     // chroma area weights, exactly as the no-alpha `Yuv420p` / semi-planar `Nv12`
-    // native arms do. The full-resolution α plane is siting-independent (never
-    // subsampled), so it is untouched. At phase 0 the folded plan is
+    // native arms do, and (RFC #238 S4-D) the vertical `Bottom` phase
+    // (`chroma_v_phase`: `1.0` for `v = 1`, `0.0` co-sited vertical) into the V
+    // weights. The full-resolution α plane is siting-independent (never
+    // subsampled), so it is untouched. At phase 0 on both axes the folded plan is
     // byte-identical to the plain co-sited grid, so co-sited output is unchanged.
-    // The vertical pairing stays co-sited (`v_phase = 0`).
     let inner = NativeYuv420::new(
       plan,
-      || ResamplePlan::area_chroma_420(w / 2, h, plan.out_w(), plan.out_h(), chroma_h_phase, 0.0),
+      || {
+        ResamplePlan::area_chroma_420(
+          w / 2,
+          h,
+          plan.out_w(),
+          plan.out_h(),
+          chroma_h_phase,
+          chroma_v_phase,
+        )
+      },
       w,
       h,
       need_color,
@@ -3109,6 +3131,16 @@ impl NativeYuva420 {
     self.inner.chroma_centered
   }
 
+  /// Whether the embedded join's cached chroma plan folded the `Bottom` vertical
+  /// phase (`v = 1`, RFC #238 S4-D). `Center` and `Bottom` share
+  /// `chroma_centered = true`, so the horizontal flag alone cannot tell them
+  /// apart; the `Yuva420p` native arm compares this too to rebuild the join when
+  /// the vertical siting moves.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub(super) const fn chroma_bottom(&self) -> bool {
+    self.inner.chroma_bottom
+  }
+
   /// Next source row the embedded join expects (0 at a fresh frame). Read by the
   /// `Yuva420p` native arm to fire the phase-rebuild drop ONLY at a fresh-frame
   /// boundary (`next_y() == 0`), never mid-frame.
@@ -3137,11 +3169,13 @@ impl NativeYuva420 {
 /// runs, and the sink only routes here under `AlphaMode::Straight`, so a
 /// mid-frame flip to Premultiplied is rejected before any native feed.
 ///
-/// `chroma_h_phase` is the RFC #238 horizontal chroma sampling phase folded into
-/// the embedded Y / U / V join's chroma area weights (`0.25` centered, `0.0`
-/// co-sited); the full-resolution α plane is siting-independent, so the phase
-/// never touches it. At phase 0 the folded plan is byte-identical to the plain
-/// co-sited grid.
+/// `chroma_h_phase` / `chroma_v_phase` are the RFC #238 horizontal and vertical
+/// chroma sampling phases folded into the embedded Y / U / V join's chroma area
+/// weights (`chroma_h_phase` `0.25` centered / `0.0` co-sited; `chroma_v_phase`
+/// `1.0` for the S4-D `Bottom` `v = 1` fold / `0.0` co-sited vertical); the
+/// full-resolution α plane is siting-independent, so neither phase touches it. At
+/// phase 0 on both axes the folded plan is byte-identical to the plain co-sited
+/// grid.
 #[cfg(feature = "yuva")]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn yuva420p_process_native(
@@ -3164,6 +3198,7 @@ pub(super) fn yuva420p_process_native(
   w: usize,
   h: usize,
   chroma_h_phase: f64,
+  chroma_v_phase: f64,
   use_simd: bool,
 ) -> Result<(), MixedSinkerError> {
   let ow = plan.out_w();
@@ -3210,7 +3245,15 @@ pub(super) fn yuva420p_process_native(
   let new_join = if rebuild {
     // Build the join (its inner Y / U / V / α streams allocate recoverably) and
     // box it recoverably (`try_box`, not `Box::new` — the latter aborts on OOM).
-    let join = NativeYuva420::new(plan, w, h, need_color, need_alpha, chroma_h_phase)?;
+    let join = NativeYuva420::new(
+      plan,
+      w,
+      h,
+      need_color,
+      need_alpha,
+      chroma_h_phase,
+      chroma_v_phase,
+    )?;
     Some(crate::resample::try_box(join).map_err(|_| {
       MixedSinkerError::Resample(ResampleError::AllocationFailed(PlanGeometry::new(
         w,
