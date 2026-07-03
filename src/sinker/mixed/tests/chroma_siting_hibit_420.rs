@@ -85,6 +85,47 @@ fn ref_full_chroma_u16(u420: &[u16], v420: &[u16]) -> (Vec<u16>, Vec<u16>) {
   (u444, v444)
 }
 
+/// Independent reference for the bottom-sited (`v = 1`) full reconstruction on
+/// logical `u16` (RFC #238 S6d): per luma row `r`, the EVEN rows take the
+/// vertical box average `(prev + cur + 1) >> 1` of chroma rows `r/2 - 1`
+/// (clamped to `r/2` at the top edge) and `r/2`; the ODD rows take chroma row
+/// `r/2` directly. Each half-row is then horizontally upsampled with the SAME
+/// centered `1/4`–`3/4` weights (Bottom is `h = 0.5`). Written separately from
+/// the production kernel so it is a true oracle.
+fn ref_full_chroma_bottom_u16(u420: &[u16], v420: &[u16]) -> (Vec<u16>, Vec<u16>) {
+  let w = W as usize;
+  let h = H as usize;
+  let cw = w / 2;
+  let mut u444 = std::vec![0u16; w * h];
+  let mut v444 = std::vec![0u16; w * h];
+  let vblend = |plane: &[u16], cr: usize, prev: usize| -> Vec<u16> {
+    (0..cw)
+      .map(|c| {
+        let a = plane[prev * cw + c] as u32;
+        let b = plane[cr * cw + c] as u32;
+        ((a + b + 1) >> 1) as u16
+      })
+      .collect::<Vec<u16>>()
+  };
+  for r in 0..h {
+    let cr = r / 2;
+    let (uhalf, vhalf) = if r & 1 == 0 {
+      let prev = cr.saturating_sub(1);
+      (vblend(u420, cr, prev), vblend(v420, cr, prev))
+    } else {
+      (
+        u420[cr * cw..cr * cw + cw].to_vec(),
+        v420[cr * cw..cr * cw + cw].to_vec(),
+      )
+    };
+    let urow = ref_upsample_center_h_u16(&uhalf, w);
+    let vrow = ref_upsample_center_h_u16(&vhalf, w);
+    u444[r * w..r * w + w].copy_from_slice(&urow);
+    v444[r * w..r * w + w].copy_from_slice(&vrow);
+  }
+  (u444, v444)
+}
+
 // ---- u16 kernel oracle (endianness-explicit) -------------------------------
 
 #[test]
@@ -200,22 +241,182 @@ fn center_upsample_u16_kernel_masks_dirty_upper_bits() {
   assert_eq!(out, [0, 0, 0, 16384, 49151, 65535, 65535, 65535]);
 }
 
+// ---- u16 bottom (v = 1) kernel oracle (RFC #238 S6d) -----------------------
+
+#[test]
+fn bottom_even_upsample_u16_kernel_matches_hand_computed() {
+  // prev = [0, 0, 100, 100], cur = [40, 40, 60, 60] (half = 4, width = 8), LE.
+  //   e = (prev + cur + 1) >> 1 = [20, 20, 80, 80], then the centered horizontal
+  //   1/4-3/4 reconstruction: 2j = (e[j-1] + 3e[j] + 2) >> 2, 2j+1 = (3e[j] +
+  //   e[j+1] + 2) >> 2. Values < 512 fit every depth, so the BITS mask is a no-op.
+  let prev = [0u16, 0, 100, 100];
+  let cur = [40u16, 40, 60, 60];
+  let mut out = [0u16; 8];
+  crate::row::scalar::chroma_upsample_420_bottom_even_h_u16::<10>(&prev, &cur, &mut out, 8, false);
+  assert_eq!(out, [20, 20, 20, 35, 65, 80, 80, 80]);
+}
+
+#[test]
+fn bottom_even_upsample_u16_kernel_equals_center_when_rows_match() {
+  // prev == cur => the vertical box blend is a no-op, so the bottom-even kernel
+  // reproduces the plain horizontal centered upsample exactly.
+  let cur = [10u16, 400, 900, 300];
+  let mut bottom = [0u16; 8];
+  let mut center = [0u16; 8];
+  crate::row::scalar::chroma_upsample_420_bottom_even_h_u16::<10>(
+    &cur,
+    &cur,
+    &mut bottom,
+    8,
+    false,
+  );
+  crate::row::scalar::chroma_upsample_2to1_center_h_u16::<10>(&cur, &mut center, 8, false);
+  assert_eq!(
+    bottom, center,
+    "prev == cur must collapse the vertical blend to the horizontal centered path"
+  );
+}
+
+#[test]
+fn bottom_even_upsample_u16_kernel_big_endian_matches_le_logical() {
+  // Same LOGICAL input, wire-encoded big-endian: the kernel blends in the logical
+  // domain and re-encodes to BE, so decoding the BE output back yields the SAME
+  // logical result as the LE path. Host-independent.
+  let prev = [0u16, 0, 400, 400];
+  let cur = [100u16, 100, 200, 200];
+  let enc = |s: &[u16], be: bool| -> Vec<u16> {
+    s.iter()
+      .map(|&x| if be { x.to_be() } else { x.to_le() })
+      .collect()
+  };
+  let mut out_le = [0u16; 8];
+  let mut out_be = [0u16; 8];
+  crate::row::scalar::chroma_upsample_420_bottom_even_h_u16::<10>(
+    &enc(&prev, false),
+    &enc(&cur, false),
+    &mut out_le,
+    8,
+    false,
+  );
+  crate::row::scalar::chroma_upsample_420_bottom_even_h_u16::<10>(
+    &enc(&prev, true),
+    &enc(&cur, true),
+    &mut out_be,
+    8,
+    true,
+  );
+  let dec_le: Vec<u16> = out_le.iter().map(|&x| u16::from_le(x)).collect();
+  let dec_be: Vec<u16> = out_be.iter().map(|&x| u16::from_be(x)).collect();
+  assert_eq!(
+    dec_be, dec_le,
+    "BE bottom kernel must equal LE for the same logical planes"
+  );
+}
+
+#[test]
+fn bottom_even_upsample_u16_kernel_masks_dirty_upper_bits() {
+  // A malformed low-packed input with bits set ABOVE BITS must blend identically
+  // to the masked clean input: the kernel masks each sample to BITS AFTER the
+  // endian load and BEFORE the blend, so dirty high bits never leak into a
+  // neighbour's low bits, and the output stays within `[0, (1 << BITS) - 1]`.
+  fn check<const BITS: u32>() {
+    let mask = ((1u32 << BITS) - 1) as u16;
+    let upper = !mask;
+    let prev = [10u16 & mask, 300 & mask, 200 & mask, 50 & mask];
+    let cur = [80u16 & mask, 40 & mask, 260 & mask, 120 & mask];
+    for be in [false, true] {
+      let enc = |s: &[u16]| -> Vec<u16> {
+        s.iter()
+          .map(|&x| if be { x.to_be() } else { x.to_le() })
+          .collect()
+      };
+      let dirty = |s: &[u16]| -> Vec<u16> {
+        s.iter()
+          .map(|&x| {
+            let d = x | upper;
+            if be { d.to_be() } else { d.to_le() }
+          })
+          .collect()
+      };
+      let mut clean_out = [0u16; 8];
+      let mut dirty_out = [0u16; 8];
+      crate::row::scalar::chroma_upsample_420_bottom_even_h_u16::<BITS>(
+        &enc(&prev),
+        &enc(&cur),
+        &mut clean_out,
+        8,
+        be,
+      );
+      crate::row::scalar::chroma_upsample_420_bottom_even_h_u16::<BITS>(
+        &dirty(&prev),
+        &dirty(&cur),
+        &mut dirty_out,
+        8,
+        be,
+      );
+      assert_eq!(
+        clean_out, dirty_out,
+        "BITS={BITS} be={be}: dirty upper bits must be masked before the blend"
+      );
+      let dec_max = clean_out
+        .iter()
+        .map(|&x| u32::from(if be { u16::from_be(x) } else { u16::from_le(x) }))
+        .max()
+        .unwrap();
+      assert!(
+        dec_max <= mask as u32,
+        "BITS={BITS} be={be}: blended output must stay within the bit depth"
+      );
+    }
+  }
+  check::<10>();
+  check::<12>();
+}
+
+/// Vertical chroma ramp: flat mid-gray luma with chroma CONSTANT across columns
+/// but stepping strongly per ROW, so the `Bottom` vertical blend is observable in
+/// isolation (a horizontal-only siting leaves it untouched). Values clamp to
+/// `maxv`.
+fn vramp_planes_n(maxv: u32) -> (Vec<u16>, Vec<u16>, Vec<u16>) {
+  let w = W as usize;
+  let h = H as usize;
+  let (cw, ch) = (w / 2, h / 2);
+  let step = (maxv / 8).max(1);
+  let y = std::vec![(maxv / 2) as u16; w * h];
+  let mut u = std::vec![0u16; cw * ch];
+  let mut v = std::vec![0u16; cw * ch];
+  for r in 0..ch {
+    for c in 0..cw {
+      u[r * cw + c] = (step + r as u32 * step).min(maxv) as u16;
+      v[r * cw + c] = maxv.saturating_sub(r as u32 * step).max(step) as u16;
+    }
+  }
+  (y, u, v)
+}
+
 // ---- per-bit-depth suite ---------------------------------------------------
 
 // The suite is identical bar the bit depth, format marker, frame type, and
 // walker, so generate it once per depth. Each lands in its own `mod` so the
 // names don't collide.
 macro_rules! hibit_420_chroma_tests {
-  ($mod:ident, $bits:expr, $Marker:ident, $Frame:ident, $walker:ident, $Ref:ident, $RefFrame:ident, $ref_walker:ident, $MarkerBe:ty, $FrameBe:ident, $walker_be:ident) => {
+  ($mod:ident, $bits:expr, $Marker:ident, $Frame:ident, $walker:ident, $Ref:ident, $RefFrame:ident, $ref_walker:ident, $MarkerBe:ty, $FrameBe:ident, $walker_be:ident, $Row:ident) => {
     mod $mod {
       use super::*;
 
       const MAXV: u32 = (1u32 << $bits) - 1;
 
-      /// Centered/default identity-decode RGB for a siting + SIMD toggle.
+      /// Centered/default identity-decode RGB for a siting + SIMD toggle (over
+      /// the horizontal `ramp_planes_n` fixture).
       fn convert_rgb(loc: ChromaLocation, simd: bool) -> Vec<u8> {
         let (yp, up, vp) = ramp_planes_n(MAXV);
-        let src = $Frame::new(&yp, &up, &vp, W, H, W, W / 2, W / 2);
+        convert_rgb_with(loc, simd, &yp, &up, &vp)
+      }
+
+      /// Identity-decode RGB for a siting + SIMD toggle over EXPLICIT planes (so
+      /// the bottom-sited tests can drive the vertical `vramp_planes_n` fixture).
+      fn convert_rgb_with(loc: ChromaLocation, simd: bool, yp: &[u16], up: &[u16], vp: &[u16]) -> Vec<u8> {
+        let src = $Frame::new(yp, up, vp, W, H, W, W / 2, W / 2);
         let mut rgb = std::vec![0u8; (W * H * 3) as usize];
         let mut sink = MixedSinker::<$Marker>::new(W as usize, H as usize)
           .with_rgb(&mut rgb)
@@ -432,12 +633,203 @@ macro_rules! hibit_420_chroma_tests {
         miri,
         ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
       )]
-      fn top_and_bottom_route_like_center_horizontally() {
-        // Top / Bottom share Center's horizontal (centered) phase; the vertical
-        // phase is not yet consumed (#302 horizontal-only), so all three agree.
-        let center = convert_rgb(ChromaLocation::Center, true);
-        assert_eq!(convert_rgb(ChromaLocation::Top, true), center);
-        assert_eq!(convert_rgb(ChromaLocation::Bottom, true), center);
+      fn top_routes_like_center_and_bottom_folds_vertically() {
+        // Top shares Center's horizontal (centered) phase and is vertically
+        // co-sited (`v = 0`), so it still agrees with Center. Bottom (RFC #238
+        // S6d) additionally folds the `v = 1` vertical blend, so on a vertical
+        // chroma ramp (strong per-row step, visible in 8-bit RGB at EVERY depth)
+        // it must DIVERGE from Center. (`bottom_rgb_matches_vblend_then_444_reference`
+        // pins its value.)
+        assert_eq!(
+          convert_rgb(ChromaLocation::Top, true),
+          convert_rgb(ChromaLocation::Center, true)
+        );
+        let (yp, up, vp) = vramp_planes_n(MAXV);
+        assert_ne!(
+          convert_rgb_with(ChromaLocation::Bottom, true, &yp, &up, &vp),
+          convert_rgb_with(ChromaLocation::Center, true, &yp, &up, &vp),
+          "Bottom must fold the vertical phase (differs from vertically co-sited Center)"
+        );
+      }
+
+      // ---- bottom-sited (v = 1) vertical fold (RFC #238 S6d) ---------------
+
+      #[test]
+      #[cfg_attr(
+        miri,
+        ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+      )]
+      fn bottom_rgb_matches_vblend_then_444_reference() {
+        let (yp, up, vp) = vramp_planes_n(MAXV);
+        let (u444, v444) = ref_full_chroma_bottom_u16(&up, &vp);
+        let ref_src = $RefFrame::new(&yp, &u444, &v444, W, H, W, W, W);
+        let mut rgb_ref = std::vec![0u8; (W * H * 3) as usize];
+        let mut ref_sink = MixedSinker::<$Ref>::new(W as usize, H as usize)
+          .with_rgb(&mut rgb_ref)
+          .unwrap();
+        $ref_walker(&ref_src, false, ColorMatrix::Bt601, &mut ref_sink).unwrap();
+        assert_eq!(
+          convert_rgb_with(ChromaLocation::Bottom, true, &yp, &up, &vp),
+          rgb_ref,
+          "bottom-sited high-bit 4:2:0 RGB must equal vblend + horizontal-upsample then 4:4:4"
+        );
+      }
+
+      #[test]
+      #[cfg_attr(
+        miri,
+        ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+      )]
+      fn bottom_rgb_u16_matches_vblend_then_444_reference() {
+        let (yp, up, vp) = vramp_planes_n(MAXV);
+        let (u444, v444) = ref_full_chroma_bottom_u16(&up, &vp);
+        let src = $Frame::new(&yp, &up, &vp, W, H, W, W / 2, W / 2);
+        let mut rgb16 = std::vec![0u16; (W * H * 3) as usize];
+        let mut sink = MixedSinker::<$Marker>::new(W as usize, H as usize)
+          .with_rgb_u16(&mut rgb16)
+          .unwrap()
+          .with_chroma_location(ChromaLocation::Bottom);
+        $walker(&src, false, ColorMatrix::Bt601, &mut sink).unwrap();
+        let ref_src = $RefFrame::new(&yp, &u444, &v444, W, H, W, W, W);
+        let mut rgb16_ref = std::vec![0u16; (W * H * 3) as usize];
+        let mut ref_sink = MixedSinker::<$Ref>::new(W as usize, H as usize)
+          .with_rgb_u16(&mut rgb16_ref)
+          .unwrap();
+        $ref_walker(&ref_src, false, ColorMatrix::Bt601, &mut ref_sink).unwrap();
+        assert_eq!(
+          rgb16, rgb16_ref,
+          "bottom-sited high-bit 4:2:0 RGB u16 must equal vblend-then-4:4:4"
+        );
+      }
+
+      #[test]
+      #[cfg_attr(
+        miri,
+        ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+      )]
+      fn bottom_path_simd_matches_scalar() {
+        let (yp, up, vp) = vramp_planes_n(MAXV);
+        assert_eq!(
+          convert_rgb_with(ChromaLocation::Bottom, true, &yp, &up, &vp),
+          convert_rgb_with(ChromaLocation::Bottom, false, &yp, &up, &vp),
+          "bottom path must be bit-identical across the SIMD and scalar tiers"
+        );
+      }
+
+      #[test]
+      #[cfg_attr(
+        miri,
+        ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+      )]
+      fn bottom_luma_only_then_late_color_box_blends() {
+        // Always-maintained lookback: rows 0, 1 are processed LUMA-ONLY (no
+        // colour), so the colour upsample never runs — yet the bottom lookback
+        // must still be staged through them. After a late `set_rgb`, row 2 (Bottom
+        // even, pair 1) must box-blend chroma rows 0 and 1 (== the all-output
+        // reference), NOT clamp to chroma row 1.
+        let (yp, up, vp) = vramp_planes_n(MAXV);
+        let w = W as usize;
+        let h = H as usize;
+        let cw = w / 2;
+        let (u444, v444) = ref_full_chroma_bottom_u16(&up, &vp);
+        let ref_src = $RefFrame::new(&yp, &u444, &v444, W, H, W, W, W);
+        let mut rgb_ref = std::vec![0u8; w * h * 3];
+        let mut ref_sink = MixedSinker::<$Ref>::new(w, h).with_rgb(&mut rgb_ref).unwrap();
+        $ref_walker(&ref_src, false, ColorMatrix::Bt601, &mut ref_sink).unwrap();
+        drop(ref_sink);
+        let mut luma = std::vec![0u8; w * h];
+        let mut rgb = std::vec![0u8; w * h * 3];
+        {
+          let mut sink = MixedSinker::<$Marker>::new(w, h)
+            .with_luma(&mut luma)
+            .unwrap()
+            .with_chroma_location(ChromaLocation::Bottom);
+          crate::PixelSink::begin_frame(&mut sink, W, H).unwrap();
+          let feed = |sink: &mut MixedSinker<'_, $Marker>, r: usize| {
+            let cr = r / 2;
+            let row = $Row::new(
+              &yp[r * w..r * w + w],
+              &up[cr * cw..cr * cw + cw],
+              &vp[cr * cw..cr * cw + cw],
+              r,
+              ColorMatrix::Bt601,
+              false,
+            );
+            crate::PixelSink::process(sink, row).unwrap();
+          };
+          feed(&mut sink, 0);
+          feed(&mut sink, 1);
+          sink.set_rgb(&mut rgb).unwrap();
+          feed(&mut sink, 2);
+          feed(&mut sink, 3);
+        }
+        let got_row2 = &rgb[2 * w * 3..3 * w * 3];
+        assert_eq!(
+          got_row2,
+          &rgb_ref[2 * w * 3..3 * w * 3],
+          "a luma-only-then-late-colour row 2 must box-blend chroma rows 0,1 (all-output reference)"
+        );
+        // Must NOT be the clamp (= Center's row 2, the centered upsample of chroma
+        // row 1 only), which is what an unmaintained lookback would produce.
+        let clamp = convert_rgb_with(ChromaLocation::Center, true, &yp, &up, &vp);
+        assert_ne!(
+          got_row2,
+          &clamp[2 * w * 3..3 * w * 3],
+          "row 2 must NOT clamp — the lookback was maintained through the luma-only rows"
+        );
+      }
+
+      #[test]
+      #[cfg_attr(
+        miri,
+        ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+      )]
+      fn bottom_no_output_rows_do_not_enable_late_color_blend() {
+        // The no-output invariant's correctness twin: rows 0, 1 are processed with
+        // NO outputs (invisible — they return before the preflight and must not
+        // prime the lookback). After a late `set_rgb`, row 2 (Bottom even) must
+        // CLAMP (== Center's row 2), NOT box-blend through those invisible rows.
+        let (yp, up, vp) = vramp_planes_n(MAXV);
+        let w = W as usize;
+        let cw = w / 2;
+        let mut rgb = std::vec![0u8; w * H as usize * 3];
+        {
+          let mut sink =
+            MixedSinker::<$Marker>::new(w, H as usize).with_chroma_location(ChromaLocation::Bottom);
+          crate::PixelSink::begin_frame(&mut sink, W, H).unwrap();
+          let feed = |sink: &mut MixedSinker<'_, $Marker>, r: usize| {
+            let cr = r / 2;
+            let row = $Row::new(
+              &yp[r * w..r * w + w],
+              &up[cr * cw..cr * cw + cw],
+              &vp[cr * cw..cr * cw + cw],
+              r,
+              ColorMatrix::Bt601,
+              false,
+            );
+            crate::PixelSink::process(sink, row).unwrap();
+          };
+          feed(&mut sink, 0);
+          feed(&mut sink, 1);
+          sink.set_rgb(&mut rgb).unwrap();
+          feed(&mut sink, 2);
+          feed(&mut sink, 3);
+        }
+        let got_row2 = &rgb[2 * w * 3..3 * w * 3];
+        let clamp = convert_rgb_with(ChromaLocation::Center, true, &yp, &up, &vp);
+        assert_eq!(
+          got_row2,
+          &clamp[2 * w * 3..3 * w * 3],
+          "a no-output predecessor row must not enable a later colour even row to box-blend"
+        );
+        // Guard: the box-blend (the all-output bottom decode) is a DIFFERENT
+        // value, so the clamp is observably the no-output-invisible behaviour.
+        let bottom_full = convert_rgb_with(ChromaLocation::Bottom, true, &yp, &up, &vp);
+        assert_ne!(
+          got_row2,
+          &bottom_full[2 * w * 3..3 * w * 3],
+          "guard: the clamp must differ from the box-blend, so the no-output rows were invisible"
+        );
       }
 
       #[test]
@@ -673,7 +1065,8 @@ hibit_420_chroma_tests!(
   yuv444p9_to,
   Yuv420p9<true>,
   Yuv420p9BeFrame,
-  yuv420p9_to_endian
+  yuv420p9_to_endian,
+  Yuv420p9Row
 );
 hibit_420_chroma_tests!(
   p10,
@@ -686,7 +1079,8 @@ hibit_420_chroma_tests!(
   yuv444p10_to,
   Yuv420p10<true>,
   Yuv420p10BeFrame,
-  yuv420p10_to_endian
+  yuv420p10_to_endian,
+  Yuv420p10Row
 );
 hibit_420_chroma_tests!(
   p12,
@@ -699,7 +1093,8 @@ hibit_420_chroma_tests!(
   yuv444p12_to,
   Yuv420p12<true>,
   Yuv420p12BeFrame,
-  yuv420p12_to_endian
+  yuv420p12_to_endian,
+  Yuv420p12Row
 );
 hibit_420_chroma_tests!(
   p14,
@@ -712,7 +1107,8 @@ hibit_420_chroma_tests!(
   yuv444p14_to,
   Yuv420p14<true>,
   Yuv420p14BeFrame,
-  yuv420p14_to_endian
+  yuv420p14_to_endian,
+  Yuv420p14Row
 );
 hibit_420_chroma_tests!(
   p16,
@@ -725,5 +1121,6 @@ hibit_420_chroma_tests!(
   yuv444p16_to,
   Yuv420p16<true>,
   Yuv420p16BeFrame,
-  yuv420p16_to_endian
+  yuv420p16_to_endian,
+  Yuv420p16Row
 );

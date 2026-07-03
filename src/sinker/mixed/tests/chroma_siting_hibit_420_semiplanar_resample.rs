@@ -568,11 +568,13 @@ macro_rules! hibit_420_semiplanar_resample_siting {
       fn centered_equals_planar_yuv420p_across_tiers() {
         for (sw, sh, ow, oh) in GEOMS {
           let (y, u, v) = ramp(sw, sh);
-          for loc in [
-            ChromaLocation::Center,
-            ChromaLocation::Top,
-            ChromaLocation::Bottom,
-          ] {
+          // Center / Top are horizontal-only and identical across the planar and
+          // semi-planar reconstructions. Bottom is EXCLUDED here: RFC #238 S6d
+          // folds the vertical `v = 1` blend for the PLANAR `Yuv420p9…16` only,
+          // so planar Bottom now diverges from the (still horizontal-only)
+          // semi-planar `P0xx` Bottom until the semi-planar vertical fold lands
+          // in a later stage.
+          for loc in [ChromaLocation::Center, ChromaLocation::Top] {
             for native in [true, false] {
               assert_eq!(
                 run(&y, &u, &v, sw, sh, ow, oh, loc, native, true),
