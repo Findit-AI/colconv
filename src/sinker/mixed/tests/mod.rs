@@ -94,6 +94,8 @@ mod chroma_siting_422_packed_resample;
 mod chroma_siting_422_resample;
 #[cfg(feature = "yuva")]
 mod chroma_siting_422_yuva;
+#[cfg(all(feature = "yuva", feature = "rgb"))]
+mod chroma_siting_422_yuva_resample;
 #[cfg(feature = "yuv-planar")]
 mod chroma_siting_hibit_420;
 #[cfg(all(feature = "yuv-planar", feature = "rgb"))]
@@ -108,6 +110,8 @@ mod chroma_siting_hibit_422;
 mod chroma_siting_hibit_422_resample;
 #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar", feature = "rgb"))]
 mod chroma_siting_hibit_422_semiplanar_resample;
+#[cfg(all(feature = "yuva", feature = "rgb"))]
+mod chroma_siting_hibit_422_yuva_resample;
 #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
 mod chroma_siting_nv;
 #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar", feature = "rgb"))]
