@@ -451,12 +451,16 @@ macro_rules! p0xx_chroma_tests {
         miri,
         ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
       )]
-      fn top_and_bottom_route_like_center_horizontally() {
-        // Top / Bottom share Center's horizontal (centered) phase; the vertical
-        // phase is not yet consumed (#302 horizontal-only), so all three agree.
+      fn top_routes_like_center() {
+        // Top shares BOTH Center's horizontal center phase and its vertical
+        // co-siting (`v = 0`), so Top and Center decode byte-identically at every
+        // depth. (RFC #238 S6e: Bottom instead folds the `v = 1` vertical box
+        // blend — its divergence from Center is covered robustly across all depths
+        // by the resample suite's `vramp` bottom tests + the identity-resample ==
+        // direct-decode check, which use a vertical ramp strong enough to survive
+        // the 8-bit RGB quantization even at 16-bit source depth.)
         let center = convert_rgb(ChromaLocation::Center, true);
         assert_eq!(convert_rgb(ChromaLocation::Top, true), center);
-        assert_eq!(convert_rgb(ChromaLocation::Bottom, true), center);
       }
 
       #[test]

@@ -126,6 +126,94 @@ pub(crate) fn chroma_upsample_2to1_center_h_p0xx<const BITS: u32>(
   }
 }
 
+/// Bottom-sited (`AVCHROMA_LOC_BOTTOM`, `v = 1`) vertical + horizontal 2:1
+/// chroma reconstruction for the **high-bit-packed semi-planar** 4:2:0 P-format
+/// family — `P010` / `P012` / `P016` (RFC #238 S6e), the interleaved MSB-aligned
+/// twin of the planar
+/// [`chroma_upsample_420_bottom_even_h_u16`](super::yuv_planar_8bit::chroma_upsample_420_bottom_even_h_u16).
+/// It is the `Bottom` sibling of [`chroma_upsample_2to1_center_h_p0xx`]: same
+/// de-pack / re-pack / re-interleave seam, but the EVEN output luma row `2i`
+/// first vertically box-blends the previous (`prev_uv_half`) and current
+/// (`cur_uv_half`) interleaved chroma rows before the horizontal centered fold.
+///
+/// ```text
+///   e[c] = (prev[c] + cur[c] + 1) >> 1                 (vertical box blend)
+///   even col 2j → (e[j-1] + 3·e[j] + 2) >> 2   (e[-1]    clamped to e[0])
+///   odd  col 2j+1 → (3·e[j] + e[j+1] + 2) >> 2  (e[half] clamped to e[half-1])
+/// ```
+///
+/// applied INDEPENDENTLY to `U` (even element) and `V` (odd element) of each
+/// interleaved pair. Both rows carry samples in the source's MSB-aligned wire
+/// convention (active value in the high `BITS`) + `big_endian` order; each input
+/// is normalized wire → host-native then de-packed `>> (16 - BITS)` (the
+/// SIMD-matching sanitization, so a mispacked neighbour's dirty low bits never
+/// leak through the blend) BEFORE the arithmetic, and each output is re-packed
+/// `<< (16 - BITS)` + re-encoded to the same wire order — so the result feeds
+/// straight to the existing `p_n_444_*` decode kernels, bit-identical per tier
+/// (the exact logical chroma the planar `_u16` twin produces, so a `P0xx`
+/// `Bottom` decode stays byte-identical to the `Yuv420pN` one). At `BITS = 16`
+/// both shifts are no-ops. The blend runs in the logical domain (`left + 3·mid`
+/// ≤ `4 · 65535` never overflows the `u32` accumulator).
+///
+/// The **odd** luma row `2i+1` is co-sited with chroma row `i` (`v = 1`), so it
+/// needs no vertical blend and reuses [`chroma_upsample_2to1_center_h_p0xx`] on
+/// `cur_uv_half` directly — only the even row routes here.
+///
+/// # Panics (debug builds)
+///
+/// - `width` must be even (4:2:0 pairs pixel columns).
+/// - `prev_uv_half.len() >= width`, `cur_uv_half.len() >= width`,
+///   `uv_full.len() >= 2 * width`.
+#[cfg(all(any(feature = "std", feature = "alloc"), feature = "yuv-planar"))]
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn chroma_upsample_420_bottom_even_h_p0xx<const BITS: u32>(
+  prev_uv_half: &[u16],
+  cur_uv_half: &[u16],
+  uv_full: &mut [u16],
+  width: usize,
+  big_endian: bool,
+) {
+  debug_assert_eq!(width & 1, 0, "P-format 4:2:0 requires even width");
+  debug_assert!(prev_uv_half.len() >= width, "prev_uv_half row too short");
+  debug_assert!(cur_uv_half.len() >= width, "cur_uv_half row too short");
+  debug_assert!(uv_full.len() >= 2 * width, "uv_full row too short");
+
+  let shift = 16 - BITS;
+  let load = |row: &[u16], c: usize, comp: usize| -> u32 {
+    let raw = row[2 * c + comp];
+    (if big_endian {
+      u16::from_be(raw)
+    } else {
+      u16::from_le(raw)
+    } >> shift) as u32
+  };
+  let store = |logical: u32| -> u16 {
+    let v = (logical as u16) << shift;
+    if big_endian { v.to_be() } else { v.to_le() }
+  };
+  // Vertical box blend of the previous and current chroma rows, per chroma
+  // column `c` and component `comp ∈ {0, 1}` (U / V), then the horizontal center
+  // phase across it — the fused `v = 1` reconstruction.
+  let vblend = |c: usize, comp: usize| -> u32 {
+    (load(prev_uv_half, c, comp) + load(cur_uv_half, c, comp) + 1) >> 1
+  };
+
+  let half = width / 2;
+  for j in 0..half {
+    // `e[j-1]` clamps to `e[0]` at the left edge; `e[j+1]` clamps to the last
+    // sample at the right edge — boundary replication, matching the horizontal
+    // sibling. U and V each get the independent phase, then interleave back.
+    let lj = j.saturating_sub(1);
+    let rj = if j + 1 < half { j + 1 } else { j };
+    let (ul, um, ur) = (vblend(lj, 0), vblend(j, 0), vblend(rj, 0));
+    let (vl, vm, vr) = (vblend(lj, 1), vblend(j, 1), vblend(rj, 1));
+    uv_full[2 * (2 * j)] = store((ul + 3 * um + 2) >> 2);
+    uv_full[2 * (2 * j) + 1] = store((vl + 3 * vm + 2) >> 2);
+    uv_full[2 * (2 * j + 1)] = store((3 * um + ur + 2) >> 2);
+    uv_full[2 * (2 * j + 1) + 1] = store((3 * vm + vr + 2) >> 2);
+  }
+}
+
 // ---- P010 (semi-planar 10-bit, high-bit-packed) → RGB ------------------
 
 /// Converts one row of P010 (semi‑planar 4:2:0 with UV interleaved,

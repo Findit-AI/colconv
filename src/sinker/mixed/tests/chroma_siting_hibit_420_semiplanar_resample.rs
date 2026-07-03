@@ -568,13 +568,17 @@ macro_rules! hibit_420_semiplanar_resample_siting {
       fn centered_equals_planar_yuv420p_across_tiers() {
         for (sw, sh, ow, oh) in GEOMS {
           let (y, u, v) = ramp(sw, sh);
-          // Center / Top are horizontal-only and identical across the planar and
-          // semi-planar reconstructions. Bottom is EXCLUDED here: RFC #238 S6d
-          // folds the vertical `v = 1` blend for the PLANAR `Yuv420p9…16` only,
-          // so planar Bottom now diverges from the (still horizontal-only)
-          // semi-planar `P0xx` Bottom until the semi-planar vertical fold lands
-          // in a later stage.
-          for loc in [ChromaLocation::Center, ChromaLocation::Top] {
+          // Center / Top are horizontal-only; Bottom folds the vertical `v = 1`
+          // blend. RFC #238 S6e routes Bottom through the semi-planar P0xx
+          // resample too (matching the planar S6d fold), so P0xx Bottom is once
+          // again byte-identical to the planar `Yuv420pN` Bottom across every
+          // tier — the strongest catch for a U/V swap or a mis-sited vertical
+          // blend in the de-interleave.
+          for loc in [
+            ChromaLocation::Center,
+            ChromaLocation::Top,
+            ChromaLocation::Bottom,
+          ] {
             for native in [true, false] {
               assert_eq!(
                 run(&y, &u, &v, sw, sh, ow, oh, loc, native, true),
@@ -803,6 +807,562 @@ macro_rules! hibit_420_semiplanar_resample_siting {
           );
 
           // Filter tier.
+          let mut rgb = vec![0u8; 4 * 4 * 3];
+          let sink = MixedSinker::<$M420, FilteredResampler<Triangle>>::with_resampler(
+            8,
+            8,
+            FilteredResampler::new(4, 4, Triangle),
+          )
+          .unwrap()
+          .with_rgb(&mut rgb)
+          .unwrap();
+          let err = flip_row1(sink, &y, &u, &v, loc1, loc2).unwrap_err();
+          assert!(
+            matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
+            "filter {loc1:?}->{loc2:?}: want ChromaSitingChanged, got {err:?}"
+          );
+        }
+      }
+
+      // ==== RFC #238 S6e: bottom-sited (v = 1) VERTICAL fold ================
+      //
+      // The `Bottom` vertical blend runs on the SAME logical U / V a `Yuv420pN`
+      // frame holds (the de-interleave produces the identical half-width planes),
+      // so every oracle here operates on those LOGICAL planes and decodes through
+      // an identity / resampled `Yuv444pN` sink — byte-identical to the planar
+      // S6d oracles. The P-format wire is MSB-aligned, but the reconstructed
+      // logical chroma is depth- and endian-independent (pinned by the BE↔LE and
+      // planar cross-checks).
+
+      /// Flat-luma fixture with a strong per-ROW chroma step (flat across
+      /// columns), so the vertical `Bottom` fold is observable in isolation: a
+      /// horizontal-only siting leaves it untouched, the `v = 1` blend visibly
+      /// moves it. `sw` / `sh` must be even. Returns LOGICAL planes.
+      fn vramp(sw: usize, sh: usize) -> (Vec<u16>, Vec<u16>, Vec<u16>) {
+        let (cw, ch) = (sw / 2, sh / 2);
+        let step = (MASK as u32 / 8).max(1);
+        let y = vec![MID; sw * sh];
+        let mut u = vec![0u16; cw * ch];
+        let mut v = vec![0u16; cw * ch];
+        for r in 0..ch {
+          for c in 0..cw {
+            u[r * cw + c] = (step + r as u32 * step).min(MASK as u32) as u16;
+            v[r * cw + c] = (MASK as u32).saturating_sub(r as u32 * step).max(step) as u16;
+          }
+        }
+        (y, u, v)
+      }
+
+      /// The EXACT bottom-sited (`v = 1`) chroma oracle for the native tier: the
+      /// centered horizontal `1/4`–`3/4` triangle (×4) composed with the vertical
+      /// `v = 1` triangle (×2 — even luma row `2i` box-blends chroma rows
+      /// `{i-1, i}` with weights `{1, 1}`, odd row `2i+1` takes chroma row `i`
+      /// with weight 2, top-edge clamp), the combined ×8 UNROUNDED reconstruction
+      /// box-averaged to `ow x oh` with a SINGLE round-half-up — the code-domain
+      /// twin the folded `area_chroma_phased_v` V axis realizes (EVEN `sh`,
+      /// `ch = sh / 2`).
+      fn bin_chroma_bottom_u16(c: &[u16], cw: usize, ch: usize, ow: usize, oh: usize) -> Vec<u16> {
+        let full = 2 * cw;
+        let sh = 2 * ch;
+        let mut r8 = vec![0u64; full * sh];
+        for r in 0..sh {
+          let cr = r / 2;
+          let prev = cr.saturating_sub(1);
+          let vrow: Vec<u32> = (0..cw)
+            .map(|j| {
+              if r & 1 == 0 {
+                u32::from(c[prev * cw + j]) + u32::from(c[cr * cw + j]) // even: {1, 1}
+              } else {
+                2 * u32::from(c[cr * cw + j]) // odd: {2}
+              }
+            })
+            .collect();
+          for j in 0..cw {
+            let l = vrow[j.saturating_sub(1)];
+            let m = vrow[j];
+            let rt = vrow[if j + 1 < cw { j + 1 } else { j }];
+            r8[r * full + 2 * j] = u64::from(l + 3 * m);
+            r8[r * full + 2 * j + 1] = u64::from(3 * m + rt);
+          }
+        }
+        let hw = area_weights(full, ow);
+        let vw = area_weights(sh, oh);
+        let denom = (8 * full * sh) as u64; // ×8 (×2 V, ×4 H) × the box normalization
+        let mut out = vec![0u16; ow * oh];
+        for (oy, (vs, vwin)) in vw.iter().enumerate() {
+          for (ox, (hs, hwin)) in hw.iter().enumerate() {
+            let mut s = 0u64;
+            for (dy, &vwt) in vwin.iter().enumerate() {
+              let mut hsum = 0u64;
+              for (dx, &hwt) in hwin.iter().enumerate() {
+                hsum += hwt * r8[(vs + dy) * full + hs + dx];
+              }
+              s += vwt * hsum;
+            }
+            out[oy * ow + ox] = rdhu(s, denom) as u16;
+          }
+        }
+        out
+      }
+
+      /// The bottom-sited NATIVE code-domain oracle: bin Y co-sited and U / V
+      /// through the exact bottom V-fold oracle to `ow x oh` (LOGICAL), then
+      /// convert ONCE at output width via an identity `Yuv444pN` sink.
+      #[allow(clippy::too_many_arguments)]
+      fn bottom_native_oracle(
+        y: &[u16],
+        u: &[u16],
+        v: &[u16],
+        sw: usize,
+        sh: usize,
+        ow: usize,
+        oh: usize,
+        simd: bool,
+      ) -> (Vec<u8>, Vec<u16>) {
+        let (cw, ch) = (sw / 2, sh / 2);
+        let yb = bin_cosited_u16(y, sw, sh, ow, oh);
+        let ub = bin_chroma_bottom_u16(u, cw, ch, ow, oh);
+        let vb = bin_chroma_bottom_u16(v, cw, ch, ow, oh);
+        let mut rgb = vec![0u8; ow * oh * 3];
+        let mut rgb16 = vec![0u16; ow * oh * 3];
+        {
+          let mut sink = MixedSinker::<$M444>::new(ow, oh)
+            .with_simd(simd)
+            .with_rgb(&mut rgb)
+            .unwrap()
+            .with_rgb_u16(&mut rgb16)
+            .unwrap();
+          let f = $F444::new(
+            &yb, &ub, &vb, ow as u32, oh as u32, ow as u32, ow as u32, ow as u32,
+          );
+          $w444(&f, FR, M, &mut sink).unwrap();
+        }
+        (rgb, rgb16)
+      }
+
+      /// Reconstruct `Yuv420pN` chroma to full resolution (`sw x sh`, `u16`) for
+      /// the bottom-sited decode — even rows box-blend chroma rows `i - 1`
+      /// (clamped) and `i` (round-half-up), odd rows take chroma row `i`, each then
+      /// horizontally upsampled with the #302 centered kernel. The shared
+      /// reconstruction step for every reconstruct-then-bin bottom oracle.
+      fn recon_full_bottom_u16(u: &[u16], v: &[u16], sw: usize, sh: usize) -> (Vec<u16>, Vec<u16>) {
+        let cw = sw / 2;
+        let vblend = |plane: &[u16], cr: usize, prev: usize| -> Vec<u16> {
+          (0..cw)
+            .map(|c| {
+              let a = u32::from(plane[prev * cw + c]);
+              let b = u32::from(plane[cr * cw + c]);
+              ((a + b + 1) >> 1) as u16
+            })
+            .collect::<Vec<u16>>()
+        };
+        let mut uf = vec![0u16; sw * sh];
+        let mut vf = vec![0u16; sw * sh];
+        for r in 0..sh {
+          let cr = r / 2;
+          let (uh, vh) = if r & 1 == 0 {
+            let prev = cr.saturating_sub(1);
+            (vblend(u, cr, prev), vblend(v, cr, prev))
+          } else {
+            (
+              u[cr * cw..cr * cw + cw].to_vec(),
+              v[cr * cw..cr * cw + cw].to_vec(),
+            )
+          };
+          uf[r * sw..r * sw + sw].copy_from_slice(&recon_full_row_u16(&uh, cw));
+          vf[r * sw..r * sw + sw].copy_from_slice(&recon_full_row_u16(&vh, cw));
+        }
+        (uf, vf)
+      }
+
+      /// The bottom-sited RGB-domain oracle: reconstruct U / V to full width with
+      /// the vertical bottom blend then run that `Yuv444pN` frame through the given
+      /// resampler (convert-each-row-then-bin) — exactly what the row-stage /
+      /// filter arms do for `Bottom`. `filter = true` uses the Triangle tier.
+      #[allow(clippy::too_many_arguments)]
+      fn bottom_rgb_domain_oracle(
+        y: &[u16],
+        u: &[u16],
+        v: &[u16],
+        sw: usize,
+        sh: usize,
+        ow: usize,
+        oh: usize,
+        simd: bool,
+        filter: bool,
+      ) -> (Vec<u8>, Vec<u16>) {
+        let (uf, vf) = recon_full_bottom_u16(u, v, sw, sh);
+        let mut rgb = vec![0u8; ow * oh * 3];
+        let mut rgb16 = vec![0u16; ow * oh * 3];
+        let f = $F444::new(
+          y, &uf, &vf, sw as u32, sh as u32, sw as u32, sw as u32, sw as u32,
+        );
+        if filter {
+          let mut sink = MixedSinker::<$M444, FilteredResampler<Triangle>>::with_resampler(
+            sw,
+            sh,
+            FilteredResampler::new(ow, oh, Triangle),
+          )
+          .unwrap()
+          .with_simd(simd)
+          .with_rgb(&mut rgb)
+          .unwrap()
+          .with_rgb_u16(&mut rgb16)
+          .unwrap();
+          $w444(&f, FR, M, &mut sink).unwrap();
+        } else {
+          let mut sink =
+            MixedSinker::<$M444, AreaResampler>::with_resampler(sw, sh, AreaResampler::to(ow, oh))
+              .unwrap()
+              .with_native(false)
+              .with_simd(simd)
+              .with_rgb(&mut rgb)
+              .unwrap()
+              .with_rgb_u16(&mut rgb16)
+              .unwrap();
+          $w444(&f, FR, M, &mut sink).unwrap();
+        }
+        (rgb, rgb16)
+      }
+
+      /// Direct (non-resample, identity dims) `P0xx` `Bottom` decode — the
+      /// delay-line kernel path (de-interleave + vertical blend), the
+      /// already-validated identity reference the resample path must match at
+      /// identity dimensions. Logical planes are packed to the MSB-aligned
+      /// interleaved wire form.
+      fn direct_bottom(
+        y: &[u16],
+        u: &[u16],
+        v: &[u16],
+        sw: usize,
+        sh: usize,
+        simd: bool,
+      ) -> (Vec<u8>, Vec<u16>) {
+        let (y_wire, uv_wire) = (pack_y(y), interleave_pack(u, v, sw, sh));
+        let mut rgb = vec![0u8; sw * sh * 3];
+        let mut rgb16 = vec![0u16; sw * sh * 3];
+        {
+          let mut sink = MixedSinker::<$M420>::new(sw, sh)
+            .with_chroma_location(ChromaLocation::Bottom)
+            .with_simd(simd)
+            .with_rgb(&mut rgb)
+            .unwrap()
+            .with_rgb_u16(&mut rgb16)
+            .unwrap();
+          let f = $F420::new(
+            &y_wire, &uv_wire, sw as u32, sh as u32, sw as u32, sw as u32,
+          );
+          $w420(&f, FR, M, &mut sink).unwrap();
+        }
+        (rgb, rgb16)
+      }
+
+      #[test]
+      #[cfg_attr(miri, ignore = "SIMD row kernels use intrinsics unsupported by Miri")]
+      fn bottom_native_equals_code_domain_oracle() {
+        for (sw, sh, ow, oh) in GEOMS {
+          let (y, u, v) = vramp(sw, sh);
+          let o = bottom_native_oracle(&y, &u, &v, sw, sh, ow, oh, true);
+          assert_eq!(
+            run(
+              &y,
+              &u,
+              &v,
+              sw,
+              sh,
+              ow,
+              oh,
+              ChromaLocation::Bottom,
+              true,
+              true
+            ),
+            o,
+            "bottom native must equal the V-fold code-domain oracle \
+             ({sw}x{sh}->{ow}x{oh})"
+          );
+        }
+      }
+
+      #[test]
+      #[cfg_attr(miri, ignore = "SIMD row kernels use intrinsics unsupported by Miri")]
+      fn bottom_row_stage_equals_rgb_reconstruct_then_bin() {
+        for (sw, sh, ow, oh) in GEOMS {
+          let (y, u, v) = vramp(sw, sh);
+          let o = bottom_rgb_domain_oracle(&y, &u, &v, sw, sh, ow, oh, true, false);
+          assert_eq!(
+            run(
+              &y,
+              &u,
+              &v,
+              sw,
+              sh,
+              ow,
+              oh,
+              ChromaLocation::Bottom,
+              false,
+              true
+            ),
+            o,
+            "bottom semi-planar row-stage must equal the RGB-domain reconstruct-then-bin \
+             oracle ({sw}x{sh}->{ow}x{oh})"
+          );
+        }
+      }
+
+      #[test]
+      #[cfg_attr(miri, ignore = "SIMD row kernels use intrinsics unsupported by Miri")]
+      fn bottom_filter_equals_rgb_reconstruct_then_bin() {
+        for (sw, sh, ow, oh) in GEOMS {
+          let (y, u, v) = vramp(sw, sh);
+          let o = bottom_rgb_domain_oracle(&y, &u, &v, sw, sh, ow, oh, true, true);
+          assert_eq!(
+            run_filter(&y, &u, &v, sw, sh, ow, oh, ChromaLocation::Bottom, true),
+            o,
+            "bottom semi-planar filter must equal the RGB-domain Triangle oracle \
+             ({sw}x{sh}->{ow}x{oh})"
+          );
+        }
+      }
+
+      #[test]
+      #[cfg_attr(miri, ignore = "SIMD row kernels use intrinsics unsupported by Miri")]
+      fn bottom_simd_matches_scalar() {
+        let (y, u, v) = vramp(8, 8);
+        for native in [true, false] {
+          assert_eq!(
+            run(&y, &u, &v, 8, 8, 4, 4, ChromaLocation::Bottom, native, true),
+            run(
+              &y,
+              &u,
+              &v,
+              8,
+              8,
+              4,
+              4,
+              ChromaLocation::Bottom,
+              native,
+              false
+            ),
+            "bottom SIMD vs scalar must agree (native={native})"
+          );
+        }
+        assert_eq!(
+          run_filter(&y, &u, &v, 8, 8, 4, 4, ChromaLocation::Bottom, true),
+          run_filter(&y, &u, &v, 8, 8, 4, 4, ChromaLocation::Bottom, false),
+          "bottom filter SIMD vs scalar must agree"
+        );
+      }
+
+      #[test]
+      #[cfg_attr(miri, ignore = "SIMD row kernels use intrinsics unsupported by Miri")]
+      fn bottom_be_matches_le() {
+        let (y, u, v) = vramp(8, 8);
+        for native in [true, false] {
+          assert_eq!(
+            run_be(&y, &u, &v, 8, 8, 4, 4, ChromaLocation::Bottom, native),
+            run(&y, &u, &v, 8, 8, 4, 4, ChromaLocation::Bottom, native, true),
+            "BE bottom decode must equal LE (native={native})"
+          );
+        }
+      }
+
+      #[test]
+      #[cfg_attr(miri, ignore = "SIMD row kernels use intrinsics unsupported by Miri")]
+      fn bottom_equals_planar_yuv420p_across_tiers() {
+        // The de-interleave / U-V-swap / mis-sited-vertical-blend catch: a
+        // semi-planar `P0xx` Bottom decode must equal the (S6d-verified) planar
+        // `Yuv420pN` Bottom decode of the SAME logical planes, on every tier.
+        for (sw, sh, ow, oh) in GEOMS {
+          let (y, u, v) = vramp(sw, sh);
+          for native in [true, false] {
+            assert_eq!(
+              run(
+                &y,
+                &u,
+                &v,
+                sw,
+                sh,
+                ow,
+                oh,
+                ChromaLocation::Bottom,
+                native,
+                true
+              ),
+              run_yuv420p(
+                &y,
+                &u,
+                &v,
+                sw,
+                sh,
+                ow,
+                oh,
+                ChromaLocation::Bottom,
+                native,
+                true
+              ),
+              "bottom semi-planar must equal bottom planar Yuv420p \
+               (native={native}, {sw}x{sh}->{ow}x{oh})"
+            );
+          }
+        }
+      }
+
+      #[test]
+      #[cfg_attr(miri, ignore = "SIMD row kernels use intrinsics unsupported by Miri")]
+      fn bottom_differs_from_center_on_a_vertical_chroma_ramp() {
+        let (y, u, v) = vramp(8, 8);
+        for native in [true, false] {
+          let cen = run(&y, &u, &v, 8, 8, 4, 4, ChromaLocation::Center, native, true);
+          let bot = run(&y, &u, &v, 8, 8, 4, 4, ChromaLocation::Bottom, native, true);
+          assert_ne!(
+            cen, bot,
+            "bottom must differ from center on a vertical chroma ramp (native={native})"
+          );
+        }
+      }
+
+      #[test]
+      #[cfg_attr(miri, ignore = "SIMD row kernels use intrinsics unsupported by Miri")]
+      fn bottom_equals_cosited_on_flat_chroma() {
+        let (y, u, v) = flat(8, 8);
+        for native in [true, false] {
+          assert_eq!(
+            run(&y, &u, &v, 8, 8, 4, 4, ChromaLocation::Left, native, true),
+            run(&y, &u, &v, 8, 8, 4, 4, ChromaLocation::Bottom, native, true),
+            "bottom must equal co-sited on flat chroma (native={native})"
+          );
+        }
+      }
+
+      #[test]
+      #[cfg_attr(miri, ignore = "SIMD row kernels use intrinsics unsupported by Miri")]
+      fn bottom_identity_resample_matches_direct_decode() {
+        // Identity dims (ow=sw, oh=sh): the resample reconstructs full-width
+        // interleaved chroma with the SAME bottom kernel as the direct decode and
+        // bins with pass-through area weights, so routing Bottom through the
+        // resample preserves the direct decode byte-for-byte.
+        let (y, u, v) = vramp(8, 8);
+        assert_eq!(
+          run(&y, &u, &v, 8, 8, 8, 8, ChromaLocation::Bottom, false, true),
+          direct_bottom(&y, &u, &v, 8, 8, true),
+          "identity resample bottom == direct decode"
+        );
+      }
+
+      #[test]
+      #[cfg_attr(miri, ignore = "SIMD row kernels use intrinsics unsupported by Miri")]
+      fn bottom_final_even_row_reserve_alloc_failure_retries_with_blend() {
+        // ODD source height => the FINAL luma row is EVEN, so its Bottom vertical
+        // blend reads the PREDECESSOR chroma row. If the `chroma_prev` reserve
+        // fails on that final row, the retry must STILL blend with the predecessor
+        // (not clamp): the reconstruction reads the lookback only AFTER the
+        // reserve, and the resample arms DEFER the stage until the commit accepts
+        // the row (#180), so a rejected row leaves the lookback untouched. Feeds
+        // MSB-aligned wire rows (packed Y + interleaved UV) per row.
+        use super::super::MixedSinkerError;
+        use crate::resample::ResampleError;
+        let (sw, sh, ow, oh) = (8usize, 7usize, 4usize, 3usize);
+        let cw = sw / 2;
+        let ch = sh.div_ceil(2);
+        let step = (MASK as u32 / 8).max(1);
+        let y = vec![MID; sw * sh];
+        let mut u = vec![0u16; cw * ch];
+        let mut v = vec![0u16; cw * ch];
+        for r in 0..ch {
+          for c in 0..cw {
+            u[r * cw + c] = (step + r as u32 * step).min(MASK as u32) as u16;
+            v[r * cw + c] = (MASK as u32).saturating_sub(r as u32 * step).max(step) as u16;
+          }
+        }
+        // Pack to the P-format wire: MSB-aligned Y + interleaved MSB-aligned UV,
+        // `ch = div_ceil(sh, 2)` chroma rows (one per luma-row pair, incl. the
+        // trailing odd row's).
+        let y_wire = pack_y(&y);
+        let mut uv_wire = vec![0u16; sw * ch];
+        for r in 0..ch {
+          for c in 0..cw {
+            uv_wire[r * sw + 2 * c] = pack(u[r * cw + c]);
+            uv_wire[r * sw + 2 * c + 1] = pack(v[r * cw + c]);
+          }
+        }
+        let run_frame = |arm_fail: bool, loc: ChromaLocation| -> Vec<u8> {
+          let mut rgb = vec![0u8; ow * oh * 3];
+          {
+            let mut sink = MixedSinker::<$M420, AreaResampler>::with_resampler(
+              sw,
+              sh,
+              AreaResampler::to(ow, oh),
+            )
+            .unwrap()
+            .with_native(false)
+            .with_chroma_location(loc)
+            .with_rgb(&mut rgb)
+            .unwrap();
+            sink.begin_frame(sw as u32, sh as u32).unwrap();
+            let feed = |sink: &mut MixedSinker<'_, $M420, AreaResampler>, r: usize| {
+              let yr = &y_wire[r * sw..(r + 1) * sw];
+              let cr = r / 2;
+              let uvr = &uv_wire[cr * sw..(cr + 1) * sw];
+              sink.process($Row::new(yr, uvr, r, M, FR))
+            };
+            for r in 0..sh - 1 {
+              feed(&mut sink, r).unwrap();
+            }
+            if arm_fail {
+              super::super::arm_chroma_prev_alloc_failure();
+              let err = feed(&mut sink, sh - 1).unwrap_err();
+              assert!(
+                matches!(
+                  err,
+                  MixedSinkerError::Resample(ResampleError::AllocationFailed(_))
+                ),
+                "armed final-row chroma_prev reserve must surface AllocationFailed, got {err:?}"
+              );
+            }
+            // Retry the SAME final row (the failpoint is one-shot, already taken).
+            feed(&mut sink, sh - 1).unwrap();
+          }
+          rgb
+        };
+        let reference = run_frame(false, ChromaLocation::Bottom);
+        let retried = run_frame(true, ChromaLocation::Bottom);
+        assert_eq!(
+          retried, reference,
+          "the post-failure retry of the final EVEN row must blend with the predecessor (not clamp)"
+        );
+        // Non-vacuous: the bottom vertical blend genuinely moves the final even
+        // row vs the vertically-co-sited Center decode.
+        assert_ne!(
+          reference,
+          run_frame(false, ChromaLocation::Center),
+          "the bottom vertical blend must move the final even row vs co-sited Center"
+        );
+      }
+
+      #[test]
+      #[cfg_attr(miri, ignore = "SIMD row kernels use intrinsics unsupported by Miri")]
+      fn mid_frame_center_bottom_flip_rejected() {
+        // Center and Bottom are BOTH horizontally centered, so the centered flag
+        // alone cannot tell them apart; the frozen VERTICAL phase rejects the flip.
+        let (y, u, v) = vramp(8, 8);
+        for (loc1, loc2) in [
+          (ChromaLocation::Center, ChromaLocation::Bottom),
+          (ChromaLocation::Bottom, ChromaLocation::Center),
+        ] {
+          for native in [true, false] {
+            let mut rgb = vec![0u8; 4 * 4 * 3];
+            let sink =
+              MixedSinker::<$M420, AreaResampler>::with_resampler(8, 8, AreaResampler::to(4, 4))
+                .unwrap()
+                .with_native(native)
+                .with_rgb(&mut rgb)
+                .unwrap();
+            let err = flip_row1(sink, &y, &u, &v, loc1, loc2).unwrap_err();
+            assert!(
+              matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
+              "native={native} {loc1:?}->{loc2:?}: want ChromaSitingChanged, got {err:?}"
+            );
+          }
           let mut rgb = vec![0u8; 4 * 4 * 3];
           let sink = MixedSinker::<$M420, FilteredResampler<Triangle>>::with_resampler(
             8,
