@@ -36,7 +36,14 @@ use crate::{
 // alongside the `yuv-semi-planar` P-format sinks. A semi-planar-only build
 // keeps the byte-identical default decode.
 #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
-use super::super::chroma_420_center_sited_h;
+use super::super::{chroma_420_bottom_sited_v, chroma_420_center_sited_h};
+// RFC #238 S6e — the bottom-sited vertical-phase chroma lookback reserve is
+// shared verbatim with the planar high-bit path (same `width` `u16` grow, same
+// `FORCE_CHROMA_PREV_ALLOC_FAILURE` failpoint): only the STAGE + reconstruction
+// layout (interleaved `U V …` here vs the planar's separate U-then-V) differs,
+// so those get P-format siblings below while the reserve reuses the twin.
+#[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
+use super::yuv420p::reserve_420_chroma_prev_u16;
 
 // The native fast tier de-interleaves + DE-PACKS each wire plane into
 // wrapper-owned host-native LOGICAL u16 scratch BEFORE handing it to the
@@ -151,12 +158,15 @@ fn grow_depack_scratch(
 /// shift is `>> 0` (a harmless no-op — the per-format tests guard the
 /// 10/12 shift the 16-bit no-op would mask).
 ///
-/// `chroma_h_phase` is the RFC #238 horizontal chroma sampling phase folded into
-/// the chroma area weights ([`ResamplePlan::area_chroma_420`]): `0.25` for the
-/// centered 4:2:0 group ([`chroma_420_center_sited_h`]), `0.0` for co-sited /
-/// unspecified. VERTICAL stays co-sited (`v_phase = 0`; `Bottom`'s vertical
-/// blend is a later stage). At phase `0.0` the folded plan is byte-identical to
-/// the plain `area` plan, so the co-sited output is untouched.
+/// `chroma_h_phase` / `chroma_v_phase` are the RFC #238 chroma sampling phases
+/// folded into the chroma area weights ([`ResamplePlan::area_chroma_420`]):
+/// `chroma_h_phase` is `0.25` for the centered 4:2:0 group
+/// ([`chroma_420_center_sited_h`]) and `0.0` for co-sited / unspecified;
+/// `chroma_v_phase` is `1.0` for the RFC #238 S6e `Bottom` VERTICAL siting
+/// ([`chroma_420_bottom_sited_v`]) and `0.0` for every vertical-co-sited layout
+/// (`Center` / `Top` / co-sited). At both phases `0.0` the folded plan is
+/// byte-identical to the plain `area` plan, so co-sited / horizontal-only output
+/// is untouched.
 ///
 /// Atomicity (the nv12 / high-bit lesson): the join's COMPLETE pre-feed
 /// preflight runs FIRST — `Ok(false)` no-op short-circuit, first-row
@@ -186,6 +196,7 @@ fn p0xx_process_native<const BITS: u32, const BE: bool>(
   y_row: &[u16],
   uv_half: &[u16],
   chroma_h_phase: f64,
+  chroma_v_phase: f64,
   matrix: ColorMatrix,
   full_range: bool,
   idx: usize,
@@ -292,11 +303,21 @@ fn p0xx_process_native<const BITS: u32, const BE: bool>(
     idx,
     w,
     h,
-    // The RFC #238 horizontal chroma phase is folded into the 4:2:0 chroma area
-    // weights (`0.25` centered, `0.0` co-sited); VERTICAL stays co-sited
-    // (`v_phase = 0`). At phase `0.0` this is byte-identical to the plain area
-    // grid, so the co-sited / unspecified output is untouched.
-    || ResamplePlan::area_chroma_420(w / 2, h, plan.out_w(), plan.out_h(), chroma_h_phase, 0.0),
+    // The RFC #238 chroma phases fold into the 4:2:0 chroma area weights: the
+    // horizontal `chroma_h_phase` (`0.25` centered, `0.0` co-sited) AND the S6e
+    // vertical `chroma_v_phase` (`1.0` for `Bottom`, `0.0` co-sited). At both
+    // phases `0` this is byte-identical to the plain area grid, so the co-sited /
+    // unspecified / horizontal-only output is untouched.
+    || {
+      ResamplePlan::area_chroma_420(
+        w / 2,
+        h,
+        plan.out_w(),
+        plan.out_h(),
+        chroma_h_phase,
+        chroma_v_phase,
+      )
+    },
     use_simd,
   )
 }
@@ -402,6 +423,127 @@ pub(crate) fn upsample_420_chroma_center_h_p0xx<'s, const BITS: u32>(
     big_endian,
   );
   &chroma_full[..2 * width]
+}
+
+/// Stages the current half-width INTERLEAVED `u16` chroma row into the
+/// bottom-sited vertical-phase lookback (RFC #238 S6e) — the P-format sibling of
+/// the planar [`stage_420_chroma_prev_u16`](super::yuv420p::stage_420_chroma_prev_u16):
+/// copies the whole interleaved `uv_half` (`width` `u16`, `U V …`, MSB-aligned
+/// wire order preserved) into `chroma_prev` and tags it with the chroma row it
+/// now holds (`idx / 2`), so a *later* even output row can validate
+/// (`chroma_prev_row == Some(its_chroma_row - 1)`) and box-blend it. The layout
+/// is INTERLEAVED (not the planar twin's separate U-then-V) because the P-format
+/// reconstruction / decode kernels stay interleaved; the two never co-monomorphize
+/// on one sink, so the shared `chroma_prev_u16` buffer carries whichever layout
+/// its owning sink writes.
+///
+/// Called on EVERY accepted bottom-sited row — the colour path
+/// ([`upsample_420_chroma_sited_p0xx`], after it has read the *previous* lookback)
+/// and the luma-only path — so the lookback is always current. **Infallible**:
+/// the caller must have run [`reserve_420_chroma_prev_u16`] up front.
+#[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
+#[inline]
+pub(crate) fn stage_420_chroma_prev_p0xx(
+  chroma_prev: &mut [u16],
+  chroma_prev_row: &mut Option<usize>,
+  uv_half: &[u16],
+  idx: usize,
+  width: usize,
+) {
+  debug_assert!(
+    chroma_prev.len() >= width,
+    "chroma_prev must be reserved via reserve_420_chroma_prev_u16 first"
+  );
+  chroma_prev[..width].copy_from_slice(&uv_half[..width]);
+  *chroma_prev_row = Some(idx / 2);
+}
+
+/// Siting-aware full-width INTERLEAVED high-bit semi-planar 4:2:0 chroma
+/// reconstruction (RFC #238 S6e) — the P-format sibling of the planar
+/// [`upsample_420_chroma_sited_u16`](super::yuv420p::upsample_420_chroma_sited_u16),
+/// folding the optional **bottom-sited vertical** phase into the horizontal
+/// centered `p0xx` upsample and maintaining the one-row chroma lookback. Returns
+/// the full-width interleaved `2 * width` `u16` slice the P-format 4:4:4 decode
+/// kernels read, staged in the already-reserved `chroma_full` in the source's
+/// MSB-aligned wire byte order.
+///
+/// `bottom_v` is [`chroma_420_bottom_sited_v`] (true only for
+/// `ChromaLocation::Bottom`, which is also horizontally centered):
+///
+/// - On an **even** luma row (`idx & 1 == 0`) with `bottom_v`, each chroma sample
+///   is the vertical box average of the previous chroma row (`chroma_prev`) and
+///   the current row, then horizontally centered — one fused pass via
+///   [`chroma_upsample_420_bottom_even_h_p0xx`](crate::row::scalar::chroma_upsample_420_bottom_even_h_p0xx)
+///   — **but only when `chroma_prev` provably holds the wanted predecessor**
+///   chroma row `idx/2 - 1` (`chroma_prev_row == Some(idx/2 - 1)`). Otherwise —
+///   the top edge (`idx == 0`), a fresh frame, or a direct `process` caller that
+///   replayed / skipped / reordered rows or attached colour late — it falls back
+///   to the plain centered upsample of the *current* chroma row (the top-edge
+///   clamp), so the blend NEVER mixes stale chroma from an older pair or frame.
+/// - Otherwise (odd luma row, or any non-bottom centered siting) the current
+///   chroma row is horizontally centered with the plain
+///   [`upsample_420_chroma_center_h_p0xx`] — bit-identical to the horizontal-only
+///   (S6b) path, so `Center` / `Top` output is untouched.
+///
+/// When `stage` is set, on every bottom-sited row the current interleaved chroma
+/// row is copied into `chroma_prev` (tagged `idx / 2`). The direct decode passes
+/// `stage = true` (its post-reconstruction work is infallible); the resample
+/// reconstruction arms pass `stage = false` and defer [`stage_420_chroma_prev_p0xx`]
+/// until AFTER their fallible resample commit accepts the row, so a rejected row
+/// leaves the lookback pointing at the predecessor and a retry still box-blends it
+/// (state-atomic, #180). The caller must have run [`reserve_420_chroma_full_u16`]
+/// (always) and, when `bottom_v`, [`reserve_420_chroma_prev_u16`] up front.
+#[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn upsample_420_chroma_sited_p0xx<'s, const BITS: u32>(
+  chroma_full: &'s mut [u16],
+  chroma_prev: &mut [u16],
+  chroma_prev_row: &mut Option<usize>,
+  uv_half: &[u16],
+  idx: usize,
+  bottom_v: bool,
+  stage: bool,
+  width: usize,
+  big_endian: bool,
+) -> &'s [u16] {
+  debug_assert!(
+    chroma_full.len() >= 2 * width,
+    "chroma_full must be reserved via reserve_420_chroma_full_u16 first"
+  );
+  let chroma_row = idx / 2;
+  // The bottom-sited EVEN row box-blends only when the lookback PROVABLY holds
+  // the wanted predecessor `chroma_row - 1`; otherwise it clamps to the current
+  // row (never stale). Every other case (non-bottom siting, the bottom-sited odd
+  // row, or an unvalidated even row) is the plain centered upsample.
+  let do_vblend =
+    bottom_v && idx & 1 == 0 && chroma_row > 0 && *chroma_prev_row == Some(chroma_row - 1);
+
+  let result = if do_vblend {
+    debug_assert!(
+      chroma_prev.len() >= width,
+      "chroma_prev must be reserved via reserve_420_chroma_prev_u16 first"
+    );
+    crate::row::scalar::chroma_upsample_420_bottom_even_h_p0xx::<BITS>(
+      &chroma_prev[..width],
+      uv_half,
+      &mut chroma_full[..2 * width],
+      width,
+      big_endian,
+    );
+    &chroma_full[..2 * width]
+  } else {
+    upsample_420_chroma_center_h_p0xx::<BITS>(chroma_full, uv_half, width, big_endian)
+  };
+
+  // Refresh the lookback with the current interleaved chroma row + its validity
+  // tag (after the read above). Gated on `stage`: the direct decode refreshes it
+  // here (its later work is infallible), while the resample reconstruction arms
+  // pass `stage = false` and defer the refresh to AFTER their fallible commit
+  // accepts the row. Only the bottom-sited path maintains it.
+  if bottom_v && stage {
+    stage_420_chroma_prev_p0xx(chroma_prev, chroma_prev_row, uv_half, idx, width);
+  }
+  result
 }
 
 // ---- P010 impl ---------------------------------------------------------
@@ -582,6 +724,15 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P010<BE>, R> {
       // `frozen_chroma_centered`).
       #[cfg(feature = "yuv-planar")]
       frozen_chroma_centered,
+      // RFC #238 S6e: the vertical (`Bottom`) chroma phase frozen alongside it,
+      // plus the one-row interleaved chroma lookback + its validity tag, so a
+      // `Bottom` even output row box-blends the previous chroma row.
+      #[cfg(feature = "yuv-planar")]
+      frozen_chroma_bottom_v,
+      #[cfg(feature = "yuv-planar")]
+      chroma_prev_u16,
+      #[cfg(feature = "yuv-planar")]
+      chroma_prev_row,
       ..
     } = self;
 
@@ -605,26 +756,33 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P010<BE>, R> {
       let matrix = row.matrix();
       let full_range = row.full_range();
       let (y, uv_half) = (row.y(), row.uv_half());
-      // RFC #238 S6b — 4:2:0 HORIZONTAL chroma siting for the high-bit
-      // semi-planar P010, mirroring the planar Yuv420p10 twin (S6a) on the
-      // semi-planar de-interleave (S3b). The centered group
+      // RFC #238 S6b/S6e — 4:2:0 chroma siting for the high-bit semi-planar
+      // P010, mirroring the planar Yuv420p10 twin (S6a/S6d) on the semi-planar
+      // de-interleave (S3b/S4-C). The centered group
       // (`chroma_420_center_sited_h`) samples chroma at `+0.5` luma = `+0.25`
-      // chroma-sample horizontally; the co-sited / unspecified group is phase 0
-      // (byte-identical). VERTICAL stays co-sited (`v_phase = 0`): S6b routes the
-      // horizontal Top / Center phase only; `Bottom`'s vertical blend is a later
-      // stage. The native fast tier folds the phase into the `area_chroma_420`
-      // chroma weights; the filter and row-stage tiers reconstruct full-width
-      // interleaved `u16` chroma (de-interleave + phase-0.5 upsample into
-      // `chroma_full_u16`) and decode 4:4:4 via the `p410` full-chroma kernels —
-      // the co-sited arms keep the fused `p010` half-chroma decode.
+      // chroma-sample horizontally; S6e additionally folds the VERTICAL `v = 1`
+      // triangle for `Bottom` ([`chroma_420_bottom_sited_v`], a strict sub-case
+      // of `center_sited`), while `Center` / `Top` keep `v_phase = 0` (co-sited
+      // vertical, byte-identical to S6b). The co-sited / unspecified group is
+      // phase 0 (byte-identical). The native fast tier folds both phases into the
+      // `area_chroma_420` chroma weights; the filter and row-stage tiers
+      // reconstruct full-width interleaved `u16` chroma (de-interleave + phase-0.5
+      // upsample into `chroma_full_u16`, plus the `Bottom` even-row vertical box
+      // blend against the `chroma_prev_u16` lookback) and decode 4:4:4 via the
+      // `p410` full-chroma kernels — the co-sited arms keep the fused `p010`
+      // half-chroma decode.
       #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
       let center_sited = chroma_420_center_sited_h(chroma_location);
+      #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
+      let bottom_v = chroma_420_bottom_sited_v(chroma_location);
       #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
       let chroma_h_phase = if center_sited {
         YUV422P_CENTERED_H_PHASE
       } else {
         0.0
       };
+      #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
+      let chroma_v_phase = if bottom_v { 1.0 } else { 0.0 };
       // Only the colour tiers reconstruct full-width chroma for the centered
       // decode; a luma-only centered row bins native Y unchanged (siting is a
       // chroma-only property).
@@ -648,11 +806,14 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P010<BE>, R> {
       // rides each tier's accept path (never before dispatch, so a rejected row
       // leaves it unset for a corrected retry). A later row observing a different
       // phase would bin a mixture of co-sited and centered chroma, so it is
-      // rejected here before any reconstruction.
+      // rejected here before any reconstruction. `Center` and `Bottom` share the
+      // horizontal center, so the vertical phase is frozen too (RFC #238 S6e) — a
+      // mid-frame Center ⇆ Bottom flip is caught only by comparing
+      // `frozen_chroma_bottom_v`.
       #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
       if need_output
         && let Some(frozen) = *frozen_chroma_centered
-        && frozen != center_sited
+        && (frozen != center_sited || *frozen_chroma_bottom_v != Some(bottom_v))
       {
         return Err(MixedSinkerError::ChromaSitingChanged(
           ChromaSitingChanged::new(idx),
@@ -707,8 +868,26 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P010<BE>, R> {
               return Ok(());
             }
             reserve_420_chroma_full_u16(chroma_full_u16, w, h)?;
-            let uv_full =
-              upsample_420_chroma_center_h_p0xx::<BITS>(chroma_full_u16, uv_half, w, BE);
+            // RFC #238 S6e: reserve the bottom-sited vertical-phase lookback
+            // AFTER the preflight, BEFORE the commit (#180); only for v=1. The
+            // sited call reads it but defers staging until the commit accepts.
+            if bottom_v {
+              reserve_420_chroma_prev_u16(chroma_prev_u16, w, h)?;
+            }
+            // `stage = false`: DEFER the lookback advance until AFTER the fallible
+            // filter commit accepts the row (below), so a rejected row leaves the
+            // predecessor for a clean retry (#180 state-atomicity).
+            let uv_full = upsample_420_chroma_sited_p0xx::<BITS>(
+              chroma_full_u16,
+              chroma_prev_u16,
+              chroma_prev_row,
+              uv_half,
+              idx,
+              bottom_v,
+              false,
+              w,
+              BE,
+            );
             let r = packed_yuv422_triple_filter_resample::<BITS>(
               luma_filter_stream_u16,
               rgb_filter_stream,
@@ -743,8 +922,16 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P010<BE>, R> {
                 p410_to_rgb_u16_row_endian(y, uv_full, scratch, w, matrix, full_range, use_simd, BE)
               },
             );
+            // RFC #238 S6e: advance the bottom lookback only AFTER the filter
+            // resample accepts the row (`r.is_ok()`) — the sited reconstruction
+            // read it above but did not stage, so a rejected row keeps the
+            // predecessor for a clean retry.
+            if r.is_ok() && bottom_v {
+              stage_420_chroma_prev_p0xx(chroma_prev_u16, chroma_prev_row, uv_half, idx, w);
+            }
             if r.is_ok() && need_output && frozen_chroma_centered.is_none() {
               *frozen_chroma_centered = Some(center_sited);
+              *frozen_chroma_bottom_v = Some(bottom_v);
             }
             return r;
           }
@@ -786,6 +973,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P010<BE>, R> {
         #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
         if r.is_ok() && need_output && frozen_chroma_centered.is_none() {
           *frozen_chroma_centered = Some(center_sited);
+          *frozen_chroma_bottom_v = Some(bottom_v);
         }
         return r;
       }
@@ -849,7 +1037,9 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P010<BE>, R> {
         // join state.
         let stale_native = idx == 0
           && native_420_u16.as_ref().is_some_and(|join| {
-            join.chroma_phase_centered() == Some(!center_sited) && join.next_y() == 0
+            (join.chroma_phase_centered() == Some(!center_sited)
+              || join.chroma_bottom() == Some(!bottom_v))
+              && join.next_y() == 0
           });
         let prev_native = if stale_native {
           native_420_u16.take()
@@ -874,6 +1064,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P010<BE>, R> {
           y,
           uv_half,
           chroma_h_phase,
+          chroma_v_phase,
           matrix,
           full_range,
           idx,
@@ -896,15 +1087,17 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P010<BE>, R> {
         #[cfg(feature = "yuv-semi-planar")]
         if frozen_chroma_centered.is_none() && need_output {
           *frozen_chroma_centered = Some(center_sited);
+          *frozen_chroma_bottom_v = Some(bottom_v);
         }
         return Ok(());
       }
       // Row-stage area tail. Same CHECK-before / SET-after split. Centered colour
       // reconstructs full-width interleaved `u16` chroma (de-interleave +
-      // phase-0.5 upsample) and decodes 4:4:4 — but ONLY after the resample
-      // preflight (frozen-output + sequence), so an out-of-sequence / rejected
-      // row is caught before the chroma reservation (#180). A luma-only centered
-      // row stays on the co-sited arm (which only bins luma).
+      // phase-0.5 upsample, plus the `Bottom` even-row vertical box blend) and
+      // decodes 4:4:4 — but ONLY after the resample preflight (frozen-output +
+      // sequence), so an out-of-sequence / rejected row is caught before the
+      // chroma reservation (#180). A luma-only centered row stays on the co-sited
+      // arm (which only bins luma).
       // `packed_yuv422_triple_resample` re-runs the idempotent preflight.
       #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
       if center_sited && want_color {
@@ -936,7 +1129,26 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P010<BE>, R> {
           return Ok(());
         }
         reserve_420_chroma_full_u16(chroma_full_u16, w, h)?;
-        let uv_full = upsample_420_chroma_center_h_p0xx::<BITS>(chroma_full_u16, uv_half, w, BE);
+        // RFC #238 S6e: reserve the bottom-sited vertical-phase lookback AFTER
+        // the preflight, BEFORE the commit (#180); only for v=1. The sited call
+        // reads it but defers staging until the commit accepts.
+        if bottom_v {
+          reserve_420_chroma_prev_u16(chroma_prev_u16, w, h)?;
+        }
+        // `stage = false`: DEFER the lookback advance until AFTER the fallible
+        // row-stage commit accepts the row (below), so a rejected row leaves the
+        // predecessor for a clean retry (#180 state-atomicity).
+        let uv_full = upsample_420_chroma_sited_p0xx::<BITS>(
+          chroma_full_u16,
+          chroma_prev_u16,
+          chroma_prev_row,
+          uv_half,
+          idx,
+          bottom_v,
+          false,
+          w,
+          BE,
+        );
         packed_yuv422_triple_resample::<BITS>(
           luma_stream_u16,
           rgb_stream,
@@ -971,11 +1183,19 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P010<BE>, R> {
             p410_to_rgb_u16_row_endian(y, uv_full, scratch, w, matrix, full_range, use_simd, BE)
           },
         )?;
+        // RFC #238 S6e: advance the bottom lookback only AFTER the row-stage
+        // resample accepts the row (the `?` above already returned any reject);
+        // the sited reconstruction read it but did not stage, so a rejected row
+        // keeps the predecessor for a clean retry.
+        if bottom_v {
+          stage_420_chroma_prev_p0xx(chroma_prev_u16, chroma_prev_row, uv_half, idx, w);
+        }
         if frozen_native_route.is_none() && need_output {
           *frozen_native_route = Some(false);
         }
         if frozen_chroma_centered.is_none() && need_output {
           *frozen_chroma_centered = Some(center_sited);
+          *frozen_chroma_bottom_v = Some(bottom_v);
         }
         return Ok(());
       }
@@ -1022,26 +1242,50 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P010<BE>, R> {
       #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
       if frozen_chroma_centered.is_none() && need_output {
         *frozen_chroma_centered = Some(center_sited);
+        *frozen_chroma_bottom_v = Some(bottom_v);
       }
       return Ok(());
     }
 
-    let one_plane_start = idx * w;
-    let one_plane_end = one_plane_start + w;
-
-    // Resolve the output set up front so the atomicity preflight below runs
+    // Resolve the output set up front so the no-output guard short-circuits
+    // before ANY per-row offset arithmetic and the atomicity preflight runs
     // before any output row is written.
     let want_rgb = rgb.is_some();
     let want_rgba = rgba.is_some();
     let want_hsv = hsv.is_some();
     let want_rgb_u16 = rgb_u16.is_some();
     let want_rgba_u16 = rgba_u16.is_some();
+    let want_color = want_rgb || want_rgba || want_hsv || want_rgb_u16 || want_rgba_u16;
+    // Repo-wide no-output invariant (RFC #238 S6e, mirrors the planar Yuv420p /
+    // NV S4-C direct twins): a `process` call carrying NO output — no colour, no
+    // luma — must run NOTHING: no per-row offset arithmetic, no allocation, no
+    // state mutation (the bottom-sited vertical lookback included). Returning
+    // HERE, before the `idx * w` offsets below, keeps the invariant overflow-safe
+    // (a no-output call never ran an attach-time `w x h` validation, so `idx * w`
+    // could overflow on a 32-bit target) AND means such a row never reserves
+    // `chroma_prev_u16` nor primes the lookback (so it can never make a later
+    // colour even row box-blend through an invisible, never-output row). P010
+    // exposes no `luma_u16`.
+    let need_output = want_color || luma.is_some();
+    if !need_output {
+      return Ok(());
+    }
+
+    let one_plane_start = idx * w;
+    let one_plane_end = one_plane_start + w;
+
     // Chroma siting (#302): the centered horizontal sitings reconstruct chroma
     // at the phase-0.5 position; the default / co-sited path keeps the
     // byte-identical fused decode (the fused P-format 4:2:0 kernels
     // de-interleave + upsample chroma in-register, exactly as before).
     #[cfg(feature = "yuv-planar")]
     let center_sited = chroma_420_center_sited_h(chroma_location);
+    // RFC #238 S6e: `Bottom` (a strict sub-case of `center_sited`) additionally
+    // box-blends the even output row's chroma with the previous chroma row via
+    // the `chroma_prev_u16` lookback maintained below; `Center` / `Top` keep the
+    // vertical-replicate (co-sited) decode, byte-identical to S6b.
+    #[cfg(feature = "yuv-planar")]
+    let bottom_v = chroma_420_bottom_sited_v(chroma_location);
 
     // Atomicity preflight (#302 / #308, cf. the crate's #180 resample fix and
     // the planar_8bit / semi_planar_8bit 8-bit siblings): reserve EVERY fallible
@@ -1055,7 +1299,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P010<BE>, R> {
     //  2. the u8 RGB row buffer, reached exactly when a colour decode needs an
     //     RGB row but no caller RGB buffer is borrowable — `want_hsv &&
     //     want_rgba && !want_rgb` (`rgb_row_buf_or_scratch`'s own scratch arm).
-    // The later `upsample_420_chroma_center_h_p0xx` / `rgb_row_buf_or_scratch`
+    // The later `upsample_420_chroma_sited_p0xx` / `rgb_row_buf_or_scratch`
     // calls reuse the already-sized buffers, so the default path is
     // byte-identical; only the failure-path ordering changes. The u16 RGB / RGBA
     // outputs write straight into their caller buffers (the rgb_u16 plane itself
@@ -1063,11 +1307,20 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P010<BE>, R> {
     // luma-only row consumes no centered chroma, so it neither reserves nor
     // upsamples it (the reserve makes the later upsample infallible).
     #[cfg(feature = "yuv-planar")]
-    let need_centered_chroma =
-      center_sited && (want_rgb || want_rgba || want_hsv || want_rgb_u16 || want_rgba_u16);
+    let need_centered_chroma = center_sited && want_color;
     #[cfg(feature = "yuv-planar")]
     if need_centered_chroma {
       reserve_420_chroma_full_u16(chroma_full_u16, w, h)?;
+    }
+    // Bottom-sited vertical-phase one-row chroma lookback (RFC #238 S6e): reserve
+    // it on EVERY bottom-sited OUTPUT row — colour OR luma-only — because the
+    // lookback is maintained so a LATER colour row can box-blend it (the
+    // luma-only staging runs below, before any luma write). A no-output row
+    // returned early above, so it never reaches here and never primes the
+    // lookback. Reserved BEFORE any output write (the #180 preflight ordering).
+    #[cfg(feature = "yuv-planar")]
+    if bottom_v {
+      reserve_420_chroma_prev_u16(chroma_prev_u16, w, h)?;
     }
     if want_hsv && want_rgba && !want_rgb {
       rgb_row_buf_or_scratch(
@@ -1080,17 +1333,39 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P010<BE>, R> {
       )?;
     }
 
+    // Bottom-sited LUMA-ONLY row (RFC #238 S6e): the colour upsample below —
+    // which normally refreshes the vertical lookback — won't run, so stage the
+    // current interleaved chroma row HERE, after its reservation above and BEFORE
+    // any luma write, so a later colour row in the same frame can box-blend it (a
+    // luma-only-then-colour in-order sequence reconstructs the same Bottom
+    // vertical phase as the all-output walk). A colour row instead stages inside
+    // `upsample_420_chroma_sited_p0xx` after reading the previous lookback, so
+    // this is skipped for it; a no-output row returned early above. The validity
+    // tag (`chroma_prev_row`) still guards out-of-sequence / cross-frame reads.
+    #[cfg(feature = "yuv-planar")]
+    if bottom_v && !want_color {
+      stage_420_chroma_prev_p0xx(chroma_prev_u16, chroma_prev_row, row.uv_half(), idx, w);
+    }
+
     // Centered full-width INTERLEAVED chroma (phase-0.5), reconstructed ONCE per
     // row from the wire-format half-width interleaved UV and reused by every
     // colour decode (u16 and u8). Infallible — the scratch was reserved above.
     // The default left/unspecified siting leaves it `None`, so the fused
     // P-format 4:2:0 kernels de-interleave + upsample chroma in-register and the
-    // output stays byte-identical.
+    // output stays byte-identical. `Center` / `Top` take the plain horizontal
+    // centered phase-0.5 fold; `Bottom` (RFC #238 S6e) additionally box-blends
+    // the even output row with the previous chroma row (`stage = true` — the
+    // direct decode's post-reconstruction work is infallible).
     #[cfg(feature = "yuv-planar")]
     let centered: Option<&[u16]> = if need_centered_chroma {
-      Some(upsample_420_chroma_center_h_p0xx::<BITS>(
+      Some(upsample_420_chroma_sited_p0xx::<BITS>(
         chroma_full_u16,
+        chroma_prev_u16,
+        chroma_prev_row,
         row.uv_half(),
+        idx,
+        bottom_v,
+        true,
         w,
         BE,
       ))
@@ -1481,6 +1756,15 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P012<BE>, R> {
       // `frozen_chroma_centered`).
       #[cfg(feature = "yuv-planar")]
       frozen_chroma_centered,
+      // RFC #238 S6e: the vertical (`Bottom`) chroma phase frozen alongside it,
+      // plus the one-row interleaved chroma lookback + its validity tag, so a
+      // `Bottom` even output row box-blends the previous chroma row.
+      #[cfg(feature = "yuv-planar")]
+      frozen_chroma_bottom_v,
+      #[cfg(feature = "yuv-planar")]
+      chroma_prev_u16,
+      #[cfg(feature = "yuv-planar")]
+      chroma_prev_row,
       ..
     } = self;
 
@@ -1494,26 +1778,33 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P012<BE>, R> {
       let matrix = row.matrix();
       let full_range = row.full_range();
       let (y, uv_half) = (row.y(), row.uv_half());
-      // RFC #238 S6b — 4:2:0 HORIZONTAL chroma siting for the high-bit
-      // semi-planar P012, mirroring the planar Yuv420p12 twin (S6a) on the
-      // semi-planar de-interleave (S3b). The centered group
+      // RFC #238 S6b/S6e — 4:2:0 chroma siting for the high-bit semi-planar
+      // P012, mirroring the planar Yuv420p12 twin (S6a/S6d) on the semi-planar
+      // de-interleave (S3b/S4-C). The centered group
       // (`chroma_420_center_sited_h`) samples chroma at `+0.5` luma = `+0.25`
-      // chroma-sample horizontally; the co-sited / unspecified group is phase 0
-      // (byte-identical). VERTICAL stays co-sited (`v_phase = 0`): S6b routes the
-      // horizontal Top / Center phase only; `Bottom`'s vertical blend is a later
-      // stage. The native fast tier folds the phase into the `area_chroma_420`
-      // chroma weights; the filter and row-stage tiers reconstruct full-width
-      // interleaved `u16` chroma (de-interleave + phase-0.5 upsample into
-      // `chroma_full_u16`) and decode 4:4:4 via the `p412` full-chroma kernels —
-      // the co-sited arms keep the fused `p012` half-chroma decode.
+      // chroma-sample horizontally; S6e additionally folds the VERTICAL `v = 1`
+      // triangle for `Bottom` ([`chroma_420_bottom_sited_v`], a strict sub-case
+      // of `center_sited`), while `Center` / `Top` keep `v_phase = 0` (co-sited
+      // vertical, byte-identical to S6b). The co-sited / unspecified group is
+      // phase 0 (byte-identical). The native fast tier folds both phases into the
+      // `area_chroma_420` chroma weights; the filter and row-stage tiers
+      // reconstruct full-width interleaved `u16` chroma (de-interleave + phase-0.5
+      // upsample into `chroma_full_u16`, plus the `Bottom` even-row vertical box
+      // blend against the `chroma_prev_u16` lookback) and decode 4:4:4 via the
+      // `p412` full-chroma kernels — the co-sited arms keep the fused `p012`
+      // half-chroma decode.
       #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
       let center_sited = chroma_420_center_sited_h(chroma_location);
+      #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
+      let bottom_v = chroma_420_bottom_sited_v(chroma_location);
       #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
       let chroma_h_phase = if center_sited {
         YUV422P_CENTERED_H_PHASE
       } else {
         0.0
       };
+      #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
+      let chroma_v_phase = if bottom_v { 1.0 } else { 0.0 };
       // Only the colour tiers reconstruct full-width chroma for the centered
       // decode; a luma-only centered row bins native Y unchanged (siting is a
       // chroma-only property).
@@ -1537,11 +1828,14 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P012<BE>, R> {
       // rides each tier's accept path (never before dispatch, so a rejected row
       // leaves it unset for a corrected retry). A later row observing a different
       // phase would bin a mixture of co-sited and centered chroma, so it is
-      // rejected here before any reconstruction.
+      // rejected here before any reconstruction. `Center` and `Bottom` share the
+      // horizontal center, so the vertical phase is frozen too (RFC #238 S6e) — a
+      // mid-frame Center ⇆ Bottom flip is caught only by comparing
+      // `frozen_chroma_bottom_v`.
       #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
       if need_output
         && let Some(frozen) = *frozen_chroma_centered
-        && frozen != center_sited
+        && (frozen != center_sited || *frozen_chroma_bottom_v != Some(bottom_v))
       {
         return Err(MixedSinkerError::ChromaSitingChanged(
           ChromaSitingChanged::new(idx),
@@ -1592,8 +1886,26 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P012<BE>, R> {
               return Ok(());
             }
             reserve_420_chroma_full_u16(chroma_full_u16, w, h)?;
-            let uv_full =
-              upsample_420_chroma_center_h_p0xx::<BITS>(chroma_full_u16, uv_half, w, BE);
+            // RFC #238 S6e: reserve the bottom-sited vertical-phase lookback
+            // AFTER the preflight, BEFORE the commit (#180); only for v=1. The
+            // sited call reads it but defers staging until the commit accepts.
+            if bottom_v {
+              reserve_420_chroma_prev_u16(chroma_prev_u16, w, h)?;
+            }
+            // `stage = false`: DEFER the lookback advance until AFTER the fallible
+            // filter commit accepts the row (below), so a rejected row leaves the
+            // predecessor for a clean retry (#180 state-atomicity).
+            let uv_full = upsample_420_chroma_sited_p0xx::<BITS>(
+              chroma_full_u16,
+              chroma_prev_u16,
+              chroma_prev_row,
+              uv_half,
+              idx,
+              bottom_v,
+              false,
+              w,
+              BE,
+            );
             let r = packed_yuv422_triple_filter_resample::<BITS>(
               luma_filter_stream_u16,
               rgb_filter_stream,
@@ -1628,8 +1940,16 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P012<BE>, R> {
                 p412_to_rgb_u16_row_endian(y, uv_full, scratch, w, matrix, full_range, use_simd, BE)
               },
             );
+            // RFC #238 S6e: advance the bottom lookback only AFTER the filter
+            // resample accepts the row (`r.is_ok()`) — the sited reconstruction
+            // read it above but did not stage, so a rejected row keeps the
+            // predecessor for a clean retry.
+            if r.is_ok() && bottom_v {
+              stage_420_chroma_prev_p0xx(chroma_prev_u16, chroma_prev_row, uv_half, idx, w);
+            }
             if r.is_ok() && need_output && frozen_chroma_centered.is_none() {
               *frozen_chroma_centered = Some(center_sited);
+              *frozen_chroma_bottom_v = Some(bottom_v);
             }
             return r;
           }
@@ -1671,6 +1991,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P012<BE>, R> {
         #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
         if r.is_ok() && need_output && frozen_chroma_centered.is_none() {
           *frozen_chroma_centered = Some(center_sited);
+          *frozen_chroma_bottom_v = Some(bottom_v);
         }
         return r;
       }
@@ -1734,7 +2055,9 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P012<BE>, R> {
         // join state.
         let stale_native = idx == 0
           && native_420_u16.as_ref().is_some_and(|join| {
-            join.chroma_phase_centered() == Some(!center_sited) && join.next_y() == 0
+            (join.chroma_phase_centered() == Some(!center_sited)
+              || join.chroma_bottom() == Some(!bottom_v))
+              && join.next_y() == 0
           });
         let prev_native = if stale_native {
           native_420_u16.take()
@@ -1759,6 +2082,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P012<BE>, R> {
           y,
           uv_half,
           chroma_h_phase,
+          chroma_v_phase,
           matrix,
           full_range,
           idx,
@@ -1781,15 +2105,17 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P012<BE>, R> {
         #[cfg(feature = "yuv-semi-planar")]
         if frozen_chroma_centered.is_none() && need_output {
           *frozen_chroma_centered = Some(center_sited);
+          *frozen_chroma_bottom_v = Some(bottom_v);
         }
         return Ok(());
       }
       // Row-stage area tail. Same CHECK-before / SET-after split. Centered colour
       // reconstructs full-width interleaved `u16` chroma (de-interleave +
-      // phase-0.5 upsample) and decodes 4:4:4 — but ONLY after the resample
-      // preflight (frozen-output + sequence), so an out-of-sequence / rejected
-      // row is caught before the chroma reservation (#180). A luma-only centered
-      // row stays on the co-sited arm (which only bins luma).
+      // phase-0.5 upsample, plus the `Bottom` even-row vertical box blend) and
+      // decodes 4:4:4 — but ONLY after the resample preflight (frozen-output +
+      // sequence), so an out-of-sequence / rejected row is caught before the
+      // chroma reservation (#180). A luma-only centered row stays on the co-sited
+      // arm (which only bins luma).
       // `packed_yuv422_triple_resample` re-runs the idempotent preflight.
       #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
       if center_sited && want_color {
@@ -1821,7 +2147,26 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P012<BE>, R> {
           return Ok(());
         }
         reserve_420_chroma_full_u16(chroma_full_u16, w, h)?;
-        let uv_full = upsample_420_chroma_center_h_p0xx::<BITS>(chroma_full_u16, uv_half, w, BE);
+        // RFC #238 S6e: reserve the bottom-sited vertical-phase lookback AFTER
+        // the preflight, BEFORE the commit (#180); only for v=1. The sited call
+        // reads it but defers staging until the commit accepts.
+        if bottom_v {
+          reserve_420_chroma_prev_u16(chroma_prev_u16, w, h)?;
+        }
+        // `stage = false`: DEFER the lookback advance until AFTER the fallible
+        // row-stage commit accepts the row (below), so a rejected row leaves the
+        // predecessor for a clean retry (#180 state-atomicity).
+        let uv_full = upsample_420_chroma_sited_p0xx::<BITS>(
+          chroma_full_u16,
+          chroma_prev_u16,
+          chroma_prev_row,
+          uv_half,
+          idx,
+          bottom_v,
+          false,
+          w,
+          BE,
+        );
         packed_yuv422_triple_resample::<BITS>(
           luma_stream_u16,
           rgb_stream,
@@ -1856,11 +2201,19 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P012<BE>, R> {
             p412_to_rgb_u16_row_endian(y, uv_full, scratch, w, matrix, full_range, use_simd, BE)
           },
         )?;
+        // RFC #238 S6e: advance the bottom lookback only AFTER the row-stage
+        // resample accepts the row (the `?` above already returned any reject);
+        // the sited reconstruction read it but did not stage, so a rejected row
+        // keeps the predecessor for a clean retry.
+        if bottom_v {
+          stage_420_chroma_prev_p0xx(chroma_prev_u16, chroma_prev_row, uv_half, idx, w);
+        }
         if frozen_native_route.is_none() && need_output {
           *frozen_native_route = Some(false);
         }
         if frozen_chroma_centered.is_none() && need_output {
           *frozen_chroma_centered = Some(center_sited);
+          *frozen_chroma_bottom_v = Some(bottom_v);
         }
         return Ok(());
       }
@@ -1907,26 +2260,50 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P012<BE>, R> {
       #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
       if frozen_chroma_centered.is_none() && need_output {
         *frozen_chroma_centered = Some(center_sited);
+        *frozen_chroma_bottom_v = Some(bottom_v);
       }
       return Ok(());
     }
 
-    let one_plane_start = idx * w;
-    let one_plane_end = one_plane_start + w;
-
-    // Resolve the output set up front so the atomicity preflight below runs
+    // Resolve the output set up front so the no-output guard short-circuits
+    // before ANY per-row offset arithmetic and the atomicity preflight runs
     // before any output row is written.
     let want_rgb = rgb.is_some();
     let want_rgba = rgba.is_some();
     let want_hsv = hsv.is_some();
     let want_rgb_u16 = rgb_u16.is_some();
     let want_rgba_u16 = rgba_u16.is_some();
+    let want_color = want_rgb || want_rgba || want_hsv || want_rgb_u16 || want_rgba_u16;
+    // Repo-wide no-output invariant (RFC #238 S6e, mirrors the planar Yuv420p /
+    // NV S4-C direct twins): a `process` call carrying NO output — no colour, no
+    // luma — must run NOTHING: no per-row offset arithmetic, no allocation, no
+    // state mutation (the bottom-sited vertical lookback included). Returning
+    // HERE, before the `idx * w` offsets below, keeps the invariant overflow-safe
+    // (a no-output call never ran an attach-time `w x h` validation, so `idx * w`
+    // could overflow on a 32-bit target) AND means such a row never reserves
+    // `chroma_prev_u16` nor primes the lookback (so it can never make a later
+    // colour even row box-blend through an invisible, never-output row). P012
+    // exposes no `luma_u16`.
+    let need_output = want_color || luma.is_some();
+    if !need_output {
+      return Ok(());
+    }
+
+    let one_plane_start = idx * w;
+    let one_plane_end = one_plane_start + w;
+
     // Chroma siting (#302): the centered horizontal sitings reconstruct chroma
     // at the phase-0.5 position; the default / co-sited path keeps the
     // byte-identical fused decode (the fused P-format 4:2:0 kernels
     // de-interleave + upsample chroma in-register, exactly as before).
     #[cfg(feature = "yuv-planar")]
     let center_sited = chroma_420_center_sited_h(chroma_location);
+    // RFC #238 S6e: `Bottom` (a strict sub-case of `center_sited`) additionally
+    // box-blends the even output row's chroma with the previous chroma row via
+    // the `chroma_prev_u16` lookback maintained below; `Center` / `Top` keep the
+    // vertical-replicate (co-sited) decode, byte-identical to S6b.
+    #[cfg(feature = "yuv-planar")]
+    let bottom_v = chroma_420_bottom_sited_v(chroma_location);
 
     // Atomicity preflight (#302 / #308, cf. the crate's #180 resample fix and
     // the planar_8bit / semi_planar_8bit 8-bit siblings): reserve EVERY fallible
@@ -1940,7 +2317,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P012<BE>, R> {
     //  2. the u8 RGB row buffer, reached exactly when a colour decode needs an
     //     RGB row but no caller RGB buffer is borrowable — `want_hsv &&
     //     want_rgba && !want_rgb` (`rgb_row_buf_or_scratch`'s own scratch arm).
-    // The later `upsample_420_chroma_center_h_p0xx` / `rgb_row_buf_or_scratch`
+    // The later `upsample_420_chroma_sited_p0xx` / `rgb_row_buf_or_scratch`
     // calls reuse the already-sized buffers, so the default path is
     // byte-identical; only the failure-path ordering changes. The u16 RGB / RGBA
     // outputs write straight into their caller buffers (the rgb_u16 plane itself
@@ -1948,11 +2325,20 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P012<BE>, R> {
     // luma-only row consumes no centered chroma, so it neither reserves nor
     // upsamples it (the reserve makes the later upsample infallible).
     #[cfg(feature = "yuv-planar")]
-    let need_centered_chroma =
-      center_sited && (want_rgb || want_rgba || want_hsv || want_rgb_u16 || want_rgba_u16);
+    let need_centered_chroma = center_sited && want_color;
     #[cfg(feature = "yuv-planar")]
     if need_centered_chroma {
       reserve_420_chroma_full_u16(chroma_full_u16, w, h)?;
+    }
+    // Bottom-sited vertical-phase one-row chroma lookback (RFC #238 S6e): reserve
+    // it on EVERY bottom-sited OUTPUT row — colour OR luma-only — because the
+    // lookback is maintained so a LATER colour row can box-blend it (the
+    // luma-only staging runs below, before any luma write). A no-output row
+    // returned early above, so it never reaches here and never primes the
+    // lookback. Reserved BEFORE any output write (the #180 preflight ordering).
+    #[cfg(feature = "yuv-planar")]
+    if bottom_v {
+      reserve_420_chroma_prev_u16(chroma_prev_u16, w, h)?;
     }
     if want_hsv && want_rgba && !want_rgb {
       rgb_row_buf_or_scratch(
@@ -1965,17 +2351,39 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P012<BE>, R> {
       )?;
     }
 
+    // Bottom-sited LUMA-ONLY row (RFC #238 S6e): the colour upsample below —
+    // which normally refreshes the vertical lookback — won't run, so stage the
+    // current interleaved chroma row HERE, after its reservation above and BEFORE
+    // any luma write, so a later colour row in the same frame can box-blend it (a
+    // luma-only-then-colour in-order sequence reconstructs the same Bottom
+    // vertical phase as the all-output walk). A colour row instead stages inside
+    // `upsample_420_chroma_sited_p0xx` after reading the previous lookback, so
+    // this is skipped for it; a no-output row returned early above. The validity
+    // tag (`chroma_prev_row`) still guards out-of-sequence / cross-frame reads.
+    #[cfg(feature = "yuv-planar")]
+    if bottom_v && !want_color {
+      stage_420_chroma_prev_p0xx(chroma_prev_u16, chroma_prev_row, row.uv_half(), idx, w);
+    }
+
     // Centered full-width INTERLEAVED chroma (phase-0.5), reconstructed ONCE per
     // row from the wire-format half-width interleaved UV and reused by every
     // colour decode (u16 and u8). Infallible — the scratch was reserved above.
     // The default left/unspecified siting leaves it `None`, so the fused
     // P-format 4:2:0 kernels de-interleave + upsample chroma in-register and the
-    // output stays byte-identical.
+    // output stays byte-identical. `Center` / `Top` take the plain horizontal
+    // centered phase-0.5 fold; `Bottom` (RFC #238 S6e) additionally box-blends
+    // the even output row with the previous chroma row (`stage = true` — the
+    // direct decode's post-reconstruction work is infallible).
     #[cfg(feature = "yuv-planar")]
     let centered: Option<&[u16]> = if need_centered_chroma {
-      Some(upsample_420_chroma_center_h_p0xx::<BITS>(
+      Some(upsample_420_chroma_sited_p0xx::<BITS>(
         chroma_full_u16,
+        chroma_prev_u16,
+        chroma_prev_row,
         row.uv_half(),
+        idx,
+        bottom_v,
+        true,
         w,
         BE,
       ))
@@ -2361,6 +2769,15 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P016<BE>, R> {
       // `frozen_chroma_centered`).
       #[cfg(feature = "yuv-planar")]
       frozen_chroma_centered,
+      // RFC #238 S6e: the vertical (`Bottom`) chroma phase frozen alongside it,
+      // plus the one-row interleaved chroma lookback + its validity tag, so a
+      // `Bottom` even output row box-blends the previous chroma row.
+      #[cfg(feature = "yuv-planar")]
+      frozen_chroma_bottom_v,
+      #[cfg(feature = "yuv-planar")]
+      chroma_prev_u16,
+      #[cfg(feature = "yuv-planar")]
+      chroma_prev_row,
       ..
     } = self;
 
@@ -2375,26 +2792,33 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P016<BE>, R> {
       let matrix = row.matrix();
       let full_range = row.full_range();
       let (y, uv_half) = (row.y(), row.uv_half());
-      // RFC #238 S6b — 4:2:0 HORIZONTAL chroma siting for the high-bit
-      // semi-planar P016, mirroring the planar Yuv420p16 twin (S6a) on the
-      // semi-planar de-interleave (S3b). The centered group
+      // RFC #238 S6b/S6e — 4:2:0 chroma siting for the high-bit semi-planar
+      // P016, mirroring the planar Yuv420p16 twin (S6a/S6d) on the semi-planar
+      // de-interleave (S3b/S4-C). The centered group
       // (`chroma_420_center_sited_h`) samples chroma at `+0.5` luma = `+0.25`
-      // chroma-sample horizontally; the co-sited / unspecified group is phase 0
-      // (byte-identical). VERTICAL stays co-sited (`v_phase = 0`): S6b routes the
-      // horizontal Top / Center phase only; `Bottom`'s vertical blend is a later
-      // stage. The native fast tier folds the phase into the `area_chroma_420`
-      // chroma weights; the filter and row-stage tiers reconstruct full-width
-      // interleaved `u16` chroma (de-interleave + phase-0.5 upsample into
-      // `chroma_full_u16`) and decode 4:4:4 via the `p416` full-chroma kernels —
-      // the co-sited arms keep the fused `p016` half-chroma decode.
+      // chroma-sample horizontally; S6e additionally folds the VERTICAL `v = 1`
+      // triangle for `Bottom` ([`chroma_420_bottom_sited_v`], a strict sub-case
+      // of `center_sited`), while `Center` / `Top` keep `v_phase = 0` (co-sited
+      // vertical, byte-identical to S6b). The co-sited / unspecified group is
+      // phase 0 (byte-identical). The native fast tier folds both phases into the
+      // `area_chroma_420` chroma weights; the filter and row-stage tiers
+      // reconstruct full-width interleaved `u16` chroma (de-interleave + phase-0.5
+      // upsample into `chroma_full_u16`, plus the `Bottom` even-row vertical box
+      // blend against the `chroma_prev_u16` lookback) and decode 4:4:4 via the
+      // `p416` full-chroma kernels — the co-sited arms keep the fused `p016`
+      // half-chroma decode.
       #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
       let center_sited = chroma_420_center_sited_h(chroma_location);
+      #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
+      let bottom_v = chroma_420_bottom_sited_v(chroma_location);
       #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
       let chroma_h_phase = if center_sited {
         YUV422P_CENTERED_H_PHASE
       } else {
         0.0
       };
+      #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
+      let chroma_v_phase = if bottom_v { 1.0 } else { 0.0 };
       // Only the colour tiers reconstruct full-width chroma for the centered
       // decode; a luma-only centered row bins native Y unchanged (siting is a
       // chroma-only property).
@@ -2418,11 +2842,14 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P016<BE>, R> {
       // rides each tier's accept path (never before dispatch, so a rejected row
       // leaves it unset for a corrected retry). A later row observing a different
       // phase would bin a mixture of co-sited and centered chroma, so it is
-      // rejected here before any reconstruction.
+      // rejected here before any reconstruction. `Center` and `Bottom` share the
+      // horizontal center, so the vertical phase is frozen too (RFC #238 S6e) — a
+      // mid-frame Center ⇆ Bottom flip is caught only by comparing
+      // `frozen_chroma_bottom_v`.
       #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
       if need_output
         && let Some(frozen) = *frozen_chroma_centered
-        && frozen != center_sited
+        && (frozen != center_sited || *frozen_chroma_bottom_v != Some(bottom_v))
       {
         return Err(MixedSinkerError::ChromaSitingChanged(
           ChromaSitingChanged::new(idx),
@@ -2473,8 +2900,26 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P016<BE>, R> {
               return Ok(());
             }
             reserve_420_chroma_full_u16(chroma_full_u16, w, h)?;
-            let uv_full =
-              upsample_420_chroma_center_h_p0xx::<BITS>(chroma_full_u16, uv_half, w, BE);
+            // RFC #238 S6e: reserve the bottom-sited vertical-phase lookback
+            // AFTER the preflight, BEFORE the commit (#180); only for v=1. The
+            // sited call reads it but defers staging until the commit accepts.
+            if bottom_v {
+              reserve_420_chroma_prev_u16(chroma_prev_u16, w, h)?;
+            }
+            // `stage = false`: DEFER the lookback advance until AFTER the fallible
+            // filter commit accepts the row (below), so a rejected row leaves the
+            // predecessor for a clean retry (#180 state-atomicity).
+            let uv_full = upsample_420_chroma_sited_p0xx::<BITS>(
+              chroma_full_u16,
+              chroma_prev_u16,
+              chroma_prev_row,
+              uv_half,
+              idx,
+              bottom_v,
+              false,
+              w,
+              BE,
+            );
             let r = packed_yuv422_triple_filter_resample::<BITS>(
               luma_filter_stream_u16,
               rgb_filter_stream,
@@ -2509,8 +2954,16 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P016<BE>, R> {
                 p416_to_rgb_u16_row_endian(y, uv_full, scratch, w, matrix, full_range, use_simd, BE)
               },
             );
+            // RFC #238 S6e: advance the bottom lookback only AFTER the filter
+            // resample accepts the row (`r.is_ok()`) — the sited reconstruction
+            // read it above but did not stage, so a rejected row keeps the
+            // predecessor for a clean retry.
+            if r.is_ok() && bottom_v {
+              stage_420_chroma_prev_p0xx(chroma_prev_u16, chroma_prev_row, uv_half, idx, w);
+            }
             if r.is_ok() && need_output && frozen_chroma_centered.is_none() {
               *frozen_chroma_centered = Some(center_sited);
+              *frozen_chroma_bottom_v = Some(bottom_v);
             }
             return r;
           }
@@ -2552,6 +3005,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P016<BE>, R> {
         #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
         if r.is_ok() && need_output && frozen_chroma_centered.is_none() {
           *frozen_chroma_centered = Some(center_sited);
+          *frozen_chroma_bottom_v = Some(bottom_v);
         }
         return r;
       }
@@ -2615,7 +3069,9 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P016<BE>, R> {
         // join state.
         let stale_native = idx == 0
           && native_420_u16.as_ref().is_some_and(|join| {
-            join.chroma_phase_centered() == Some(!center_sited) && join.next_y() == 0
+            (join.chroma_phase_centered() == Some(!center_sited)
+              || join.chroma_bottom() == Some(!bottom_v))
+              && join.next_y() == 0
           });
         let prev_native = if stale_native {
           native_420_u16.take()
@@ -2640,6 +3096,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P016<BE>, R> {
           y,
           uv_half,
           chroma_h_phase,
+          chroma_v_phase,
           matrix,
           full_range,
           idx,
@@ -2662,15 +3119,17 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P016<BE>, R> {
         #[cfg(feature = "yuv-semi-planar")]
         if frozen_chroma_centered.is_none() && need_output {
           *frozen_chroma_centered = Some(center_sited);
+          *frozen_chroma_bottom_v = Some(bottom_v);
         }
         return Ok(());
       }
       // Row-stage area tail. Same CHECK-before / SET-after split. Centered colour
       // reconstructs full-width interleaved `u16` chroma (de-interleave +
-      // phase-0.5 upsample) and decodes 4:4:4 — but ONLY after the resample
-      // preflight (frozen-output + sequence), so an out-of-sequence / rejected
-      // row is caught before the chroma reservation (#180). A luma-only centered
-      // row stays on the co-sited arm (which only bins luma).
+      // phase-0.5 upsample, plus the `Bottom` even-row vertical box blend) and
+      // decodes 4:4:4 — but ONLY after the resample preflight (frozen-output +
+      // sequence), so an out-of-sequence / rejected row is caught before the
+      // chroma reservation (#180). A luma-only centered row stays on the co-sited
+      // arm (which only bins luma).
       // `packed_yuv422_triple_resample` re-runs the idempotent preflight.
       #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
       if center_sited && want_color {
@@ -2702,7 +3161,26 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P016<BE>, R> {
           return Ok(());
         }
         reserve_420_chroma_full_u16(chroma_full_u16, w, h)?;
-        let uv_full = upsample_420_chroma_center_h_p0xx::<BITS>(chroma_full_u16, uv_half, w, BE);
+        // RFC #238 S6e: reserve the bottom-sited vertical-phase lookback AFTER
+        // the preflight, BEFORE the commit (#180); only for v=1. The sited call
+        // reads it but defers staging until the commit accepts.
+        if bottom_v {
+          reserve_420_chroma_prev_u16(chroma_prev_u16, w, h)?;
+        }
+        // `stage = false`: DEFER the lookback advance until AFTER the fallible
+        // row-stage commit accepts the row (below), so a rejected row leaves the
+        // predecessor for a clean retry (#180 state-atomicity).
+        let uv_full = upsample_420_chroma_sited_p0xx::<BITS>(
+          chroma_full_u16,
+          chroma_prev_u16,
+          chroma_prev_row,
+          uv_half,
+          idx,
+          bottom_v,
+          false,
+          w,
+          BE,
+        );
         packed_yuv422_triple_resample::<BITS>(
           luma_stream_u16,
           rgb_stream,
@@ -2737,11 +3215,19 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P016<BE>, R> {
             p416_to_rgb_u16_row_endian(y, uv_full, scratch, w, matrix, full_range, use_simd, BE)
           },
         )?;
+        // RFC #238 S6e: advance the bottom lookback only AFTER the row-stage
+        // resample accepts the row (the `?` above already returned any reject);
+        // the sited reconstruction read it but did not stage, so a rejected row
+        // keeps the predecessor for a clean retry.
+        if bottom_v {
+          stage_420_chroma_prev_p0xx(chroma_prev_u16, chroma_prev_row, uv_half, idx, w);
+        }
         if frozen_native_route.is_none() && need_output {
           *frozen_native_route = Some(false);
         }
         if frozen_chroma_centered.is_none() && need_output {
           *frozen_chroma_centered = Some(center_sited);
+          *frozen_chroma_bottom_v = Some(bottom_v);
         }
         return Ok(());
       }
@@ -2788,26 +3274,50 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P016<BE>, R> {
       #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
       if frozen_chroma_centered.is_none() && need_output {
         *frozen_chroma_centered = Some(center_sited);
+        *frozen_chroma_bottom_v = Some(bottom_v);
       }
       return Ok(());
     }
 
-    let one_plane_start = idx * w;
-    let one_plane_end = one_plane_start + w;
-
-    // Resolve the output set up front so the atomicity preflight below runs
+    // Resolve the output set up front so the no-output guard short-circuits
+    // before ANY per-row offset arithmetic and the atomicity preflight runs
     // before any output row is written.
     let want_rgb = rgb.is_some();
     let want_rgba = rgba.is_some();
     let want_hsv = hsv.is_some();
     let want_rgb_u16 = rgb_u16.is_some();
     let want_rgba_u16 = rgba_u16.is_some();
+    let want_color = want_rgb || want_rgba || want_hsv || want_rgb_u16 || want_rgba_u16;
+    // Repo-wide no-output invariant (RFC #238 S6e, mirrors the planar Yuv420p /
+    // NV S4-C direct twins): a `process` call carrying NO output — no colour, no
+    // luma — must run NOTHING: no per-row offset arithmetic, no allocation, no
+    // state mutation (the bottom-sited vertical lookback included). Returning
+    // HERE, before the `idx * w` offsets below, keeps the invariant overflow-safe
+    // (a no-output call never ran an attach-time `w x h` validation, so `idx * w`
+    // could overflow on a 32-bit target) AND means such a row never reserves
+    // `chroma_prev_u16` nor primes the lookback (so it can never make a later
+    // colour even row box-blend through an invisible, never-output row). P016
+    // exposes no `luma_u16`.
+    let need_output = want_color || luma.is_some();
+    if !need_output {
+      return Ok(());
+    }
+
+    let one_plane_start = idx * w;
+    let one_plane_end = one_plane_start + w;
+
     // Chroma siting (#302): the centered horizontal sitings reconstruct chroma
     // at the phase-0.5 position; the default / co-sited path keeps the
     // byte-identical fused decode (the fused P-format 4:2:0 kernels
     // de-interleave + upsample chroma in-register, exactly as before).
     #[cfg(feature = "yuv-planar")]
     let center_sited = chroma_420_center_sited_h(chroma_location);
+    // RFC #238 S6e: `Bottom` (a strict sub-case of `center_sited`) additionally
+    // box-blends the even output row's chroma with the previous chroma row via
+    // the `chroma_prev_u16` lookback maintained below; `Center` / `Top` keep the
+    // vertical-replicate (co-sited) decode, byte-identical to S6b.
+    #[cfg(feature = "yuv-planar")]
+    let bottom_v = chroma_420_bottom_sited_v(chroma_location);
 
     // Atomicity preflight (#302 / #308, cf. the crate's #180 resample fix and
     // the planar_8bit / semi_planar_8bit 8-bit siblings): reserve EVERY fallible
@@ -2821,7 +3331,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P016<BE>, R> {
     //  2. the u8 RGB row buffer, reached exactly when a colour decode needs an
     //     RGB row but no caller RGB buffer is borrowable — `want_hsv &&
     //     want_rgba && !want_rgb` (`rgb_row_buf_or_scratch`'s own scratch arm).
-    // The later `upsample_420_chroma_center_h_p0xx` / `rgb_row_buf_or_scratch`
+    // The later `upsample_420_chroma_sited_p0xx` / `rgb_row_buf_or_scratch`
     // calls reuse the already-sized buffers, so the default path is
     // byte-identical; only the failure-path ordering changes. The u16 RGB / RGBA
     // outputs write straight into their caller buffers (the rgb_u16 plane itself
@@ -2829,11 +3339,20 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P016<BE>, R> {
     // luma-only row consumes no centered chroma, so it neither reserves nor
     // upsamples it (the reserve makes the later upsample infallible).
     #[cfg(feature = "yuv-planar")]
-    let need_centered_chroma =
-      center_sited && (want_rgb || want_rgba || want_hsv || want_rgb_u16 || want_rgba_u16);
+    let need_centered_chroma = center_sited && want_color;
     #[cfg(feature = "yuv-planar")]
     if need_centered_chroma {
       reserve_420_chroma_full_u16(chroma_full_u16, w, h)?;
+    }
+    // Bottom-sited vertical-phase one-row chroma lookback (RFC #238 S6e): reserve
+    // it on EVERY bottom-sited OUTPUT row — colour OR luma-only — because the
+    // lookback is maintained so a LATER colour row can box-blend it (the
+    // luma-only staging runs below, before any luma write). A no-output row
+    // returned early above, so it never reaches here and never primes the
+    // lookback. Reserved BEFORE any output write (the #180 preflight ordering).
+    #[cfg(feature = "yuv-planar")]
+    if bottom_v {
+      reserve_420_chroma_prev_u16(chroma_prev_u16, w, h)?;
     }
     if want_hsv && want_rgba && !want_rgb {
       rgb_row_buf_or_scratch(
@@ -2846,17 +3365,39 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P016<BE>, R> {
       )?;
     }
 
+    // Bottom-sited LUMA-ONLY row (RFC #238 S6e): the colour upsample below —
+    // which normally refreshes the vertical lookback — won't run, so stage the
+    // current interleaved chroma row HERE, after its reservation above and BEFORE
+    // any luma write, so a later colour row in the same frame can box-blend it (a
+    // luma-only-then-colour in-order sequence reconstructs the same Bottom
+    // vertical phase as the all-output walk). A colour row instead stages inside
+    // `upsample_420_chroma_sited_p0xx` after reading the previous lookback, so
+    // this is skipped for it; a no-output row returned early above. The validity
+    // tag (`chroma_prev_row`) still guards out-of-sequence / cross-frame reads.
+    #[cfg(feature = "yuv-planar")]
+    if bottom_v && !want_color {
+      stage_420_chroma_prev_p0xx(chroma_prev_u16, chroma_prev_row, row.uv_half(), idx, w);
+    }
+
     // Centered full-width INTERLEAVED chroma (phase-0.5), reconstructed ONCE per
     // row from the wire-format half-width interleaved UV and reused by every
     // colour decode (u16 and u8). Infallible — the scratch was reserved above.
     // The default left/unspecified siting leaves it `None`, so the fused
     // P-format 4:2:0 kernels de-interleave + upsample chroma in-register and the
-    // output stays byte-identical.
+    // output stays byte-identical. `Center` / `Top` take the plain horizontal
+    // centered phase-0.5 fold; `Bottom` (RFC #238 S6e) additionally box-blends
+    // the even output row with the previous chroma row (`stage = true` — the
+    // direct decode's post-reconstruction work is infallible).
     #[cfg(feature = "yuv-planar")]
     let centered: Option<&[u16]> = if need_centered_chroma {
-      Some(upsample_420_chroma_center_h_p0xx::<BITS>(
+      Some(upsample_420_chroma_sited_p0xx::<BITS>(
         chroma_full_u16,
+        chroma_prev_u16,
+        chroma_prev_row,
         row.uv_half(),
+        idx,
+        bottom_v,
+        true,
         w,
         BE,
       ))

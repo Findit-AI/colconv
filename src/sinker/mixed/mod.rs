@@ -2784,19 +2784,24 @@ pub struct MixedSinker<'a, F: SourceFormat, R = NoopResampler> {
   #[cfg(feature = "yuv-planar")]
   chroma_full_u16: Vec<u16>,
   /// One-row chroma **lookback** for the bottom-sited (`AVCHROMA_LOC_BOTTOM`)
-  /// vertical-phase HIGH-BIT 4:2:0 upsample (RFC #238 S6d) — the `u16` twin of
-  /// [`Self::chroma_prev`]. Holds a copy of a chroma row's half-width U then V
-  /// back-to-back (`width` `u16`: `[0..width/2]` = `U`, `[width/2..width]` = `V`)
-  /// in the source's wire byte order, so an *even* output luma row `2i` can
+  /// vertical-phase HIGH-BIT 4:2:0 upsample (RFC #238 S6d/S6e) — the `u16` twin
+  /// of [`Self::chroma_prev`]. Holds a copy of one chroma row (`width` `u16`, in
+  /// the source's wire byte order) so an *even* output luma row `2i` can
   /// vertically box-blend chroma rows `i-1` (here) and `i` (the current row)
-  /// before the horizontal centered upsample. WHICH chroma row it holds is
-  /// tracked by the SHARED [`Self::chroma_prev_row`] tag (element-agnostic, so
-  /// the `u8` and `u16` bottom paths — never both live on one monomorphized
-  /// sink — reuse it); the blend trusts it only for the wanted predecessor
-  /// `i-1`, else falls back to the top-edge clamp. Lazily grown to `width` `u16`
-  /// on the first bottom-sited chroma row; empty otherwise (only
-  /// `ChromaLocation::Bottom` on a `Yuv420p9` … `Yuv420p16` sink touches it).
-  /// Gated to `yuv-planar`, like [`Self::chroma_full_u16`] which it feeds.
+  /// before the horizontal centered upsample. The planar `Yuv420p9` …
+  /// `Yuv420p16` sinks lay it out as the half-width U then V back-to-back
+  /// (`[0..width/2]` = `U`, `[width/2..width]` = `V`, RFC #238 S6d); the
+  /// semi-planar `P010` / `P012` / `P016` sinks lay it out as the packed
+  /// INTERLEAVED `U V U V…` half-row (RFC #238 S6e) — the SAME `width` `u16`,
+  /// whichever layout its owning monomorphized sink writes. WHICH chroma row it
+  /// holds is tracked by the SHARED [`Self::chroma_prev_row`] tag
+  /// (element-agnostic, so the `u8` and `u16` bottom paths — never both live on
+  /// one monomorphized sink — reuse it); the blend trusts it only for the wanted
+  /// predecessor `i-1`, else falls back to the top-edge clamp. Lazily grown to
+  /// `width` `u16` on the first bottom-sited chroma row; empty otherwise (only
+  /// `ChromaLocation::Bottom` on a `Yuv420p9` … `Yuv420p16` / `P010` / `P012` /
+  /// `P016` sink touches it). Gated to `yuv-planar`, like
+  /// [`Self::chroma_full_u16`] which it feeds.
   #[cfg(feature = "yuv-planar")]
   chroma_prev_u16: Vec<u16>,
   /// Source-width `u8` luma staging for the **packed YUV 4:2:2** resample
