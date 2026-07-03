@@ -2783,6 +2783,22 @@ pub struct MixedSinker<'a, F: SourceFormat, R = NoopResampler> {
   /// it reuses live there).
   #[cfg(feature = "yuv-planar")]
   chroma_full_u16: Vec<u16>,
+  /// One-row chroma **lookback** for the bottom-sited (`AVCHROMA_LOC_BOTTOM`)
+  /// vertical-phase HIGH-BIT 4:2:0 upsample (RFC #238 S6d) — the `u16` twin of
+  /// [`Self::chroma_prev`]. Holds a copy of a chroma row's half-width U then V
+  /// back-to-back (`width` `u16`: `[0..width/2]` = `U`, `[width/2..width]` = `V`)
+  /// in the source's wire byte order, so an *even* output luma row `2i` can
+  /// vertically box-blend chroma rows `i-1` (here) and `i` (the current row)
+  /// before the horizontal centered upsample. WHICH chroma row it holds is
+  /// tracked by the SHARED [`Self::chroma_prev_row`] tag (element-agnostic, so
+  /// the `u8` and `u16` bottom paths — never both live on one monomorphized
+  /// sink — reuse it); the blend trusts it only for the wanted predecessor
+  /// `i-1`, else falls back to the top-edge clamp. Lazily grown to `width` `u16`
+  /// on the first bottom-sited chroma row; empty otherwise (only
+  /// `ChromaLocation::Bottom` on a `Yuv420p9` … `Yuv420p16` sink touches it).
+  /// Gated to `yuv-planar`, like [`Self::chroma_full_u16`] which it feeds.
+  #[cfg(feature = "yuv-planar")]
+  chroma_prev_u16: Vec<u16>,
   /// Source-width `u8` luma staging for the **packed YUV 4:2:2** resample
   /// path (the interleaved Y bytes are de-interleaved here via the format's
   /// own `*_to_luma_row` kernel — the exact Y→luma derivation the direct
@@ -3862,6 +3878,8 @@ impl<F: SourceFormat, R> MixedSinker<'_, F, R> {
       chroma_prev_row: None,
       #[cfg(feature = "yuv-planar")]
       chroma_full_u16: Vec::new(),
+      #[cfg(feature = "yuv-planar")]
+      chroma_prev_u16: Vec::new(),
       #[cfg(any(feature = "yuv-packed", feature = "gray"))]
       luma_scratch: Vec::new(),
       #[cfg(feature = "rgb-legacy")]
@@ -8850,6 +8868,14 @@ pub(super) fn reset_high_bit_yuv_streams<F: SourceFormat, R>(sink: &mut MixedSin
     sink.frozen_native_route = None;
     sink.frozen_domain = None;
     sink.frozen_chroma_centered = None;
+    // RFC #238 S6d: clear the frozen VERTICAL (`Bottom`) chroma phase too, so
+    // the next frame may pick Center or Bottom while a mid-frame Center ⇆ Bottom
+    // flip stays rejected; and invalidate the high-bit bottom-sited vertical
+    // lookback (`chroma_prev_u16`, tracked by the shared `chroma_prev_row` tag)
+    // so frame N+1's first even row can never box-blend frame N's last chroma
+    // row. Both stay `None` / untouched for every non-`Bottom` high-bit format.
+    sink.frozen_chroma_bottom_v = None;
+    sink.chroma_prev_row = None;
   }
   sink.resample_outputs = None;
 }

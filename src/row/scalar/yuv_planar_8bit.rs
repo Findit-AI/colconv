@@ -487,6 +487,94 @@ pub(crate) fn chroma_upsample_2to1_center_h_u16<const BITS: u32>(
   }
 }
 
+/// `u16` twin of [`chroma_upsample_420_bottom_even_h`] for the **high-bit**
+/// planar 4:2:0 formats (`Yuv420p9` … `Yuv420p16`, RFC #238 S6d): the EVEN
+/// output luma row's bottom-sited (`v = 1`) vertical box-blend of the previous
+/// (`prev_half`) and current (`cur_half`) half-width chroma rows, fused with the
+/// #302 horizontal `1/4`–`3/4` centered reconstruction, on `u16` chroma.
+///
+/// ```text
+///   e[j]          = (prev[j] + cur[j] + 1) >> 1              (vertical box blend)
+///   even col 2j   → (e[j-1] + 3·e[j] + 2) >> 2   (e[-1]    clamped to e[0])
+///   odd  col 2j+1 → (3·e[j] + e[j+1] + 2) >> 2   (e[half]  clamped to e[half-1])
+/// ```
+///
+/// Both `prev_half` / `cur_half` and `c_full` carry samples in the source's
+/// **wire byte order** (`big_endian`); the function is generic over the source
+/// bit depth `BITS` (`9`…`16`). Each input is normalized wire → host-native
+/// logical AND masked to the low `BITS` (`& ((1 << BITS) - 1)` — the
+/// `bits_mask::<BITS>()` the fused decode applies; `u16::MAX` / a no-op at
+/// `BITS = 16`) BEFORE the arithmetic, EXACTLY as the centered sibling
+/// [`chroma_upsample_2to1_center_h_u16`] and the non-centered decode kernels do,
+/// so dirty upper bits in a malformed-but-accepted low-packed frame are
+/// discarded and never leak through the blend. Both the vertical and horizontal
+/// steps run in the logical domain (a masked `9`…`16`-bit value, so
+/// `left + 3 * mid` ≤ `4 * 65535` never overflows the `u32` accumulator and the
+/// result stays in `[0, (1 << BITS) - 1]`), and each output is re-encoded to the
+/// SAME wire order — so the caller feeds it straight to the existing
+/// `yuv444p{9,10,12,14,16}_to_*_row_endian` kernels with the same `big_endian`
+/// flag and the bottom-sited high-bit path reuses their full SIMD backends,
+/// staying bit-identical per tier and host-endianness-independent.
+///
+/// The **odd** luma row `2i+1` is co-sited with chroma row `i` (`v = 1`), so it
+/// needs no vertical blend and reuses [`chroma_upsample_2to1_center_h_u16`] on
+/// `cur_half` directly — only the even row routes here.
+///
+/// # Panics (debug builds)
+///
+/// - `width` must be even (4:2:0 pairs pixel columns).
+/// - `prev_half.len() >= width / 2`, `cur_half.len() >= width / 2`,
+///   `c_full.len() >= width`.
+// Gated like the `u8` sibling: reachable through the high-bit `Yuv420p` sink's
+// bottom-sited path, which stages the full-width chroma in a `Vec` scratch.
+#[cfg(any(feature = "std", feature = "alloc"))]
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn chroma_upsample_420_bottom_even_h_u16<const BITS: u32>(
+  prev_half: &[u16],
+  cur_half: &[u16],
+  c_full: &mut [u16],
+  width: usize,
+  big_endian: bool,
+) {
+  debug_assert_eq!(width & 1, 0, "YUV 4:2:0 requires even width");
+  debug_assert!(prev_half.len() >= width / 2, "prev_half row too short");
+  debug_assert!(cur_half.len() >= width / 2, "cur_half row too short");
+  debug_assert!(c_full.len() >= width, "c_full row too short");
+
+  // Low-packed sample mask `(1 << BITS) - 1`, identical to `bits_mask::<BITS>()`
+  // (computed inline so the kernel keeps the `u8`-sibling's `any(std, alloc)`
+  // gate). `u16::MAX` — a no-op — at `BITS = 16`. Applied after the endian
+  // normalization, matching the centered `u16` sibling.
+  let mask = ((1u32 << BITS) - 1) as u16;
+  let load = |raw: u16| -> u32 {
+    let logical = if big_endian {
+      u16::from_be(raw)
+    } else {
+      u16::from_le(raw)
+    };
+    (logical & mask) as u32
+  };
+  let store = |logical: u32| -> u16 {
+    let v = logical as u16;
+    if big_endian { v.to_be() } else { v.to_le() }
+  };
+
+  // Vertical box blend of the previous and current chroma rows, evaluated per
+  // chroma column (`e[j]`), then the horizontal center phase across it.
+  let half = width / 2;
+  let vblend = |j: usize| -> u32 { (load(prev_half[j]) + load(cur_half[j]) + 1) >> 1 };
+  for j in 0..half {
+    // `e[j-1]` clamps to `e[0]` at the left edge; `e[j+1]` clamps to the last
+    // sample at the right edge — boundary replication, matching the horizontal
+    // sibling.
+    let left = vblend(j.saturating_sub(1));
+    let mid = vblend(j);
+    let right = vblend(if j + 1 < half { j + 1 } else { j });
+    c_full[2 * j] = store((left + 3 * mid + 2) >> 2);
+    c_full[2 * j + 1] = store((3 * mid + right + 2) >> 2);
+  }
+}
+
 // ---- YUV 4:1:0 → RGB (fused: 4x horizontal upsample + convert) -------
 
 /// Converts one row of 4:1:0 YUV — Y at full width, U/V at
