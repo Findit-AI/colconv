@@ -185,6 +185,13 @@ pub(crate) struct NativePlanarYuvU16 {
   staged: [[bool; 2]; 3],
   /// Next output row to finalize.
   next_emit: usize,
+  /// Whether the cached chroma plan was built with a non-zero chroma phase
+  /// (RFC #238 centered siting). The join is built once and only `reset`
+  /// between frames, so a reused sink whose `chroma_location` moved to a
+  /// different phase must REBUILD it — the caller compares this against the
+  /// current siting and drops the join on a mismatch. `false` for a luma-only
+  /// join (no chroma plan) and for every co-sited / unphased layout.
+  chroma_centered: bool,
 }
 
 /// Chroma-grid streams, source de-interleave scratch, and staging of
@@ -228,6 +235,9 @@ impl NativePlanarYuvU16 {
     let stage_len = plan.out_w().checked_mul(2).ok_or_else(|| {
       ResampleError::Overflow(PlanGeometry::new(w, h, plan.out_w(), plan.out_h()))
     })?;
+    // Recorded so a reused sink rebuilds (not merely resets) the join when the
+    // frame's chroma siting phase changes; stays `false` for a luma-only join.
+    let mut chroma_centered = false;
     let chroma = if need_color {
       #[cfg(all(test, feature = "std", feature = "yuv-planar"))]
       if FORCE_PLANAR_HB_NATIVE_CHROMA_FAILURE.with(|f| f.take()) {
@@ -239,6 +249,7 @@ impl NativePlanarYuvU16 {
         )));
       }
       let chroma_plan = build_chroma_plan()?;
+      chroma_centered = chroma_plan.has_chroma_phase();
       Some(NativePlanarChromaU16 {
         u: AreaStream::new(
           chroma_plan.h(),
@@ -271,6 +282,7 @@ impl NativePlanarYuvU16 {
       chroma_vsub,
       staged: [[false; 2]; 3],
       next_emit: 0,
+      chroma_centered,
     })
   }
 
@@ -286,8 +298,16 @@ impl NativePlanarYuvU16 {
 
   /// Next Y source row this join expects — the per-row sequence counter (the
   /// native path bins Y on every output-bearing row, luma implicit).
-  fn next_y(&self) -> usize {
+  pub(crate) fn next_y(&self) -> usize {
     self.y.next_y()
+  }
+
+  /// The cached chroma plan's centered-phase flag (RFC #238), `Some` only when
+  /// a chroma half is present — a luma-only join carries no phase, so its
+  /// siting is irrelevant. The native call site drops-and-rebuilds a reused
+  /// join whose horizontal chroma phase no longer matches the frame's siting.
+  pub(crate) fn chroma_phase_centered(&self) -> Option<bool> {
+    self.chroma.as_ref().map(|_| self.chroma_centered)
   }
 
   /// Sequencing preflight across all three plane streams — checked before any
@@ -603,6 +623,9 @@ pub(crate) fn yuv_planar16_process_native<const BITS: u32, const BE: bool>(
     chroma_vsub,
     staged,
     next_emit,
+    // Cache key read only at build / the native call site; the feed loop
+    // ignores it.
+    chroma_centered: _,
   } = &mut **join;
   y.feed_row(idx, &y_src[..w], use_simd, |oy, out_row| {
     let slot = oy & 1;

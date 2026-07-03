@@ -8843,11 +8843,13 @@ pub(super) fn reset_high_bit_yuv_streams<F: SourceFormat, R>(sink: &mut MixedSin
   // Clear the per-frame frozen native/row-stage route and averaging domain so
   // the next frame may pick either tier / any domain (the dispatch re-freezes
   // each on its first resampled row); a mid-frame flip within a frame stays
-  // rejected.
+  // rejected. The RFC #238 frozen 4:2:2 chroma siting is cleared here too, so
+  // the next frame may pick either phase while a mid-frame flip stays rejected.
   #[cfg(feature = "yuv-planar")]
   {
     sink.frozen_native_route = None;
     sink.frozen_domain = None;
+    sink.frozen_chroma_centered = None;
   }
   sink.resample_outputs = None;
 }
