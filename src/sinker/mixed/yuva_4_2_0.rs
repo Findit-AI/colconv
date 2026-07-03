@@ -1259,6 +1259,10 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuva420p9<BE>, R> {
         RowSlice::AFull9,
         yuva420p9_to_rgba_row_endian,
         yuva420p9_to_rgba_u16_row_endian,
+        // Centered-siting (#302, RFC #238 S6c) 4:4:4 twins fed the horizontally
+        // reconstructed full-width chroma; α passed through unchanged.
+        yuva444p9_to_rgba_row_endian,
+        yuva444p9_to_rgba_u16_row_endian,
       );
     }
     yuva420p_high_bit_process::<9, BE, _, _>(
@@ -1408,6 +1412,10 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuva420p10<BE>, R> {
         RowSlice::AFull10,
         yuva420p10_to_rgba_row_endian,
         yuva420p10_to_rgba_u16_row_endian,
+        // Centered-siting (#302, RFC #238 S6c) 4:4:4 twins fed the horizontally
+        // reconstructed full-width chroma; α passed through unchanged.
+        yuva444p10_to_rgba_row_endian,
+        yuva444p10_to_rgba_u16_row_endian,
       );
     }
     yuva420p_high_bit_process::<10, BE, _, _>(
@@ -1557,6 +1565,10 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuva420p12<BE>, R> {
         RowSlice::AFull12,
         yuva420p12_to_rgba_row_endian,
         yuva420p12_to_rgba_u16_row_endian,
+        // Centered-siting (#302, RFC #238 S6c) 4:4:4 twins fed the horizontally
+        // reconstructed full-width chroma; α passed through unchanged.
+        yuva444p12_to_rgba_row_endian,
+        yuva444p12_to_rgba_u16_row_endian,
       );
     }
     yuva420p_high_bit_process::<12, BE, _, _>(
@@ -1706,6 +1718,10 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuva420p16<BE>, R> {
         RowSlice::AFull16,
         yuva420p16_to_rgba_row_endian,
         yuva420p16_to_rgba_u16_row_endian,
+        // Centered-siting (#302, RFC #238 S6c) 4:4:4 twins fed the horizontally
+        // reconstructed full-width chroma; α passed through unchanged.
+        yuva444p16_to_rgba_row_endian,
+        yuva444p16_to_rgba_u16_row_endian,
       );
     }
     yuva420p_high_bit_process::<16, BE, _, _>(
@@ -2297,9 +2313,42 @@ fn yuva420p_high_bit_resample<const BITS: u32, const BE: bool>(
     bool,
     bool,
   ),
+  // Chroma siting (#302, RFC #238 S6c): the centered (phase-0.5) 4:4:4 twins of
+  // the two source-alpha dispatchers above (`yuva444pN_to_rgba*`). Each takes
+  // FULL-width U / V (the horizontally reconstructed chroma) with the α plane
+  // fed unchanged; their signatures match the matching 4:2:0 dispatcher. They
+  // are invoked ONLY on the centered horizontal sitings; the co-sited / default
+  // path keeps the byte-identical fused 4:2:0 decode.
+  rgba_444_dispatch: fn(
+    &[u16],
+    &[u16],
+    &[u16],
+    &[u16],
+    &mut [u8],
+    usize,
+    crate::ColorMatrix,
+    bool,
+    bool,
+    bool,
+  ),
+  rgba_u16_444_dispatch: fn(
+    &[u16],
+    &[u16],
+    &[u16],
+    &[u16],
+    &mut [u16],
+    usize,
+    crate::ColorMatrix,
+    bool,
+    bool,
+    bool,
+  ),
 ) -> Result<(), MixedSinkerError> {
   let w = sinker.width;
+  let h = sinker.height;
   let use_simd = sinker.simd;
+  // Chroma siting (#302): `Copy`, read before the field split-borrow below.
+  let chroma_location = sinker.chroma_location;
 
   if w & 1 != 0 {
     return Err(MixedSinkerError::WidthAlignment(WidthAlignment::odd(w)));
@@ -2356,6 +2405,7 @@ fn yuva420p_high_bit_resample<const BITS: u32, const BE: bool>(
     rgba_scratch_u16,
     rgba_color_scratch_u16,
     luma_scratch_u16,
+    chroma_full_u16,
     plan,
     rgba_stream,
     rgba_stream_u16,
@@ -2365,10 +2415,41 @@ fn yuva420p_high_bit_resample<const BITS: u32, const BE: bool>(
     luma_filter_stream_u16,
     resample_outputs,
     frozen_alpha_mode,
+    frozen_chroma_centered,
     ..
   } = sinker;
   let plan = plan.as_ref().expect("plan.is_some() checked by the caller");
   check_frozen_alpha_mode(*frozen_alpha_mode, alpha_mode, idx)?;
+  // RFC #238 S6c — 4:2:0 HORIZONTAL chroma siting for the high-bit alpha-bearing
+  // source. The centered group (`chroma_420_center_sited_h` — chroma at `+0.5`
+  // luma horizontally) reconstructs full-width chroma then feeds the 4:4:4
+  // (+ source-alpha) twins; the co-sited / unspecified group is phase 0 (today's
+  // fused 4:2:0 decode, byte-identical). The full-resolution α plane is never
+  // subsampled, so it is siting-independent and passes through the 4:4:4 twins
+  // UNCHANGED. Vertical stays co-sited (the `Bottom` v-fold is a later PR).
+  let center_sited = chroma_420_center_sited_h(chroma_location);
+  // A colour output drives the centered chroma reconstruction (u8 OR native
+  // u16); a luma-only row bins the native Y (siting-independent) and never
+  // reconstructs chroma, so it stays on the co-sited fused arm.
+  let want_color =
+    rgb.is_some() || rgba.is_some() || hsv.is_some() || rgb_u16.is_some() || rgba_u16.is_some();
+  // The EXACT set the packed tails treat as output-bearing (colour u8 / u16 or
+  // luma); gates the siting freeze so a no-output call (which consumes no stream
+  // state) freezes nothing. MUST include the u16 colour outputs — a u16-only
+  // sink still advances a stream and must freeze the siting.
+  let need_output = want_color || luma.is_some() || luma_u16.is_some();
+  // Freeze the effective horizontal siting on the first output-bearing row: a
+  // later row observing a different phase — in sequence or not — would bin a
+  // mixture of co-sited and centered chroma, so it is rejected here before any
+  // reconstruction. The matching SET rides each accepted output row below.
+  if need_output
+    && let Some(frozen) = *frozen_chroma_centered
+    && frozen != center_sited
+  {
+    return Err(MixedSinkerError::ChromaSitingChanged(
+      ChromaSitingChanged::new(idx),
+    ));
+  }
   // The span kind picks the engine (mirrors the 8-bit `Yuva420p` and packed
   // `Vuya`): `Area` bins (the alpha-aware tail — premultiplied colour binned
   // premultiplied then un-premultiplied) at native precision; `Filter` runs
@@ -2382,44 +2463,126 @@ fn yuva420p_high_bit_resample<const BITS: u32, const BE: bool>(
   // matching the in-range area path. A premultiplied `Filter` plan has no
   // analogue (the engine cannot un-premultiply), so it is routed to the area
   // tail, which surfaces the typed `UnsupportedFilter`.
-  match plan.kind() {
-    crate::resample::SpanKind::Area => packed_yuva444_resample::<BITS>(
-      rgba_stream,
-      rgba_stream_u16,
-      luma_stream_u16,
-      resample_outputs,
-      rgb,
-      rgba,
-      rgb_u16,
-      rgba_u16,
-      luma,
-      luma_u16,
-      hsv,
-      rgba_scratch,
-      rgb_scratch,
-      rgba_scratch_u16,
-      rgba_color_scratch_u16,
-      luma_scratch_u16,
-      w,
-      plan,
-      idx,
-      use_simd,
-      alpha_mode,
-      |dst| {
-        rgba_dispatch(
-          y_row, u_half_row, v_half_row, a_row, dst, w, matrix, full_range, use_simd, BE,
+  let r = match plan.kind() {
+    crate::resample::SpanKind::Area => {
+      if center_sited && want_color {
+        // Centered area: reconstruct full-width chroma and bin the 4:4:4-decoded
+        // RGBA — but ONLY after the resample preflight (frozen-output +
+        // sequence), so an out-of-sequence / rejected row is caught before the
+        // chroma reservation (#180). `packed_yuva444_resample` re-runs the
+        // idempotent preflight. The α plane is full-resolution and
+        // siting-independent: it flows into the 4:4:4 converters UNCHANGED.
+        let expected = if rgb.is_some() || rgba.is_some() || hsv.is_some() {
+          rgba_stream.as_ref().map_or(0, |s| s.next_y())
+        } else {
+          rgba_stream_u16.as_ref().map_or(0, |s| s.next_y())
+        };
+        match super::planar_resample::resample_preflight_check_only(
+          resample_outputs,
+          luma,
+          luma_u16,
+          rgb,
+          rgba,
+          rgb_u16,
+          rgba_u16,
+          &None,
+          &None,
+          &None,
+          &None,
+          &None,
+          hsv,
+          &None,
+          Some(expected),
+          idx,
+        )? {
+          core::ops::ControlFlow::Break(()) => Ok(()),
+          core::ops::ControlFlow::Continue(()) => {
+            reserve_420_chroma_full_u16(chroma_full_u16, w, h)?;
+            let (u_full, v_full) = upsample_420_chroma_center_h_u16::<BITS>(
+              chroma_full_u16,
+              u_half_row,
+              v_half_row,
+              w,
+              BE,
+            );
+            packed_yuva444_resample::<BITS>(
+              rgba_stream,
+              rgba_stream_u16,
+              luma_stream_u16,
+              resample_outputs,
+              rgb,
+              rgba,
+              rgb_u16,
+              rgba_u16,
+              luma,
+              luma_u16,
+              hsv,
+              rgba_scratch,
+              rgb_scratch,
+              rgba_scratch_u16,
+              rgba_color_scratch_u16,
+              luma_scratch_u16,
+              w,
+              plan,
+              idx,
+              use_simd,
+              alpha_mode,
+              |dst| {
+                rgba_444_dispatch(
+                  y_row, u_full, v_full, a_row, dst, w, matrix, full_range, use_simd, BE,
+                )
+              },
+              |dst| {
+                rgba_u16_444_dispatch(
+                  y_row, u_full, v_full, a_row, dst, w, matrix, full_range, use_simd, BE,
+                )
+              },
+              |dst| deinterleave_y_high_bit_masked::<BITS, BE>(y_row, dst, w),
+            )
+          }
+        }
+      } else {
+        packed_yuva444_resample::<BITS>(
+          rgba_stream,
+          rgba_stream_u16,
+          luma_stream_u16,
+          resample_outputs,
+          rgb,
+          rgba,
+          rgb_u16,
+          rgba_u16,
+          luma,
+          luma_u16,
+          hsv,
+          rgba_scratch,
+          rgb_scratch,
+          rgba_scratch_u16,
+          rgba_color_scratch_u16,
+          luma_scratch_u16,
+          w,
+          plan,
+          idx,
+          use_simd,
+          alpha_mode,
+          |dst| {
+            rgba_dispatch(
+              y_row, u_half_row, v_half_row, a_row, dst, w, matrix, full_range, use_simd, BE,
+            )
+          },
+          |dst| {
+            rgba_u16_dispatch(
+              y_row, u_half_row, v_half_row, a_row, dst, w, matrix, full_range, use_simd, BE,
+            )
+          },
+          |dst| deinterleave_y_high_bit_masked::<BITS, BE>(y_row, dst, w),
         )
-      },
-      |dst| {
-        rgba_u16_dispatch(
-          y_row, u_half_row, v_half_row, a_row, dst, w, matrix, full_range, use_simd, BE,
-        )
-      },
-      |dst| deinterleave_y_high_bit_masked::<BITS, BE>(y_row, dst, w),
-    ),
+      }
+    }
     crate::resample::SpanKind::Filter if alpha_mode.is_premultiplied() => {
-      // Premultiplied + filter has no analogue: route to the area tail with
-      // the filter plan so it returns the typed `UnsupportedFilter`.
+      // Premultiplied + filter has no analogue: route to the area tail with the
+      // filter plan so it returns the typed `UnsupportedFilter`. Siting is
+      // irrelevant — the row is rejected before any chroma reconstruction, so it
+      // stays on the co-sited kernels (no wasted reservation, #180).
       packed_yuva444_resample::<BITS>(
         rgba_stream,
         rgba_stream_u16,
@@ -2455,46 +2618,143 @@ fn yuva420p_high_bit_resample<const BITS: u32, const BE: bool>(
         |dst| deinterleave_y_high_bit_masked::<BITS, BE>(y_row, dst, w),
       )
     }
-    crate::resample::SpanKind::Filter => packed_yuva444_filter_resample::<BITS, false, false>(
-      rgba_filter_stream,
-      rgba_filter_stream_u16,
-      // High-bit planar YUVA never uses the u8 native-Y luma stream
-      // (`NATIVE_LUMA_U8 = false`); pass an inert slot.
-      &mut None,
-      luma_filter_stream_u16,
-      resample_outputs,
-      rgb,
-      rgba,
-      rgb_u16,
-      rgba_u16,
-      luma,
-      luma_u16,
-      hsv,
-      rgba_scratch,
-      rgb_scratch,
-      rgba_scratch_u16,
-      rgba_color_scratch_u16,
-      luma_scratch_u16,
-      w,
-      plan,
-      idx,
-      use_simd,
-      // Luma rides `deinterleave_y` + the u16 stream (native Y is u16), so the
-      // u8-luma input is unused.
-      &[],
-      None,
-      |dst| {
-        rgba_dispatch(
-          y_row, u_half_row, v_half_row, a_row, dst, w, matrix, full_range, use_simd, BE,
+    crate::resample::SpanKind::Filter => {
+      // Reject a multi-kernel (BICUBLIN) filter plan BEFORE the centered
+      // preflight/reserve below: `packed_yuva444_filter_resample`'s first act is
+      // this same check, so without hoisting it a BICUBLIN plan would freeze the
+      // output set and reserve/reconstruct chroma before being rejected as
+      // `UnsupportedFilter` (#180 reject-before-allocation). Idempotent — the
+      // delegate re-runs it.
+      plan.ensure_single_kernel_filter()?;
+      if center_sited && want_color {
+        // Centered filter: reconstruct full-width chroma and filter the
+        // 4:4:4-decoded RGBA — but ONLY after the filter preflight (frozen-output
+        // + sequence), so an out-of-sequence / rejected row is caught before the
+        // chroma reservation (#180). The α plane is siting-independent and flows
+        // into the 4:4:4 converters UNCHANGED.
+        let expected = if rgb.is_some() || rgba.is_some() || hsv.is_some() {
+          rgba_filter_stream.as_ref().map_or(0, |s| s.next_y())
+        } else {
+          rgba_filter_stream_u16.as_ref().map_or(0, |s| s.next_y())
+        };
+        match super::planar_resample::resample_preflight_check_only(
+          resample_outputs,
+          luma,
+          luma_u16,
+          rgb,
+          rgba,
+          rgb_u16,
+          rgba_u16,
+          &None,
+          &None,
+          &None,
+          &None,
+          &None,
+          hsv,
+          &None,
+          Some(expected),
+          idx,
+        )? {
+          core::ops::ControlFlow::Break(()) => Ok(()),
+          core::ops::ControlFlow::Continue(()) => {
+            reserve_420_chroma_full_u16(chroma_full_u16, w, h)?;
+            let (u_full, v_full) = upsample_420_chroma_center_h_u16::<BITS>(
+              chroma_full_u16,
+              u_half_row,
+              v_half_row,
+              w,
+              BE,
+            );
+            packed_yuva444_filter_resample::<BITS, false, false>(
+              rgba_filter_stream,
+              rgba_filter_stream_u16,
+              &mut None,
+              luma_filter_stream_u16,
+              resample_outputs,
+              rgb,
+              rgba,
+              rgb_u16,
+              rgba_u16,
+              luma,
+              luma_u16,
+              hsv,
+              rgba_scratch,
+              rgb_scratch,
+              rgba_scratch_u16,
+              rgba_color_scratch_u16,
+              luma_scratch_u16,
+              w,
+              plan,
+              idx,
+              use_simd,
+              &[],
+              None,
+              |dst| {
+                rgba_444_dispatch(
+                  y_row, u_full, v_full, a_row, dst, w, matrix, full_range, use_simd, BE,
+                )
+              },
+              |dst| {
+                rgba_u16_444_dispatch(
+                  y_row, u_full, v_full, a_row, dst, w, matrix, full_range, use_simd, BE,
+                )
+              },
+              |dst| deinterleave_y_high_bit_masked::<BITS, BE>(y_row, dst, w),
+              |_dst: &mut [u8]| {},
+            )
+          }
+        }
+      } else {
+        packed_yuva444_filter_resample::<BITS, false, false>(
+          rgba_filter_stream,
+          rgba_filter_stream_u16,
+          // High-bit planar YUVA never uses the u8 native-Y luma stream
+          // (`NATIVE_LUMA_U8 = false`); pass an inert slot.
+          &mut None,
+          luma_filter_stream_u16,
+          resample_outputs,
+          rgb,
+          rgba,
+          rgb_u16,
+          rgba_u16,
+          luma,
+          luma_u16,
+          hsv,
+          rgba_scratch,
+          rgb_scratch,
+          rgba_scratch_u16,
+          rgba_color_scratch_u16,
+          luma_scratch_u16,
+          w,
+          plan,
+          idx,
+          use_simd,
+          // Luma rides `deinterleave_y` + the u16 stream (native Y is u16), so the
+          // u8-luma input is unused.
+          &[],
+          None,
+          |dst| {
+            rgba_dispatch(
+              y_row, u_half_row, v_half_row, a_row, dst, w, matrix, full_range, use_simd, BE,
+            )
+          },
+          |dst| {
+            rgba_u16_dispatch(
+              y_row, u_half_row, v_half_row, a_row, dst, w, matrix, full_range, use_simd, BE,
+            )
+          },
+          |dst| deinterleave_y_high_bit_masked::<BITS, BE>(y_row, dst, w),
+          |_dst: &mut [u8]| {},
         )
-      },
-      |dst| {
-        rgba_u16_dispatch(
-          y_row, u_half_row, v_half_row, a_row, dst, w, matrix, full_range, use_simd, BE,
-        )
-      },
-      |dst| deinterleave_y_high_bit_masked::<BITS, BE>(y_row, dst, w),
-      |_dst: &mut [u8]| {},
-    ),
+      }
+    }
+  };
+  // RFC #238 S6c: freeze the horizontal 4:2:0 chroma siting on the first
+  // ACCEPTED output-bearing resampled row (a rejected row returns Err above and
+  // leaves it unset for a corrected retry). Both packed tails carry one plan
+  // kind for the frame, so there is no native/row-stage route to co-freeze here.
+  if r.is_ok() && need_output && frozen_chroma_centered.is_none() {
+    *frozen_chroma_centered = Some(center_sited);
   }
+  r
 }
