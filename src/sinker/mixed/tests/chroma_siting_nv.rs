@@ -235,12 +235,24 @@ macro_rules! nv_chroma_siting_tests {
         miri,
         ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
       )]
-      fn top_and_bottom_route_like_center_horizontally() {
-        // Top / Bottom share Center's horizontal phase; the vertical phase is
-        // not yet consumed (#302 horizontal-only), so all three match here.
+      fn top_routes_like_center_bottom_adds_vertical() {
+        // Top shares Center's horizontal (centered) phase and keeps the vertical
+        // pairing co-sited, so Top == Center. RFC #238 S4-C: Bottom (v=1)
+        // additionally vertically box-blends the even output row's chroma with the
+        // previous chroma row, so on `ramp_planes`' vertically-varying chroma it
+        // differs from Center. (Its exact value is pinned by the resample identity
+        // == direct-decode cross-check in `chroma_siting_nv12_resample`.)
         let center = convert_rgb(ChromaLocation::Center, true);
-        assert_eq!(convert_rgb(ChromaLocation::Top, true), center);
-        assert_eq!(convert_rgb(ChromaLocation::Bottom, true), center);
+        assert_eq!(
+          convert_rgb(ChromaLocation::Top, true),
+          center,
+          "Top keeps Center's horizontal phase (vertical co-sited)"
+        );
+        assert_ne!(
+          convert_rgb(ChromaLocation::Bottom, true),
+          center,
+          "Bottom's vertical box blend must differ from Center on a vertically-varying chroma ramp"
+        );
       }
 
       #[test]

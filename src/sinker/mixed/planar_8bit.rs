@@ -1803,6 +1803,18 @@ impl NativeYuv420 {
     self.chroma_centered
   }
 
+  /// Whether the cached chroma plan folded the RFC #238 S4-C `Bottom` vertical
+  /// phase (`v = 1`) — see [`chroma_bottom`](Self#structfield.chroma_bottom).
+  /// `Center` and `Bottom` share `chroma_centered = true`, so the semi-planar
+  /// 4:2:0 (`Nv12` / `Nv21`) point-of-use siting invalidation compares this too
+  /// (its joins live in a sibling module and cannot touch the private field
+  /// directly) to rebuild the join on a vertical-phase change.
+  #[cfg(feature = "yuv-semi-planar")]
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub(super) const fn chroma_bottom(&self) -> bool {
+    self.chroma_bottom
+  }
+
   /// Next source row this join expects (0 at a fresh frame). Read by the
   /// semi-planar 4:2:0 point-of-use siting invalidation to fire the
   /// phase-rebuild drop ONLY at a fresh-frame boundary (`next_y() == 0`), never
