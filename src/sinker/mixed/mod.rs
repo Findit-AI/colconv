@@ -10468,6 +10468,11 @@ pub(super) fn reset_high_bit_yuva_streams<F: SourceFormat, R>(sink: &mut MixedSi
     stream.reset();
   }
   sink.resample_outputs = None;
+  // RFC #238 S6c: clear the per-frame frozen 4:2:0 horizontal chroma siting so
+  // the next frame may pick either phase while a mid-frame flip stays rejected
+  // (mirrors the planar `reset_high_bit_yuv_streams`). Untouched by the 4:2:2 /
+  // 4:4:4 YUVA families that share this reset (they never set it).
+  sink.frozen_chroma_centered = None;
   sink.frozen_alpha_mode = Some(sink.alpha_mode);
 }
 
