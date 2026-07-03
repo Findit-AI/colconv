@@ -384,11 +384,15 @@ fn centered_chroma_matches_yuv420p_centered_across_tiers() {
   for (sw, sh, ow, oh) in [(8, 8, 4, 4), (8, 8, 5, 3), (12, 8, 4, 4), (16, 8, 6, 5)] {
     let (y, u, v, a) = ramp(sw, sh);
     for native in [true, false] {
-      // Center / Top keep the vertical pairing co-sited, so Yuva420p == Yuv420p.
-      // Bottom is excluded here: Yuv420p now folds its vertical v=1 phase through
-      // the resample while Yuva420p still co-sites it, so the two diverge on
-      // Bottom until the Yuva420p vertical fold lands.
-      for loc in [ChromaLocation::Center, ChromaLocation::Top] {
+      // α is orthogonal to chroma siting on every axis, so the Yuva420p decode
+      // must match the no-alpha Yuv420p decode for the horizontal centered group
+      // (Center / Top) AND the vertical Bottom fold (RFC #238 S4-D) — both now
+      // route through the resample identically (α-drop).
+      for loc in [
+        ChromaLocation::Center,
+        ChromaLocation::Top,
+        ChromaLocation::Bottom,
+      ] {
         let ya = run(&y, &u, &v, &a, sw, sh, ow, oh, loc, native, true);
         let yv = run_yuv420p(&y, &u, &v, sw, sh, ow, oh, loc, native, true);
         assert_eq!(
@@ -429,15 +433,14 @@ fn centered_chroma_matches_yuv420p_centered_across_tiers() {
 )]
 fn centered_native_rgba_equals_code_domain_oracle() {
   // The straight-alpha native tier IS bin-Y/U/V/A-then-convert: Y / A co-sited,
-  // U / V through the exact centered chroma oracle, one `Yuva444p` convert.
+  // U / V through the exact centered chroma oracle, one `Yuva444p` convert. Only
+  // the vertically-co-sited centered sitings (Center / Top) match this oracle;
+  // `Bottom` folds the vertical `v = 1` triangle and has its own V-fold oracle
+  // ([`bottom_native_rgba_equals_code_domain_oracle`]).
   for (sw, sh, ow, oh) in [(8, 8, 4, 4), (8, 8, 5, 3), (12, 8, 4, 4), (16, 8, 6, 5)] {
     let (y, u, v, a) = ramp(sw, sh);
     let oracle = native_rgba_oracle(&y, &u, &v, &a, sw, sh, ow, oh, true);
-    for loc in [
-      ChromaLocation::Center,
-      ChromaLocation::Top,
-      ChromaLocation::Bottom,
-    ] {
+    for loc in [ChromaLocation::Center, ChromaLocation::Top] {
       let n = run(&y, &u, &v, &a, sw, sh, ow, oh, loc, true, true);
       assert_eq!(n.1, oracle, "native rgba {loc:?} {sw}x{sh}->{ow}x{oh}");
     }
@@ -727,11 +730,16 @@ fn in_sequence_flip_row1<R>(
 )]
 fn in_sequence_mid_frame_phase_change_rejected_across_tiers() {
   let (y, u, v, a) = ramp(8, 8);
-  // Both flip directions: Center->Left (drop the phase) and Left->Center (add
-  // it). Each must reject the in-sequence row 1 with ChromaSitingChanged.
+  // Flip directions: Center->Left (drop the horizontal phase) and Left->Center
+  // (add it), plus the RFC #238 S4-D Center<->Bottom vertical flips — Center and
+  // Bottom share the horizontal centered phase, so only the frozen vertical
+  // companion catches them. Each must reject the in-sequence row 1 with
+  // ChromaSitingChanged.
   for (loc1, loc2) in [
     (ChromaLocation::Center, ChromaLocation::Left),
     (ChromaLocation::Left, ChromaLocation::Center),
+    (ChromaLocation::Center, ChromaLocation::Bottom),
+    (ChromaLocation::Bottom, ChromaLocation::Center),
   ] {
     // Native fast tier.
     let mut rgb = vec![0u8; 4 * 4 * 3];
@@ -960,4 +968,570 @@ fn centered_filter_bicublin_rejected_before_the_chroma_reserve() {
       .unwrap();
   let cf = Yuva420pFrame::try_new(&y, &u, &v, &a, 8, 8, 8, cw as u32, cw as u32, 8).unwrap();
   let _ = yuva420p_to(&cf, FR, M, &mut consume);
+}
+
+// ---- bottom-sited (v = 1) vertical fold (RFC #238 S4-D) ---------------------
+
+/// The EXACT bottom-sited (`v = 1`) chroma oracle: the centered horizontal
+/// `1/4`–`3/4` triangle (×4, as [`bin_chroma_centered`]) composed with the
+/// vertical `v = 1` triangle (×2 — even luma row `2i` box-blends chroma rows
+/// `{i - 1, i}` with weights `{1, 1}`, odd row `2i + 1` takes chroma row `i` with
+/// weight 2, top-edge clamp), the combined ×8 UNROUNDED reconstruction
+/// box-averaged to `ow x oh` with a SINGLE round-half-up. α is orthogonal to the
+/// chroma decode, so this is byte-identical to the no-alpha `Yuv420p` S4-B
+/// oracle (EVEN `sh` only, `ch = sh / 2`).
+fn bin_chroma_bottom(c: &[u8], cw: usize, ch: usize, ow: usize, oh: usize) -> Vec<u8> {
+  let full = 2 * cw;
+  let sh = 2 * ch;
+  let mut r8 = vec![0u64; full * sh];
+  for r in 0..sh {
+    let cr = r / 2;
+    let prev = cr.saturating_sub(1);
+    let vrow: Vec<u32> = (0..cw)
+      .map(|j| {
+        if r & 1 == 0 {
+          u32::from(c[prev * cw + j]) + u32::from(c[cr * cw + j]) // even: {1, 1}
+        } else {
+          2 * u32::from(c[cr * cw + j]) // odd: {2}
+        }
+      })
+      .collect();
+    for j in 0..cw {
+      let l = vrow[j.saturating_sub(1)];
+      let m = vrow[j];
+      let rt = vrow[if j + 1 < cw { j + 1 } else { j }];
+      r8[r * full + 2 * j] = u64::from(l + 3 * m); // even col: (v[j-1] + 3·v[j])
+      r8[r * full + 2 * j + 1] = u64::from(3 * m + rt); // odd col: (3·v[j] + v[j+1])
+    }
+  }
+  let hw = area_weights(full, ow);
+  let vw = area_weights(sh, oh);
+  let denom = (8 * full * sh) as u64; // ×8 (×2 V, ×4 H) × the box normalization
+  let mut out = vec![0u8; ow * oh];
+  for (oy, (vs, vwin)) in vw.iter().enumerate() {
+    for (ox, (hs, hwin)) in hw.iter().enumerate() {
+      let mut s = 0u64;
+      for (dy, &vwt) in vwin.iter().enumerate() {
+        let mut hsum = 0u64;
+        for (dx, &hwt) in hwin.iter().enumerate() {
+          hsum += hwt * r8[(vs + dy) * full + hs + dx];
+        }
+        s += vwt * hsum;
+      }
+      out[oy * ow + ox] = rdhu(s, denom) as u8;
+    }
+  }
+  out
+}
+
+/// The bottom-sited NATIVE RGBA oracle: bin Y and A co-sited (both
+/// full-resolution, siting-independent), U / V through the exact bottom V-fold
+/// chroma oracle, then convert ONCE at output width via an identity `Yuva444p`
+/// sink with the binned α straight — the byte-for-byte ground truth the
+/// straight-alpha native tier reproduces for `ChromaLocation::Bottom` (EVEN `sh`
+/// only).
+#[allow(clippy::too_many_arguments)]
+fn bottom_native_rgba_oracle(
+  y: &[u8],
+  u: &[u8],
+  v: &[u8],
+  a: &[u8],
+  sw: usize,
+  sh: usize,
+  ow: usize,
+  oh: usize,
+  simd: bool,
+) -> Vec<u8> {
+  let cw = sw / 2;
+  let ch = sh / 2;
+  let yb = bin_cosited(y, sw, sh, ow, oh);
+  let ub = bin_chroma_bottom(u, cw, ch, ow, oh);
+  let vb = bin_chroma_bottom(v, cw, ch, ow, oh);
+  let ab = bin_cosited(a, sw, sh, ow, oh);
+  let mut rgba = vec![0u8; ow * oh * 4];
+  {
+    let mut sink = MixedSinker::<Yuva444p>::new(ow, oh)
+      .with_alpha_mode(AlphaMode::Straight)
+      .with_simd(simd)
+      .with_rgba(&mut rgba)
+      .unwrap();
+    let f = Yuva444pFrame::try_new(
+      &yb, &ub, &vb, &ab, ow as u32, oh as u32, ow as u32, ow as u32, ow as u32, ow as u32,
+    )
+    .unwrap();
+    yuva444p_to(&f, FR, M, &mut sink).unwrap();
+  }
+  rgba
+}
+
+/// A `Yuva420p` fixture with flat luma and a strong per-ROW chroma step (flat
+/// across columns) plus a varying alpha, so the vertical bottom fold is
+/// observable in isolation: a horizontal-only siting leaves the chroma untouched,
+/// the `v = 1` blend visibly moves it, and α stays a real varying plane (so its
+/// byte-identity assertion is non-vacuous). `sw` / `sh` must be even.
+fn vramp(sw: usize, sh: usize) -> (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>) {
+  let cw = sw / 2;
+  let ch = sh / 2;
+  let y = vec![128u8; sw * sh];
+  let mut u = vec![0u8; cw * ch];
+  let mut v = vec![0u8; cw * ch];
+  let mut a = vec![0u8; sw * sh];
+  for r in 0..ch {
+    for c in 0..cw {
+      u[r * cw + c] = (20 + r * 40).min(240) as u8;
+      v[r * cw + c] = (220u32.saturating_sub((r * 40) as u32)).max(16) as u8;
+    }
+  }
+  for (i, p) in a.iter_mut().enumerate() {
+    *p = 25 + ((i as u32 * 9) % 210) as u8;
+  }
+  (y, u, v, a)
+}
+
+/// Direct (non-resample) `Yuva420p` `Bottom` decode to straight RGBA — the
+/// delay-line kernel path (identical YUV→RGBA + source-α kernel the resample
+/// arm reconstructs into), the already-validated identity Bottom reference the
+/// resample path must match at identity dimensions (colour AND α).
+fn direct_bottom_yuva_rgba(
+  y: &[u8],
+  u: &[u8],
+  v: &[u8],
+  a: &[u8],
+  sw: usize,
+  sh: usize,
+) -> Vec<u8> {
+  let cw = sw / 2;
+  let mut rgba = vec![0u8; sw * sh * 4];
+  {
+    let mut sink = MixedSinker::<Yuva420p>::new(sw, sh)
+      .with_alpha_mode(AlphaMode::Straight)
+      .with_chroma_location(ChromaLocation::Bottom)
+      .with_rgba(&mut rgba)
+      .unwrap();
+    let f = Yuva420pFrame::try_new(
+      y, u, v, a, sw as u32, sh as u32, sw as u32, cw as u32, cw as u32, sw as u32,
+    )
+    .unwrap();
+    yuva420p_to(&f, FR, M, &mut sink).unwrap();
+  }
+  rgba
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn bottom_native_rgba_equals_code_domain_oracle() {
+  // The straight-alpha native tier folds the vertical v=1 triangle into the
+  // chroma area weights; its RGBA (α included) is the EXACT code-domain box
+  // average of the UNROUNDED H⊗V reconstruction (single rounding): Y / A
+  // co-sited, U / V through the bottom V-fold oracle, one `Yuva444p` convert.
+  for (sw, sh, ow, oh) in [(8, 8, 4, 4), (8, 8, 5, 3), (12, 8, 4, 4), (16, 8, 6, 5)] {
+    let (y, u, v, a) = ramp(sw, sh);
+    let oracle = bottom_native_rgba_oracle(&y, &u, &v, &a, sw, sh, ow, oh, true);
+    let n = run(
+      &y,
+      &u,
+      &v,
+      &a,
+      sw,
+      sh,
+      ow,
+      oh,
+      ChromaLocation::Bottom,
+      true,
+      true,
+    );
+    assert_eq!(n.1, oracle, "native bottom rgba {sw}x{sh}->{ow}x{oh}");
+  }
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn bottom_native_simd_matches_scalar() {
+  // Precomputed integer weights → the SIMD H/V passes are 0-ULP against scalar.
+  let (y, u, v, a) = ramp(8, 8);
+  let s = run(
+    &y,
+    &u,
+    &v,
+    &a,
+    8,
+    8,
+    4,
+    4,
+    ChromaLocation::Bottom,
+    true,
+    false,
+  );
+  let d = run(
+    &y,
+    &u,
+    &v,
+    &a,
+    8,
+    8,
+    4,
+    4,
+    ChromaLocation::Bottom,
+    true,
+    true,
+  );
+  assert_eq!(s.0, d.0, "rgb scalar vs simd");
+  assert_eq!(s.1, d.1, "rgba scalar vs simd");
+  assert_eq!(s.2, d.2, "hsv scalar vs simd");
+  assert_eq!(s.3, d.3, "luma scalar vs simd");
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn bottom_differs_from_center_on_a_vertical_chroma_ramp() {
+  // The v=1 fold must actually MOVE the chroma: on a purely-vertical chroma ramp
+  // Bottom diverges from the vertically-co-sited Center on BOTH tiers.
+  let (y, u, v, a) = vramp(8, 8);
+  for native in [true, false] {
+    let cen = run(
+      &y,
+      &u,
+      &v,
+      &a,
+      8,
+      8,
+      4,
+      4,
+      ChromaLocation::Center,
+      native,
+      true,
+    );
+    let bot = run(
+      &y,
+      &u,
+      &v,
+      &a,
+      8,
+      8,
+      4,
+      4,
+      ChromaLocation::Bottom,
+      native,
+      true,
+    );
+    assert_ne!(
+      bot.0, cen.0,
+      "bottom rgb must differ from center (native={native})"
+    );
+  }
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn bottom_equals_cosited_on_flat_chroma() {
+  // On constant chroma the vertical blend (and the horizontal triangle) are
+  // no-ops, so Bottom collapses to the co-sited decode byte-for-byte — colour,
+  // RGBA (α included), and HSV.
+  let (y, u, v, a) = flat_chroma(8, 8);
+  for native in [true, false] {
+    let cos = run(
+      &y,
+      &u,
+      &v,
+      &a,
+      8,
+      8,
+      4,
+      4,
+      ChromaLocation::Left,
+      native,
+      true,
+    );
+    let bot = run(
+      &y,
+      &u,
+      &v,
+      &a,
+      8,
+      8,
+      4,
+      4,
+      ChromaLocation::Bottom,
+      native,
+      true,
+    );
+    assert_eq!(bot.0, cos.0, "flat-chroma bottom rgb (native={native})");
+    assert_eq!(bot.1, cos.1, "flat-chroma bottom rgba (native={native})");
+    assert_eq!(bot.2, cos.2, "flat-chroma bottom hsv (native={native})");
+  }
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn bottom_alpha_is_identical_to_cosited() {
+  // The vertical Bottom fold must NOT touch the full-resolution α plane: the
+  // Bottom RGBA's alpha channel equals the co-sited path's α byte-for-byte on
+  // BOTH tiers, while the colour channels DO move (a vertical chroma ramp, so
+  // Bottom genuinely diverges — the non-vacuous control).
+  let (y, u, v, a) = vramp(8, 8);
+  for native in [true, false] {
+    let cos = run(
+      &y,
+      &u,
+      &v,
+      &a,
+      8,
+      8,
+      4,
+      4,
+      ChromaLocation::Left,
+      native,
+      true,
+    );
+    let bot = run(
+      &y,
+      &u,
+      &v,
+      &a,
+      8,
+      8,
+      4,
+      4,
+      ChromaLocation::Bottom,
+      native,
+      true,
+    );
+    let cos_a: Vec<u8> = cos.1.iter().skip(3).step_by(4).copied().collect();
+    let bot_a: Vec<u8> = bot.1.iter().skip(3).step_by(4).copied().collect();
+    assert_eq!(
+      bot_a, cos_a,
+      "bottom alpha must equal co-sited alpha (native={native})"
+    );
+    assert_ne!(
+      bot.0, cos.0,
+      "bottom colour must differ from co-sited (native={native})"
+    );
+  }
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn bottom_identity_matches_direct_decode() {
+  // At identity dimensions (out == src) the encoded resample tier reconstructs
+  // chroma with the SAME bottom kernel as the direct (non-resample) Yuva420p
+  // decode and bins with pass-through area weights, so routing Bottom through the
+  // resample preserves the alpha-aware decode byte-for-byte (colour AND α).
+  let (y, u, v, a) = vramp(8, 8);
+  let res = run(
+    &y,
+    &u,
+    &v,
+    &a,
+    8,
+    8,
+    8,
+    8,
+    ChromaLocation::Bottom,
+    false,
+    true,
+  );
+  let direct = direct_bottom_yuva_rgba(&y, &u, &v, &a, 8, 8);
+  assert_eq!(
+    res.1, direct,
+    "identity encoded resample bottom rgba == direct decode"
+  );
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn bottom_odd_height_final_even_row_reserve_failure_retries_with_blend() {
+  // ODD source height => the FINAL luma row is EVEN, so its Bottom vertical blend
+  // reads the PREDECESSOR chroma row via the `chroma_prev` lookback. If the
+  // lookback reservation is refused on that final row, the retry must STILL blend
+  // with the predecessor: the reserve sits BEHIND the resample preflight (#180)
+  // and a rejected row leaves the lookback (and every output) untouched, so the
+  // deferred, commit-accepted staging never advanced it. Without the atomicity a
+  // failed attempt would clamp the retry and silently diverge. `with_native(false)`
+  // forces the encoded arm that reconstructs chroma (the native tier folds v into
+  // the area weights and never touches the lookback).
+  use super::super::MixedSinkerError;
+  use crate::resample::ResampleError;
+  let (sw, sh, ow, oh) = (8usize, 7usize, 4usize, 3usize);
+  let cw = sw / 2;
+  let ch = sh.div_ceil(2);
+  let y = vec![128u8; sw * sh];
+  let mut u = vec![0u8; cw * ch];
+  let mut v = vec![0u8; cw * ch];
+  for r in 0..ch {
+    for c in 0..cw {
+      u[r * cw + c] = (20 + r * 40).min(240) as u8;
+      v[r * cw + c] = (220u32.saturating_sub((r * 40) as u32)).max(16) as u8;
+    }
+  }
+  let mut a = vec![0u8; sw * sh];
+  for (i, p) in a.iter_mut().enumerate() {
+    *p = 25 + ((i as u32 * 9) % 210) as u8;
+  }
+  let run_frame = |arm_fail: bool, loc: ChromaLocation| -> (Vec<u8>, Vec<u8>) {
+    let mut rgb = vec![0u8; ow * oh * 3];
+    let mut rgba = vec![0u8; ow * oh * 4];
+    {
+      let mut sink =
+        MixedSinker::<Yuva420p, AreaResampler>::with_resampler(sw, sh, AreaResampler::to(ow, oh))
+          .unwrap()
+          .with_native(false)
+          .with_alpha_mode(AlphaMode::Straight)
+          .with_chroma_location(loc)
+          .with_rgb(&mut rgb)
+          .unwrap()
+          .with_rgba(&mut rgba)
+          .unwrap();
+      sink.begin_frame(sw as u32, sh as u32).unwrap();
+      let feed = |sink: &mut MixedSinker<'_, Yuva420p, AreaResampler>, r: usize| {
+        let yr = &y[r * sw..(r + 1) * sw];
+        let cr = r / 2;
+        let ur = &u[cr * cw..(cr + 1) * cw];
+        let vr = &v[cr * cw..(cr + 1) * cw];
+        let ar = &a[r * sw..(r + 1) * sw];
+        sink.process(Yuva420pRow::new(yr, ur, vr, ar, r, M, FR))
+      };
+      for r in 0..sh - 1 {
+        feed(&mut sink, r).unwrap();
+      }
+      if arm_fail {
+        super::super::arm_chroma_prev_alloc_failure();
+        let err = feed(&mut sink, sh - 1).unwrap_err();
+        assert!(
+          matches!(
+            err,
+            MixedSinkerError::Resample(ResampleError::AllocationFailed(_))
+          ),
+          "armed final-row lookback reserve must surface AllocationFailed, got {err:?}"
+        );
+      }
+      // Retry the SAME final row (the failpoint is one-shot, already taken).
+      feed(&mut sink, sh - 1).unwrap();
+    }
+    (rgb, rgba)
+  };
+  let reference = run_frame(false, ChromaLocation::Bottom);
+  let retried = run_frame(true, ChromaLocation::Bottom);
+  assert_eq!(
+    retried.0, reference.0,
+    "the post-failure retry of the final EVEN row must blend rgb with the predecessor (not clamp)"
+  );
+  assert_eq!(
+    retried.1, reference.1,
+    "the post-failure retry rgba (colour + α) must match the clean run"
+  );
+  // Non-vacuous: the bottom vertical blend genuinely moves the final even row, so
+  // the reference differs from the vertically-co-sited Center decode.
+  assert_ne!(
+    reference.0,
+    run_frame(false, ChromaLocation::Center).0,
+    "the bottom vertical blend must move the final even row vs co-sited Center"
+  );
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn bottom_direct_luma_only_then_late_colour_attach_blends_not_clamps() {
+  // A Yuva420p `Bottom` DIRECT decode (no resampler) where rows 0 and 1 are fed
+  // luma-only, then the caller attaches RGBA before row 2 (direct sinks allow
+  // this late-attach; there is no frozen-output lock). Row 2 is an EVEN row whose
+  // Bottom vertical blend reads the PREDECESSOR chroma row via the lookback — so
+  // the luma-only rows 0/1 must have STAGED it. Its colour + α must equal the
+  // all-output Bottom reference (box-blends rows 0/1's chroma, NOT clamp to the
+  // current chroma row). Non-vacuous: on a vertical chroma ramp a clamped row 2
+  // (empty lookback) genuinely differs from the blended one.
+  let (y, u, v, a) = vramp(8, 8);
+  let (sw, sh, cw) = (8usize, 8usize, 4usize);
+  let feed = |sink: &mut MixedSinker<'_, Yuva420p, crate::resample::NoopResampler>, r: usize| {
+    let cr = r / 2;
+    let row = Yuva420pRow::new(
+      &y[r * sw..r * sw + sw],
+      &u[cr * cw..cr * cw + cw],
+      &v[cr * cw..cr * cw + cw],
+      &a[r * sw..r * sw + sw],
+      r,
+      M,
+      FR,
+    );
+    PixelSink::process(sink, row)
+  };
+
+  // Reference: full-output Bottom direct decode (every row carries RGBA, so its
+  // lookback is staged inside the colour upsample on every row).
+  let reference = direct_bottom_yuva_rgba(&y, &u, &v, &a, sw, sh);
+
+  // Late-attach: rows 0/1 luma-only, RGBA attached before row 2.
+  let mut luma = vec![0u8; sw * sh];
+  let mut rgba = vec![0u8; sw * sh * 4];
+  {
+    let mut sink = MixedSinker::<Yuva420p>::new(sw, sh)
+      .with_alpha_mode(AlphaMode::Straight)
+      .with_chroma_location(ChromaLocation::Bottom)
+      .with_luma(&mut luma)
+      .unwrap();
+    PixelSink::begin_frame(&mut sink, sw as u32, sh as u32).unwrap();
+    for r in 0..2 {
+      feed(&mut sink, r).unwrap();
+    }
+    sink.set_rgba(&mut rgba).unwrap();
+    for r in 2..sh {
+      feed(&mut sink, r).unwrap();
+    }
+  }
+  let (row2, row3) = (2 * sw * 4, 3 * sw * 4);
+  assert_eq!(
+    &rgba[row2..row3],
+    &reference[row2..row3],
+    "late-colour-attach row 2 must box-blend the luma-only-staged chroma, not clamp"
+  );
+  for c in 0..sw {
+    assert_eq!(
+      rgba[(2 * sw + c) * 4 + 3],
+      a[2 * sw + c],
+      "row 2 alpha at col {c} must equal the source alpha plane (siting never touches α)"
+    );
+  }
+
+  // Non-vacuous control: feed row 2 as the FIRST row of a fresh frame, so the
+  // lookback is empty and the even-row blend CLAMPS to the current chroma row.
+  // That clamped colour must differ from the blended reference — proving the
+  // late-attach assertion above verifies a genuine blend, not a coincidence.
+  let mut rgba_clamp = vec![0u8; sw * sh * 4];
+  {
+    let mut sink = MixedSinker::<Yuva420p>::new(sw, sh)
+      .with_alpha_mode(AlphaMode::Straight)
+      .with_chroma_location(ChromaLocation::Bottom)
+      .with_rgba(&mut rgba_clamp)
+      .unwrap();
+    PixelSink::begin_frame(&mut sink, sw as u32, sh as u32).unwrap();
+    feed(&mut sink, 2).unwrap();
+  }
+  assert_ne!(
+    &rgba_clamp[row2..row3],
+    &reference[row2..row3],
+    "control: a clamped row 2 (empty lookback) must differ from the blended reference"
+  );
 }

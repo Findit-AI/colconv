@@ -117,6 +117,51 @@ mod p8 {
     (u444, v444)
   }
 
+  /// The full-resolution U / V a **`Bottom`** (`v = 1`) 4:2:0 decode reconstructs
+  /// (RFC #238 S4-D): the even luma row `2i` vertically box-blends chroma rows
+  /// `{i - 1, i}` (round-half-up, top-edge clamp) BEFORE the centered horizontal
+  /// upsample; the odd luma row `2i + 1` is co-sited with chroma row `i` and keeps
+  /// the plain centered upsample. Mirrors the streaming delay-line kernel
+  /// (vertical blend rounded to u8, then horizontal), so it is the direct-decode
+  /// ground truth.
+  fn ref_full_chroma_bottom(u420: &[u8], v420: &[u8]) -> (Vec<u8>, Vec<u8>) {
+    let w = W as usize;
+    let h = H as usize;
+    let cw = w / 2;
+    let mut u444 = std::vec![0u8; w * h];
+    let mut v444 = std::vec![0u8; w * h];
+    let vblend = |plane: &[u8], cr: usize, prev: usize| -> Vec<u32> {
+      (0..cw)
+        .map(|c| (u32::from(plane[prev * cw + c]) + u32::from(plane[cr * cw + c]) + 1) >> 1)
+        .collect()
+    };
+    for r in 0..h {
+      let cr = r / 2;
+      let (urow, vrow) = if r & 1 == 0 {
+        let prev = cr.saturating_sub(1);
+        (vblend(u420, cr, prev), vblend(v420, cr, prev))
+      } else {
+        (
+          u420[cr * cw..cr * cw + cw]
+            .iter()
+            .map(|&x| u32::from(x))
+            .collect(),
+          v420[cr * cw..cr * cw + cw]
+            .iter()
+            .map(|&x| u32::from(x))
+            .collect(),
+        )
+      };
+      let uo = ref_upsample_center_h(&urow, w);
+      let vo = ref_upsample_center_h(&vrow, w);
+      for c in 0..w {
+        u444[r * w + c] = uo[c] as u8;
+        v444[r * w + c] = vo[c] as u8;
+      }
+    }
+    (u444, v444)
+  }
+
   fn frame<'a>(y: &'a [u8], u: &'a [u8], v: &'a [u8], a: &'a [u8]) -> Yuva420pFrame<'a> {
     Yuva420pFrame::try_new(y, u, v, a, W, H, W, W / 2, W / 2, W).unwrap()
   }
@@ -333,10 +378,44 @@ mod p8 {
     miri,
     ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
   )]
-  fn top_and_bottom_route_like_center_horizontally() {
+  fn top_routes_like_center_and_bottom_folds_vertically() {
+    // Top shares the horizontal centered phase AND keeps the vertical pairing
+    // co-sited (RFC #238 S4-D folds only Bottom's `v = 1`), so Top == Center
+    // byte-for-byte. Bottom additionally applies the vertical `v = 1` blend, so on
+    // the vertically-varying fixture it diverges from Center.
     let center = convert_rgba(ChromaLocation::Center, true);
     assert_eq!(convert_rgba(ChromaLocation::Top, true), center);
-    assert_eq!(convert_rgba(ChromaLocation::Bottom, true), center);
+    assert_ne!(convert_rgba(ChromaLocation::Bottom, true), center);
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn bottom_rgba_matches_vfold_upsample_then_444_with_real_alpha() {
+    // RFC #238 S4-D: the `Bottom` (`v = 1`) direct decode reconstructs chroma
+    // with the vertical box-blend + centered horizontal upsample, so its RGBA
+    // equals a 4:4:4 YUVA decode on that v-fold-reconstructed chroma + the SAME
+    // full-res source alpha — on BOTH the SIMD and scalar tiers (0-ULP).
+    let (y, u, v, a) = ramp_planes();
+    let (u444, v444) = ref_full_chroma_bottom(&u, &v);
+    let ref_src = Yuva444pFrame::try_new(&y, &u444, &v444, &a, W, H, W, W, W, W).unwrap();
+    let mut rgba_ref = std::vec![0u8; (W * H * 4) as usize];
+    let mut ref_sink = MixedSinker::<Yuva444p>::new(W as usize, H as usize)
+      .with_rgba(&mut rgba_ref)
+      .unwrap();
+    yuva444p_to(&ref_src, false, ColorMatrix::Bt601, &mut ref_sink).unwrap();
+    assert_eq!(
+      convert_rgba(ChromaLocation::Bottom, true),
+      rgba_ref,
+      "bottom YUVA RGBA (SIMD) must equal v-fold-upsample-then-4:4:4 (real source alpha)"
+    );
+    assert_eq!(
+      convert_rgba(ChromaLocation::Bottom, false),
+      rgba_ref,
+      "bottom YUVA RGBA (scalar) must equal v-fold-upsample-then-4:4:4"
+    );
   }
 
   #[test]
