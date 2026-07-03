@@ -197,6 +197,12 @@ pub(super) struct HsvDirectPlanarYuv {
   /// frames, so a reused sink whose siting phase changed must REBUILD it;
   /// `begin_frame` reads [`Self::chroma_centered`] to drop a stale join.
   chroma_centered: bool,
+  /// RFC #238 S4-B: whether the cached chroma plan folded the `Bottom` vertical
+  /// phase (`v = 1`) — the [`NativeYuv420`](super::planar_8bit) `chroma_bottom`
+  /// twin. `Center` and `Bottom` share `chroma_centered = true`, so the point-
+  /// of-use siting invalidation compares this too to rebuild the join on a
+  /// vertical-phase change. `false` for every horizontal-only siting.
+  chroma_bottom: bool,
 }
 
 #[cfg(feature = "yuv-planar")]
@@ -226,6 +232,7 @@ impl HsvDirectPlanarYuv {
     })?;
     let chroma_plan = build_chroma_plan()?;
     let chroma_centered = chroma_plan.has_chroma_phase();
+    let chroma_bottom = chroma_plan.has_chroma_v_phase();
     Ok(Self {
       y: AreaStream::new(plan.h(), plan.v(), w, h, 1)?,
       y_stage: try_zeroed(stage_len).map_err(alloc)?,
@@ -249,6 +256,7 @@ impl HsvDirectPlanarYuv {
       staged: [[false; 4]; 3],
       next_emit: 0,
       chroma_centered,
+      chroma_bottom,
     })
   }
 
@@ -266,6 +274,15 @@ impl HsvDirectPlanarYuv {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(super) const fn chroma_centered(&self) -> bool {
     self.chroma_centered
+  }
+
+  /// Whether the cached chroma plan folded the `Bottom` vertical phase — see
+  /// [`Self::chroma_bottom`](Self#structfield.chroma_bottom). Read by the
+  /// `Yuv420p` HSV-only point-of-use siting invalidation, alongside
+  /// [`Self::chroma_centered`], to rebuild the join on a vertical-phase change.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub(super) const fn chroma_bottom(&self) -> bool {
+    self.chroma_bottom
   }
 
   /// Next source row this join expects (0 at a fresh frame). Read by the sink's
@@ -338,8 +355,9 @@ fn hsv_direct_feed_emit(
     chroma_vsub,
     staged,
     next_emit,
-    // Cache key read only at build / begin_frame; the feed loop ignores it.
+    // Cache keys read only at build / begin_frame; the feed loop ignores them.
     chroma_centered: _,
+    chroma_bottom: _,
   } = join;
   let cv = *chroma_vsub;
   y.feed_row(idx, y_row, use_simd, |oy, out_row| {

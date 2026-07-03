@@ -384,11 +384,11 @@ fn centered_chroma_matches_yuv420p_centered_across_tiers() {
   for (sw, sh, ow, oh) in [(8, 8, 4, 4), (8, 8, 5, 3), (12, 8, 4, 4), (16, 8, 6, 5)] {
     let (y, u, v, a) = ramp(sw, sh);
     for native in [true, false] {
-      for loc in [
-        ChromaLocation::Center,
-        ChromaLocation::Top,
-        ChromaLocation::Bottom,
-      ] {
+      // Center / Top keep the vertical pairing co-sited, so Yuva420p == Yuv420p.
+      // Bottom is excluded here: Yuv420p now folds its vertical v=1 phase through
+      // the resample while Yuva420p still co-sites it, so the two diverge on
+      // Bottom until the Yuva420p vertical fold lands.
+      for loc in [ChromaLocation::Center, ChromaLocation::Top] {
         let ya = run(&y, &u, &v, &a, sw, sh, ow, oh, loc, native, true);
         let yv = run_yuv420p(&y, &u, &v, sw, sh, ow, oh, loc, native, true);
         assert_eq!(
