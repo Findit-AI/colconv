@@ -9,7 +9,7 @@ use crate::{
   ColorMatrix, PixelSink,
   resample::{AreaResampler, ResampleError},
   sinker::{MixedSinker, MixedSinkerError},
-  source::{Bgr48, Rgb48, Rgb48Row, bgr48_to, rgb48_to},
+  source::{Bgr48, Bgr48Row, Rgb48, Rgb48Row, bgr48_to, rgb48_to},
 };
 use mediaframe::frame::{Bgr48Frame, Rgb48Frame};
 
@@ -334,6 +334,72 @@ fn rgb48_out_of_sequence_first_row_rejected_before_allocation() {
     sink.rgb_scratch_capacity(),
     0,
     "scratch grown for a rejected row"
+  );
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn bgr48_first_row_scratch_oom_leaves_stream_and_freeze_uncommitted_for_retry() {
+  let host = packed_frame_u16();
+  let wire = as_le_u16(&host);
+  let mut rgb_u16 = vec![0u16; OUT * OUT * 3];
+  let mut luma = vec![0u8; OUT * OUT];
+  {
+    let mut sink =
+      MixedSinker::<Bgr48, AreaResampler>::with_resampler(SRC, SRC, AreaResampler::to(OUT, OUT))
+        .unwrap()
+        .with_rgb_u16(&mut rgb_u16)
+        .unwrap();
+    sink.begin_frame(SRC as u32, SRC as u32).unwrap();
+    // Arm the single-shot source-RGB-u16-scratch grow failpoint: Bgr48 stages its
+    // wire row into the host-u16 scratch, so the row-0 stream box builds OK and the
+    // scratch grow then refuses — surfacing AllocationFailed with BOTH the stream
+    // field `None` and the freeze uncommitted (the commit-together atomic shape; the
+    // pre-fix ordering would have left the stream committed).
+    crate::sinker::mixed::arm_source_rgb_u16_scratch_failure();
+    let err = sink
+      .process(Bgr48Row::new(&wire[..SRC * 3], 0, ColorMatrix::Bt709, true))
+      .unwrap_err();
+    assert!(
+      matches!(
+        err,
+        MixedSinkerError::Resample(ResampleError::AllocationFailed(_))
+      ),
+      "first-row scratch OOM must surface AllocationFailed, got {err:?}"
+    );
+    // DIRECT stream-rollback proof (the non-vacuous part): the u16 area stream field
+    // must be `None` — the fix builds it into a LOCAL and inserts only after the
+    // scratch grows, so a failed scratch leaves nothing committed. The insert-before-
+    // scratch shape would leave it `Some` here, so this assertion FAILS against that
+    // shape and PASSES against the fix.
+    assert!(
+      !sink.rgb_stream_u16_allocated(),
+      "a scratch OOM must leave the rgb_stream_u16 field None (no partial commit)"
+    );
+    // The freeze was likewise never committed — attaching luma (a CHANGED output
+    // set) and replaying from row 0 is ACCEPTED, not ResampleOutputsChanged.
+    sink.set_luma(&mut luma).unwrap();
+    for r in 0..SRC {
+      sink
+        .process(Bgr48Row::new(
+          &wire[r * SRC * 3..(r + 1) * SRC * 3],
+          r,
+          ColorMatrix::Bt709,
+          true,
+        ))
+        .expect("frame replay after a first-row scratch OOM must succeed");
+    }
+  }
+  assert!(
+    rgb_u16.iter().any(|&b| b != 0),
+    "the recovered frame produced real rgb_u16 output (scratch OOM was recoverable)"
+  );
+  assert!(
+    luma.iter().any(|&b| b != 0),
+    "the newly-attached luma output was driven on the accepted retry"
   );
 }
 

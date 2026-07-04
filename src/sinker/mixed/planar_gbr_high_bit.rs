@@ -77,9 +77,8 @@
 use super::{
   GeometryOverflow, InsufficientBuffer, MixedSinker, MixedSinkerError, RowIndexOutOfRange,
   RowShapeMismatch, RowSlice, check_dimensions_match, check_frozen_alpha_mode,
-  packed_rgb_u16_filter_stream, packed_rgb_u16_resample_emit, packed_rgb_u16_resample_preflight,
-  packed_rgb_u16_resample_stream, packed_rgba_u16_filter_resample, packed_rgba_u16_resample,
-  rgb_row_buf_or_scratch, rgba_plane_row_slice, rgba_u16_plane_row_slice, source_rgb_u16_scratch,
+  packed_rgb_u16_resample, packed_rgb_u16_resample_filter, packed_rgba_u16_filter_resample,
+  packed_rgba_u16_resample, rgb_row_buf_or_scratch, rgba_plane_row_slice, rgba_u16_plane_row_slice,
 };
 use crate::{
   PixelSink,
@@ -282,88 +281,69 @@ macro_rules! impl_gbrp_high_bit {
             resample_outputs,
             ..
           } = self;
-          let stream_next_y = match plan.kind() {
-            crate::resample::SpanKind::Area => rgb_stream_u16.as_ref().map_or(0, |s| s.next_y()),
-            crate::resample::SpanKind::Filter => {
-              rgb_filter_stream_u16.as_ref().map_or(0, |s| s.next_y())
-            }
-          };
-          if !packed_rgb_u16_resample_preflight(
-            resample_outputs,
-            rgb,
-            rgba,
-            luma,
-            rgb_u16,
-            rgba_u16,
-            luma_u16,
-            hsv,
-            stream_next_y,
-            idx,
-          )? {
-            return Ok(());
-          }
-          // Create + sequence-check the kind-appropriate stream BEFORE the
-          // source-width staging, so a later out-of-sequence row is rejected
-          // without the scatter (mirrors the area-only ordering).
+          // Transactional resample (RFC #238 tail-collapse): scatter the native-depth
+          // G/B/R planes into the source-width packed-u16 RGB scratch and feed the
+          // shared 3-channel u16 helper (`SRC_BITS = BITS`, `NATIVE_LUMA16 = true`
+          // for native-precision `luma_u16` parity); the span kind picks the engine.
           return match plan.kind() {
-            crate::resample::SpanKind::Area => {
-              let stream = packed_rgb_u16_resample_stream(rgb_stream_u16, plan, idx)?;
-              let src_u16 = source_rgb_u16_scratch(rgb_scratch_u16, w, plan)?;
-              gbr_to_rgb_u16_high_bit_row::<BITS, BE>(
-                row.g(),
-                row.b(),
-                row.r(),
-                src_u16,
-                w,
-                use_simd,
-              );
-              packed_rgb_u16_resample_emit::<BITS, true>(
-                stream,
-                plan,
-                rgb,
-                rgba,
-                luma,
-                rgb_u16,
-                rgba_u16,
-                luma_u16,
-                hsv,
-                src_u16,
-                rgb_scratch,
-                row.matrix(),
-                row.full_range(),
-                idx,
-                use_simd,
-              )
-            }
-            crate::resample::SpanKind::Filter => {
-              let stream = packed_rgb_u16_filter_stream(rgb_filter_stream_u16, plan, idx)?;
-              let src_u16 = source_rgb_u16_scratch(rgb_scratch_u16, w, plan)?;
-              gbr_to_rgb_u16_high_bit_row::<BITS, BE>(
-                row.g(),
-                row.b(),
-                row.r(),
-                src_u16,
-                w,
-                use_simd,
-              );
-              packed_rgb_u16_resample_emit::<BITS, true>(
-                stream,
-                plan,
-                rgb,
-                rgba,
-                luma,
-                rgb_u16,
-                rgba_u16,
-                luma_u16,
-                hsv,
-                src_u16,
-                rgb_scratch,
-                row.matrix(),
-                row.full_range(),
-                idx,
-                use_simd,
-              )
-            }
+            crate::resample::SpanKind::Area => packed_rgb_u16_resample::<BITS, true>(
+              rgb_stream_u16,
+              resample_outputs,
+              rgb,
+              rgba,
+              luma,
+              rgb_u16,
+              rgba_u16,
+              luma_u16,
+              hsv,
+              rgb_scratch_u16,
+              rgb_scratch,
+              w,
+              plan,
+              idx,
+              use_simd,
+              row.matrix(),
+              row.full_range(),
+              |src_u16| {
+                gbr_to_rgb_u16_high_bit_row::<BITS, BE>(
+                  row.g(),
+                  row.b(),
+                  row.r(),
+                  src_u16,
+                  w,
+                  use_simd,
+                )
+              },
+            ),
+            crate::resample::SpanKind::Filter => packed_rgb_u16_resample_filter::<BITS, true>(
+              rgb_filter_stream_u16,
+              resample_outputs,
+              rgb,
+              rgba,
+              luma,
+              rgb_u16,
+              rgba_u16,
+              luma_u16,
+              hsv,
+              rgb_scratch_u16,
+              rgb_scratch,
+              w,
+              plan,
+              idx,
+              use_simd,
+              row.matrix(),
+              row.full_range(),
+              |src_u16| {
+                gbr_to_rgb_u16_high_bit_row::<BITS, BE>(
+                  row.g(),
+                  row.b(),
+                  row.r(),
+                  src_u16,
+                  w,
+                  use_simd,
+                )
+              },
+            ),
           };
         }
 
@@ -752,7 +732,9 @@ macro_rules! impl_gbrap_high_bit {
               // G/B/R planes into the source-width packed u16 RGB row and feed
               // the 3-channel high-bit tail (luma_u16 at native precision —
               // `NATIVE_LUMA16 = true` — for parity with the direct path).
-              if !packed_rgb_u16_resample_preflight(
+              // Transactional 3-channel u16 area resample (RFC #238 tail-collapse).
+              return packed_rgb_u16_resample::<BITS, true>(
+                rgb_stream_u16,
                 resample_outputs,
                 rgb,
                 rgba,
@@ -761,30 +743,17 @@ macro_rules! impl_gbrap_high_bit {
                 rgba_u16,
                 luma_u16,
                 hsv,
-                rgb_stream_u16.as_ref().map_or(0, |s| s.next_y()),
-                idx,
-              )? {
-                return Ok(());
-              }
-              let stream = packed_rgb_u16_resample_stream(rgb_stream_u16, plan, idx)?;
-              let src_u16 = source_rgb_u16_scratch(rgb_scratch_u16, w, plan)?;
-              gbr_to_rgb_u16_high_bit_row::<BITS, BE>(g_in, b_in, r_in, src_u16, w, use_simd);
-              return packed_rgb_u16_resample_emit::<BITS, true>(
-                stream,
-                plan,
-                rgb,
-                rgba,
-                luma,
-                rgb_u16,
-                rgba_u16,
-                luma_u16,
-                hsv,
-                src_u16,
+                rgb_scratch_u16,
                 rgb_scratch,
-                matrix,
-                full_range,
+                w,
+                plan,
                 idx,
                 use_simd,
+                matrix,
+                full_range,
+                |src_u16| {
+                  gbr_to_rgb_u16_high_bit_row::<BITS, BE>(g_in, b_in, r_in, src_u16, w, use_simd)
+                },
               );
             }
             crate::resample::SpanKind::Filter => {
@@ -857,7 +826,9 @@ macro_rules! impl_gbrap_high_bit {
               // G/B/R planes into the source-width packed u16 RGB row and feed
               // the 3-channel high-bit filter tail (luma_u16 at native
               // precision — `NATIVE_LUMA16 = true` — for parity).
-              if !packed_rgb_u16_resample_preflight(
+              // Transactional 3-channel u16 filter resample (RFC #238 tail-collapse).
+              return packed_rgb_u16_resample_filter::<BITS, true>(
+                rgb_filter_stream_u16,
                 resample_outputs,
                 rgb,
                 rgba,
@@ -866,30 +837,17 @@ macro_rules! impl_gbrap_high_bit {
                 rgba_u16,
                 luma_u16,
                 hsv,
-                rgb_filter_stream_u16.as_ref().map_or(0, |s| s.next_y()),
-                idx,
-              )? {
-                return Ok(());
-              }
-              let stream = packed_rgb_u16_filter_stream(rgb_filter_stream_u16, plan, idx)?;
-              let src_u16 = source_rgb_u16_scratch(rgb_scratch_u16, w, plan)?;
-              gbr_to_rgb_u16_high_bit_row::<BITS, BE>(g_in, b_in, r_in, src_u16, w, use_simd);
-              return packed_rgb_u16_resample_emit::<BITS, true>(
-                stream,
-                plan,
-                rgb,
-                rgba,
-                luma,
-                rgb_u16,
-                rgba_u16,
-                luma_u16,
-                hsv,
-                src_u16,
+                rgb_scratch_u16,
                 rgb_scratch,
-                matrix,
-                full_range,
+                w,
+                plan,
                 idx,
                 use_simd,
+                matrix,
+                full_range,
+                |src_u16| {
+                  gbr_to_rgb_u16_high_bit_row::<BITS, BE>(g_in, b_in, r_in, src_u16, w, use_simd)
+                },
               );
             }
           }
