@@ -10,8 +10,8 @@ use crate::{PixelSink, row::*, source::*};
 // guard, which exists only when the reused planar join is compiled in.
 #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
 use super::super::{
-  FrozenOutputs, HsvFrameMut, NativePlanarYuvU16, NativeRouteChanged, native_planar_hb_preflight,
-  yuv_planar16_process_native,
+  FrozenOutputs, HsvFrameMut, NativePlanarYuvU16, NativeRouteChanged,
+  native_planar_hb_preflight_check_only, yuv_planar16_process_native,
 };
 #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
 use crate::{
@@ -175,11 +175,15 @@ fn p4xx_process_native<const BITS: u32, const BE: bool>(
   // 4:4:4 chroma is full-resolution: `chroma_w = w`, a chroma row per Y row.
   let cw = w;
 
-  // Run the planar join's COMPLETE pre-feed rejection preflight FIRST — BEFORE
-  // any fallible scratch grow below — so every rejection returns its
-  // deterministic typed error and leaves the wrapper scratch untouched. The
-  // delegate re-runs this identical preflight harmlessly.
-  if !native_planar_hb_preflight(
+  // Run the planar join's COMPLETE compare-only pre-feed rejection preflight
+  // FIRST — BEFORE any fallible scratch grow below — so every rejection returns
+  // its deterministic typed error and leaves the wrapper scratch untouched.
+  // Compare-only (no output-set freeze): the de-pack grows below AND the
+  // delegate's own colour / source scratch grows all stay pre-commit, and the
+  // delegate performs the SINGLE freeze once every pre-feed allocation has
+  // succeeded — so a LATER grow (here or in the delegate) failing leaves
+  // `resample_outputs` untouched and the row retryable.
+  if !native_planar_hb_preflight_check_only(
     native_planar_u16,
     resample_outputs,
     rgb,

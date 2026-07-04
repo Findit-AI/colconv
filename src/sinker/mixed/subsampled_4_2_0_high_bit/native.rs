@@ -288,6 +288,49 @@ pub(crate) fn yuv420p16_native_preflight(
   )
 }
 
+/// Compare-only twin of [`yuv420p16_native_preflight`]: the same 4-point pre-feed
+/// rejection via
+/// [`native_preflight_core_check_only`](crate::sinker::mixed::planar_8bit::native_preflight_core_check_only),
+/// threading the native-depth u16 colour outputs, but with **NO commit** — it
+/// COMPARES the frozen output set against a fresh snapshot instead of storing it.
+/// The semi-planar 4:2:0 P-format wrapper
+/// ([`p0xx_process_native`](super::p0xx)) runs it ahead of its own fallible
+/// de-pack scratch grow, so a rejected / failed pre-feed row leaves the wrapper
+/// scratch untouched WITHOUT a committed freeze; the delegate
+/// [`yuv420p16_process_native`] re-runs the committing preflight and owns the
+/// single commit. The 4:2:0 high-bit sibling of
+/// [`native_planar_hb_preflight_check_only`](crate::sinker::mixed::planar_high_bit_native::native_planar_hb_preflight_check_only).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn yuv420p16_native_preflight_check_only(
+  native_420_u16: &Option<std::boxed::Box<NativeYuv420U16>>,
+  resample_outputs: &Option<super::super::FrozenOutputs>,
+  rgb: &Option<&mut [u8]>,
+  rgba: &Option<&mut [u8]>,
+  rgb_u16: &Option<&mut [u16]>,
+  rgba_u16: &Option<&mut [u16]>,
+  luma: &Option<&mut [u8]>,
+  hsv: &mut Option<HsvFrameMut<'_>>,
+  idx: usize,
+  need_luma: bool,
+  need_color: bool,
+) -> Result<bool, MixedSinkerError> {
+  super::super::planar_8bit::native_preflight_core_check_only(
+    native_420_u16.as_ref().map_or(0, |j| j.next_y()),
+    resample_outputs,
+    rgb,
+    rgba,
+    rgb_u16,
+    rgba_u16,
+    luma,
+    // The high-bit planar 4:2:0 family exposes no `luma_u16` output.
+    &None,
+    hsv,
+    idx,
+    need_luma,
+    need_color,
+  )
+}
+
 /// Grows a source-de-interleave scratch to `len` `u16` under the planner's
 /// recoverable-allocation contract, with the test-only allocation
 /// failpoint on the FIRST such grow of an output-bearing row (mirrors the

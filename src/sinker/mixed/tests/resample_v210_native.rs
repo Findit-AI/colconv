@@ -946,9 +946,12 @@ fn frozen_mid_frame_change_rejected_before_scratch_alloc() {
   );
 }
 
-/// The post-freeze rejection point: after a RECOVERABLE wrapper scratch
-/// allocation failure on an in-sequence colour row 0, a later OUT-OF-SEQUENCE row
-/// must reject as `OutOfSequenceRow`, never `AllocationFailed`.
+/// Sequence rejection after a RECOVERABLE wrapper-scratch allocation failure:
+/// because the wrapper now runs the COMPARE-ONLY preflight (the delegate owns the
+/// single commit), a de-pack failure on an in-sequence colour row 0 leaves the
+/// output set UNFROZEN and the join unbuilt, so a later OUT-OF-SEQUENCE row is
+/// caught by the pre-compare first-row sequence check and must reject as
+/// `OutOfSequenceRow`, never `AllocationFailed`.
 #[test]
 #[cfg_attr(
   miri,

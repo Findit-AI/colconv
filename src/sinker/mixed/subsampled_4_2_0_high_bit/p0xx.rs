@@ -17,7 +17,9 @@ use super::super::{
   planar_8bit::YUV422P_CENTERED_H_PHASE, planar_resample::resample_preflight_check_only,
 };
 #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
-use super::native::{NativeYuv420U16, yuv420p16_native_preflight, yuv420p16_process_native};
+use super::native::{
+  NativeYuv420U16, yuv420p16_native_preflight_check_only, yuv420p16_process_native,
+};
 // The RFC #238 insertion-point selector decides the native-vs-row-stage
 // splice; it is consulted in the `yuv-planar` dispatch block, so its import
 // matches that gate exactly.
@@ -215,13 +217,15 @@ fn p0xx_process_native<const BITS: u32, const BE: bool>(
     rgb.is_some() || rgba.is_some() || hsv.is_some() || rgb_u16.is_some() || rgba_u16.is_some();
   let cw = w / 2;
 
-  // Run the planar join's COMPLETE pre-feed rejection preflight FIRST —
-  // no-output short-circuit, first-row out-of-sequence, AND frozen-output
-  // (mid-frame output change) — BEFORE any fallible scratch grow below, so
-  // every rejection returns its deterministic typed error and leaves the
+  // Run the planar join's COMPLETE compare-only pre-feed rejection preflight
+  // FIRST — no-output short-circuit, first-row out-of-sequence, AND output-set
+  // compare (mid-frame output change) — BEFORE any fallible scratch grow below,
+  // so every rejection returns its deterministic typed error and leaves the
   // wrapper scratch untouched (the crate's preflight-atomicity contract).
-  // The delegate re-runs this identical preflight harmlessly.
-  if !yuv420p16_native_preflight(
+  // Compare-only (no output-set freeze), so the de-pack reserve below stays a
+  // genuine pre-commit step; the delegate re-runs the committing preflight and
+  // owns the single commit.
+  if !yuv420p16_native_preflight_check_only(
     native_420_u16,
     resample_outputs,
     rgb,

@@ -765,10 +765,12 @@ macro_rules! p2xx_high_bit_native_suite {
         );
       }
 
-      /// The post-freeze rejection point: after a RECOVERABLE wrapper scratch
-      /// allocation failure on an in-sequence colour row 0, a later
-      /// OUT-OF-SEQUENCE row must reject as `OutOfSequenceRow`, never
-      /// `AllocationFailed`.
+      /// Sequence rejection after a RECOVERABLE wrapper-scratch allocation
+      /// failure: because the wrapper now runs the COMPARE-ONLY preflight (the
+      /// commit is the delegate's), a de-pack failure on an in-sequence colour
+      /// row 0 leaves the output set UNFROZEN and the join unbuilt, so a later
+      /// OUT-OF-SEQUENCE row is caught by the pre-compare first-row sequence
+      /// check and must reject as `OutOfSequenceRow`, never `AllocationFailed`.
       #[test]
       #[cfg_attr(
         miri,
@@ -998,5 +1000,167 @@ fn luma_only_native_skips_chroma_planning() {
   assert!(
     p210_to(&frame, FR, M, &mut sink).is_err(),
     "colour native must reach chroma planning (the armed failpoint fires)"
+  );
+}
+
+/// RFC #238 — the high-bit non-4:2:0 native delegate is preflight-transactional
+/// through the SEMI-PLANAR 4:2:2 wrapper too. A colour-capability REBUILD (frame
+/// 2 attaches colour to a frame-1 luma-only join) whose CHROMA-PLAN build fails
+/// (the delegate's failpoint, reached via the P210 wrapper) must surface the
+/// typed `AllocationFailed` while leaving the cached luma-only join AND the
+/// output-set freeze INTACT (uncommitted), so retrying row 0 with YET ANOTHER
+/// output attached is accepted — a committed `{luma, hsv}` freeze would reject it
+/// as `ResampleOutputsChanged`.
+#[test]
+#[cfg(feature = "rgb")]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn native_colour_capability_rebuild_chroma_oom_is_transactional_semi_planar() {
+  use crate::source::{P210, P210Row};
+  // P210 is 10-bit high-bit-packed (`logical << (16 - 10)`); a uniform mid-gray.
+  let y = vec![(1u16 << 9) << (16 - 10); SRC * SRC];
+  // Interleaved UV row stride = `2 * CW == SRC` u16.
+  let uv = vec![(1u16 << 9) << (16 - 10); SRC * SRC];
+  let (yl, uvl) = (as_le(&y), as_le(&uv));
+  let row = |r: usize| {
+    P210Row::new(
+      &yl[r * SRC..(r + 1) * SRC],
+      &uvl[r * SRC..(r + 1) * SRC],
+      r,
+      M,
+      FR,
+    )
+  };
+
+  let mut luma = vec![0u8; OUT * OUT];
+  let (mut hh, mut ss, mut vv) = (
+    vec![0u8; OUT * OUT],
+    vec![0u8; OUT * OUT],
+    vec![0u8; OUT * OUT],
+  );
+  let mut rgb = vec![0u8; OUT * OUT * 3];
+  let mut sink =
+    MixedSinker::<P210, AreaResampler>::with_resampler(SRC, SRC, AreaResampler::to(OUT, OUT))
+      .unwrap()
+      .with_native(true)
+      .with_luma(&mut luma)
+      .unwrap();
+
+  // Frame 1: a luma-only native join (chroma absent), frozen as `{luma}`.
+  sink.begin_frame(SRC as u32, SRC as u32).unwrap();
+  for r in 0..SRC {
+    sink
+      .process(row(r))
+      .expect("luma-only frame builds the native join");
+  }
+
+  // Frame 2: attach HSV -> the row-0 rebuild MUST build the chroma half; arm the
+  // planar join's chroma-plan failpoint so that rebuild fails.
+  sink.begin_frame(SRC as u32, SRC as u32).unwrap();
+  sink.set_hsv(&mut hh, &mut ss, &mut vv).unwrap();
+  crate::sinker::mixed::arm_planar_hb_native_chroma_failure();
+  let err = sink.process(row(0)).unwrap_err();
+  assert!(
+    matches!(
+      err,
+      MixedSinkerError::Resample(ResampleError::AllocationFailed(_))
+    ),
+    "the P210 colour-capability rebuild chroma-plan OOM must surface AllocationFailed, got {err:?}"
+  );
+
+  // The freeze was never committed and the cached join stayed intact: attaching
+  // ANOTHER output (rgb) and retrying row 0 is ACCEPTED.
+  sink.set_rgb(&mut rgb).unwrap();
+  sink
+    .process(row(0))
+    .expect("row 0 with a changed output set must succeed after a rebuild chroma OOM");
+  // Drive the rest of the frame through the recovered join: a fully-recovered
+  // join emits real colour output (mid-gray input -> non-zero RGB).
+  for r in 1..SRC {
+    sink
+      .process(row(r))
+      .expect("the recovered join must process the rest of the frame");
+  }
+  assert!(
+    rgb.iter().any(|&b| b != 0),
+    "the recovered join must produce real colour output"
+  );
+}
+
+/// The source-scratch failpoint companion of
+/// [`native_colour_capability_rebuild_chroma_oom_is_transactional_semi_planar`]:
+/// the delegate's SOURCE-SCRATCH grow (on the rebuilt local join, reached via the
+/// P210 wrapper) fails on the colour-capability rebuild row and must likewise
+/// leave the cached join + freeze uncommitted so a changed-output retry succeeds.
+#[test]
+#[cfg(feature = "rgb")]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn native_colour_capability_rebuild_src_scratch_oom_is_transactional_semi_planar() {
+  use crate::source::{P210, P210Row};
+  let y = vec![(1u16 << 9) << (16 - 10); SRC * SRC];
+  let uv = vec![(1u16 << 9) << (16 - 10); SRC * SRC];
+  let (yl, uvl) = (as_le(&y), as_le(&uv));
+  let row = |r: usize| {
+    P210Row::new(
+      &yl[r * SRC..(r + 1) * SRC],
+      &uvl[r * SRC..(r + 1) * SRC],
+      r,
+      M,
+      FR,
+    )
+  };
+
+  let mut luma = vec![0u8; OUT * OUT];
+  let (mut hh, mut ss, mut vv) = (
+    vec![0u8; OUT * OUT],
+    vec![0u8; OUT * OUT],
+    vec![0u8; OUT * OUT],
+  );
+  let mut rgb = vec![0u8; OUT * OUT * 3];
+  let mut sink =
+    MixedSinker::<P210, AreaResampler>::with_resampler(SRC, SRC, AreaResampler::to(OUT, OUT))
+      .unwrap()
+      .with_native(true)
+      .with_luma(&mut luma)
+      .unwrap();
+
+  sink.begin_frame(SRC as u32, SRC as u32).unwrap();
+  for r in 0..SRC {
+    sink
+      .process(row(r))
+      .expect("luma-only frame builds the native join");
+  }
+
+  // Frame 2: attach HSV -> rebuild WITH chroma; arm the delegate's source-scratch
+  // failpoint so the rebuilt join's Y de-interleave scratch grow refuses.
+  sink.begin_frame(SRC as u32, SRC as u32).unwrap();
+  sink.set_hsv(&mut hh, &mut ss, &mut vv).unwrap();
+  crate::sinker::mixed::arm_planar_hb_native_alloc_failure();
+  let err = sink.process(row(0)).unwrap_err();
+  assert!(
+    matches!(
+      err,
+      MixedSinkerError::Resample(ResampleError::AllocationFailed(_))
+    ),
+    "the P210 colour-capability rebuild source-scratch OOM must surface AllocationFailed, got {err:?}"
+  );
+
+  sink.set_rgb(&mut rgb).unwrap();
+  sink
+    .process(row(0))
+    .expect("row 0 with a changed output set must succeed after a rebuild source-scratch OOM");
+  for r in 1..SRC {
+    sink
+      .process(row(r))
+      .expect("the recovered join must process the rest of the frame");
+  }
+  assert!(
+    rgb.iter().any(|&b| b != 0),
+    "the recovered join must produce real colour output"
   );
 }

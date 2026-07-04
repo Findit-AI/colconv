@@ -10692,13 +10692,17 @@ fn y2xx_process_native<const BITS: u32, const BE: bool>(
   // per Y row (`chroma_vsub = 1`).
   let cw = w / 2;
 
-  // Run the planar join's COMPLETE pre-feed rejection preflight FIRST —
-  // no-output short-circuit, first-row out-of-sequence, AND frozen-output
-  // (mid-frame output change) — BEFORE any fallible scratch grow below, so
-  // every rejection returns its deterministic typed error and leaves the
-  // wrapper scratch untouched (the crate's preflight-atomicity contract). The
-  // delegate re-runs this identical preflight harmlessly.
-  if !native_planar_hb_preflight(
+  // Run the planar join's COMPLETE compare-only pre-feed rejection preflight
+  // FIRST — no-output short-circuit, first-row out-of-sequence, AND output-set
+  // compare (mid-frame output change) — BEFORE any fallible scratch grow below,
+  // so every rejection returns its deterministic typed error and leaves the
+  // wrapper scratch untouched (the crate's preflight-atomicity contract).
+  // Compare-only (no output-set freeze): the de-pack grows below AND the
+  // delegate's own colour / source scratch grows all stay pre-commit, and the
+  // delegate performs the SINGLE freeze once every pre-feed allocation has
+  // succeeded — so a LATER grow (here or in the delegate) failing leaves
+  // `resample_outputs` untouched and the row retryable.
+  if !native_planar_hb_preflight_check_only(
     native_planar_u16,
     resample_outputs,
     rgb,
@@ -10934,13 +10938,17 @@ fn v210_process_native<const BE: bool>(
   // Y row (`chroma_vsub = 1`).
   let cw = w / 2;
 
-  // Run the planar join's COMPLETE pre-feed rejection preflight FIRST —
-  // no-output short-circuit, first-row out-of-sequence, AND frozen-output
-  // (mid-frame output change) — BEFORE any fallible scratch grow below, so every
-  // rejection returns its deterministic typed error and leaves the wrapper
-  // scratch untouched (the crate's preflight-atomicity contract). The delegate
-  // re-runs this identical preflight harmlessly.
-  if !native_planar_hb_preflight(
+  // Run the planar join's COMPLETE compare-only pre-feed rejection preflight
+  // FIRST — no-output short-circuit, first-row out-of-sequence, AND output-set
+  // compare (mid-frame output change) — BEFORE any fallible scratch grow below,
+  // so every rejection returns its deterministic typed error and leaves the
+  // wrapper scratch untouched (the crate's preflight-atomicity contract).
+  // Compare-only (no output-set freeze): the de-pack grows below AND the
+  // delegate's own colour / source scratch grows all stay pre-commit, and the
+  // delegate performs the SINGLE freeze once every pre-feed allocation has
+  // succeeded — so a LATER grow (here or in the delegate) failing leaves
+  // `resample_outputs` untouched and the row retryable.
+  if !native_planar_hb_preflight_check_only(
     native_planar_u16,
     resample_outputs,
     rgb,
@@ -11473,13 +11481,16 @@ fn packed_vyu444_process_native(
 /// `need_color == false` only Y is de-packed and the join is handed empty U / V
 /// slices, so a luma-only / `luma_u16`-only sink plans no chroma state.
 ///
-/// Atomicity mirrors [`y2xx_process_native`]: the join's COMPLETE pre-feed
-/// preflight runs FIRST (via [`planar_high_bit_native::native_planar_hb_preflight`]),
-/// before any fallible scratch grow, so a rejected row returns its deterministic
-/// typed error, never `AllocationFailed`, and touches no caller output. The
-/// de-pack into scratch is infallible and runs only after the preflight clears;
-/// the delegate re-runs the identical preflight (idempotent) and owns the binning
-/// + conversion.
+/// Atomicity mirrors [`y2xx_process_native`]: the join's COMPLETE compare-only
+/// pre-feed preflight runs FIRST (via
+/// [`planar_high_bit_native::native_planar_hb_preflight_check_only`]), before any
+/// fallible scratch grow, so a rejected row returns its deterministic typed
+/// error, never `AllocationFailed`, and touches no caller output. It commits no
+/// output-set freeze — the de-pack grows here AND the delegate's own colour /
+/// source scratch grows all stay pre-commit, and the delegate performs the SINGLE
+/// freeze once every pre-feed allocation has succeeded, so a LATER grow failing
+/// leaves `resample_outputs` untouched and the row retryable. The de-pack into
+/// scratch is infallible and runs only after the preflight clears.
 #[cfg(all(feature = "yuv-444-packed", feature = "yuv-planar"))]
 #[allow(clippy::too_many_arguments)]
 fn packed_yuv444_hb_process_native<const BITS: u32>(
@@ -11517,11 +11528,15 @@ fn packed_yuv444_hb_process_native<const BITS: u32>(
   let need_color =
     rgb.is_some() || rgba.is_some() || hsv.is_some() || rgb_u16.is_some() || rgba_u16.is_some();
 
-  // Run the planar join's COMPLETE pre-feed rejection preflight FIRST — before
-  // any fallible scratch grow below, so every rejection returns its
-  // deterministic typed error and leaves the wrapper scratch untouched. The
-  // delegate re-runs this identical preflight harmlessly.
-  if !native_planar_hb_preflight(
+  // Run the planar join's COMPLETE compare-only pre-feed rejection preflight
+  // FIRST — before any fallible scratch grow below, so every rejection returns
+  // its deterministic typed error and leaves the wrapper scratch untouched.
+  // Compare-only (no output-set freeze): the de-pack grows below AND the
+  // delegate's own colour / source scratch grows all stay pre-commit, and the
+  // delegate performs the SINGLE freeze once every pre-feed allocation has
+  // succeeded — so a LATER grow (here or in the delegate) failing leaves
+  // `resample_outputs` untouched and the row retryable.
+  if !native_planar_hb_preflight_check_only(
     native_planar_u16,
     resample_outputs,
     rgb,
@@ -15652,12 +15667,15 @@ use planar_high_bit_native::yuv_planar16_process_native;
 // matching the [`yuv_planar16_process_native`] re-export above; the
 // semi-planar / `y2xx` / packed-4:4:4 wrappers are additional consumers.
 #[cfg(feature = "yuv-planar")]
-use planar_high_bit_native::{NativePlanarYuvU16, native_planar_hb_preflight};
-// The source-scratch alloc failpoint is armed only by the high-bit planar
-// native suite, which is gated on `rgb` (its colour oracle), so its re-export
-// is dead in a `yuv-planar`-without-`rgb` build.
+use planar_high_bit_native::{NativePlanarYuvU16, native_planar_hb_preflight_check_only};
+// The source-scratch + u16-colour-scratch alloc failpoints are armed only by the
+// high-bit planar native suite, which is gated on `rgb` (its colour oracle), so
+// these re-exports are dead in a `yuv-planar`-without-`rgb` build.
 #[cfg(all(test, feature = "std", feature = "yuv-planar", feature = "rgb"))]
-pub(crate) use planar_high_bit_native::arm_planar_hb_native_alloc_failure;
+pub(crate) use planar_high_bit_native::{
+  arm_planar_hb_native_alloc_failure, arm_planar_hb_native_alloc_failure_after,
+  arm_planar_hb_native_rgb_u16_scratch_failure,
+};
 // The chroma failpoint is armed only by the high-bit non-4:2:0 native suites
 // that own a colour oracle (V210 / Y2xx / P2xx / P4xx / packed-4:4:4, each
 // pulling in `yuv-planar` for the join, plus the `rgb`-gated planar high-bit

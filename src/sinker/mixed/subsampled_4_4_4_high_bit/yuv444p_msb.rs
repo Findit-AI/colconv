@@ -29,7 +29,7 @@ use crate::{
 
 #[cfg(feature = "yuv-planar")]
 use super::super::{
-  FrozenOutputs, HsvFrameMut, NativePlanarYuvU16, native_planar_hb_preflight,
+  FrozenOutputs, HsvFrameMut, NativePlanarYuvU16, native_planar_hb_preflight_check_only,
   yuv_planar16_process_native,
 };
 #[cfg(feature = "yuv-planar")]
@@ -122,12 +122,16 @@ fn yuv444p_msb_process_native<const BITS: u32, const BE: bool>(
   let need_color =
     rgb.is_some() || rgba.is_some() || hsv.is_some() || rgb_u16.is_some() || rgba_u16.is_some();
 
-  // The planar join's COMPLETE pre-feed rejection preflight runs FIRST — BEFORE
-  // any fallible scratch grow below — so every rejection returns its
-  // deterministic typed error and leaves the wrapper scratch untouched. The
-  // delegate re-runs this identical preflight harmlessly. The MSB planar 4:4:4
-  // family exposes no `luma_u16` output (`&None`).
-  if !native_planar_hb_preflight(
+  // The planar join's COMPLETE compare-only pre-feed rejection preflight runs
+  // FIRST — BEFORE any fallible scratch grow below — so every rejection returns
+  // its deterministic typed error and leaves the wrapper scratch untouched. The
+  // MSB planar 4:4:4 family exposes no `luma_u16` output (`&None`). Compare-only
+  // (no output-set freeze): the de-pack grows below AND the delegate's own
+  // colour / source scratch grows all stay pre-commit, and the delegate performs
+  // the SINGLE freeze once every pre-feed allocation has succeeded — so a LATER
+  // grow (here or in the delegate) failing leaves `resample_outputs` untouched
+  // and the row retryable.
+  if !native_planar_hb_preflight_check_only(
     native_planar_u16,
     resample_outputs,
     rgb,
