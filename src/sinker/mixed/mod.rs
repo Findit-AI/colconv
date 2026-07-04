@@ -4272,6 +4272,28 @@ impl<F: SourceFormat, R> MixedSinker<'_, F, R> {
     self.rgba_stream_u16.is_some()
   }
 
+  /// Whether the **3-channel** native-`u32` packed-RGB area stream has been
+  /// created — the `u32` twin of [`Self::rgb_stream_u16_allocated`], a white-box
+  /// probe for the RFC #238 tail-collapse native-`u32` packed-RGB / GBR resample
+  /// atomicity tests (a first-row allocation failure must leave the field `None`,
+  /// never a partial commit). Gated on `std` + the `rgb` / `gbr` families that
+  /// bin through the shared 3-channel `rgb_stream_u32`.
+  #[cfg(all(test, feature = "std", any(feature = "rgb", feature = "gbr")))]
+  pub(crate) fn rgb_stream_u32_allocated(&self) -> bool {
+    self.rgb_stream_u32.is_some()
+  }
+
+  /// Whether the **4-channel** native-`u32` packed-RGBA area stream has been
+  /// created — the alpha-aware `u32` twin of [`Self::rgb_stream_u32_allocated`], a
+  /// white-box probe for the RFC #238 tail-collapse native-`u32` packed-RGBA /
+  /// `Gbrap32` resample atomicity tests (a first-row allocation failure must leave
+  /// the field `None`, never a partial commit). Gated on `std` + the `rgb` / `gbr`
+  /// families that bin through the shared 4-channel `rgba_stream_u32`.
+  #[cfg(all(test, feature = "std", any(feature = "rgb", feature = "gbr")))]
+  pub(crate) fn rgba_stream_u32_allocated(&self) -> bool {
+    self.rgba_stream_u32.is_some()
+  }
+
   /// Whether the packed-float-RGB `f32` area stream has been created —
   /// a white-box probe for the resample ordering tests (an
   /// out-of-sequence first row must be rejected before the stream is
@@ -6780,25 +6802,25 @@ pub(crate) fn arm_source_rgb_u16_scratch_failure() {
   FORCE_SOURCE_RGB_U16_SCRATCH_FAILURE.with(|f| f.set(true));
 }
 
-/// Freezes the output configuration for a resampled high-bit
-/// packed-RGB frame — the full u8 **and** u16 output set — and reports
-/// whether any output is attached. Enforces the split-preflight
-/// conditional ordering (a no-output call returns before the freeze, and an
-/// out-of-sequence FIRST row is rejected before the freeze via
-/// `stream_next_y`, so a rejected first row stores no snapshot to poison a
-/// retry; a later row's sequence check stays in the companion `*_stream`),
-/// extended with the native-depth `rgb_u16` / `rgba_u16` / `luma_u16`
-/// channels. (The u8 element family folds this split into the transactional
-/// [`packed_rgb_resample`] under RFC #238; the high-bit families follow in
-/// later tail-collapse increments.)
+/// Freezes the output configuration for a resampled packed-RGB frame —
+/// the full u8 **and** u16 output set — and reports whether any output is
+/// attached. Enforces the split-preflight conditional ordering (a no-output
+/// call returns before the freeze, and an out-of-sequence FIRST row is
+/// rejected before the freeze via `stream_next_y`, so a rejected first row
+/// stores no snapshot to poison a retry; a later row's sequence check stays in
+/// the companion `*_stream`), extended with the native-depth `rgb_u16` /
+/// `rgba_u16` / `luma_u16` channels.
 ///
-/// The legacy 16-bit packed-RGB family (`rgb-legacy`) shares this
-/// freeze: its output set is exactly `rgb` / `rgba` / `rgb_u16` /
-/// `rgba_u16` / `luma` / `luma_u16` / `hsv`, the same one the high-bit
-/// path freezes. (It bins its native 5/6/5 channels through the u8
-/// [`packed_rgb_resample_stream`], so its `stream_next_y` is that u8
-/// stream's counter — element type is irrelevant to the row index.)
-#[cfg(any(feature = "rgb", feature = "gbr", feature = "rgb-legacy"))]
+/// The high-bit (`rgb` / `gbr`) and native-`u32` families that once shared this
+/// committing preflight now fold it into their transactional compare-before /
+/// commit-after resample helpers under RFC #238 (the u8 twin is
+/// [`packed_rgb_resample`]). The legacy 16-bit packed-RGB family (`rgb-legacy`)
+/// is its sole remaining caller, pending its own tail-collapse increment: its
+/// output set is exactly `rgb` / `rgba` / `rgb_u16` / `rgba_u16` / `luma` /
+/// `luma_u16` / `hsv`, and it bins its native 5/6/5 channels through the u8
+/// [`packed_rgb_resample_stream`], so its `stream_next_y` is that u8 stream's
+/// counter — element type is irrelevant to the row index.
+#[cfg(feature = "rgb-legacy")]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn packed_rgb_u16_resample_preflight(
   resample_outputs: &mut Option<FrozenOutputs>,
@@ -7377,6 +7399,17 @@ pub(super) fn source_rgb_u32_scratch<'s>(
   width: usize,
   plan: &ResamplePlan,
 ) -> Result<&'s mut [u32], MixedSinkerError> {
+  // Single-shot grow failpoint (RFC #238 tail-collapse tests): refuse this grow as
+  // a host OOM would, proving a `u32` source-staging OOM AFTER a successful stream
+  // build leaves the stream field `None` AND `resample_outputs` uncommitted
+  // (retryable). The `u32` twin of the `source_rgb_u16_scratch` failpoint, so a
+  // 3-ch `u32` atomicity test can fail this specific pre-commit grow.
+  #[cfg(all(test, feature = "std", any(feature = "rgb", feature = "gbr")))]
+  if FORCE_SOURCE_RGB_U32_SCRATCH_FAILURE.with(|f| f.take()) {
+    return Err(MixedSinkerError::Resample(ResampleError::AllocationFailed(
+      crate::resample::PlanGeometry::new(plan.src_w(), plan.src_h(), plan.out_w(), plan.out_h()),
+    )));
+  }
   let row = width
     .checked_mul(3)
     .ok_or(MixedSinkerError::GeometryOverflow(GeometryOverflow::new(
@@ -7402,6 +7435,27 @@ pub(super) fn source_rgb_u32_scratch<'s>(
   Ok(&mut scratch[..row])
 }
 
+// Single-shot source-RGB-`u32`-scratch grow failpoint for the RFC #238
+// tail-collapse transactional-preflight tests. Gated on `any(rgb, gbr)` (the
+// native-`u32` packed-RGB / GBR families that stage a source-width `u32` RGB row
+// pre-commit); `source_rgb_u32_scratch` consults it under the same gate. Separate
+// from the `try_box` box-alloc failpoint so a 3-channel `u32` test can fail the
+// SCRATCH grow specifically (after a successful stream construction).
+#[cfg(all(test, feature = "std", any(feature = "rgb", feature = "gbr")))]
+std::thread_local! {
+  static FORCE_SOURCE_RGB_U32_SCRATCH_FAILURE: core::cell::Cell<bool> = const { core::cell::Cell::new(false) };
+}
+
+/// Arms a single-shot failpoint that makes the next [`source_rgb_u32_scratch`]
+/// grow refuse with `AllocationFailed`, exactly as a host OOM would. Proves the
+/// commit-together atomic shape of [`packed_rgb_u32_resample`] (a source-staging
+/// OOM after a successful stream build leaves the stream field `None` AND
+/// `resample_outputs` uncommitted, so the row is retryable). Test-only.
+#[cfg(all(test, feature = "std", any(feature = "rgb", feature = "gbr")))]
+pub(crate) fn arm_source_rgb_u32_scratch_failure() {
+  FORCE_SOURCE_RGB_U32_SCRATCH_FAILURE.with(|f| f.set(true));
+}
+
 /// Source-width host-native canonical `R, G, B, A` `u32` staging (`4 * width`)
 /// for the native-`u32` packed-RGBA resample tier. The `u32` twin of
 /// [`source_rgba_u16_scratch`].
@@ -7411,6 +7465,17 @@ pub(super) fn source_rgba_u32_scratch<'s>(
   width: usize,
   plan: &ResamplePlan,
 ) -> Result<&'s mut [u32], MixedSinkerError> {
+  // Single-shot grow failpoint (RFC #238 tail-collapse tests): refuse this grow as
+  // a host OOM would, proving a 4-channel `u32` scratch OOM AFTER a successful
+  // stream build leaves the stream field `None` AND `resample_outputs` uncommitted
+  // (retryable). The 4-channel twin of the `source_rgb_u32_scratch` failpoint, so a
+  // packed-RGBA `u32` atomicity test can fail this specific pre-commit grow.
+  #[cfg(all(test, feature = "std", any(feature = "rgb", feature = "gbr")))]
+  if FORCE_SOURCE_RGBA_U32_SCRATCH_FAILURE.with(|f| f.take()) {
+    return Err(MixedSinkerError::Resample(ResampleError::AllocationFailed(
+      crate::resample::PlanGeometry::new(plan.src_w(), plan.src_h(), plan.out_w(), plan.out_h()),
+    )));
+  }
   let row = width
     .checked_mul(4)
     .ok_or(MixedSinkerError::GeometryOverflow(GeometryOverflow::new(
@@ -7436,86 +7501,345 @@ pub(super) fn source_rgba_u32_scratch<'s>(
   Ok(&mut scratch[..row])
 }
 
-/// Lazily creates + sequence-checks the 3-channel `u32` **area** stream — the
-/// `u32` twin of [`packed_rgb_u16_resample_stream`]. Sequence-check precedes
-/// allocation so a rejected first row creates no output buffers.
+// Single-shot source-RGBA-`u32`-scratch grow failpoint for the RFC #238
+// tail-collapse transactional-preflight tests. Gated on `any(rgb, gbr)` (the
+// native-`u32` packed-RGBA / `Gbrap32` families that stage a source-width `u32`
+// RGBA row pre-commit); `source_rgba_u32_scratch` consults it under the same gate.
+// Separate from the `try_box` box-alloc failpoint so a 4-channel `u32` test can
+// fail the SCRATCH grow specifically (after a successful stream construction,
+// before the stream-field insert).
+#[cfg(all(test, feature = "std", any(feature = "rgb", feature = "gbr")))]
+std::thread_local! {
+  static FORCE_SOURCE_RGBA_U32_SCRATCH_FAILURE: core::cell::Cell<bool> = const { core::cell::Cell::new(false) };
+}
+
+/// Arms a single-shot failpoint that makes the next [`source_rgba_u32_scratch`]
+/// grow refuse with `AllocationFailed`, exactly as a host OOM would. Proves the
+/// commit-together atomic shape of [`packed_rgba_u32_resample`] (a source-staging
+/// OOM after a successful stream build leaves the stream field `None` AND
+/// `resample_outputs` uncommitted, so the row is retryable). Test-only.
+#[cfg(all(test, feature = "std", any(feature = "rgb", feature = "gbr")))]
+pub(crate) fn arm_source_rgba_u32_scratch_failure() {
+  FORCE_SOURCE_RGBA_U32_SCRATCH_FAILURE.with(|f| f.set(true));
+}
+
+/// RFC #238 tail-collapse — the transactional native-`u32` packed-RGB **area**
+/// resample, the `u32` element-family twin of [`packed_rgb_u16_resample`]. Folds
+/// the split preflight + area-stream build + [`packed_rgb_u32_resample_emit`]
+/// sequence into one call behind the shared compare-before / commit-after
+/// preflight
+/// ([`resample_preflight_check_only`](planar_resample::resample_preflight_check_only)):
+/// the missing area stream is built into a LOCAL and every fallible pre-feed
+/// scratch (the source-width `u32` staging row, the always-sized out-width binned
+/// `u16` row the emit narrows into, and — when a narrowed output is attached — the
+/// out-width `u8` narrow row) is grown with NO field mutation, so the stream field
+/// insert and the output-set freeze COMMIT TOGETHER only after they all succeed. A
+/// first-row allocation failure therefore leaves `rgb_stream_u32` `None` AND
+/// `resample_outputs` uncommitted (never a partial commit) — state-atomic and
+/// retryable even with a changed output attachment (the #180 discipline). A pure
+/// reordering of the pre-collapse split path: identical bytes, only deferring the
+/// field mutations past the fallible allocations.
+///
+/// `convert` stages the source-width canonical host-native `u32` RGB row into the
+/// grown `rgb_scratch_u32` (each format's `*_to_rgb_u32` kernel). `NATIVE_LUMA16`
+/// threads straight to [`packed_rgb_u32_resample_emit`] (native-depth vs narrowed
+/// `luma_u16`), so every output byte matches the pre-collapse emit — full `u32`
+/// binning, narrowed only per output (0-ULP, issue #289).
 #[cfg(any(feature = "rgb", feature = "gbr"))]
-pub(super) fn packed_rgb_u32_resample_stream<'s>(
-  rgb_stream_u32: &'s mut Option<std::boxed::Box<crate::resample::AreaStream<u32>>>,
+#[allow(clippy::too_many_arguments)]
+pub(super) fn packed_rgb_u32_resample<const NATIVE_LUMA16: bool>(
+  rgb_stream_u32: &mut Option<std::boxed::Box<crate::resample::AreaStream<u32>>>,
+  resample_outputs: &mut Option<FrozenOutputs>,
+  rgb: &mut Option<&mut [u8]>,
+  rgba: &mut Option<&mut [u8]>,
+  luma: &mut Option<&mut [u8]>,
+  rgb_u16: &mut Option<&mut [u16]>,
+  rgba_u16: &mut Option<&mut [u16]>,
+  luma_u16: &mut Option<&mut [u16]>,
+  hsv: &mut Option<HsvFrameMut<'_>>,
+  rgb_scratch_u32: &mut Vec<u32>,
+  binned_scratch_u16: &mut Vec<u16>,
+  narrow_scratch: &mut Vec<u8>,
+  w: usize,
   plan: &ResamplePlan,
   idx: usize,
-) -> Result<&'s mut crate::resample::AreaStream<u32>, MixedSinkerError> {
+  use_simd: bool,
+  matrix: crate::ColorMatrix,
+  full_range: bool,
+  convert: impl FnOnce(&mut [u32]),
+) -> Result<(), MixedSinkerError> {
+  let need_any = rgb.is_some()
+    || rgba.is_some()
+    || luma.is_some()
+    || rgb_u16.is_some()
+    || rgba_u16.is_some()
+    || luma_u16.is_some()
+    || hsv.is_some();
+  // Sequence-counter row for the shared L1 preflight (the area stream is the sole
+  // per-row stream), or `None` when no output is attached so the preflight
+  // short-circuits to a no-op.
+  let expected = if need_any {
+    Some(rgb_stream_u32.as_ref().map_or(0, |s| s.next_y()))
+  } else {
+    None
+  };
+  // Compare-only preflight (NO commit): the output-set freeze commits only AFTER
+  // the fallible stream alloc + scratch growth below succeed, so a first-row
+  // allocation failure leaves `resample_outputs` uncommitted (retryable with a
+  // changed output attachment). A no-output sink short-circuits to a no-op.
+  if let core::ops::ControlFlow::Break(()) = planar_resample::resample_preflight_check_only(
+    resample_outputs,
+    luma,
+    luma_u16,
+    rgb,
+    rgba,
+    rgb_u16,
+    rgba_u16,
+    &None,
+    &None,
+    &None,
+    &None,
+    &None,
+    hsv,
+    &None,
+    expected,
+    idx,
+  )? {
+    return Ok(());
+  }
+  // Area-only sink: reject a filter plan before any allocation (mirrors the
+  // pre-collapse `packed_rgb_u32_resample_stream` guard). Runs AFTER the
+  // compare-only preflight, so a no-output sink stays a no-op even under a filter
+  // plan.
   if plan.kind().is_filter() {
     return Err(plan.unsupported_filter().into());
   }
-  let expected = rgb_stream_u32.as_ref().map_or(0, |stream| stream.next_y());
-  if expected != idx {
-    return Err(MixedSinkerError::Resample(ResampleError::OutOfSequenceRow(
-      crate::resample::OutOfSequenceRow::new(expected, idx),
-    )));
-  }
-  let stream = match rgb_stream_u32 {
-    Some(stream) => stream,
-    None => rgb_stream_u32.insert({
-      let stream =
-        crate::resample::AreaStream::new(plan.h(), plan.v(), plan.src_w(), plan.src_h(), 3)?;
-      crate::resample::try_box(stream).map_err(|_| {
-        MixedSinkerError::Resample(crate::resample::ResampleError::AllocationFailed(
-          crate::resample::PlanGeometry::new(
-            plan.src_w(),
-            plan.src_h(),
-            plan.out_w(),
-            plan.out_h(),
-          ),
-        ))
-      })?
-    }),
+  // The emit narrows the binned `u32` row for its u8 / narrowed-`luma_u16` outputs
+  // through the out-width `narrow_scratch`; pre-grow it here with the emit's exact
+  // predicate so that fallible growth precedes the freeze too (the emit's own grow
+  // then re-runs as a no-op). A native-`u16`-only sink neither grows it nor risks
+  // its allocation failure.
+  let need_narrow = rgb.is_some()
+    || rgba.is_some()
+    || luma.is_some()
+    || hsv.is_some()
+    || (!NATIVE_LUMA16 && luma_u16.is_some());
+  // Build the missing area stream into a LOCAL and grow the staging scratches —
+  // every fallible pre-feed step — with NO field mutation, so the stream field
+  // insert and the freeze commit TOGETHER only after they all succeed (the
+  // `planar_dual_resample` atomic shape: a scratch OOM leaves `rgb_stream_u32`
+  // `None` AND `resample_outputs` uncommitted, never a partial commit).
+  let new_stream = if rgb_stream_u32.is_none() {
+    let stream =
+      crate::resample::AreaStream::new(plan.h(), plan.v(), plan.src_w(), plan.src_h(), 3)?;
+    Some(crate::resample::try_box(stream).map_err(|_| {
+      MixedSinkerError::Resample(crate::resample::ResampleError::AllocationFailed(
+        crate::resample::PlanGeometry::new(plan.src_w(), plan.src_h(), plan.out_w(), plan.out_h()),
+      ))
+    })?)
+  } else {
+    None
   };
-  Ok(stream)
+  source_rgb_u32_scratch(rgb_scratch_u32, w, plan)?;
+  source_rgb_u16_scratch(binned_scratch_u16, plan.out_w(), plan)?;
+  if need_narrow {
+    source_rgb_scratch(narrow_scratch, plan.out_w(), plan)?;
+  }
+  // Every pre-feed allocation succeeded — COMMIT atomically: insert the stream and
+  // freeze the output set together (the compare above already caught any later
+  // mid-frame output change; the freeze stores the snapshot on the first row).
+  if let Some(s) = new_stream {
+    *rgb_stream_u32 = Some(s);
+  }
+  frozen_outputs_check(
+    resample_outputs,
+    luma,
+    luma_u16,
+    rgb,
+    rgba,
+    rgb_u16,
+    rgba_u16,
+    &None,
+    &None,
+    &None,
+    &None,
+    &None,
+    hsv,
+    &None,
+    idx,
+  )?;
+  // Stage the source-width canonical host-native `u32` RGB row (the caller's
+  // conversion into the grown scratch) and run the shared per-output emit (its
+  // binned / narrow grows re-run as no-ops after the pre-commit grows above).
+  let stream = rgb_stream_u32.as_mut().expect("created above");
+  let src_u32 = source_rgb_u32_scratch(rgb_scratch_u32, w, plan)?;
+  convert(src_u32);
+  packed_rgb_u32_resample_emit::<NATIVE_LUMA16>(
+    stream,
+    plan,
+    rgb,
+    rgba,
+    luma,
+    rgb_u16,
+    rgba_u16,
+    luma_u16,
+    hsv,
+    src_u32,
+    binned_scratch_u16,
+    narrow_scratch,
+    matrix,
+    full_range,
+    idx,
+    use_simd,
+  )
 }
 
-/// Lazily creates + sequence-checks the 3-channel `u32` **filter** stream — the
-/// `u32` twin of [`packed_rgb_u16_filter_stream`].
+/// RFC #238 tail-collapse — the transactional native-`u32` packed-RGB **filter**
+/// resample, the [`SpanKind::Filter`](crate::resample::SpanKind) twin of
+/// [`packed_rgb_u32_resample`] over a 3-channel `u32`
+/// [`FilterStream`](crate::resample::FilterStream). Identical compare-before /
+/// commit-after discipline (the filter stream is built into a local and its field
+/// insert + the freeze + the pre-grown binned / narrow scratches commit together
+/// only after every allocation) and the identical [`packed_rgb_u32_resample_emit`]
+/// tail (the emit is generic over the resampler kind), so the resampled colour
+/// equals the equivalent area resample up to the signed kernel weights while
+/// remaining byte-identical to the pre-collapse split filter path.
 #[cfg(any(feature = "rgb", feature = "gbr"))]
-pub(super) fn packed_rgb_u32_filter_stream<'s>(
-  rgb_filter_stream_u32: &'s mut Option<std::boxed::Box<crate::resample::FilterStream<u32>>>,
+#[allow(clippy::too_many_arguments)]
+pub(super) fn packed_rgb_u32_resample_filter<const NATIVE_LUMA16: bool>(
+  rgb_filter_stream_u32: &mut Option<std::boxed::Box<crate::resample::FilterStream<u32>>>,
+  resample_outputs: &mut Option<FrozenOutputs>,
+  rgb: &mut Option<&mut [u8]>,
+  rgba: &mut Option<&mut [u8]>,
+  luma: &mut Option<&mut [u8]>,
+  rgb_u16: &mut Option<&mut [u16]>,
+  rgba_u16: &mut Option<&mut [u16]>,
+  luma_u16: &mut Option<&mut [u16]>,
+  hsv: &mut Option<HsvFrameMut<'_>>,
+  rgb_scratch_u32: &mut Vec<u32>,
+  binned_scratch_u16: &mut Vec<u16>,
+  narrow_scratch: &mut Vec<u8>,
+  w: usize,
   plan: &ResamplePlan,
   idx: usize,
-) -> Result<&'s mut crate::resample::FilterStream<u32>, MixedSinkerError> {
-  plan.ensure_single_kernel_filter()?;
-  let expected = rgb_filter_stream_u32
-    .as_ref()
-    .map_or(0, |stream| stream.next_y());
-  if expected != idx {
-    return Err(MixedSinkerError::Resample(ResampleError::OutOfSequenceRow(
-      crate::resample::OutOfSequenceRow::new(expected, idx),
-    )));
-  }
-  let (fh, fv) = (
-    plan
-      .filter_h()
-      .expect("filter plan carries horizontal windows"),
-    plan
-      .filter_v()
-      .expect("filter plan carries vertical windows"),
-  );
-  let stream = match rgb_filter_stream_u32 {
-    Some(stream) => stream,
-    None => rgb_filter_stream_u32.insert({
-      let stream = crate::resample::FilterStream::new(fh, fv, plan.src_w(), plan.src_h(), 3)?;
-      crate::resample::try_box(stream).map_err(|_| {
-        MixedSinkerError::Resample(crate::resample::ResampleError::AllocationFailed(
-          crate::resample::PlanGeometry::new(
-            plan.src_w(),
-            plan.src_h(),
-            plan.out_w(),
-            plan.out_h(),
-          ),
-        ))
-      })?
-    }),
+  use_simd: bool,
+  matrix: crate::ColorMatrix,
+  full_range: bool,
+  convert: impl FnOnce(&mut [u32]),
+) -> Result<(), MixedSinkerError> {
+  let need_any = rgb.is_some()
+    || rgba.is_some()
+    || luma.is_some()
+    || rgb_u16.is_some()
+    || rgba_u16.is_some()
+    || luma_u16.is_some()
+    || hsv.is_some();
+  let expected = if need_any {
+    Some(rgb_filter_stream_u32.as_ref().map_or(0, |s| s.next_y()))
+  } else {
+    None
   };
-  Ok(stream)
+  // Compare-only preflight (NO commit) — see `packed_rgb_u32_resample`.
+  if let core::ops::ControlFlow::Break(()) = planar_resample::resample_preflight_check_only(
+    resample_outputs,
+    luma,
+    luma_u16,
+    rgb,
+    rgba,
+    rgb_u16,
+    rgba_u16,
+    &None,
+    &None,
+    &None,
+    &None,
+    &None,
+    hsv,
+    &None,
+    expected,
+    idx,
+  )? {
+    return Ok(());
+  }
+  // Single-kernel filter: reject a BICUBLIN plan before any allocation (its chroma
+  // windows are read only by the `Yuv420p` per-plane route, so filtering every
+  // channel with the luma kernel would be wrong output).
+  plan.ensure_single_kernel_filter()?;
+  // Pre-grow the emit's out-width narrow scratch with its exact predicate so that
+  // fallible growth precedes the freeze too (see `packed_rgb_u32_resample`).
+  let need_narrow = rgb.is_some()
+    || rgba.is_some()
+    || luma.is_some()
+    || hsv.is_some()
+    || (!NATIVE_LUMA16 && luma_u16.is_some());
+  // Build the missing filter stream into a LOCAL and grow the staging scratches —
+  // every fallible pre-feed step — with NO field mutation, so the stream field
+  // insert and the freeze commit TOGETHER (the `planar_dual_resample` atomic
+  // shape: a scratch OOM leaves `rgb_filter_stream_u32` `None` AND
+  // `resample_outputs` uncommitted, never a partial commit).
+  let new_stream = if rgb_filter_stream_u32.is_none() {
+    let (fh, fv) = (
+      plan
+        .filter_h()
+        .expect("filter plan carries horizontal windows"),
+      plan
+        .filter_v()
+        .expect("filter plan carries vertical windows"),
+    );
+    let stream = crate::resample::FilterStream::new(fh, fv, plan.src_w(), plan.src_h(), 3)?;
+    Some(crate::resample::try_box(stream).map_err(|_| {
+      MixedSinkerError::Resample(crate::resample::ResampleError::AllocationFailed(
+        crate::resample::PlanGeometry::new(plan.src_w(), plan.src_h(), plan.out_w(), plan.out_h()),
+      ))
+    })?)
+  } else {
+    None
+  };
+  source_rgb_u32_scratch(rgb_scratch_u32, w, plan)?;
+  source_rgb_u16_scratch(binned_scratch_u16, plan.out_w(), plan)?;
+  if need_narrow {
+    source_rgb_scratch(narrow_scratch, plan.out_w(), plan)?;
+  }
+  if let Some(s) = new_stream {
+    *rgb_filter_stream_u32 = Some(s);
+  }
+  frozen_outputs_check(
+    resample_outputs,
+    luma,
+    luma_u16,
+    rgb,
+    rgba,
+    rgb_u16,
+    rgba_u16,
+    &None,
+    &None,
+    &None,
+    &None,
+    &None,
+    hsv,
+    &None,
+    idx,
+  )?;
+  let stream = rgb_filter_stream_u32.as_mut().expect("created above");
+  let src_u32 = source_rgb_u32_scratch(rgb_scratch_u32, w, plan)?;
+  convert(src_u32);
+  packed_rgb_u32_resample_emit::<NATIVE_LUMA16>(
+    stream,
+    plan,
+    rgb,
+    rgba,
+    luma,
+    rgb_u16,
+    rgba_u16,
+    luma_u16,
+    hsv,
+    src_u32,
+    binned_scratch_u16,
+    narrow_scratch,
+    matrix,
+    full_range,
+    idx,
+    use_simd,
+  )
 }
 
 /// Feeds the prepared source-width host-native `u32` RGB row into the (already
@@ -7800,10 +8124,12 @@ fn derive_packed_rgba_u32_outputs<const NATIVE_LUMA16: bool>(
 /// as a canonical host-native `R, G, B, A` `u32` row; under
 /// [`AlphaMode::Premultiplied`] it is premultiplied at full `u32` precision
 /// before binning and un-premultiplied per output row, so transparent pixels
-/// never bleed. Atomic preflight matches the u16 area tail (no-output → no
-/// freeze; out-of-sequence first row rejected before the freeze; later-row
-/// freeze before the sequence re-check; all scratch + the stream created before
-/// the single feed).
+/// never bleed. RFC #238 tail-collapse: the compare-only preflight commits the
+/// output-set freeze only AFTER the fallible stream + scratch allocs, and the
+/// stream is built into a LOCAL inserted alongside that freeze, so a first-row
+/// allocation failure leaves `rgba_stream_u32` `None` AND `resample_outputs`
+/// uncommitted (state-atomic + retryable, the #180 discipline) — byte-identical to
+/// the pre-collapse split path.
 #[cfg(any(feature = "rgb", feature = "gbr"))]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn packed_rgba_u32_resample<const NATIVE_LUMA16: bool>(
@@ -7830,6 +8156,8 @@ pub(super) fn packed_rgba_u32_resample<const NATIVE_LUMA16: bool>(
   full_range: bool,
   convert_rgba_u32: impl FnOnce(&mut [u32]),
 ) -> Result<(), MixedSinkerError> {
+  // Area-only sink (native-`u32` packed RGBA is not routed to the filter path):
+  // reject a filter plan before any work.
   if plan.kind().is_filter() {
     return Err(plan.unsupported_filter().into());
   }
@@ -7841,15 +8169,79 @@ pub(super) fn packed_rgba_u32_resample<const NATIVE_LUMA16: bool>(
     || luma.is_some()
     || luma_u16.is_some()
     || hsv.is_some();
-  if !need_any {
+  // Sequence-counter row for the shared L1 preflight (the colour stream is the sole
+  // per-row stream), or `None` when no output is attached so the preflight
+  // short-circuits to a no-op.
+  let expected = if need_any {
+    Some(rgba_stream_u32.as_ref().map_or(0, |s| s.next_y()))
+  } else {
+    None
+  };
+  // Compare-only preflight (NO commit): the output-set freeze commits only AFTER
+  // the fallible stream alloc + scratch growth below succeed (RFC #238
+  // tail-collapse), so a first-row allocation failure leaves `resample_outputs`
+  // uncommitted — retryable with a changed output attachment.
+  if let core::ops::ControlFlow::Break(()) = planar_resample::resample_preflight_check_only(
+    resample_outputs,
+    luma,
+    luma_u16,
+    rgb,
+    rgba,
+    rgb_u16,
+    rgba_u16,
+    &None,
+    &None,
+    &None,
+    &None,
+    &None,
+    hsv,
+    &None,
+    expected,
+    idx,
+  )? {
     return Ok(());
   }
-  let expected = rgba_stream_u32.as_ref().map_or(0, |s| s.next_y());
-  let first_row = resample_outputs.is_none();
-  if first_row && expected != idx {
-    return Err(MixedSinkerError::Resample(ResampleError::OutOfSequenceRow(
-      crate::resample::OutOfSequenceRow::new(expected, idx),
-    )));
+  let narrowed_luma_u16 = !NATIVE_LUMA16 && luma_u16.is_some();
+  let need_narrow =
+    rgb.is_some() || rgba.is_some() || luma.is_some() || narrowed_luma_u16 || hsv.is_some();
+  let native_luma = NATIVE_LUMA16 && luma_u16.is_some();
+  let premult = alpha_mode.is_premultiplied();
+  // Build the missing stream into a LOCAL and grow every pre-feed scratch — every
+  // fallible step — with NO field mutation, so the stream field insert and the
+  // freeze commit TOGETHER only after they all succeed (the `planar_dual_resample`
+  // atomic shape: a scratch OOM leaves `rgba_stream_u32` `None` AND
+  // `resample_outputs` uncommitted, never a partial commit).
+  let new_stream = if rgba_stream_u32.is_none() {
+    let stream =
+      crate::resample::AreaStream::new(plan.h(), plan.v(), plan.src_w(), plan.src_h(), 4)?;
+    Some(crate::resample::try_box(stream).map_err(|_| {
+      MixedSinkerError::Resample(crate::resample::ResampleError::AllocationFailed(
+        crate::resample::PlanGeometry::new(plan.src_w(), plan.src_h(), plan.out_w(), plan.out_h()),
+      ))
+    })?)
+  } else {
+    None
+  };
+  // Grow every pre-feed scratch (the conditional premult / native-luma / narrow
+  // rows and the always-sized out-width colour + source-width RGBA staging) BEFORE
+  // the commit, so a scratch OOM likewise leaves the stream field `None` and
+  // `resample_outputs` uncommitted.
+  if premult {
+    source_rgba_u32_scratch(color_scratch_u32, ow, plan)?;
+  }
+  source_rgba_u16_scratch(color_scratch_u16, ow, plan)?;
+  if native_luma {
+    source_rgb_u16_scratch(rgb_scratch_u16, ow, plan)?;
+  }
+  if need_narrow {
+    source_rgb_scratch(narrow_scratch, ow, plan)?;
+  }
+  source_rgba_u32_scratch(rgba_scratch_u32, w, plan)?;
+  // Every pre-feed allocation succeeded — COMMIT atomically: insert the stream and
+  // freeze the output set together (the compare-only preflight above already caught
+  // any later mid-frame output change).
+  if let Some(s) = new_stream {
+    *rgba_stream_u32 = Some(s);
   }
   frozen_outputs_check(
     resample_outputs,
@@ -7868,33 +8260,8 @@ pub(super) fn packed_rgba_u32_resample<const NATIVE_LUMA16: bool>(
     &None,
     idx,
   )?;
-  if expected != idx {
-    return Err(MixedSinkerError::Resample(ResampleError::OutOfSequenceRow(
-      crate::resample::OutOfSequenceRow::new(expected, idx),
-    )));
-  }
-  let narrowed_luma_u16 = !NATIVE_LUMA16 && luma_u16.is_some();
-  let need_narrow =
-    rgb.is_some() || rgba.is_some() || luma.is_some() || narrowed_luma_u16 || hsv.is_some();
-  let native_luma = NATIVE_LUMA16 && luma_u16.is_some();
-  if rgba_stream_u32.is_none() {
-    *rgba_stream_u32 = Some({
-      let stream =
-        crate::resample::AreaStream::new(plan.h(), plan.v(), plan.src_w(), plan.src_h(), 4)?;
-      crate::resample::try_box(stream).map_err(|_| {
-        MixedSinkerError::Resample(crate::resample::ResampleError::AllocationFailed(
-          crate::resample::PlanGeometry::new(
-            plan.src_w(),
-            plan.src_h(),
-            plan.out_w(),
-            plan.out_h(),
-          ),
-        ))
-      })?
-    });
-  }
-  let premult = alpha_mode.is_premultiplied();
-  // Out-width straight `u32` RGBA, resolved per output row — needed only to
+  // Re-fetch the scratches (these grows re-run as no-ops after the pre-commit grows
+  // above). Out-width straight `u32` RGBA, resolved per output row — needed only to
   // hold the un-premultiply on the premult path (straight mode reads `binned`).
   let color_u32: &mut [u32] = if premult {
     source_rgba_u32_scratch(color_scratch_u32, ow, plan)?
@@ -7959,7 +8326,11 @@ pub(super) fn packed_rgba_u32_resample<const NATIVE_LUMA16: bool>(
 /// row bins through one 4-channel [`FilterStream<u32>`](crate::resample::FilterStream)
 /// and every output narrows only afterwards (0-ULP). Premultiplied alpha has no
 /// filter analogue — those frames stay on the area path; this is reached only
-/// for straight alpha. Sequence-check precedes every allocation.
+/// for straight alpha. RFC #238 tail-collapse: same compare-before / commit-after
+/// discipline as [`packed_rgba_u32_resample`] — the stream builds into a LOCAL and
+/// its field insert + the output-set freeze commit together only after every
+/// fallible alloc, so a first-row failure leaves `rgba_filter_stream_u32` `None`
+/// AND `resample_outputs` uncommitted (byte-identical to the pre-collapse path).
 #[cfg(any(feature = "rgb", feature = "gbr"))]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn packed_rgba_u32_filter_resample<const NATIVE_LUMA16: bool>(
@@ -7984,6 +8355,8 @@ pub(super) fn packed_rgba_u32_filter_resample<const NATIVE_LUMA16: bool>(
   full_range: bool,
   convert_rgba_u32: impl FnOnce(&mut [u32]),
 ) -> Result<(), MixedSinkerError> {
+  // Single-kernel filter tail — reject a BICUBLIN plan (its chroma windows are read
+  // only by the `Yuv420p` per-plane route) before any state change.
   plan.ensure_single_kernel_filter()?;
   let ow = plan.out_w();
   let need_any = rgb.is_some()
@@ -7993,15 +8366,82 @@ pub(super) fn packed_rgba_u32_filter_resample<const NATIVE_LUMA16: bool>(
     || luma.is_some()
     || luma_u16.is_some()
     || hsv.is_some();
-  if !need_any {
+  // Sequence-counter row for the shared L1 preflight (the 4-channel filter stream is
+  // the sole per-row stream), or `None` when no output is attached so the preflight
+  // short-circuits to a no-op.
+  let expected = if need_any {
+    Some(rgba_filter_stream_u32.as_ref().map_or(0, |s| s.next_y()))
+  } else {
+    None
+  };
+  // Compare-only preflight (NO commit): the output-set freeze commits only AFTER
+  // the fallible stream alloc + scratch growth below succeed (RFC #238
+  // tail-collapse), so a first-row allocation failure leaves `resample_outputs`
+  // uncommitted — retryable with a changed output attachment.
+  if let core::ops::ControlFlow::Break(()) = planar_resample::resample_preflight_check_only(
+    resample_outputs,
+    luma,
+    luma_u16,
+    rgb,
+    rgba,
+    rgb_u16,
+    rgba_u16,
+    &None,
+    &None,
+    &None,
+    &None,
+    &None,
+    hsv,
+    &None,
+    expected,
+    idx,
+  )? {
     return Ok(());
   }
-  let expected = rgba_filter_stream_u32.as_ref().map_or(0, |s| s.next_y());
-  let first_row = resample_outputs.is_none();
-  if first_row && expected != idx {
-    return Err(MixedSinkerError::Resample(ResampleError::OutOfSequenceRow(
-      crate::resample::OutOfSequenceRow::new(expected, idx),
-    )));
+  let narrowed_luma_u16 = !NATIVE_LUMA16 && luma_u16.is_some();
+  let need_narrow =
+    rgb.is_some() || rgba.is_some() || luma.is_some() || narrowed_luma_u16 || hsv.is_some();
+  let native_luma = NATIVE_LUMA16 && luma_u16.is_some();
+  // Build the missing filter stream into a LOCAL and grow every pre-feed scratch —
+  // every fallible step — with NO field mutation, so the stream field insert and the
+  // freeze commit TOGETHER only after they all succeed (the `planar_dual_resample`
+  // atomic shape: a scratch OOM leaves `rgba_filter_stream_u32` `None` AND
+  // `resample_outputs` uncommitted, never a partial commit).
+  let new_stream = if rgba_filter_stream_u32.is_none() {
+    let (fh, fv) = (
+      plan
+        .filter_h()
+        .expect("filter plan carries horizontal windows"),
+      plan
+        .filter_v()
+        .expect("filter plan carries vertical windows"),
+    );
+    let stream = crate::resample::FilterStream::new(fh, fv, plan.src_w(), plan.src_h(), 4)?;
+    Some(crate::resample::try_box(stream).map_err(|_| {
+      MixedSinkerError::Resample(crate::resample::ResampleError::AllocationFailed(
+        crate::resample::PlanGeometry::new(plan.src_w(), plan.src_h(), plan.out_w(), plan.out_h()),
+      ))
+    })?)
+  } else {
+    None
+  };
+  // Grow every pre-feed scratch (the always-sized out-width colour + source-width
+  // RGBA staging, plus the conditional native-luma / narrow rows) BEFORE the commit,
+  // so a scratch OOM likewise leaves the stream field `None` and `resample_outputs`
+  // uncommitted.
+  source_rgba_u16_scratch(color_scratch_u16, ow, plan)?;
+  if native_luma {
+    source_rgb_u16_scratch(rgb_scratch_u16, ow, plan)?;
+  }
+  if need_narrow {
+    source_rgb_scratch(narrow_scratch, ow, plan)?;
+  }
+  source_rgba_u32_scratch(rgba_scratch_u32, w, plan)?;
+  // Every pre-feed allocation succeeded — COMMIT atomically: insert the stream and
+  // freeze the output set together (the compare-only preflight above already caught
+  // any later mid-frame output change).
+  if let Some(s) = new_stream {
+    *rgba_filter_stream_u32 = Some(s);
   }
   frozen_outputs_check(
     resample_outputs,
@@ -8020,38 +8460,8 @@ pub(super) fn packed_rgba_u32_filter_resample<const NATIVE_LUMA16: bool>(
     &None,
     idx,
   )?;
-  if expected != idx {
-    return Err(MixedSinkerError::Resample(ResampleError::OutOfSequenceRow(
-      crate::resample::OutOfSequenceRow::new(expected, idx),
-    )));
-  }
-  let narrowed_luma_u16 = !NATIVE_LUMA16 && luma_u16.is_some();
-  let need_narrow =
-    rgb.is_some() || rgba.is_some() || luma.is_some() || narrowed_luma_u16 || hsv.is_some();
-  let native_luma = NATIVE_LUMA16 && luma_u16.is_some();
-  if rgba_filter_stream_u32.is_none() {
-    let (fh, fv) = (
-      plan
-        .filter_h()
-        .expect("filter plan carries horizontal windows"),
-      plan
-        .filter_v()
-        .expect("filter plan carries vertical windows"),
-    );
-    *rgba_filter_stream_u32 = Some({
-      let stream = crate::resample::FilterStream::new(fh, fv, plan.src_w(), plan.src_h(), 4)?;
-      crate::resample::try_box(stream).map_err(|_| {
-        MixedSinkerError::Resample(crate::resample::ResampleError::AllocationFailed(
-          crate::resample::PlanGeometry::new(
-            plan.src_w(),
-            plan.src_h(),
-            plan.out_w(),
-            plan.out_h(),
-          ),
-        ))
-      })?
-    });
-  }
+  // Re-fetch the scratches (these grows re-run as no-ops after the pre-commit grows
+  // above).
   let color16 = source_rgba_u16_scratch(color_scratch_u16, ow, plan)?;
   let rgb16: &mut [u16] = if native_luma {
     source_rgb_u16_scratch(rgb_scratch_u16, ow, plan)?
