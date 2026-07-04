@@ -375,6 +375,155 @@ fn rgbf32_rejected_first_row_does_not_poison_output_retry() {
 }
 
 #[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn rgbf32_first_row_scratch_oom_leaves_stream_and_freeze_uncommitted_for_retry() {
+  let host = packed_frame_f32();
+  let wire = as_le_rgbf32(&host);
+  let mut rgb_u16 = vec![0u16; OUT * OUT * 3];
+  let mut luma = vec![0u8; OUT * OUT];
+  {
+    let mut sink =
+      MixedSinker::<Rgbf32, AreaResampler>::with_resampler(SRC, SRC, AreaResampler::to(OUT, OUT))
+        .unwrap()
+        .with_rgb_u16(&mut rgb_u16)
+        .unwrap();
+    sink.begin_frame(SRC as u32, SRC as u32).unwrap();
+    // Arm the single-shot source-RGB-`f32`-scratch grow failpoint: `Rgbf32` stages
+    // its wire row into the host-`f32` scratch, so the row-0 area stream box builds
+    // OK (into a local) and the scratch grow — which runs AFTER the stream build and
+    // BEFORE the field insert — refuses, surfacing AllocationFailed with BOTH the
+    // stream field `None` and the freeze uncommitted (the commit-together atomic
+    // shape; the pre-fix ordering would have left the stream committed).
+    crate::sinker::mixed::arm_source_rgb_f32_scratch_failure();
+    let err = sink
+      .process(Rgbf32Row::new(
+        &wire[..SRC * 3],
+        0,
+        ColorMatrix::Bt709,
+        true,
+      ))
+      .unwrap_err();
+    assert!(
+      matches!(
+        err,
+        MixedSinkerError::Resample(ResampleError::AllocationFailed(_))
+      ),
+      "first-row scratch OOM must surface AllocationFailed, got {err:?}"
+    );
+    // DIRECT stream-rollback proof (the non-vacuous part): the `f32` area stream
+    // field must be `None` — the fix builds it into a LOCAL and inserts only after
+    // the scratch grows, so a failed scratch leaves nothing committed. The
+    // insert-before-scratch shape would leave it `Some` here, so this assertion FAILS
+    // against that shape and PASSES against the fix (a `try_box` box failure cannot
+    // make this distinction — it fails before any stream exists to insert).
+    assert!(
+      !sink.rgb_stream_f32_allocated(),
+      "a scratch OOM must leave the rgb_stream_f32 field None (no partial commit)"
+    );
+    // The freeze was likewise never committed — attaching luma (a CHANGED output
+    // set) and replaying from row 0 is ACCEPTED, not ResampleOutputsChanged.
+    sink.set_luma(&mut luma).unwrap();
+    for r in 0..SRC {
+      sink
+        .process(Rgbf32Row::new(
+          &wire[r * SRC * 3..(r + 1) * SRC * 3],
+          r,
+          ColorMatrix::Bt709,
+          true,
+        ))
+        .expect("frame replay after a first-row scratch OOM must succeed");
+    }
+  }
+  assert!(
+    rgb_u16.iter().any(|&b| b != 0),
+    "the recovered frame produced real rgb_u16 output (scratch OOM was recoverable)"
+  );
+  assert!(
+    luma.iter().any(|&b| b != 0),
+    "the newly-attached luma output was driven on the accepted retry"
+  );
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn rgbf32_first_row_emit_scratch_oom_leaves_stream_and_freeze_uncommitted_for_retry() {
+  // The EMIT-owned out-width u8 narrow scratch (grown for a u8 `rgb` output), NOT
+  // the source f32 staging scratch. The combined helper pre-grows every emit-owned
+  // scratch via an `emit(None)` pregrow call BEFORE the freeze (mirroring the u16 /
+  // u32 helpers), so a first-row OOM in it surfaces with the stream field `None` and
+  // `resample_outputs` uncommitted — never a partial commit.
+  let host = packed_frame_f32();
+  let wire = as_le_rgbf32(&host);
+  let mut rgb = vec![0u8; OUT * OUT * 3];
+  let mut luma = vec![0u8; OUT * OUT];
+  {
+    let mut sink =
+      MixedSinker::<Rgbf32, AreaResampler>::with_resampler(SRC, SRC, AreaResampler::to(OUT, OUT))
+        .unwrap()
+        .with_rgb(&mut rgb)
+        .unwrap();
+    sink.begin_frame(SRC as u32, SRC as u32).unwrap();
+    // Arm the u8 narrow-scratch (`source_rgb_scratch`) grow failpoint — the scratch
+    // the `Rgbf32` emit grows for its u8 `rgb` output, AFTER the stream box builds.
+    // The pregrow call runs it before the freeze, so this OOM must leave BOTH the
+    // stream field `None` and the freeze uncommitted (the post-freeze-grow shape
+    // would have left the stream committed).
+    crate::sinker::mixed::arm_source_rgb_scratch_failure();
+    let err = sink
+      .process(Rgbf32Row::new(
+        &wire[..SRC * 3],
+        0,
+        ColorMatrix::Bt709,
+        true,
+      ))
+      .unwrap_err();
+    assert!(
+      matches!(
+        err,
+        MixedSinkerError::Resample(ResampleError::AllocationFailed(_))
+      ),
+      "first-row emit-scratch OOM must surface AllocationFailed, got {err:?}"
+    );
+    // DIRECT stream-rollback proof: an emit-OWNED scratch OOM must ALSO leave the
+    // field `None` — the helper pregrows the emit scratch before the stream insert +
+    // freeze, so nothing is committed. The post-freeze-grow shape would leave it
+    // `Some` here (freeze committed, stream inserted), so this assertion FAILS
+    // against that shape and PASSES against the fix.
+    assert!(
+      !sink.rgb_stream_f32_allocated(),
+      "an emit-owned scratch OOM must leave the rgb_stream_f32 field None (no partial commit)"
+    );
+    // The freeze was likewise never committed — attaching luma (a CHANGED output
+    // set) and replaying from row 0 is ACCEPTED, not ResampleOutputsChanged.
+    sink.set_luma(&mut luma).unwrap();
+    for r in 0..SRC {
+      sink
+        .process(Rgbf32Row::new(
+          &wire[r * SRC * 3..(r + 1) * SRC * 3],
+          r,
+          ColorMatrix::Bt709,
+          true,
+        ))
+        .expect("frame replay after a first-row emit-scratch OOM must succeed");
+    }
+  }
+  assert!(
+    rgb.iter().any(|&b| b != 0),
+    "the recovered frame produced real rgb output (emit-scratch OOM was recoverable)"
+  );
+  assert!(
+    luma.iter().any(|&b| b != 0),
+    "the newly-attached luma output was driven on the accepted retry"
+  );
+}
+
+#[test]
 fn rgbf32_mid_frame_out_of_sequence_rejected() {
   let host = packed_frame_f32();
   let wire = as_le_rgbf32(&host);

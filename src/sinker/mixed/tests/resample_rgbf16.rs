@@ -538,3 +538,77 @@ fn rgbf16_mid_frame_output_change_rejected() {
   }
   assert!(luma.iter().all(|&l| l == 0));
 }
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn rgbf16_first_row_emit_scratch_oom_leaves_stream_and_freeze_uncommitted_for_retry() {
+  // The EMIT-owned out-width u8 narrow scratch (grown for a u8 `rgb` output by the
+  // `Rgbf16` f16-round emit), NOT the source f32 staging scratch. The shared
+  // combined helper pre-grows every emit-owned scratch via an `emit(None)` pregrow
+  // call BEFORE the freeze, so a first-row OOM in it leaves the stream field `None`
+  // and `resample_outputs` uncommitted — never a partial commit (the f16 arm reuses
+  // the f32 stream, so this is the `AreaStream<f32>` field).
+  let host = packed_frame_f16();
+  let wire = as_le_f16(&host);
+  let mut rgb = std::vec![0u8; OUT * OUT * 3];
+  let mut luma = std::vec![0u8; OUT * OUT];
+  {
+    let mut sink =
+      MixedSinker::<Rgbf16, AreaResampler>::with_resampler(SRC, SRC, AreaResampler::to(OUT, OUT))
+        .unwrap()
+        .with_rgb(&mut rgb)
+        .unwrap();
+    sink.begin_frame(SRC as u32, SRC as u32).unwrap();
+    // Arm the u8 narrow-scratch (`source_rgb_scratch`) grow failpoint — the scratch
+    // the f16 emit grows for its u8 `rgb` output, AFTER the stream box builds. The
+    // pregrow call runs it before the freeze, so this OOM must leave BOTH the stream
+    // field `None` and the freeze uncommitted.
+    crate::sinker::mixed::arm_source_rgb_scratch_failure();
+    let err = sink
+      .process(Rgbf16Row::new(
+        &wire[..SRC * 3],
+        0,
+        ColorMatrix::Bt709,
+        true,
+      ))
+      .unwrap_err();
+    assert!(
+      matches!(
+        err,
+        MixedSinkerError::Resample(ResampleError::AllocationFailed(_))
+      ),
+      "first-row emit-scratch OOM must surface AllocationFailed, got {err:?}"
+    );
+    // DIRECT stream-rollback proof: an emit-OWNED scratch OOM must ALSO leave the
+    // field `None`. The post-freeze-grow shape would leave it `Some` here, so this
+    // assertion FAILS against that shape and PASSES against the fix.
+    assert!(
+      !sink.rgb_stream_f32_allocated(),
+      "an emit-owned scratch OOM must leave the rgb_stream_f32 field None (no partial commit)"
+    );
+    // The freeze was likewise never committed — attaching luma (a CHANGED output
+    // set) and replaying from row 0 is ACCEPTED, not ResampleOutputsChanged.
+    sink.set_luma(&mut luma).unwrap();
+    for r in 0..SRC {
+      sink
+        .process(Rgbf16Row::new(
+          &wire[r * SRC * 3..(r + 1) * SRC * 3],
+          r,
+          ColorMatrix::Bt709,
+          true,
+        ))
+        .expect("frame replay after a first-row emit-scratch OOM must succeed");
+    }
+  }
+  assert!(
+    rgb.iter().any(|&b| b != 0),
+    "the recovered frame produced real rgb output (emit-scratch OOM was recoverable)"
+  );
+  assert!(
+    luma.iter().any(|&b| b != 0),
+    "the newly-attached luma output was driven on the accepted retry"
+  );
+}

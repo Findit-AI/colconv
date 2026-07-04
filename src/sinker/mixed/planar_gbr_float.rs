@@ -35,9 +35,9 @@
 use super::{
   GeometryOverflow, InsufficientBuffer, MixedSinker, MixedSinkerError, RowIndexOutOfRange,
   RowShapeMismatch, RowSlice, check_dimensions_match, check_frozen_alpha_mode,
-  packed_rgb_f32_filter, packed_rgb_f32_resample_preflight, packed_rgb_f32_resample_stream,
-  packed_rgba_f32_filter_resample, packed_rgba_f32_resample, planar_gbr_f32_resample_emit,
-  rgb_row_buf_or_scratch, rgba_plane_row_slice, rgba_u16_plane_row_slice, source_rgb_f32_scratch,
+  packed_rgb_f32_resample, packed_rgb_f32_resample_filter, packed_rgba_f32_filter_resample,
+  packed_rgba_f32_resample, planar_gbr_f32_resample_emit, rgb_row_buf_or_scratch,
+  rgba_plane_row_slice, rgba_u16_plane_row_slice,
 };
 use crate::{
   ColorMatrix, PixelSink,
@@ -486,89 +486,124 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Gbrpf32<BE>, R> {
         ..
       } = self;
 
-      let stream_next_y = match plan.kind() {
-        crate::resample::SpanKind::Area => rgb_stream_f32.as_ref().map_or(0, |s| s.next_y()),
-        crate::resample::SpanKind::Filter => {
-          rgb_filter_stream_f32.as_ref().map_or(0, |s| s.next_y())
-        }
-      };
-      if !packed_rgb_f32_resample_preflight(
-        resample_outputs,
-        rgb,
-        rgba,
-        luma,
-        rgb_u16,
-        rgba_u16,
-        luma_u16,
-        rgb_f32,
-        rgba_f32,
-        rgb_f16,
-        rgba_f16,
-        hsv,
-        stream_next_y,
-        idx,
-      )? {
-        return Ok(());
-      }
-      // Create + sequence-check the kind-appropriate stream BEFORE the
-      // source-width scatter, so a later out-of-sequence row is rejected
-      // without the conversion (reject-before-staging atomicity). The
-      // dedicated tail de-interleaves each binned row and re-runs the exact
-      // direct `gbrpf32_*` kernels (full parity); the binned row is
-      // host-native, so they run `::<HOST_NATIVE_BE>` inside the emit.
+      // Transactional resample (RFC #238 tail-collapse): the span kind picks the
+      // shared 3-channel float driver (float area / signed-coefficient filter, both
+      // binning the staged host-native f32 RGB row scattered from the G/B/R planes);
+      // each derives every output via the dedicated planar `emit` that de-interleaves
+      // the binned row and re-runs the exact direct `gbrpf32_*` kernels (full parity;
+      // the binned row is host-native, so they run `::<HOST_NATIVE_BE>` inside the
+      // emit).
       return match plan.kind() {
-        crate::resample::SpanKind::Area => {
-          let stream = packed_rgb_f32_resample_stream(rgb_stream_f32, plan, idx)?;
-          let src_f32 = source_rgb_f32_scratch(rgb_scratch_f32, w, plan)?;
-          gbrpf32_to_rgb_f32_row::<BE>(row.g(), row.b(), row.r(), src_f32, w, use_simd);
-          planar_gbr_f32_resample_emit(
-            stream,
-            plan,
-            rgb,
-            rgba,
-            luma,
-            rgb_u16,
-            rgba_u16,
-            luma_u16,
-            rgb_f32,
-            rgba_f32,
-            rgb_f16,
-            rgba_f16,
-            hsv,
-            src_f32,
-            rgb_plane_scratch_f32,
-            GBR_FLOAT_LUMA_MATRIX,
-            GBR_FLOAT_FULL_RANGE,
-            idx,
-            use_simd,
-          )
-        }
-        crate::resample::SpanKind::Filter => {
-          let stream = packed_rgb_f32_filter(rgb_filter_stream_f32, plan, idx)?;
-          let src_f32 = source_rgb_f32_scratch(rgb_scratch_f32, w, plan)?;
-          gbrpf32_to_rgb_f32_row::<BE>(row.g(), row.b(), row.r(), src_f32, w, use_simd);
-          planar_gbr_f32_resample_emit(
-            stream,
-            plan,
-            rgb,
-            rgba,
-            luma,
-            rgb_u16,
-            rgba_u16,
-            luma_u16,
-            rgb_f32,
-            rgba_f32,
-            rgb_f16,
-            rgba_f16,
-            hsv,
-            src_f32,
-            rgb_plane_scratch_f32,
-            GBR_FLOAT_LUMA_MATRIX,
-            GBR_FLOAT_FULL_RANGE,
-            idx,
-            use_simd,
-          )
-        }
+        crate::resample::SpanKind::Area => packed_rgb_f32_resample(
+          rgb_stream_f32,
+          resample_outputs,
+          rgb,
+          rgba,
+          luma,
+          rgb_u16,
+          rgba_u16,
+          luma_u16,
+          rgb_f32,
+          rgba_f32,
+          rgb_f16,
+          rgba_f16,
+          hsv,
+          rgb_scratch_f32,
+          w,
+          plan,
+          idx,
+          |src_f32| gbrpf32_to_rgb_f32_row::<BE>(row.g(), row.b(), row.r(), src_f32, w, use_simd),
+          |stream,
+           src,
+           rgb,
+           rgba,
+           luma,
+           rgb_u16,
+           rgba_u16,
+           luma_u16,
+           rgb_f32,
+           rgba_f32,
+           rgb_f16,
+           rgba_f16,
+           hsv| {
+            planar_gbr_f32_resample_emit(
+              stream,
+              plan,
+              rgb,
+              rgba,
+              luma,
+              rgb_u16,
+              rgba_u16,
+              luma_u16,
+              rgb_f32,
+              rgba_f32,
+              rgb_f16,
+              rgba_f16,
+              hsv,
+              src,
+              rgb_plane_scratch_f32,
+              GBR_FLOAT_LUMA_MATRIX,
+              GBR_FLOAT_FULL_RANGE,
+              idx,
+              use_simd,
+            )
+          },
+        ),
+        crate::resample::SpanKind::Filter => packed_rgb_f32_resample_filter(
+          rgb_filter_stream_f32,
+          resample_outputs,
+          rgb,
+          rgba,
+          luma,
+          rgb_u16,
+          rgba_u16,
+          luma_u16,
+          rgb_f32,
+          rgba_f32,
+          rgb_f16,
+          rgba_f16,
+          hsv,
+          rgb_scratch_f32,
+          w,
+          plan,
+          idx,
+          |src_f32| gbrpf32_to_rgb_f32_row::<BE>(row.g(), row.b(), row.r(), src_f32, w, use_simd),
+          |stream,
+           src,
+           rgb,
+           rgba,
+           luma,
+           rgb_u16,
+           rgba_u16,
+           luma_u16,
+           rgb_f32,
+           rgba_f32,
+           rgb_f16,
+           rgba_f16,
+           hsv| {
+            planar_gbr_f32_resample_emit(
+              stream,
+              plan,
+              rgb,
+              rgba,
+              luma,
+              rgb_u16,
+              rgba_u16,
+              luma_u16,
+              rgb_f32,
+              rgba_f32,
+              rgb_f16,
+              rgba_f16,
+              hsv,
+              src,
+              rgb_plane_scratch_f32,
+              GBR_FLOAT_LUMA_MATRIX,
+              GBR_FLOAT_FULL_RANGE,
+              idx,
+              use_simd,
+            )
+          },
+        ),
       };
     }
 
