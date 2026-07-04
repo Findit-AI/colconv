@@ -17,7 +17,7 @@ use crate::{PixelSink, row::*, source::*};
 #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
 use super::super::{
   ChromaSitingChanged, FrozenOutputs, HsvFrameMut, NativePlanarYuvU16, NativeRouteChanged,
-  chroma_422_center_sited_h, native_planar_hb_preflight,
+  chroma_422_center_sited_h, native_planar_hb_preflight_check_only,
   planar_8bit::YUV422P_CENTERED_H_PHASE,
   planar_resample::resample_preflight_check_only,
   subsampled_4_2_0_high_bit::{reserve_pn_chroma_full_u16, upsample_pn_chroma_center_h},
@@ -205,13 +205,15 @@ fn p2xx_process_native<const BITS: u32, const BE: bool, const LOW_PACKED: bool>(
   // per Y row (`chroma_vsub = 1`).
   let cw = w / 2;
 
-  // Run the planar join's COMPLETE pre-feed rejection preflight FIRST —
-  // no-output short-circuit, first-row out-of-sequence, AND frozen-output
-  // (mid-frame output change) — BEFORE any fallible scratch grow below, so
-  // every rejection returns its deterministic typed error and leaves the
-  // wrapper scratch untouched (the crate's preflight-atomicity contract). The
-  // delegate re-runs this identical preflight harmlessly.
-  if !native_planar_hb_preflight(
+  // Run the planar join's COMPLETE compare-only pre-feed rejection preflight
+  // FIRST — no-output short-circuit, first-row out-of-sequence, AND output-set
+  // compare (mid-frame output change) — BEFORE any fallible scratch grow below,
+  // so every rejection returns its deterministic typed error and leaves the
+  // wrapper scratch untouched (the crate's preflight-atomicity contract).
+  // Compare-only (no output-set freeze), so the de-pack reserve below stays a
+  // genuine pre-commit step ahead of the delegate's own commit; the delegate
+  // re-runs this identical compare and owns the single commit.
+  if !native_planar_hb_preflight_check_only(
     native_planar_u16,
     resample_outputs,
     rgb,

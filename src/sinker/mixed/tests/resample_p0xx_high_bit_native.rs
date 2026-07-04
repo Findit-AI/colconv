@@ -650,10 +650,12 @@ macro_rules! p0xx_high_bit_native_suite {
         );
       }
 
-      /// The post-freeze rejection point: after a RECOVERABLE wrapper
-      /// scratch allocation failure on an in-sequence colour row 0 leaves
-      /// `resample_outputs` frozen but the join's Y stream still at row 0, a
-      /// later OUT-OF-SEQUENCE row must reject as the deterministic
+      /// Sequence rejection after a RECOVERABLE wrapper-scratch allocation
+      /// failure: because the wrapper now runs the COMPARE-ONLY preflight (the
+      /// commit is the delegate's), a de-pack failure on an in-sequence colour
+      /// row 0 leaves `resample_outputs` UNFROZEN and the join's Y stream still
+      /// at row 0, so a later OUT-OF-SEQUENCE row is caught by the pre-compare
+      /// first-row sequence check and must reject as the deterministic
       /// `OutOfSequenceRow`, never `AllocationFailed`.
       #[test]
       #[cfg_attr(
@@ -673,10 +675,11 @@ macro_rules! p0xx_high_bit_native_suite {
         .with_rgb_u16(&mut rgb_u16)
         .unwrap();
         // Step 1 — a RECOVERABLE wrapper-scratch failure on the in-sequence
-        // colour row 0. The full preflight clears (freezing the u16 colour
-        // output set), then the armed (Y) scratch reserve refuses:
-        // AllocationFailed. The join's Y stream has not been fed (the grow
-        // precedes the delegate's feed), so it still expects row 0.
+        // colour row 0. The compare-only preflight clears WITHOUT freezing, then
+        // the armed (Y) scratch reserve refuses: AllocationFailed. `resample_outputs`
+        // stays None (the delegate owns the commit, never reached) and the join's
+        // Y stream has not been fed (the grow precedes it), so it still expects
+        // row 0.
         crate::sinker::mixed::subsampled_4_2_0_high_bit::arm_p0xx_alloc_failure();
         let err0 = sink
           .process($row::new(&y[..SRC], &uv[..SRC], 0, M, FR))
@@ -690,10 +693,10 @@ macro_rules! p0xx_high_bit_native_suite {
            AllocationFailed, got {err0:?}"
         );
         // Step 2 — RE-ARM, then feed an OUT-OF-SEQUENCE row (idx 2; the
-        // join's Y stream still expects 0). The pre-freeze first-row branch
-        // is skipped (frozen in step 1), so the post-freeze sequence check
-        // is the sole gate; it must reject as OutOfSequenceRow BEFORE the
-        // re-armed scratch reserve.
+        // join's Y stream still expects 0). Outputs are unfrozen (step 1 never
+        // committed), so the preflight's pre-compare first-row sequence check is
+        // the gate; it must reject as OutOfSequenceRow BEFORE the re-armed
+        // scratch reserve.
         crate::sinker::mixed::subsampled_4_2_0_high_bit::arm_p0xx_alloc_failure();
         let err2 = sink
           .process($row::new(&y[2 * SRC..3 * SRC], &uv[SRC..2 * SRC], 2, M, FR))
@@ -704,7 +707,7 @@ macro_rules! p0xx_high_bit_native_suite {
             MixedSinkerError::Resample(ResampleError::OutOfSequenceRow(_))
           ),
           "an out-of-sequence row after a recoverable scratch failure must \
-           reject as OutOfSequenceRow (the post-freeze sequence check), \
+           reject as OutOfSequenceRow (the pre-compare sequence check), \
            never AllocationFailed, got {err2:?}"
         );
         assert!(

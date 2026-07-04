@@ -891,10 +891,12 @@ macro_rules! y2xx_native_suite {
         );
       }
 
-      /// The post-freeze rejection point: after a RECOVERABLE wrapper scratch
-      /// allocation failure on an in-sequence colour row 0, a later
-      /// OUT-OF-SEQUENCE row must reject as `OutOfSequenceRow`, never
-      /// `AllocationFailed`.
+      /// Sequence rejection after a RECOVERABLE wrapper-scratch allocation
+      /// failure: because the wrapper now runs the COMPARE-ONLY preflight (the
+      /// delegate owns the single commit), a de-pack failure on an in-sequence
+      /// colour row 0 leaves the output set UNFROZEN and the join unbuilt, so a
+      /// later OUT-OF-SEQUENCE row is caught by the pre-compare first-row sequence
+      /// check and must reject as `OutOfSequenceRow`, never `AllocationFailed`.
       #[test]
       #[cfg_attr(
         miri,
@@ -1175,5 +1177,85 @@ fn luma_only_native_skips_chroma_planning() {
   assert!(
     y210_to(&frame, FR, M, &mut sink).is_err(),
     "colour native must reach chroma planning (the armed failpoint fires)"
+  );
+}
+
+/// RFC #238 — a fallible grow INSIDE the delegate, reached through a PACKED
+/// wrapper (Y210) AFTER the wrapper's own de-pack scratch work has succeeded,
+/// must still leave the output-set freeze untouched. Because the packed wrappers
+/// now run the COMPARE-ONLY preflight (the delegate owns the single commit), the
+/// wrapper commits no freeze; a colour-capability rebuild whose delegate
+/// `rgb_scratch_u16` grow refuses returns AllocationFailed with `resample_outputs`
+/// unfrozen, so a retry of row 0 with yet another output attached is accepted
+/// (the pre-fix committing wrapper would have frozen `{luma, rgb_u16}` before the
+/// delegate's grow and mis-rejected the retry as ResampleOutputsChanged).
+#[test]
+#[cfg(feature = "rgb")]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn native_delegate_grow_failure_through_packed_wrapper_is_transactional() {
+  use crate::source::{Y210, Y210Row};
+  // Uniform MSB-aligned 10-bit packed plane (`Y₀ U Y₁ V` quads); 2*SRC u16 / row.
+  let mut packed = vec![0u16; SRC * 2 * SRC];
+  for q in 0..(SRC * SRC / 2) {
+    let base = q * 4;
+    for k in 0..4 {
+      packed[base + k] = (1u16 << 9) << (16 - 10);
+    }
+  }
+  let p = as_le(&packed);
+  let row = |r: usize| Y210Row::new(&p[r * 2 * SRC..(r + 1) * 2 * SRC], r, M, FR);
+
+  let mut luma = vec![0u8; OUT * OUT];
+  let mut rgb_u16 = vec![0u16; OUT * OUT * 3];
+  let mut rgb = vec![0u8; OUT * OUT * 3];
+  let mut sink =
+    MixedSinker::<Y210, AreaResampler>::with_resampler(SRC, SRC, AreaResampler::to(OUT, OUT))
+      .unwrap()
+      .with_native(true)
+      .with_luma(&mut luma)
+      .unwrap();
+
+  // Frame 1: a luma-only native join (chroma absent), frozen as `{luma}`.
+  sink.begin_frame(SRC as u32, SRC as u32).unwrap();
+  for r in 0..SRC {
+    sink
+      .process(row(r))
+      .expect("luma-only frame builds the native join");
+  }
+
+  // Frame 2: attach u16 colour -> the Y210 wrapper de-packs (its OWN scratch work
+  // succeeds), then the delegate rebuilds and grows `rgb_scratch_u16`; arm that
+  // delegate grow to refuse, so the failure lands INSIDE the delegate.
+  sink.begin_frame(SRC as u32, SRC as u32).unwrap();
+  sink.set_rgb_u16(&mut rgb_u16).unwrap();
+  crate::sinker::mixed::arm_planar_hb_native_rgb_u16_scratch_failure();
+  let err = sink.process(row(0)).unwrap_err();
+  assert!(
+    matches!(
+      err,
+      MixedSinkerError::Resample(ResampleError::AllocationFailed(_))
+    ),
+    "a delegate u16-scratch OOM (after the packed wrapper's de-pack) must surface \
+     AllocationFailed, got {err:?}"
+  );
+
+  // The wrapper committed NO freeze: attaching ANOTHER output (rgb) and retrying
+  // row 0 is accepted — proof the freeze was left untouched by the failed
+  // delegate grow.
+  sink.set_rgb(&mut rgb).unwrap();
+  sink
+    .process(row(0))
+    .expect("row 0 with a changed output set must succeed after a delegate u16-scratch OOM");
+  for r in 1..SRC {
+    sink
+      .process(row(r))
+      .expect("the recovered join must process the rest of the frame");
+  }
+  assert!(
+    rgb.iter().any(|&b| b != 0) && rgb_u16.iter().any(|&b| b != 0),
+    "the recovered join must produce real u8 and u16 colour output"
   );
 }
