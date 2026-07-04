@@ -192,6 +192,14 @@ pub(crate) struct NativePlanarYuvU16 {
   /// current siting and drops the join on a mismatch. `false` for a luma-only
   /// join (no chroma plan) and for every co-sited / unphased layout.
   chroma_centered: bool,
+  /// The vertical (`Bottom`, `v = 1`) companion of [`Self::chroma_centered`]
+  /// (RFC #238 S8c — the high-bit 4:4:0 native tier). Set when the cached chroma
+  /// plan folds the `v = 1` phase; [`ResamplePlan::has_chroma_phase`] cannot tell
+  /// a co-sited plan from a bottom-folded one (4:4:0 has no horizontal phase, so
+  /// `chroma_centered` stays `false` for it), so the caller compares THIS flag to
+  /// rebuild a reused join whose vertical siting moved. `false` for a luma-only
+  /// join and every co-sited layout.
+  chroma_bottom: bool,
 }
 
 /// Chroma-grid streams, source de-interleave scratch, and staging of
@@ -238,6 +246,11 @@ impl NativePlanarYuvU16 {
     // Recorded so a reused sink rebuilds (not merely resets) the join when the
     // frame's chroma siting phase changes; stays `false` for a luma-only join.
     let mut chroma_centered = false;
+    // RFC #238 S8c: the vertical (`Bottom`) companion — set when the chroma plan
+    // folds the `v = 1` phase (the high-bit 4:4:0 native tier). 4:4:0 has no
+    // horizontal phase, so `chroma_centered` stays `false` for it and the
+    // vertical axis is recorded separately here.
+    let mut chroma_bottom = false;
     let chroma = if need_color {
       #[cfg(all(test, feature = "std", feature = "yuv-planar"))]
       if FORCE_PLANAR_HB_NATIVE_CHROMA_FAILURE.with(|f| f.take()) {
@@ -250,6 +263,7 @@ impl NativePlanarYuvU16 {
       }
       let chroma_plan = build_chroma_plan()?;
       chroma_centered = chroma_plan.has_chroma_phase();
+      chroma_bottom = chroma_plan.has_chroma_v_phase();
       Some(NativePlanarChromaU16 {
         u: AreaStream::new(
           chroma_plan.h(),
@@ -283,6 +297,7 @@ impl NativePlanarYuvU16 {
       staged: [[false; 2]; 3],
       next_emit: 0,
       chroma_centered,
+      chroma_bottom,
     })
   }
 
@@ -308,6 +323,15 @@ impl NativePlanarYuvU16 {
   /// join whose horizontal chroma phase no longer matches the frame's siting.
   pub(crate) fn chroma_phase_centered(&self) -> Option<bool> {
     self.chroma.as_ref().map(|_| self.chroma_centered)
+  }
+
+  /// The cached chroma plan's vertical (`Bottom`, `v = 1`) phase flag (RFC #238
+  /// S8c), `Some` only when a chroma half is present — a luma-only join carries no
+  /// phase, so its siting is irrelevant. The native call site drops-and-rebuilds a
+  /// reused join whose vertical chroma phase no longer matches the frame's siting
+  /// (the 4:4:0 companion of [`Self::chroma_phase_centered`]).
+  pub(crate) fn chroma_bottom(&self) -> Option<bool> {
+    self.chroma.as_ref().map(|_| self.chroma_bottom)
   }
 
   /// Sequencing preflight across all three plane streams — checked before any
@@ -623,9 +647,10 @@ pub(crate) fn yuv_planar16_process_native<const BITS: u32, const BE: bool>(
     chroma_vsub,
     staged,
     next_emit,
-    // Cache key read only at build / the native call site; the feed loop
-    // ignores it.
+    // Cache keys read only at build / the native call site; the feed loop
+    // ignores them.
     chroma_centered: _,
+    chroma_bottom: _,
   } = &mut **join;
   y.feed_row(idx, &y_src[..w], use_simd, |oy, out_row| {
     let slot = oy & 1;
