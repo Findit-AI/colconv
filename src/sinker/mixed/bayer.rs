@@ -2,9 +2,8 @@
 
 use super::{
   GeometryOverflow, InsufficientBuffer, LumaCoefficients, MixedSinker, MixedSinkerError,
-  RowIndexOutOfRange, RowShapeMismatch, RowSlice, check_dimensions_match,
-  packed_rgb_resample_preflight, packed_rgb_resample_stream, rgb_row_buf_or_scratch,
-  rgb_row_to_luma_row, source_rgb_scratch,
+  RowIndexOutOfRange, RowShapeMismatch, RowSlice, check_dimensions_match, frozen_outputs_check,
+  rgb_row_buf_or_scratch, rgb_row_to_luma_row, source_rgb_scratch,
 };
 use crate::{PixelSink, raw::*, row::*};
 
@@ -110,35 +109,105 @@ impl<R> PixelSink for MixedSinker<'_, Bayer, R> {
       ..
     } = self;
 
-    // Non-identity plan: freeze the output set, then check stream
-    // sequencing — both before touching the scratch — so a no-output
-    // sink stays a no-op and an out-of-sequence row is rejected
-    // without the source-width allocation/demosaic. Only then demosaic
-    // the CFA row into the source-width RGB scratch and feed the
-    // 3-channel area stream. Every output derives from each finalized
-    // (binned) RGB row via the *same Bayer derivations the identity
-    // path uses* — Q8-coefficient luma (`rgb_row_to_luma_row`) and the
-    // OpenCV HSV kernel — so a resampled frame matches a direct
-    // demosaic of the source followed by an area-bin of that RGB.
-    // (Bayer carries no `ColorMatrix`/`full_range`, so it cannot share
-    // the packed-RGB tail's `ColorMatrix`-based emit; only the
-    // freeze/stream/scratch plumbing is shared.)
+    // Non-identity plan: run the shared L1 compare-only preflight (no-output
+    // no-op + out-of-sequence + mid-frame output-set-change rejection), build the
+    // area stream and grow the scratch, then COMMIT the output-set freeze only
+    // after both allocations succeed (RFC #238 tail-collapse: a first-row
+    // allocation failure leaves `resample_outputs` uncommitted, retryable with a
+    // changed output set). Only then demosaic the CFA row into the source-width
+    // RGB scratch and feed the 3-channel area stream. Every output derives from
+    // each finalized (binned) RGB row via the *same Bayer derivations the
+    // identity path uses* — Q8-coefficient luma (`rgb_row_to_luma_row`) and the
+    // OpenCV HSV kernel — so a resampled frame matches a direct demosaic of the
+    // source followed by an area-bin of that RGB. Bayer carries no
+    // `ColorMatrix`/`full_range`, so it CANNOT share the packed-RGB tail's
+    // `ColorMatrix`-based emit; it keeps its BESPOKE emit inline below and shares
+    // only the transactional preflight/stream/scratch/freeze plumbing.
     if let Some(plan) = plan.as_ref() {
-      // `rgba` and `luma_u16` are never attached on a Bayer sink
-      // (RGB-only family), so those shared-preflight slots are `&None`.
-      if !packed_rgb_resample_preflight(
-        resample_outputs,
-        rgb,
-        &None,
-        luma,
-        &None,
-        hsv,
-        rgb_stream.as_ref().map_or(0, |s| s.next_y()),
-        idx,
-      )? {
+      // `rgba` and `luma_u16` are never attached on a Bayer sink (RGB-only
+      // family), so those shared-preflight slots are `&None`.
+      let need_any = rgb.is_some() || luma.is_some() || hsv.is_some();
+      let expected = if need_any {
+        Some(rgb_stream.as_ref().map_or(0, |s| s.next_y()))
+      } else {
+        None
+      };
+      if let core::ops::ControlFlow::Break(()) =
+        super::planar_resample::resample_preflight_check_only(
+          resample_outputs,
+          luma,
+          &None,
+          rgb,
+          &None,
+          &None,
+          &None,
+          &None,
+          &None,
+          &None,
+          &None,
+          &None,
+          hsv,
+          &None,
+          expected,
+          idx,
+        )?
+      {
         return Ok(());
       }
-      let stream = packed_rgb_resample_stream(rgb_stream, plan, idx)?;
+      // Area-only: reject a filter plan before any allocation (Bayer is not routed
+      // to the filter engine).
+      if plan.kind().is_filter() {
+        return Err(plan.unsupported_filter().into());
+      }
+      // Build the missing area stream into a LOCAL and grow the scratch — every
+      // fallible pre-feed step — with NO field mutation, so the stream field insert
+      // and the freeze commit TOGETHER only after both succeed (the
+      // `planar_dual_resample` atomic shape: a scratch OOM leaves `rgb_stream`
+      // `None` AND `resample_outputs` uncommitted, never a partial commit).
+      let new_stream = if rgb_stream.is_none() {
+        let stream =
+          crate::resample::AreaStream::new(plan.h(), plan.v(), plan.src_w(), plan.src_h(), 3)?;
+        Some(crate::resample::try_box(stream).map_err(|_| {
+          MixedSinkerError::Resample(crate::resample::ResampleError::AllocationFailed(
+            crate::resample::PlanGeometry::new(
+              plan.src_w(),
+              plan.src_h(),
+              plan.out_w(),
+              plan.out_h(),
+            ),
+          ))
+        })?)
+      } else {
+        None
+      };
+      source_rgb_scratch(rgb_scratch, w, plan)?;
+      // Every pre-feed allocation succeeded — COMMIT atomically: insert the stream
+      // and freeze the output set together (the compare-only preflight above
+      // already caught any later output change).
+      if let Some(s) = new_stream {
+        *rgb_stream = Some(s);
+      }
+      frozen_outputs_check(
+        resample_outputs,
+        luma,
+        &None,
+        rgb,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        hsv,
+        &None,
+        idx,
+      )?;
+      // Demosaic the CFA row into the (grown) scratch and feed the BESPOKE emit
+      // (Q8 luma + OpenCV HSV, no `ColorMatrix`); this scratch grow re-runs as a
+      // no-op after the pre-commit grow above.
+      let stream = rgb_stream.as_mut().expect("created above");
       let scratch = source_rgb_scratch(rgb_scratch, w, plan)?;
       bayer_to_rgb_row(
         row.above(),

@@ -353,3 +353,87 @@ fn bayer8_resample_rejects_out_of_sequence_rows() {
     "got {err:?}"
   );
 }
+
+/// RFC #238 tail-collapse atomicity (Bayer, scratch OOM): the Bayer8 arm builds
+/// its area stream into a LOCAL, grows the source-width demosaic scratch, then
+/// inserts the stream + freezes together (keeping its BESPOKE Q8-luma / OpenCV-HSV
+/// emit). A scratch-grow OOM AFTER the stream build therefore leaves the stream
+/// field `None` AND `resample_outputs` uncommitted, so a row-0 retry with a
+/// CHANGED output set is accepted. The DIRECT `rgb_stream`-None assertion is
+/// non-vacuous — it FAILS against the R1-buggy insert-before-scratch shape.
+#[test]
+#[cfg(feature = "std")]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn bayer8_first_row_scratch_oom_leaves_stream_and_freeze_uncommitted_for_retry() {
+  let plane = bayer_plane(0x7A9E);
+  let matrix = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+  let mut rgb = vec![0u8; OUT * OUT * 3];
+  let mut luma = vec![0u8; OUT * OUT];
+  {
+    let mut sink =
+      MixedSinker::<Bayer, AreaResampler>::with_resampler(SRC, SRC, AreaResampler::to(OUT, OUT))
+        .unwrap()
+        .with_rgb(&mut rgb)
+        .unwrap();
+    sink.begin_frame(SRC as u32, SRC as u32).unwrap();
+    // Arm the source-RGB-scratch grow failpoint: the row-0 stream box builds OK,
+    // then the demosaic scratch grow refuses — AllocationFailed with BOTH the
+    // stream field `None` and the freeze uncommitted.
+    crate::sinker::mixed::arm_source_rgb_scratch_failure();
+    let row0 = &plane[0..SRC];
+    let err = sink
+      .process(BayerRow::new(
+        row0,
+        row0,
+        row0,
+        0,
+        BayerPattern::Rggb,
+        BayerDemosaic::Bilinear,
+        matrix,
+      ))
+      .unwrap_err();
+    assert!(
+      matches!(
+        err,
+        MixedSinkerError::Resample(ResampleError::AllocationFailed(_))
+      ),
+      "first-row Bayer scratch OOM must surface AllocationFailed, got {err:?}"
+    );
+    // DIRECT stream-rollback proof: the area stream field must be `None` (the fix
+    // builds it into a local and inserts only after the scratch grows). Fails
+    // against the R1-buggy insert-before-scratch shape.
+    assert!(
+      !sink.rgb_stream_allocated(),
+      "a Bayer scratch OOM must leave the rgb_stream field None (no partial commit)"
+    );
+    // The freeze was likewise never committed — attaching luma (a CHANGED output
+    // set) and replaying from row 0 is ACCEPTED, not ResampleOutputsChanged.
+    sink.set_luma(&mut luma).unwrap();
+    for r in 0..SRC {
+      let above = r.saturating_sub(1);
+      let below = (r + 1).min(SRC - 1);
+      sink
+        .process(BayerRow::new(
+          &plane[above * SRC..above * SRC + SRC],
+          &plane[r * SRC..r * SRC + SRC],
+          &plane[below * SRC..below * SRC + SRC],
+          r,
+          BayerPattern::Rggb,
+          BayerDemosaic::Bilinear,
+          matrix,
+        ))
+        .expect("frame replay after a first-row Bayer scratch OOM must succeed");
+    }
+  }
+  assert!(
+    rgb.iter().any(|&b| b != 0),
+    "the recovered frame produced real RGB output (scratch OOM was recoverable)"
+  );
+  assert!(
+    luma.iter().any(|&b| b != 0),
+    "the newly-attached luma output was driven on the accepted retry"
+  );
+}

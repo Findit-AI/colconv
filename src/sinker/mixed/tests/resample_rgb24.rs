@@ -225,3 +225,71 @@ fn rgb24_rejected_first_row_does_not_poison_output_retry() {
     .process(Rgb24Row::new(&buf[..SRC * 3], 0, ColorMatrix::Bt709, true))
     .expect("row 0 must succeed after a rejected out-of-sequence first row");
 }
+
+/// RFC #238 tail-collapse atomicity (3-channel): the transactional
+/// [`packed_rgb_resample`] helper commits the output-set freeze only AFTER the
+/// (fallible) area-stream box allocation succeeds. A first-row stream-alloc
+/// refusal therefore returns the typed `AllocationFailed` leaving
+/// `resample_outputs` UNCOMMITTED (the output untouched), so a row-0 retry with a
+/// CHANGED output set (luma added) is ACCEPTED — not mis-rejected as
+/// `ResampleOutputsChanged` — and drives real output. The pre-collapse split
+/// (freeze-before-alloc) would have frozen `{rgb}` and rejected the retry.
+#[test]
+#[cfg(feature = "std")]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn rgb24_first_row_stream_alloc_failure_leaves_freeze_uncommitted_for_retry() {
+  let buf = packed_frame();
+  let mut rgb = vec![0u8; OUT * OUT * 3];
+  let mut luma = vec![0u8; OUT * OUT];
+  {
+    let mut sink =
+      MixedSinker::<Rgb24, AreaResampler>::with_resampler(SRC, SRC, AreaResampler::to(OUT, OUT))
+        .unwrap()
+        .with_rgb(&mut rgb)
+        .unwrap();
+    sink.begin_frame(SRC as u32, SRC as u32).unwrap();
+    // Arm the single-shot box-alloc failpoint: the row-0 area-stream box alloc
+    // refuses, surfacing the recoverable AllocationFailed with the freeze
+    // uncommitted (the helper freezes only after the alloc succeeds).
+    crate::resample::arm_box_failure();
+    let err = sink
+      .process(Rgb24Row::new(&buf[..SRC * 3], 0, ColorMatrix::Bt709, true))
+      .unwrap_err();
+    assert!(
+      matches!(
+        err,
+        MixedSinkerError::Resample(ResampleError::AllocationFailed(_))
+      ),
+      "first-row stream box-alloc refusal must surface AllocationFailed, got {err:?}"
+    );
+    // The box alloc fails before the field insert, so the stream field stays None.
+    assert!(
+      !sink.rgb_stream_allocated(),
+      "a box-alloc-refused first row must leave the rgb_stream field None"
+    );
+    // The freeze was never committed — attaching luma (a CHANGED output set) and
+    // replaying the frame from row 0 is ACCEPTED, not ResampleOutputsChanged.
+    sink.set_luma(&mut luma).unwrap();
+    for r in 0..SRC {
+      sink
+        .process(Rgb24Row::new(
+          &buf[r * SRC * 3..(r + 1) * SRC * 3],
+          r,
+          ColorMatrix::Bt709,
+          true,
+        ))
+        .expect("frame replay after a first-row stream-alloc OOM must succeed");
+    }
+  }
+  assert!(
+    rgb.iter().any(|&b| b != 0),
+    "the recovered frame produced real RGB output (box-alloc refusal was recoverable)"
+  );
+  assert!(
+    luma.iter().any(|&b| b != 0),
+    "the newly-attached luma output was driven on the accepted retry"
+  );
+}

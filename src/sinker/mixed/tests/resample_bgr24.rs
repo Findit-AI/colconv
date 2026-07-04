@@ -264,3 +264,76 @@ fn bgr24_resample_rejects_out_of_sequence_rows() {
     "got {err:?}"
   );
 }
+
+/// RFC #238 tail-collapse atomicity (3-channel, scratch OOM): `packed_rgb_resample`
+/// builds the area stream into a LOCAL and grows the source-width scratch BEFORE
+/// committing the stream field + the output-set freeze TOGETHER. A scratch-grow
+/// OOM AFTER the (successful) stream construction therefore leaves the stream
+/// field `None` AND `resample_outputs` uncommitted (no partial commit), so a
+/// row-0 retry with a CHANGED output set is ACCEPTED and drives real output.
+/// (`Rgb24` is zero-copy/direct with no scratch to fail; `Bgr24`, its staged
+/// sibling, grows `source_rgb_scratch`, so it exercises this path.)
+#[test]
+#[cfg(feature = "std")]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn bgr24_first_row_scratch_oom_leaves_stream_and_freeze_uncommitted_for_retry() {
+  let buf = packed_bgr_frame();
+  let mut rgb = vec![0u8; OUT * OUT * 3];
+  let mut luma = vec![0u8; OUT * OUT];
+  {
+    let mut sink =
+      MixedSinker::<Bgr24, AreaResampler>::with_resampler(SRC, SRC, AreaResampler::to(OUT, OUT))
+        .unwrap()
+        .with_rgb(&mut rgb)
+        .unwrap();
+    sink.begin_frame(SRC as u32, SRC as u32).unwrap();
+    // Arm the single-shot source-RGB-scratch grow failpoint: the row-0 stream box
+    // builds OK, then the scratch grow refuses — surfacing AllocationFailed with
+    // BOTH the stream field `None` and the freeze uncommitted (the commit-together
+    // atomic shape; the pre-fix ordering would have left the stream committed).
+    crate::sinker::mixed::arm_source_rgb_scratch_failure();
+    let err = sink
+      .process(Bgr24Row::new(&buf[..SRC * 3], 0, ColorMatrix::Bt709, true))
+      .unwrap_err();
+    assert!(
+      matches!(
+        err,
+        MixedSinkerError::Resample(ResampleError::AllocationFailed(_))
+      ),
+      "first-row scratch OOM must surface AllocationFailed, got {err:?}"
+    );
+    // DIRECT stream-rollback proof (the non-vacuous part): the area stream field
+    // must be `None` — the fix builds it into a LOCAL and inserts only after the
+    // scratch grows, so the failed scratch leaves nothing committed. The R1-buggy
+    // shape (insert the stream BEFORE the scratch grow) would leave it `Some` here,
+    // so this assertion FAILS against the buggy shape and PASSES against the fix.
+    assert!(
+      !sink.rgb_stream_allocated(),
+      "a scratch OOM must leave the rgb_stream field None (no partial commit)"
+    );
+    // The freeze was likewise never committed — attaching luma (a CHANGED output
+    // set) and replaying from row 0 is ACCEPTED, not ResampleOutputsChanged.
+    sink.set_luma(&mut luma).unwrap();
+    for r in 0..SRC {
+      sink
+        .process(Bgr24Row::new(
+          &buf[r * SRC * 3..(r + 1) * SRC * 3],
+          r,
+          ColorMatrix::Bt709,
+          true,
+        ))
+        .expect("frame replay after a first-row scratch OOM must succeed");
+    }
+  }
+  assert!(
+    rgb.iter().any(|&b| b != 0),
+    "the recovered frame produced real RGB output (scratch OOM was recoverable)"
+  );
+  assert!(
+    luma.iter().any(|&b| b != 0),
+    "the newly-attached luma output was driven on the accepted retry"
+  );
+}
