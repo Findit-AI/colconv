@@ -205,6 +205,32 @@ pub(super) const fn chroma_420_bottom_sited_v(loc: crate::ChromaLocation) -> boo
   matches!(loc, crate::ChromaLocation::Bottom)
 }
 
+/// Whether `loc` places 4:4:0 chroma at the **bottom** vertical phase (`v = 1`)
+/// — the one vertical siting a top-to-bottom stream can reconstruct with a
+/// backward one-row chroma lookback (the even luma row's predecessor chroma row
+/// is already streamed).
+///
+/// 4:4:0 subsamples chroma 2:1 **vertically only** (full-width chroma), so the
+/// siting reduces to its vertical axis alone and there is NO horizontal phase to
+/// stage. This is the 4:4:0 companion of the 4:2:0 [`chroma_420_bottom_sited_v`]
+/// but with a WIDER match: both `Bottom` (`h = 0.5`, `v = 1`) AND `BottomLeft`
+/// (`h = 0`, `v = 1`) are `v = 1`, and because 4:4:0 never reconstructs
+/// horizontally their horizontal difference is irrelevant — both fold the
+/// identical vertical box average. (4:2:0 excludes `BottomLeft` because there the
+/// `h = 0` phase would need a co-sited full-width horizontal staging its
+/// `h = 0.5` path lacks; 4:4:0 has no such constraint.) The `v = 0` (`Top` /
+/// `TopLeft`) and `v = 0.5` (`Center` / `Left`) phases need the *next* chroma row
+/// for a causal reconstruction — which the row-at-a-time `process` cannot see —
+/// so they keep the byte-identical vertical-replicate decode.
+#[cfg(feature = "yuv-planar")]
+#[inline]
+pub(super) const fn chroma_440_bottom_sited_v(loc: crate::ChromaLocation) -> bool {
+  matches!(
+    loc,
+    crate::ChromaLocation::Bottom | crate::ChromaLocation::BottomLeft
+  )
+}
+
 /// Whether `loc` places 4:2:2 chroma at the **horizontal center** between its
 /// two luma columns — the MPEG-1 / JPEG horizontal phase that needs phase-0.5
 /// reconstruction
