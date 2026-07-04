@@ -54,8 +54,7 @@
 use super::{
   GeometryOverflow, InsufficientBuffer, MixedSinker, MixedSinkerError, RowIndexOutOfRange,
   RowShapeMismatch, RowSlice, check_dimensions_match, direct_rgb_u16_scratch,
-  packed_rgb_u16_resample_emit, packed_rgb_u16_resample_preflight, packed_rgb_u16_resample_stream,
-  rgb_row_buf_or_scratch, rgba_plane_row_slice, rgba_u16_plane_row_slice, source_rgb_u16_scratch,
+  packed_rgb_u16_resample, rgb_row_buf_or_scratch, rgba_plane_row_slice, rgba_u16_plane_row_slice,
 };
 use crate::{
   PixelSink,
@@ -221,7 +220,12 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, X2Rgb10<BE>, R> {
     // variant — byte-identical to this source's own narrowed direct path
     // (no native 10-bit luma kernel exists).
     if let Some(plan) = plan.as_ref() {
-      if !packed_rgb_u16_resample_preflight(
+      // Transactional area resample (RFC #238 tail-collapse): unpack the packed
+      // 10-bit wire row into the source-width native-u16 RGB staging scratch and
+      // feed the shared 3-channel u16 helper (`SRC_BITS = 10`, narrowed
+      // `luma_u16`). X2Rgb10 is area-only — a filter plan is rejected inside.
+      return packed_rgb_u16_resample::<10, false>(
+        rgb_stream_u16,
         resample_outputs,
         rgb,
         rgba,
@@ -230,30 +234,15 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, X2Rgb10<BE>, R> {
         rgba_u16,
         luma_u16,
         hsv,
-        rgb_stream_u16.as_ref().map_or(0, |s| s.next_y()),
-        idx,
-      )? {
-        return Ok(());
-      }
-      let stream = packed_rgb_u16_resample_stream(rgb_stream_u16, plan, idx)?;
-      let src_u16 = source_rgb_u16_scratch(rgb_scratch_u16, w, plan)?;
-      x2rgb10_to_rgb_u16_row_endian::<BE>(row.x2rgb10(), src_u16, w, use_simd);
-      return packed_rgb_u16_resample_emit::<10, false>(
-        stream,
-        plan,
-        rgb,
-        rgba,
-        luma,
-        rgb_u16,
-        rgba_u16,
-        luma_u16,
-        hsv,
-        src_u16,
+        rgb_scratch_u16,
         rgb_scratch,
-        row.matrix(),
-        row.full_range(),
+        w,
+        plan,
         idx,
         use_simd,
+        row.matrix(),
+        row.full_range(),
+        |src_u16| x2rgb10_to_rgb_u16_row_endian::<BE>(row.x2rgb10(), src_u16, w, use_simd),
       );
     }
 
@@ -509,7 +498,10 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, X2Bgr10<BE>, R> {
     // narrowed-luma_u16 rationale; `rgba_u16` expands the binned row with
     // opaque alpha 1023.
     if let Some(plan) = plan.as_ref() {
-      if !packed_rgb_u16_resample_preflight(
+      // Transactional area resample (RFC #238 tail-collapse) — the X2Bgr10 twin of
+      // the X2Rgb10 path (`SRC_BITS = 10`, narrowed `luma_u16`, area-only).
+      return packed_rgb_u16_resample::<10, false>(
+        rgb_stream_u16,
         resample_outputs,
         rgb,
         rgba,
@@ -518,30 +510,15 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, X2Bgr10<BE>, R> {
         rgba_u16,
         luma_u16,
         hsv,
-        rgb_stream_u16.as_ref().map_or(0, |s| s.next_y()),
-        idx,
-      )? {
-        return Ok(());
-      }
-      let stream = packed_rgb_u16_resample_stream(rgb_stream_u16, plan, idx)?;
-      let src_u16 = source_rgb_u16_scratch(rgb_scratch_u16, w, plan)?;
-      x2bgr10_to_rgb_u16_row_endian::<BE>(row.x2bgr10(), src_u16, w, use_simd);
-      return packed_rgb_u16_resample_emit::<10, false>(
-        stream,
-        plan,
-        rgb,
-        rgba,
-        luma,
-        rgb_u16,
-        rgba_u16,
-        luma_u16,
-        hsv,
-        src_u16,
+        rgb_scratch_u16,
         rgb_scratch,
-        row.matrix(),
-        row.full_range(),
+        w,
+        plan,
         idx,
         use_simd,
+        row.matrix(),
+        row.full_range(),
+        |src_u16| x2bgr10_to_rgb_u16_row_endian::<BE>(row.x2bgr10(), src_u16, w, use_simd),
       );
     }
 
