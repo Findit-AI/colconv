@@ -946,3 +946,142 @@ rgba8_resample_suite!(rgba, Rgba, RgbaRow, rgba_to, RgbaFrame, [0, 1, 2, 3]);
 rgba8_resample_suite!(bgra, Bgra, BgraRow, bgra_to, BgraFrame, [2, 1, 0, 3]);
 rgba8_resample_suite!(argb, Argb, ArgbRow, argb_to, ArgbFrame, [3, 0, 1, 2]);
 rgba8_resample_suite!(abgr, Abgr, AbgrRow, abgr_to, AbgrFrame, [3, 2, 1, 0]);
+
+/// RFC #238 tail-collapse atomicity (4-channel): the in-place-upgraded
+/// `packed_rgba_resample` commits the output-set freeze only AFTER the
+/// (fallible) 4-channel area-stream box allocation succeeds. A first-row
+/// stream-alloc refusal returns the typed `AllocationFailed` leaving
+/// `resample_outputs` UNCOMMITTED (the output untouched), so a row-0 retry with a
+/// CHANGED output set (hsv added) is ACCEPTED — not mis-rejected as
+/// `ResampleOutputsChanged` — and drives real output. The pre-collapse split
+/// (freeze-before-alloc) would have frozen `{rgba}` and rejected the retry.
+#[test]
+#[cfg(feature = "std")]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn rgba_first_row_stream_alloc_failure_leaves_freeze_uncommitted_for_retry() {
+  let pix = packed_frame(0xA70A);
+  let mut rgba = std::vec![0u8; OUT * OUT * 4];
+  let mut h = std::vec![0u8; OUT * OUT];
+  let mut s = std::vec![0u8; OUT * OUT];
+  let mut v = std::vec![0u8; OUT * OUT];
+  {
+    let mut sink =
+      MixedSinker::<Rgba, AreaResampler>::with_resampler(SRC, SRC, AreaResampler::to(OUT, OUT))
+        .unwrap()
+        .with_rgba(&mut rgba)
+        .unwrap();
+    sink.begin_frame(SRC as u32, SRC as u32).unwrap();
+    // Arm the single-shot box-alloc failpoint: the row-0 4-channel area-stream box
+    // alloc refuses, surfacing the recoverable AllocationFailed with the freeze
+    // uncommitted (the helper freezes only after the alloc succeeds).
+    crate::resample::arm_box_failure();
+    let err = sink
+      .process(RgbaRow::new(&pix[..SRC * 4], 0, ColorMatrix::Bt709, true))
+      .unwrap_err();
+    assert!(
+      matches!(
+        err,
+        MixedSinkerError::Resample(ResampleError::AllocationFailed(_))
+      ),
+      "first-row 4-channel stream box-alloc refusal must surface AllocationFailed, got {err:?}"
+    );
+    // The box alloc fails before the field insert, so the stream field stays None.
+    assert!(
+      !sink.rgba_stream_allocated(),
+      "a box-alloc-refused first row must leave the rgba_stream field None"
+    );
+    // The freeze was never committed — attaching hsv (a CHANGED output set) and
+    // replaying the frame from row 0 is ACCEPTED, not ResampleOutputsChanged.
+    sink.set_hsv(&mut h, &mut s, &mut v).unwrap();
+    for r in 0..SRC {
+      sink
+        .process(RgbaRow::new(
+          &pix[r * SRC * 4..(r + 1) * SRC * 4],
+          r,
+          ColorMatrix::Bt709,
+          true,
+        ))
+        .expect("frame replay after a first-row 4-channel stream-alloc OOM must succeed");
+    }
+  }
+  assert!(
+    rgba.iter().any(|&b| b != 0),
+    "the recovered frame produced real RGBA output (box-alloc refusal was recoverable)"
+  );
+}
+
+/// RFC #238 tail-collapse atomicity (4-channel, scratch OOM): confirms the same
+/// commit-together shape in `packed_rgba_resample` — the RGBA stream builds into a
+/// LOCAL, then the drop-alpha RGB scratch (`source_rgb_scratch`, needed here
+/// because `hsv` is attached) grows before the stream field insert + freeze. A
+/// scratch OOM AFTER the successful stream build leaves the stream field `None`
+/// AND `resample_outputs` uncommitted, so a row-0 retry with a CHANGED output set
+/// (luma added) is ACCEPTED and drives real output.
+#[test]
+#[cfg(feature = "std")]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn rgba_first_row_scratch_oom_leaves_stream_and_freeze_uncommitted_for_retry() {
+  let pix = packed_frame(0x5C0A);
+  let mut rgba = std::vec![0u8; OUT * OUT * 4];
+  let mut h = std::vec![0u8; OUT * OUT];
+  let mut s = std::vec![0u8; OUT * OUT];
+  let mut v = std::vec![0u8; OUT * OUT];
+  let mut luma = std::vec![0u8; OUT * OUT];
+  {
+    let mut sink =
+      MixedSinker::<Rgba, AreaResampler>::with_resampler(SRC, SRC, AreaResampler::to(OUT, OUT))
+        .unwrap()
+        .with_rgba(&mut rgba)
+        .unwrap();
+    // Attach hsv so the drop-alpha RGB scratch (`source_rgb_scratch`) is grown.
+    sink.set_hsv(&mut h, &mut s, &mut v).unwrap();
+    sink.begin_frame(SRC as u32, SRC as u32).unwrap();
+    // Arm the single-shot source-RGB-scratch grow failpoint: the row-0 RGBA stream
+    // box builds OK, then the drop-alpha RGB scratch grow refuses — surfacing
+    // AllocationFailed with BOTH the stream field `None` and the freeze
+    // uncommitted (the commit-together atomic shape).
+    crate::sinker::mixed::arm_source_rgb_scratch_failure();
+    let err = sink
+      .process(RgbaRow::new(&pix[..SRC * 4], 0, ColorMatrix::Bt709, true))
+      .unwrap_err();
+    assert!(
+      matches!(
+        err,
+        MixedSinkerError::Resample(ResampleError::AllocationFailed(_))
+      ),
+      "first-row 4-channel drop-alpha scratch OOM must surface AllocationFailed, got {err:?}"
+    );
+    // DIRECT stream-rollback proof (the non-vacuous part): the 4-channel stream
+    // field must be `None` — the fix builds it into a LOCAL and inserts only after
+    // the scratch grows. The R1-buggy shape (insert BEFORE the scratch) would leave
+    // it `Some` here, so this FAILS against the buggy shape and PASSES against the
+    // fix.
+    assert!(
+      !sink.rgba_stream_allocated(),
+      "a scratch OOM must leave the rgba_stream field None (no partial commit)"
+    );
+    // The freeze was likewise never committed — attaching luma (a CHANGED output
+    // set) and replaying from row 0 is ACCEPTED, not ResampleOutputsChanged.
+    sink.set_luma(&mut luma).unwrap();
+    for r in 0..SRC {
+      sink
+        .process(RgbaRow::new(
+          &pix[r * SRC * 4..(r + 1) * SRC * 4],
+          r,
+          ColorMatrix::Bt709,
+          true,
+        ))
+        .expect("frame replay after a first-row 4-channel scratch OOM must succeed");
+    }
+  }
+  assert!(
+    rgba.iter().any(|&b| b != 0),
+    "the recovered frame produced real RGBA output (scratch OOM was recoverable)"
+  );
+}

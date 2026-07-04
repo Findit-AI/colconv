@@ -50,10 +50,9 @@
 
 use super::{
   InsufficientBuffer, MixedSinker, MixedSinkerError, RowIndexOutOfRange, RowShapeMismatch,
-  RowSlice, check_dimensions_match, check_frozen_alpha_mode, packed_rgb_filter_stream,
-  packed_rgb_resample_emit, packed_rgb_resample_preflight, packed_rgb_resample_stream,
-  packed_rgba_filter_resample, packed_rgba_resample, rgb_row_buf_or_scratch, rgba_plane_row_slice,
-  source_rgb_scratch,
+  RowSlice, check_dimensions_match, check_frozen_alpha_mode, packed_rgb_resample,
+  packed_rgb_resample_filter, packed_rgba_filter_resample, packed_rgba_resample,
+  rgb_row_buf_or_scratch, rgba_plane_row_slice,
 };
 use crate::{
   PixelSink,
@@ -137,7 +136,7 @@ impl<R> PixelSink for MixedSinker<'_, Rgb24, R> {
       rgba,
       luma,
       hsv,
-      rgb_scratch: _,
+      rgb_scratch,
       plan,
       rgb_stream,
       rgb_filter_stream,
@@ -146,63 +145,50 @@ impl<R> PixelSink for MixedSinker<'_, Rgb24, R> {
     } = self;
 
     // Non-identity plan: the source row IS interleaved RGB, so the
-    // fused path feeds it to the resample stream directly — there is no
-    // conversion step, making the native and row-stage tiers one and
-    // the same for this family. Luma / HSV / RGBA derive from each
-    // finalized output row. The plan's span kind picks the engine — the
-    // integer area stream or the signed-coefficient filter stream.
+    // fused path feeds it to the resample stream directly (zero-copy —
+    // `direct`), making the native and row-stage tiers one and the same
+    // for this family. Luma / HSV / RGBA derive from each finalized
+    // output row. The plan's span kind picks the engine — the integer
+    // area stream or the signed-coefficient filter stream — behind the
+    // shared transactional resample helper (RFC #238 tail-collapse).
     if let Some(plan) = plan.as_ref() {
-      let stream_next_y = match plan.kind() {
-        crate::resample::SpanKind::Area => rgb_stream.as_ref().map_or(0, |s| s.next_y()),
-        crate::resample::SpanKind::Filter => rgb_filter_stream.as_ref().map_or(0, |s| s.next_y()),
-      };
-      if !packed_rgb_resample_preflight(
-        resample_outputs,
-        rgb,
-        rgba,
-        luma,
-        &None,
-        hsv,
-        stream_next_y,
-        idx,
-      )? {
-        return Ok(());
-      }
       return match plan.kind() {
-        crate::resample::SpanKind::Area => {
-          let stream = packed_rgb_resample_stream(rgb_stream, plan, idx)?;
-          packed_rgb_resample_emit(
-            stream,
-            plan,
-            rgb,
-            rgba,
-            luma,
-            &mut None,
-            hsv,
-            row.rgb(),
-            row.matrix(),
-            row.full_range(),
-            idx,
-            use_simd,
-          )
-        }
-        crate::resample::SpanKind::Filter => {
-          let stream = packed_rgb_filter_stream(rgb_filter_stream, plan, idx)?;
-          packed_rgb_resample_emit(
-            stream,
-            plan,
-            rgb,
-            rgba,
-            luma,
-            &mut None,
-            hsv,
-            row.rgb(),
-            row.matrix(),
-            row.full_range(),
-            idx,
-            use_simd,
-          )
-        }
+        crate::resample::SpanKind::Area => packed_rgb_resample(
+          rgb_stream,
+          resample_outputs,
+          rgb,
+          rgba,
+          luma,
+          &mut None,
+          hsv,
+          rgb_scratch,
+          Some(row.rgb()),
+          w,
+          plan,
+          idx,
+          use_simd,
+          row.matrix(),
+          row.full_range(),
+          |_| {},
+        ),
+        crate::resample::SpanKind::Filter => packed_rgb_resample_filter(
+          rgb_filter_stream,
+          resample_outputs,
+          rgb,
+          rgba,
+          luma,
+          &mut None,
+          hsv,
+          rgb_scratch,
+          Some(row.rgb()),
+          w,
+          plan,
+          idx,
+          use_simd,
+          row.matrix(),
+          row.full_range(),
+          |_| {},
+        ),
       };
     }
     let one_plane_start = idx * w;
@@ -331,40 +317,28 @@ impl<R> PixelSink for MixedSinker<'_, Bgr24, R> {
       ..
     } = self;
 
-    // Non-identity plan: freeze the output set, then check stream
-    // sequencing — both before touching the scratch — so a no-output
-    // sink stays a no-op and an out-of-sequence row is rejected
-    // without the source-width allocation/swap. Only then stage the
-    // BGR->RGB row and feed the one packed-RGB resample tail.
+    // Non-identity plan: stage the BGR->RGB row into the source-width
+    // scratch and feed the shared transactional resample helper (RFC #238
+    // tail-collapse). Area-only — a filter plan is rejected inside the
+    // helper (`Bgr24` is not routed to the filter engine).
     if let Some(plan) = plan.as_ref() {
-      if !packed_rgb_resample_preflight(
+      return packed_rgb_resample(
+        rgb_stream,
         resample_outputs,
-        rgb,
-        rgba,
-        luma,
-        &None,
-        hsv,
-        rgb_stream.as_ref().map_or(0, |s| s.next_y()),
-        idx,
-      )? {
-        return Ok(());
-      }
-      let stream = packed_rgb_resample_stream(rgb_stream, plan, idx)?;
-      let scratch = source_rgb_scratch(rgb_scratch, w, plan)?;
-      bgr_to_rgb_row(row.bgr(), scratch, w, use_simd);
-      return packed_rgb_resample_emit(
-        stream,
-        plan,
         rgb,
         rgba,
         luma,
         &mut None,
         hsv,
-        scratch,
-        row.matrix(),
-        row.full_range(),
+        rgb_scratch,
+        None,
+        w,
+        plan,
         idx,
         use_simd,
+        row.matrix(),
+        row.full_range(),
+        |scratch| bgr_to_rgb_row(row.bgr(), scratch, w, use_simd),
       );
     }
 
@@ -560,34 +534,23 @@ impl<R> PixelSink for MixedSinker<'_, Rgba, R> {
               |_| {},
             );
           }
-          if !packed_rgb_resample_preflight(
+          return packed_rgb_resample(
+            rgb_stream,
             resample_outputs,
-            rgb,
-            rgba,
-            luma,
-            &None,
-            hsv,
-            rgb_stream.as_ref().map_or(0, |s| s.next_y()),
-            idx,
-          )? {
-            return Ok(());
-          }
-          let stream = packed_rgb_resample_stream(rgb_stream, plan, idx)?;
-          let scratch = source_rgb_scratch(rgb_scratch, w, plan)?;
-          rgba_to_rgb_row(row.rgba(), scratch, w, use_simd);
-          return packed_rgb_resample_emit(
-            stream,
-            plan,
             rgb,
             rgba,
             luma,
             &mut None,
             hsv,
-            scratch,
-            row.matrix(),
-            row.full_range(),
+            rgb_scratch,
+            None,
+            w,
+            plan,
             idx,
             use_simd,
+            row.matrix(),
+            row.full_range(),
+            |scratch| rgba_to_rgb_row(row.rgba(), scratch, w, use_simd),
           );
         }
         crate::resample::SpanKind::Filter => {
@@ -644,34 +607,23 @@ impl<R> PixelSink for MixedSinker<'_, Rgba, R> {
               |dst| dst.copy_from_slice(row.rgba()),
             );
           }
-          if !packed_rgb_resample_preflight(
+          return packed_rgb_resample_filter(
+            rgb_filter_stream,
             resample_outputs,
-            rgb,
-            rgba,
-            luma,
-            &None,
-            hsv,
-            rgb_filter_stream.as_ref().map_or(0, |s| s.next_y()),
-            idx,
-          )? {
-            return Ok(());
-          }
-          let stream = packed_rgb_filter_stream(rgb_filter_stream, plan, idx)?;
-          let scratch = source_rgb_scratch(rgb_scratch, w, plan)?;
-          rgba_to_rgb_row(row.rgba(), scratch, w, use_simd);
-          return packed_rgb_resample_emit(
-            stream,
-            plan,
             rgb,
             rgba,
             luma,
             &mut None,
             hsv,
-            scratch,
-            row.matrix(),
-            row.full_range(),
+            rgb_scratch,
+            None,
+            w,
+            plan,
             idx,
             use_simd,
+            row.matrix(),
+            row.full_range(),
+            |scratch| rgba_to_rgb_row(row.rgba(), scratch, w, use_simd),
           );
         }
       }
@@ -864,34 +816,23 @@ impl<R> PixelSink for MixedSinker<'_, Bgra, R> {
               |_| {},
             );
           }
-          if !packed_rgb_resample_preflight(
+          return packed_rgb_resample(
+            rgb_stream,
             resample_outputs,
-            rgb,
-            rgba,
-            luma,
-            &None,
-            hsv,
-            rgb_stream.as_ref().map_or(0, |s| s.next_y()),
-            idx,
-          )? {
-            return Ok(());
-          }
-          let stream = packed_rgb_resample_stream(rgb_stream, plan, idx)?;
-          let scratch = source_rgb_scratch(rgb_scratch, w, plan)?;
-          bgra_to_rgb_row(row.bgra(), scratch, w, use_simd);
-          return packed_rgb_resample_emit(
-            stream,
-            plan,
             rgb,
             rgba,
             luma,
             &mut None,
             hsv,
-            scratch,
-            row.matrix(),
-            row.full_range(),
+            rgb_scratch,
+            None,
+            w,
+            plan,
             idx,
             use_simd,
+            row.matrix(),
+            row.full_range(),
+            |scratch| bgra_to_rgb_row(row.bgra(), scratch, w, use_simd),
           );
         }
         crate::resample::SpanKind::Filter => {
@@ -942,34 +883,23 @@ impl<R> PixelSink for MixedSinker<'_, Bgra, R> {
               |dst| bgra_to_rgba_row(row.bgra(), dst, w, use_simd),
             );
           }
-          if !packed_rgb_resample_preflight(
+          return packed_rgb_resample_filter(
+            rgb_filter_stream,
             resample_outputs,
-            rgb,
-            rgba,
-            luma,
-            &None,
-            hsv,
-            rgb_filter_stream.as_ref().map_or(0, |s| s.next_y()),
-            idx,
-          )? {
-            return Ok(());
-          }
-          let stream = packed_rgb_filter_stream(rgb_filter_stream, plan, idx)?;
-          let scratch = source_rgb_scratch(rgb_scratch, w, plan)?;
-          bgra_to_rgb_row(row.bgra(), scratch, w, use_simd);
-          return packed_rgb_resample_emit(
-            stream,
-            plan,
             rgb,
             rgba,
             luma,
             &mut None,
             hsv,
-            scratch,
-            row.matrix(),
-            row.full_range(),
+            rgb_scratch,
+            None,
+            w,
+            plan,
             idx,
             use_simd,
+            row.matrix(),
+            row.full_range(),
+            |scratch| bgra_to_rgb_row(row.bgra(), scratch, w, use_simd),
           );
         }
       }
@@ -1161,34 +1091,23 @@ impl<R> PixelSink for MixedSinker<'_, Argb, R> {
               |_| {},
             );
           }
-          if !packed_rgb_resample_preflight(
+          return packed_rgb_resample(
+            rgb_stream,
             resample_outputs,
-            rgb,
-            rgba,
-            luma,
-            &None,
-            hsv,
-            rgb_stream.as_ref().map_or(0, |s| s.next_y()),
-            idx,
-          )? {
-            return Ok(());
-          }
-          let stream = packed_rgb_resample_stream(rgb_stream, plan, idx)?;
-          let scratch = source_rgb_scratch(rgb_scratch, w, plan)?;
-          argb_to_rgb_row(row.argb(), scratch, w, use_simd);
-          return packed_rgb_resample_emit(
-            stream,
-            plan,
             rgb,
             rgba,
             luma,
             &mut None,
             hsv,
-            scratch,
-            row.matrix(),
-            row.full_range(),
+            rgb_scratch,
+            None,
+            w,
+            plan,
             idx,
             use_simd,
+            row.matrix(),
+            row.full_range(),
+            |scratch| argb_to_rgb_row(row.argb(), scratch, w, use_simd),
           );
         }
         crate::resample::SpanKind::Filter => {
@@ -1239,34 +1158,23 @@ impl<R> PixelSink for MixedSinker<'_, Argb, R> {
               |dst| argb_to_rgba_row(row.argb(), dst, w, use_simd),
             );
           }
-          if !packed_rgb_resample_preflight(
+          return packed_rgb_resample_filter(
+            rgb_filter_stream,
             resample_outputs,
-            rgb,
-            rgba,
-            luma,
-            &None,
-            hsv,
-            rgb_filter_stream.as_ref().map_or(0, |s| s.next_y()),
-            idx,
-          )? {
-            return Ok(());
-          }
-          let stream = packed_rgb_filter_stream(rgb_filter_stream, plan, idx)?;
-          let scratch = source_rgb_scratch(rgb_scratch, w, plan)?;
-          argb_to_rgb_row(row.argb(), scratch, w, use_simd);
-          return packed_rgb_resample_emit(
-            stream,
-            plan,
             rgb,
             rgba,
             luma,
             &mut None,
             hsv,
-            scratch,
-            row.matrix(),
-            row.full_range(),
+            rgb_scratch,
+            None,
+            w,
+            plan,
             idx,
             use_simd,
+            row.matrix(),
+            row.full_range(),
+            |scratch| argb_to_rgb_row(row.argb(), scratch, w, use_simd),
           );
         }
       }
@@ -1458,34 +1366,23 @@ impl<R> PixelSink for MixedSinker<'_, Abgr, R> {
               |_| {},
             );
           }
-          if !packed_rgb_resample_preflight(
+          return packed_rgb_resample(
+            rgb_stream,
             resample_outputs,
-            rgb,
-            rgba,
-            luma,
-            &None,
-            hsv,
-            rgb_stream.as_ref().map_or(0, |s| s.next_y()),
-            idx,
-          )? {
-            return Ok(());
-          }
-          let stream = packed_rgb_resample_stream(rgb_stream, plan, idx)?;
-          let scratch = source_rgb_scratch(rgb_scratch, w, plan)?;
-          abgr_to_rgb_row(row.abgr(), scratch, w, use_simd);
-          return packed_rgb_resample_emit(
-            stream,
-            plan,
             rgb,
             rgba,
             luma,
             &mut None,
             hsv,
-            scratch,
-            row.matrix(),
-            row.full_range(),
+            rgb_scratch,
+            None,
+            w,
+            plan,
             idx,
             use_simd,
+            row.matrix(),
+            row.full_range(),
+            |scratch| abgr_to_rgb_row(row.abgr(), scratch, w, use_simd),
           );
         }
         crate::resample::SpanKind::Filter => {
@@ -1536,34 +1433,23 @@ impl<R> PixelSink for MixedSinker<'_, Abgr, R> {
               |dst| abgr_to_rgba_row(row.abgr(), dst, w, use_simd),
             );
           }
-          if !packed_rgb_resample_preflight(
+          return packed_rgb_resample_filter(
+            rgb_filter_stream,
             resample_outputs,
-            rgb,
-            rgba,
-            luma,
-            &None,
-            hsv,
-            rgb_filter_stream.as_ref().map_or(0, |s| s.next_y()),
-            idx,
-          )? {
-            return Ok(());
-          }
-          let stream = packed_rgb_filter_stream(rgb_filter_stream, plan, idx)?;
-          let scratch = source_rgb_scratch(rgb_scratch, w, plan)?;
-          abgr_to_rgb_row(row.abgr(), scratch, w, use_simd);
-          return packed_rgb_resample_emit(
-            stream,
-            plan,
             rgb,
             rgba,
             luma,
             &mut None,
             hsv,
-            scratch,
-            row.matrix(),
-            row.full_range(),
+            rgb_scratch,
+            None,
+            w,
+            plan,
             idx,
             use_simd,
+            row.matrix(),
+            row.full_range(),
+            |scratch| abgr_to_rgb_row(row.abgr(), scratch, w, use_simd),
           );
         }
       }
@@ -1711,63 +1597,48 @@ impl<R> PixelSink for MixedSinker<'_, Xrgb, R> {
     // plan kind) and X is reset to 0xFF on output, the same as the area
     // path treats it.
     if let Some(plan) = plan.as_ref() {
-      let (stream_next_y, is_filter) = match plan.kind() {
-        crate::resample::SpanKind::Area => (rgb_stream.as_ref().map_or(0, |s| s.next_y()), false),
-        crate::resample::SpanKind::Filter => {
-          (rgb_filter_stream.as_ref().map_or(0, |s| s.next_y()), true)
-        }
-      };
-      if !packed_rgb_resample_preflight(
-        resample_outputs,
-        rgb,
-        rgba,
-        luma,
-        &None,
-        hsv,
-        stream_next_y,
-        idx,
-      )? {
-        return Ok(());
-      }
-      // Create the per-kind stream (sequence-check before its allocation)
-      // BEFORE staging the source-width scratch, so a rejected first row
-      // grows nothing and `AllocationFailed` never masks `OutOfSequenceRow`.
-      if is_filter {
-        let stream = packed_rgb_filter_stream(rgb_filter_stream, plan, idx)?;
-        let scratch = source_rgb_scratch(rgb_scratch, w, plan)?;
-        argb_to_rgb_row(row.xrgb(), scratch, w, use_simd);
-        return packed_rgb_resample_emit(
-          stream,
-          plan,
+      // The X byte is padding, never a filtered channel — the 3 real RGB
+      // channels resample (area or filter per the plan kind) through the shared
+      // transactional helper (RFC #238 tail-collapse) and X is reset to 0xFF on
+      // output, the same as the area path treats it.
+      return match plan.kind() {
+        crate::resample::SpanKind::Area => packed_rgb_resample(
+          rgb_stream,
+          resample_outputs,
           rgb,
           rgba,
           luma,
           &mut None,
           hsv,
-          scratch,
-          row.matrix(),
-          row.full_range(),
+          rgb_scratch,
+          None,
+          w,
+          plan,
           idx,
           use_simd,
-        );
-      }
-      let stream = packed_rgb_resample_stream(rgb_stream, plan, idx)?;
-      let scratch = source_rgb_scratch(rgb_scratch, w, plan)?;
-      argb_to_rgb_row(row.xrgb(), scratch, w, use_simd);
-      return packed_rgb_resample_emit(
-        stream,
-        plan,
-        rgb,
-        rgba,
-        luma,
-        &mut None,
-        hsv,
-        scratch,
-        row.matrix(),
-        row.full_range(),
-        idx,
-        use_simd,
-      );
+          row.matrix(),
+          row.full_range(),
+          |scratch| argb_to_rgb_row(row.xrgb(), scratch, w, use_simd),
+        ),
+        crate::resample::SpanKind::Filter => packed_rgb_resample_filter(
+          rgb_filter_stream,
+          resample_outputs,
+          rgb,
+          rgba,
+          luma,
+          &mut None,
+          hsv,
+          rgb_scratch,
+          None,
+          w,
+          plan,
+          idx,
+          use_simd,
+          row.matrix(),
+          row.full_range(),
+          |scratch| argb_to_rgb_row(row.xrgb(), scratch, w, use_simd),
+        ),
+      };
     }
 
     let one_plane_start = idx * w;
@@ -1910,63 +1781,48 @@ impl<R> PixelSink for MixedSinker<'_, Rgbx, R> {
     // channel — the 3 real RGB channels resample (area or filter per the
     // plan kind) and X is reset to 0xFF on output.
     if let Some(plan) = plan.as_ref() {
-      let (stream_next_y, is_filter) = match plan.kind() {
-        crate::resample::SpanKind::Area => (rgb_stream.as_ref().map_or(0, |s| s.next_y()), false),
-        crate::resample::SpanKind::Filter => {
-          (rgb_filter_stream.as_ref().map_or(0, |s| s.next_y()), true)
-        }
-      };
-      if !packed_rgb_resample_preflight(
-        resample_outputs,
-        rgb,
-        rgba,
-        luma,
-        &None,
-        hsv,
-        stream_next_y,
-        idx,
-      )? {
-        return Ok(());
-      }
-      // Create the per-kind stream (sequence-check before its allocation)
-      // BEFORE staging the source-width scratch, so a rejected first row
-      // grows nothing and `AllocationFailed` never masks `OutOfSequenceRow`.
-      if is_filter {
-        let stream = packed_rgb_filter_stream(rgb_filter_stream, plan, idx)?;
-        let scratch = source_rgb_scratch(rgb_scratch, w, plan)?;
-        rgba_to_rgb_row(row.rgbx(), scratch, w, use_simd);
-        return packed_rgb_resample_emit(
-          stream,
-          plan,
+      // The X byte is padding, never a filtered channel — the 3 real RGB
+      // channels resample (area or filter per the plan kind) through the shared
+      // transactional helper (RFC #238 tail-collapse) and X is reset to 0xFF on
+      // output, the same as the area path treats it.
+      return match plan.kind() {
+        crate::resample::SpanKind::Area => packed_rgb_resample(
+          rgb_stream,
+          resample_outputs,
           rgb,
           rgba,
           luma,
           &mut None,
           hsv,
-          scratch,
-          row.matrix(),
-          row.full_range(),
+          rgb_scratch,
+          None,
+          w,
+          plan,
           idx,
           use_simd,
-        );
-      }
-      let stream = packed_rgb_resample_stream(rgb_stream, plan, idx)?;
-      let scratch = source_rgb_scratch(rgb_scratch, w, plan)?;
-      rgba_to_rgb_row(row.rgbx(), scratch, w, use_simd);
-      return packed_rgb_resample_emit(
-        stream,
-        plan,
-        rgb,
-        rgba,
-        luma,
-        &mut None,
-        hsv,
-        scratch,
-        row.matrix(),
-        row.full_range(),
-        idx,
-        use_simd,
-      );
+          row.matrix(),
+          row.full_range(),
+          |scratch| rgba_to_rgb_row(row.rgbx(), scratch, w, use_simd),
+        ),
+        crate::resample::SpanKind::Filter => packed_rgb_resample_filter(
+          rgb_filter_stream,
+          resample_outputs,
+          rgb,
+          rgba,
+          luma,
+          &mut None,
+          hsv,
+          rgb_scratch,
+          None,
+          w,
+          plan,
+          idx,
+          use_simd,
+          row.matrix(),
+          row.full_range(),
+          |scratch| rgba_to_rgb_row(row.rgbx(), scratch, w, use_simd),
+        ),
+      };
     }
 
     let one_plane_start = idx * w;
@@ -2107,63 +1963,48 @@ impl<R> PixelSink for MixedSinker<'_, Xbgr, R> {
     // channel — the 3 real RGB channels resample (area or filter per the
     // plan kind) and X is reset to 0xFF on output.
     if let Some(plan) = plan.as_ref() {
-      let (stream_next_y, is_filter) = match plan.kind() {
-        crate::resample::SpanKind::Area => (rgb_stream.as_ref().map_or(0, |s| s.next_y()), false),
-        crate::resample::SpanKind::Filter => {
-          (rgb_filter_stream.as_ref().map_or(0, |s| s.next_y()), true)
-        }
-      };
-      if !packed_rgb_resample_preflight(
-        resample_outputs,
-        rgb,
-        rgba,
-        luma,
-        &None,
-        hsv,
-        stream_next_y,
-        idx,
-      )? {
-        return Ok(());
-      }
-      // Create the per-kind stream (sequence-check before its allocation)
-      // BEFORE staging the source-width scratch, so a rejected first row
-      // grows nothing and `AllocationFailed` never masks `OutOfSequenceRow`.
-      if is_filter {
-        let stream = packed_rgb_filter_stream(rgb_filter_stream, plan, idx)?;
-        let scratch = source_rgb_scratch(rgb_scratch, w, plan)?;
-        abgr_to_rgb_row(row.xbgr(), scratch, w, use_simd);
-        return packed_rgb_resample_emit(
-          stream,
-          plan,
+      // The X byte is padding, never a filtered channel — the 3 real RGB
+      // channels resample (area or filter per the plan kind) through the shared
+      // transactional helper (RFC #238 tail-collapse) and X is reset to 0xFF on
+      // output, the same as the area path treats it.
+      return match plan.kind() {
+        crate::resample::SpanKind::Area => packed_rgb_resample(
+          rgb_stream,
+          resample_outputs,
           rgb,
           rgba,
           luma,
           &mut None,
           hsv,
-          scratch,
-          row.matrix(),
-          row.full_range(),
+          rgb_scratch,
+          None,
+          w,
+          plan,
           idx,
           use_simd,
-        );
-      }
-      let stream = packed_rgb_resample_stream(rgb_stream, plan, idx)?;
-      let scratch = source_rgb_scratch(rgb_scratch, w, plan)?;
-      abgr_to_rgb_row(row.xbgr(), scratch, w, use_simd);
-      return packed_rgb_resample_emit(
-        stream,
-        plan,
-        rgb,
-        rgba,
-        luma,
-        &mut None,
-        hsv,
-        scratch,
-        row.matrix(),
-        row.full_range(),
-        idx,
-        use_simd,
-      );
+          row.matrix(),
+          row.full_range(),
+          |scratch| abgr_to_rgb_row(row.xbgr(), scratch, w, use_simd),
+        ),
+        crate::resample::SpanKind::Filter => packed_rgb_resample_filter(
+          rgb_filter_stream,
+          resample_outputs,
+          rgb,
+          rgba,
+          luma,
+          &mut None,
+          hsv,
+          rgb_scratch,
+          None,
+          w,
+          plan,
+          idx,
+          use_simd,
+          row.matrix(),
+          row.full_range(),
+          |scratch| abgr_to_rgb_row(row.xbgr(), scratch, w, use_simd),
+        ),
+      };
     }
 
     let one_plane_start = idx * w;
@@ -2305,63 +2146,48 @@ impl<R> PixelSink for MixedSinker<'_, Bgrx, R> {
     // channel — the 3 real RGB channels resample (area or filter per the
     // plan kind) and X is reset to 0xFF on output.
     if let Some(plan) = plan.as_ref() {
-      let (stream_next_y, is_filter) = match plan.kind() {
-        crate::resample::SpanKind::Area => (rgb_stream.as_ref().map_or(0, |s| s.next_y()), false),
-        crate::resample::SpanKind::Filter => {
-          (rgb_filter_stream.as_ref().map_or(0, |s| s.next_y()), true)
-        }
-      };
-      if !packed_rgb_resample_preflight(
-        resample_outputs,
-        rgb,
-        rgba,
-        luma,
-        &None,
-        hsv,
-        stream_next_y,
-        idx,
-      )? {
-        return Ok(());
-      }
-      // Create the per-kind stream (sequence-check before its allocation)
-      // BEFORE staging the source-width scratch, so a rejected first row
-      // grows nothing and `AllocationFailed` never masks `OutOfSequenceRow`.
-      if is_filter {
-        let stream = packed_rgb_filter_stream(rgb_filter_stream, plan, idx)?;
-        let scratch = source_rgb_scratch(rgb_scratch, w, plan)?;
-        bgra_to_rgb_row(row.bgrx(), scratch, w, use_simd);
-        return packed_rgb_resample_emit(
-          stream,
-          plan,
+      // The X byte is padding, never a filtered channel — the 3 real RGB
+      // channels resample (area or filter per the plan kind) through the shared
+      // transactional helper (RFC #238 tail-collapse) and X is reset to 0xFF on
+      // output, the same as the area path treats it.
+      return match plan.kind() {
+        crate::resample::SpanKind::Area => packed_rgb_resample(
+          rgb_stream,
+          resample_outputs,
           rgb,
           rgba,
           luma,
           &mut None,
           hsv,
-          scratch,
-          row.matrix(),
-          row.full_range(),
+          rgb_scratch,
+          None,
+          w,
+          plan,
           idx,
           use_simd,
-        );
-      }
-      let stream = packed_rgb_resample_stream(rgb_stream, plan, idx)?;
-      let scratch = source_rgb_scratch(rgb_scratch, w, plan)?;
-      bgra_to_rgb_row(row.bgrx(), scratch, w, use_simd);
-      return packed_rgb_resample_emit(
-        stream,
-        plan,
-        rgb,
-        rgba,
-        luma,
-        &mut None,
-        hsv,
-        scratch,
-        row.matrix(),
-        row.full_range(),
-        idx,
-        use_simd,
-      );
+          row.matrix(),
+          row.full_range(),
+          |scratch| bgra_to_rgb_row(row.bgrx(), scratch, w, use_simd),
+        ),
+        crate::resample::SpanKind::Filter => packed_rgb_resample_filter(
+          rgb_filter_stream,
+          resample_outputs,
+          rgb,
+          rgba,
+          luma,
+          &mut None,
+          hsv,
+          rgb_scratch,
+          None,
+          w,
+          plan,
+          idx,
+          use_simd,
+          row.matrix(),
+          row.full_range(),
+          |scratch| bgra_to_rgb_row(row.bgrx(), scratch, w, use_simd),
+        ),
+      };
     }
 
     let one_plane_start = idx * w;

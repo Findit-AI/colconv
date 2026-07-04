@@ -2428,21 +2428,23 @@ impl<S, R: RowResampler<S> + ?Sized> RowResampler<S> for std::boxed::Box<R> {
 }
 
 // Single-shot box-allocation failpoint for the recoverably-boxed native joins
-// (the straight-alpha `Yuva420p` tier and the `Yuv420p` BICUBLIN tier). Gated
-// on `yuv-planar` (which `yuva` implies) because those are its only arming
-// tests; `try_box` itself is gated wider (every boxed-stream consumer) but only
-// consults the failpoint under this same gate.
-#[cfg(all(test, feature = "std", feature = "yuv-planar"))]
+// (the straight-alpha `Yuva420p` tier and the `Yuv420p` BICUBLIN tier) and the
+// directly-boxed packed-RGB / RGBA area & filter streams (the RFC #238
+// tail-collapse transactional-preflight tests). Gated on `yuv-planar` OR `rgb`
+// because those are its arming families; `try_box` itself is gated wider (every
+// boxed-stream consumer) but only consults the failpoint under this same gate.
+#[cfg(all(test, feature = "std", any(feature = "yuv-planar", feature = "rgb")))]
 std::thread_local! {
   static FORCE_BOX_FAILURE: core::cell::Cell<bool> = const { core::cell::Cell::new(false) };
 }
 
 /// Arms a single-shot failpoint that makes the next [`try_box`] refuse, exactly
 /// as a host OOM would. Used to prove the outer box allocation is recoverable
-/// (typed `AllocationFailed`, not an abort) and transactional (the join field
+/// (typed `AllocationFailed`, not an abort) and transactional (the boxed field
 /// is left `None`, so the call is retryable). Shared by the straight-alpha
-/// `Yuva420p` and the BICUBLIN box tests. Test-only.
-#[cfg(all(test, feature = "std", feature = "yuv-planar"))]
+/// `Yuva420p` / BICUBLIN box tests and the packed-RGB / RGBA tail-collapse
+/// atomicity tests. Test-only.
+#[cfg(all(test, feature = "std", any(feature = "yuv-planar", feature = "rgb")))]
 pub(crate) fn arm_box_failure() {
   FORCE_BOX_FAILURE.with(|f| f.set(true));
 }
@@ -2479,7 +2481,7 @@ pub(crate) fn arm_box_failure() {
 pub(crate) fn try_box<T>(
   value: T,
 ) -> Result<std::boxed::Box<T>, std::collections::TryReserveError> {
-  #[cfg(all(test, feature = "std", feature = "yuv-planar"))]
+  #[cfg(all(test, feature = "std", any(feature = "yuv-planar", feature = "rgb")))]
   if FORCE_BOX_FAILURE.with(|f| f.take()) {
     // Reproduce the exact error `try_reserve_exact` yields on refusal so the
     // failpoint is indistinguishable from a real OOM.
