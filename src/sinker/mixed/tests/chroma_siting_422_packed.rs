@@ -1,12 +1,13 @@
 //! Chroma-siting-aware 4:2:2 upsampling for the 8-bit PACKED `Yuyv422` /
-//! `Uyvy422` (#302) — the packed sibling of `chroma_siting_422` (planar
+//! `Uyvy422` / `Yvyu422` — the packed sibling of `chroma_siting_422` (planar
 //! `Yuv422p`) and `chroma_siting_nv16` (semi-planar `Nv16`).
 //!
 //! A packed 4:2:2 row carries chroma 2:1 inline (`[Y0 U Y1 V]` for YUYV,
-//! `[U Y0 V Y1]` for UYVY), so the centered reconstruction de-interleaves the
-//! Y bytes to a full-width plane + the U / V bytes to half-width planes, then
-//! reuses the SAME phase-0.5 horizontal upsample + 4:4:4 decode the planar /
-//! semi-planar twins use. Covers, for BOTH layouts: the default / co-sited path
+//! `[U Y0 V Y1]` for UYVY, `[Y0 V Y1 U]` for YVYU), so the centered
+//! reconstruction de-interleaves the Y bytes to a full-width plane + the U / V
+//! bytes to half-width planes, then reuses the SAME phase-0.5 horizontal
+//! upsample + 4:4:4 decode the planar / semi-planar twins use. Covers, for ALL
+//! layouts: the default / co-sited path
 //! staying byte-identical to the pre-#302 fused nearest-neighbor decode (the
 //! regression guard, negative-controlled by a ramp that makes the phase
 //! observable); the centered RGB / RGBA / HSV decodes matching an independent
@@ -82,6 +83,24 @@ pub(super) fn pack_uyvy(y: &[u8], u: &[u8], v: &[u8]) -> Vec<u8> {
       out[base + 1] = y[r * w + 2 * c];
       out[base + 2] = v[r * cw + c];
       out[base + 3] = y[r * w + 2 * c + 1];
+    }
+  }
+  out
+}
+
+/// Packs planar Y (full) + half-width U / V into a YVYU422 plane (`[Y0 V Y1 U]`).
+pub(super) fn pack_yvyu(y: &[u8], u: &[u8], v: &[u8]) -> Vec<u8> {
+  let w = W as usize;
+  let h = H as usize;
+  let cw = w / 2;
+  let mut out = std::vec![0u8; 2 * w * h];
+  for r in 0..h {
+    for c in 0..cw {
+      let base = r * 2 * w + c * 4;
+      out[base] = y[r * w + 2 * c];
+      out[base + 1] = v[r * cw + c];
+      out[base + 2] = y[r * w + 2 * c + 1];
+      out[base + 3] = u[r * cw + c];
     }
   }
   out
@@ -652,4 +671,12 @@ packed_siting_suite!(
   Uyvy422Frame,
   uyvy422_to,
   pack_uyvy
+);
+packed_siting_suite!(
+  yvyu,
+  Yvyu422,
+  Yvyu422Row,
+  Yvyu422Frame,
+  yvyu422_to,
+  pack_yvyu
 );

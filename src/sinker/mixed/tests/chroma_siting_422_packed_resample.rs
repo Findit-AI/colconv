@@ -1,5 +1,6 @@
-//! RFC #238 S2b — chroma-siting-aware 4:2:2 **resample** for the PACKED
-//! `Yuyv422` (`Y0 U Y1 V …`) and `Uyvy422` (`U Y0 V Y1 …`) formats.
+//! RFC #238 — chroma-siting-aware 4:2:2 **resample** for the PACKED
+//! `Yuyv422` (`Y0 U Y1 V …`), `Uyvy422` (`U Y0 V Y1 …`) and `Yvyu422`
+//! (`Y0 V Y1 U …`) formats.
 //!
 //! The 4:2:2 resample twin of the identity-decode `chroma_siting_422_packed`
 //! and the packed sibling of the planar `chroma_siting_422_resample`
@@ -10,9 +11,7 @@
 //! strongest catch for a U/V swap in the de-interleave. Covers the same tiers
 //! as the planar twin minus the two the packed family lacks: there is no
 //! separate `hsv_direct` join (native HSV rides `yuv_planar_process_native`,
-//! and packed HSV-only is RGB-staged) and no Linear averaging tier. Yvyu422 is
-//! OUT of the centered-siting rollout (a separate follow-up), so it is not
-//! covered here.
+//! and packed HSV-only is RGB-staged) and no Linear averaging tier.
 //!
 //! The native oracle (`native_oracle`) is the EXACT code-domain box-average of
 //! the UNROUNDED triangle-reconstructed chroma — a SINGLE rounding, the
@@ -26,11 +25,11 @@ use crate::{
   resample::{AreaResampler, FilteredResampler, Triangle},
   sinker::MixedSinker,
   source::{
-    Uyvy422, Uyvy422Row, Yuv422p, Yuv444p, Yuyv422, Yuyv422Row, uyvy422_to, yuv422p_to, yuv444p_to,
-    yuyv422_to,
+    Uyvy422, Uyvy422Row, Yuv422p, Yuv444p, Yuyv422, Yuyv422Row, Yvyu422, Yvyu422Row, uyvy422_to,
+    yuv422p_to, yuv444p_to, yuyv422_to, yvyu422_to,
   },
 };
-use mediaframe::frame::{Uyvy422Frame, Yuv422pFrame, Yuv444pFrame, Yuyv422Frame};
+use mediaframe::frame::{Uyvy422Frame, Yuv422pFrame, Yuv444pFrame, Yuyv422Frame, Yvyu422Frame};
 
 const M: ColorMatrix = ColorMatrix::Bt601;
 const FR: bool = true;
@@ -209,6 +208,22 @@ fn pack_uyvy(y: &[u8], u: &[u8], v: &[u8], sw: usize, sh: usize) -> Vec<u8> {
       buf[base + 1] = y[r * sw + c * 2];
       buf[base + 2] = v[r * cw + c];
       buf[base + 3] = y[r * sw + c * 2 + 1];
+    }
+  }
+  buf
+}
+
+/// Pack into a `Yvyu422` plane (`Y0 V Y1 U` per 2-pixel group).
+fn pack_yvyu(y: &[u8], u: &[u8], v: &[u8], sw: usize, sh: usize) -> Vec<u8> {
+  let cw = sw / 2;
+  let mut buf = vec![0u8; 2 * sw * sh];
+  for r in 0..sh {
+    for c in 0..cw {
+      let base = r * 2 * sw + c * 4;
+      buf[base] = y[r * sw + c * 2];
+      buf[base + 1] = v[r * cw + c];
+      buf[base + 2] = y[r * sw + c * 2 + 1];
+      buf[base + 3] = u[r * cw + c];
     }
   }
   buf
@@ -954,6 +969,14 @@ packed_422_siting_resample_suite!(
   Uyvy422Frame,
   uyvy422_to,
   pack_uyvy,
+);
+packed_422_siting_resample_suite!(
+  yvyu422,
+  Yvyu422,
+  Yvyu422Row,
+  Yvyu422Frame,
+  yvyu422_to,
+  pack_yvyu,
 );
 
 // ---- the ≤1 LSB single-rounding note, pinned (format-independent) -----------
