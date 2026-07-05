@@ -38,16 +38,18 @@ use crate::{
 // `sink.process(...)` (the pattern the `resample_rgbf32` /
 // `resample_rgb48` tests use). `Xyz12Row::new` is `pub(crate)` in the
 // upstream `mediaframe` crate, so colconv cannot construct one — there
-// is no public Row constructor or `From` impl. The sequence-check
-// (`xyz12_resample_stream`) and the conditional-ordered frozen-output
-// snapshot (`xyz12_resample_preflight` -> `frozen_outputs_check`,
-// including the first-row out-of-sequence rejection that runs *before*
-// the freeze so a rejected first row stores no snapshot that would
-// poison a retry) are the *same* shared helpers exercised bit-for-bit
-// by the `resample_rgbf32` `..._rejected_first_row_does_not_poison_
-// output_retry` test, so the ordering logic is covered; only the
-// xyz-specific driver to feed a bad order is inexpressible here.
-// `begin_frame`'s stream reset is covered by
+// is no public Row constructor or `From` impl. The sequence-check and
+// the conditional-ordered frozen-output snapshot (the sink's resample
+// route calls the shared compare-only `resample_preflight_check_only`,
+// then commits the `frozen_outputs_check` freeze only after every stream
+// / scratch allocation succeeds) are the *same* shared helpers exercised
+// bit-for-bit by the `resample_rgbf32`
+// `..._rejected_first_row_does_not_poison_output_retry` test, so the
+// ordering logic is covered; only the xyz-specific driver to feed a bad
+// order is inexpressible here. The commit-together atomicity IS covered
+// directly below via the scratch-OOM failpoints (source-XYZ and the
+// emit-owned narrow), which a walker can drive at row 0. `begin_frame`'s
+// stream reset is covered by
 // `xyz12_begin_frame_resets_stream_between_frames`.
 
 const SRC: usize = 8;
@@ -626,4 +628,134 @@ fn xyz12_begin_frame_resets_stream_between_frames() {
       }
     }
   }
+}
+
+// RFC #238 tail-collapse atomicity: the source-width linear-XYZ `f32` staging
+// scratch is grown AFTER the area stream builds into a LOCAL and BEFORE the field
+// insert + freeze, so a scratch OOM leaves the stream field `None` AND
+// `resample_outputs` uncommitted — a retryable first row. `xyz_f32` alone does not
+// stage through the emit's narrow scratch, so the source-XYZ grow is the first
+// fallible step after the stream build.
+#[test]
+#[cfg(feature = "std")]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn first_row_source_scratch_oom_leaves_stream_and_freeze_uncommitted_for_retry() {
+  let gamut = DcpTargetGamut::Rec709;
+  let wire = varying_frame();
+  let src = Xyz12LeFrame::try_new(&wire, SRC as u32, SRC as u32, (SRC * 3) as u32).unwrap();
+  let mut xyz = std::vec![0f32; OUT * OUT * 3];
+  let mut rgb = std::vec![0u8; OUT * OUT * 3];
+  {
+    let mut sink =
+      MixedSinker::<Xyz12Le, AreaResampler>::with_resampler(SRC, SRC, AreaResampler::to(OUT, OUT))
+        .unwrap()
+        .with_xyz_f32(&mut xyz)
+        .unwrap();
+    // Arm the single-shot source-linear-XYZ scratch grow failpoint: the row-0 area
+    // stream box builds OK (into a LOCAL) and the source-XYZ staging grow — before the
+    // field insert + freeze — refuses, surfacing AllocationFailed with BOTH the stream
+    // field `None` and the freeze uncommitted (the commit-together atomic shape).
+    crate::sinker::mixed::arm_source_xyz_f32_scratch_failure();
+    let err = xyz12_to(&src, gamut, &mut sink).unwrap_err();
+    assert!(
+      matches!(
+        err,
+        crate::sinker::MixedSinkerError::Resample(
+          crate::resample::ResampleError::AllocationFailed(_)
+        )
+      ),
+      "first-row source-XYZ scratch OOM must surface AllocationFailed, got {err:?}"
+    );
+    // DIRECT stream-rollback proof (the non-vacuous part): the area stream field must
+    // be `None` — the fix builds it into a LOCAL and inserts only after the scratch
+    // grows. The insert-before-scratch shape would leave it `Some` here, so this
+    // assertion FAILS against that shape and PASSES against the fix.
+    assert!(
+      !sink.xyz_stream_f32_allocated(),
+      "a scratch OOM must leave the xyz_stream_f32 field None (no partial commit)"
+    );
+    // DIRECT freeze-rollback proof (same frame, BEFORE any begin_frame reset): the
+    // output-set snapshot must NOT be committed. A freeze-before-scratch regression
+    // would commit it here even though the stream insertion is still delayed — this
+    // catches the freeze half that the walker retry below (which `begin_frame`-resets
+    // the field) cannot.
+    assert!(
+      !sink.resample_outputs_frozen(),
+      "a first-row scratch OOM must leave resample_outputs uncommitted (no partial commit)"
+    );
+    // Extra recoverability coverage — attaching rgb (a CHANGED output set) and
+    // re-walking (begin_frame re-sequences from row 0) is ACCEPTED and drives output.
+    sink.set_rgb(&mut rgb).unwrap();
+    xyz12_to(&src, gamut, &mut sink)
+      .expect("frame replay after a first-row source-XYZ scratch OOM must succeed");
+  }
+  assert!(
+    xyz.iter().any(|&v| v != 0.0),
+    "the recovered frame produced real xyz_f32 output (scratch OOM was recoverable)"
+  );
+}
+
+// RFC #238 tail-collapse atomicity: the emit's OWN out-width narrow (u8 RGB) scratch
+// is PRE-GROWN before the freeze (the same predicate `xyz12_resample_emit` uses), so
+// a narrow-scratch OOM — after the stream build AND the source-XYZ grow both
+// succeed — still leaves the stream field `None` AND `resample_outputs` uncommitted.
+// `rgb` stages through that narrow scratch, so its grow is reachable.
+#[test]
+#[cfg(feature = "std")]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn first_row_emit_narrow_scratch_oom_leaves_stream_and_freeze_uncommitted_for_retry() {
+  let gamut = DcpTargetGamut::Rec709;
+  let wire = varying_frame();
+  let src = Xyz12LeFrame::try_new(&wire, SRC as u32, SRC as u32, (SRC * 3) as u32).unwrap();
+  let mut rgb = std::vec![0u8; OUT * OUT * 3];
+  let mut xyz = std::vec![0f32; OUT * OUT * 3];
+  {
+    let mut sink =
+      MixedSinker::<Xyz12Le, AreaResampler>::with_resampler(SRC, SRC, AreaResampler::to(OUT, OUT))
+        .unwrap()
+        .with_rgb(&mut rgb)
+        .unwrap();
+    // Arm the source-RGB (emit narrow) scratch grow failpoint: the row-0 stream box
+    // builds OK, the source-XYZ staging grows OK, and the emit-owned narrow scratch —
+    // pre-grown BEFORE the field insert + freeze — refuses. Proves the emit-owned
+    // scratch is pre-grown BEFORE the commit, so nothing fallible runs post-freeze.
+    crate::sinker::mixed::arm_source_rgb_scratch_failure();
+    let err = xyz12_to(&src, gamut, &mut sink).unwrap_err();
+    assert!(
+      matches!(
+        err,
+        crate::sinker::MixedSinkerError::Resample(
+          crate::resample::ResampleError::AllocationFailed(_)
+        )
+      ),
+      "first-row emit-narrow scratch OOM must surface AllocationFailed, got {err:?}"
+    );
+    assert!(
+      !sink.xyz_stream_f32_allocated(),
+      "an emit-owned scratch OOM must leave the xyz_stream_f32 field None (no partial commit)"
+    );
+    // DIRECT freeze-rollback proof (same frame, BEFORE any begin_frame reset): the
+    // emit-owned scratch is pre-grown BEFORE the freeze, so its OOM must leave the
+    // output-set snapshot uncommitted. A freeze-before-scratch regression would commit
+    // it here — this catches the freeze half the walker retry below cannot.
+    assert!(
+      !sink.resample_outputs_frozen(),
+      "a first-row scratch OOM must leave resample_outputs uncommitted (no partial commit)"
+    );
+    // Extra recoverability coverage — attaching xyz_f32 (a CHANGED output set) and
+    // re-walking is ACCEPTED and drives output.
+    sink.set_xyz_f32(&mut xyz).unwrap();
+    xyz12_to(&src, gamut, &mut sink)
+      .expect("frame replay after a first-row emit-narrow scratch OOM must succeed");
+  }
+  assert!(
+    rgb.iter().any(|&b| b != 0),
+    "the recovered frame produced real rgb output (scratch OOM was recoverable)"
+  );
 }
