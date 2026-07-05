@@ -24,8 +24,8 @@
 
 use super::{
   GeometryOverflow, InsufficientBuffer, MixedSinker, MixedSinkerError, RowIndexOutOfRange,
-  RowShapeMismatch, RowSlice, check_dimensions_match, packed_rgb_resample_stream,
-  packed_rgb_u16_resample_preflight, rgb_row_buf_or_scratch, rgba_plane_row_slice,
+  RowShapeMismatch, RowSlice, check_dimensions_match, frozen_outputs_check,
+  resample_preflight_check_only, rgb_row_buf_or_scratch, rgba_plane_row_slice,
   rgba_u16_plane_row_slice, source_rgb_scratch,
 };
 use crate::{
@@ -430,9 +430,15 @@ macro_rules! impl_legacy_rgb_sinker {
         // **native** R/G/B channels (5/6/5, 5/5/5 or 4/4/4 values, NOT
         // bit-expanded), bin those at native depth through the shared u8
         // area stream, then re-pack each binned pixel and run the exact
-        // direct `$to_*` kernels. Freeze the full output set and
-        // sequence-check before staging so a no-output sink stays a no-op
-        // and an out-of-sequence row is rejected without the allocation.
+        // direct `$to_*` kernels. Run the shared L1 compare-only preflight
+        // (no-output no-op + out-of-sequence + mid-frame output-set-change
+        // rejection), build the area stream into a LOCAL and grow every
+        // pre-feed scratch — incl. the emit-owned re-pack + u8-RGB-stage
+        // scratches — then COMMIT the stream insert + output-set freeze only
+        // after all allocations succeed (RFC #238 tail-collapse: a first-row
+        // allocation failure leaves `rgb_stream` `None` AND `resample_outputs`
+        // uncommitted, retryable with a changed output set). The bespoke
+        // `legacy_rgb_resample_emit` (native bin + re-pack) stays unchanged.
         if let Some(plan) = self.plan.as_ref() {
           let Self {
             rgb,
@@ -444,29 +450,112 @@ macro_rules! impl_legacy_rgb_sinker {
             hsv,
             rgb_scratch,
             legacy_rgb_native_scratch,
-            legacy_rgb_packed_scratch,
+            legacy_rgb_packed_scratch: packed_scratch,
             rgb_stream,
             resample_outputs,
             ..
           } = self;
-          if !packed_rgb_u16_resample_preflight(
+          // The per-row sequence counter is the u8 area stream's `next_y`
+          // (the row index is element-type-agnostic); `None` means no output
+          // is attached, which the compare-only preflight turns into a no-op.
+          let expected = if rgb.is_some()
+            || rgba.is_some()
+            || rgb_u16.is_some()
+            || rgba_u16.is_some()
+            || luma.is_some()
+            || luma_u16.is_some()
+            || hsv.is_some()
+          {
+            Some(rgb_stream.as_ref().map_or(0, |s| s.next_y()))
+          } else {
+            None
+          };
+          if let core::ops::ControlFlow::Break(()) = resample_preflight_check_only(
             resample_outputs,
+            luma,
+            luma_u16,
             rgb,
             rgba,
-            luma,
             rgb_u16,
             rgba_u16,
-            luma_u16,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
             hsv,
-            // Legacy 16-bit RGB bins its native 5/6/5 channels through the
-            // u8 `packed_rgb_resample_stream`, so the sequence counter is
-            // that u8 stream's (the row index is element-type-agnostic).
-            rgb_stream.as_ref().map_or(0, |s| s.next_y()),
+            &None,
+            expected,
             idx,
           )? {
             return Ok(());
           }
-          let stream = packed_rgb_resample_stream(rgb_stream, plan, idx)?;
+          // Area-only: reject a filter plan before any allocation (legacy bins
+          // its native channels through the u8 area stream; it is not routed to
+          // the filter engine).
+          if plan.kind().is_filter() {
+            return Err(plan.unsupported_filter().into());
+          }
+          // Build the missing area stream into a LOCAL and grow every pre-feed
+          // scratch — every fallible step — with NO field mutation, so the
+          // stream insert and the freeze commit TOGETHER only after all succeed
+          // (a scratch OOM leaves `rgb_stream` `None` AND `resample_outputs`
+          // uncommitted, never a partial commit).
+          let new_stream = if rgb_stream.is_none() {
+            let stream =
+              crate::resample::AreaStream::new(plan.h(), plan.v(), plan.src_w(), plan.src_h(), 3)?;
+            Some(crate::resample::try_box(stream).map_err(|_| {
+              MixedSinkerError::Resample(crate::resample::ResampleError::AllocationFailed(
+                crate::resample::PlanGeometry::new(
+                  plan.src_w(),
+                  plan.src_h(),
+                  plan.out_w(),
+                  plan.out_h(),
+                ),
+              ))
+            })?)
+          } else {
+            None
+          };
+          let ow = plan.out_w();
+          // Emit-owned re-pack scratch (every attached output reads the
+          // re-packed row) — pre-grown with the emit's exact size.
+          legacy_rgb_packed_scratch(packed_scratch, ow, plan)?;
+          // Emit-owned u8 RGB stage — the emit's exact predicate (rgb absent
+          // AND a u8-RGB-derived output attached), so a native-`u16`-only sink
+          // neither grows it nor risks its allocation.
+          if rgb.is_none() && (luma.is_some() || luma_u16.is_some() || hsv.is_some()) {
+            source_rgb_scratch(rgb_scratch, ow, plan)?;
+          }
+          // Source-width native-channel staging row (filled by the unpack
+          // below); grown last so a native OOM is the final pre-commit failure.
+          source_rgb_scratch(legacy_rgb_native_scratch, w, plan)?;
+          // Every pre-feed allocation succeeded — COMMIT atomically: insert the
+          // stream and freeze the output set together (the compare above
+          // already caught any later mid-frame output change).
+          if let Some(s) = new_stream {
+            *rgb_stream = Some(s);
+          }
+          frozen_outputs_check(
+            resample_outputs,
+            luma,
+            luma_u16,
+            rgb,
+            rgba,
+            rgb_u16,
+            rgba_u16,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            hsv,
+            &None,
+            idx,
+          )?;
+          let stream = rgb_stream.as_mut().expect("created above");
+          // Re-grow is a no-op after the pre-commit grow; nothing fallible runs
+          // post-freeze.
           let native = source_rgb_scratch(legacy_rgb_native_scratch, w, plan)?;
           let src = row.$buf_field();
           let unpack = $unpack;
@@ -489,7 +578,7 @@ macro_rules! impl_legacy_rgb_sinker {
             hsv,
             native,
             rgb_scratch,
-            legacy_rgb_packed_scratch,
+            packed_scratch,
             row.matrix(),
             row.full_range(),
             idx,
@@ -757,7 +846,7 @@ impl_legacy_rgb_sinker! {
 // These mirror the 16-bit packed sinkers above, including the native-depth
 // area fused-resample tier (#164): a non-identity plan unpacks the packed
 // source row to its native R/G/B channels, bins them at native depth through
-// the shared u8 `packed_rgb_resample_stream`, and — per finalized output row —
+// the shared u8 area stream, and — per finalized output row —
 // re-packs each binned pixel back into the source's byte (or 4-bit nibble)
 // layout and runs the exact direct `$to_*` kernels, so every output is
 // byte-identical to a direct conversion of the area-downscaled source frame.
@@ -1081,9 +1170,14 @@ macro_rules! impl_legacy_rgb_packed_sinker {
         // Non-identity plan: unpack the packed source row to its native R/G/B
         // channels, bin those at native depth through the shared u8 area
         // stream, then re-pack each binned pixel and run the exact direct
-        // `$to_*` kernels. Freeze the output set and sequence-check before
-        // staging so a no-output sink stays a no-op and an out-of-sequence row
-        // is rejected without the allocation.
+        // `$to_*` kernels. Run the shared L1 compare-only preflight, build the
+        // area stream into a LOCAL and grow every pre-feed scratch — incl. the
+        // emit-owned re-pack + u8-RGB-stage scratches — then COMMIT the stream
+        // insert + output-set freeze only after all allocations succeed (RFC
+        // #238 tail-collapse: a first-row allocation failure leaves `rgb_stream`
+        // `None` AND `resample_outputs` uncommitted, retryable with a changed
+        // output set). The bespoke `legacy_rgb_packed_resample_emit` (native bin
+        // + re-pack) stays unchanged.
         if let Some(plan) = self.plan.as_ref() {
           let Self {
             rgb,
@@ -1095,26 +1189,99 @@ macro_rules! impl_legacy_rgb_packed_sinker {
             hsv,
             rgb_scratch,
             legacy_rgb_native_scratch,
-            legacy_rgb_packed_scratch,
+            legacy_rgb_packed_scratch: packed_scratch,
             rgb_stream,
             resample_outputs,
             ..
           } = self;
-          if !packed_rgb_u16_resample_preflight(
+          let expected = if rgb.is_some()
+            || rgba.is_some()
+            || rgb_u16.is_some()
+            || rgba_u16.is_some()
+            || luma.is_some()
+            || luma_u16.is_some()
+            || hsv.is_some()
+          {
+            Some(rgb_stream.as_ref().map_or(0, |s| s.next_y()))
+          } else {
+            None
+          };
+          if let core::ops::ControlFlow::Break(()) = resample_preflight_check_only(
             resample_outputs,
+            luma,
+            luma_u16,
             rgb,
             rgba,
-            luma,
             rgb_u16,
             rgba_u16,
-            luma_u16,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
             hsv,
-            rgb_stream.as_ref().map_or(0, |s| s.next_y()),
+            &None,
+            expected,
             idx,
           )? {
             return Ok(());
           }
-          let stream = packed_rgb_resample_stream(rgb_stream, plan, idx)?;
+          // Area-only: reject a filter plan before any allocation.
+          if plan.kind().is_filter() {
+            return Err(plan.unsupported_filter().into());
+          }
+          let new_stream = if rgb_stream.is_none() {
+            let stream =
+              crate::resample::AreaStream::new(plan.h(), plan.v(), plan.src_w(), plan.src_h(), 3)?;
+            Some(crate::resample::try_box(stream).map_err(|_| {
+              MixedSinkerError::Resample(crate::resample::ResampleError::AllocationFailed(
+                crate::resample::PlanGeometry::new(
+                  plan.src_w(),
+                  plan.src_h(),
+                  plan.out_w(),
+                  plan.out_h(),
+                ),
+              ))
+            })?)
+          } else {
+            None
+          };
+          let ow = plan.out_w();
+          let nibble_packed = impl_legacy_rgb_packed_sinker!(@nibble $src_kind);
+          // Emit-owned re-pack scratch — the emit's exact size (`out_w` bytes,
+          // or `out_w.div_ceil(2)` for the 4-bpp two-pixels-per-byte formats).
+          let pack_row_bytes = if nibble_packed { ow.div_ceil(2) } else { ow };
+          legacy_rgb_byte_packed_scratch(packed_scratch, pack_row_bytes, plan)?;
+          // Emit-owned u8 RGB stage — the emit's exact predicate (rgb absent AND
+          // a u8-RGB-derived output attached).
+          if rgb.is_none() && (luma.is_some() || luma_u16.is_some() || hsv.is_some()) {
+            source_rgb_scratch(rgb_scratch, ow, plan)?;
+          }
+          // Source-width native-channel staging row (filled by the unpack
+          // below); grown last so a native OOM is the final pre-commit failure.
+          source_rgb_scratch(legacy_rgb_native_scratch, w, plan)?;
+          // Every pre-feed allocation succeeded — COMMIT atomically.
+          if let Some(s) = new_stream {
+            *rgb_stream = Some(s);
+          }
+          frozen_outputs_check(
+            resample_outputs,
+            luma,
+            luma_u16,
+            rgb,
+            rgba,
+            rgb_u16,
+            rgba_u16,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            hsv,
+            &None,
+            idx,
+          )?;
+          let stream = rgb_stream.as_mut().expect("created above");
           let native = source_rgb_scratch(legacy_rgb_native_scratch, w, plan)?;
           let src = row.$buf_field();
           let unpack = $unpack;
@@ -1137,12 +1304,12 @@ macro_rules! impl_legacy_rgb_packed_sinker {
             hsv,
             native,
             rgb_scratch,
-            legacy_rgb_packed_scratch,
+            packed_scratch,
             row.matrix(),
             row.full_range(),
             idx,
             use_simd,
-            impl_legacy_rgb_packed_sinker!(@nibble $src_kind),
+            nibble_packed,
             $repack,
             $to_rgb,
             $to_rgba,

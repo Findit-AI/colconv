@@ -4516,9 +4516,13 @@ impl<F: SourceFormat, R> MixedSinker<'_, F, R> {
   /// first-row scratch OOM must leave `resample_outputs` UNCOMMITTED so the
   /// freeze half of the commit-together shape is proven directly, without
   /// relying on a walker retry (which would `begin_frame`-reset the field
-  /// before it could be observed). Gated to cover the `xyz` + `mono` (Pal8)
-  /// test-module gates that consume it.
-  #[cfg(all(test, feature = "std", any(feature = "xyz", feature = "mono")))]
+  /// before it could be observed). Gated to cover the `xyz` + `mono` (Pal8) +
+  /// `rgb-legacy` test-module gates that consume it.
+  #[cfg(all(
+    test,
+    feature = "std",
+    any(feature = "xyz", feature = "mono", feature = "rgb-legacy")
+  ))]
   pub(crate) fn resample_outputs_frozen(&self) -> bool {
     self.resample_outputs.is_some()
   }
@@ -5704,6 +5708,7 @@ pub(super) fn source_rgb_scratch<'s>(
       feature = "bayer",
       feature = "mono",
       feature = "xyz",
+      feature = "rgb-legacy",
       all(feature = "rgb-float", any(feature = "yuv-planar", feature = "rgb"))
     )
   ))]
@@ -5739,10 +5744,11 @@ pub(super) fn source_rgb_scratch<'s>(
 
 // Single-shot source-RGB-scratch grow failpoint for the RFC #238 tail-collapse
 // transactional-preflight tests. Gated on the families that stage their converted
-// or drop-alpha u8 RGB through this helper (packed-RGB / GBR / Bayer / Pal8 emit
-// scratch and the `Xyz12` emit's narrow scratch); `source_rgb_scratch` consults it
-// under the same gate. Separate from the `try_box` box-alloc failpoint so a test can
-// fail the SCRATCH grow specifically (after a successful stream construction).
+// or drop-alpha u8 RGB through this helper (packed-RGB / GBR / Bayer / Pal8 /
+// legacy-RGB emit scratch and the `Xyz12` emit's narrow scratch);
+// `source_rgb_scratch` consults it under the same gate. Separate from the `try_box`
+// box-alloc failpoint so a test can fail the SCRATCH grow specifically (after a
+// successful stream construction).
 #[cfg(all(
   test,
   feature = "std",
@@ -5752,6 +5758,7 @@ pub(super) fn source_rgb_scratch<'s>(
     feature = "bayer",
     feature = "mono",
     feature = "xyz",
+    feature = "rgb-legacy",
     all(feature = "rgb-float", any(feature = "yuv-planar", feature = "rgb"))
   )
 ))]
@@ -5773,6 +5780,7 @@ std::thread_local! {
     feature = "bayer",
     feature = "mono",
     feature = "xyz",
+    feature = "rgb-legacy",
     all(feature = "rgb-float", any(feature = "yuv-planar", feature = "rgb"))
   )
 ))]
@@ -6208,86 +6216,6 @@ pub(super) fn gray_luma_resample<E: crate::resample::AreaSample + crate::resampl
   }
 }
 
-/// Fused downscale for [`MixedSinker<Rgb24, R>`]: the packed source
-/// row feeds the 3-channel area stream with no conversion step; RGB
-/// copies, and luma / luma_u16 / HSV / RGBA derive from each finalized
-/// output row.
-///
-/// `src_rgb` is the **source-width** canonical RGB row — `Rgb24` hands
-/// in its packed source directly (zero copy); channel-swapped or
-/// converting formats (the `Bgr24` / padding-byte family, planar
-/// `Gbrp`) stage their row into a source-width scratch first, so this
-/// one tail serves every packed-RGB-canonical source. The caller runs the
-/// resample preflight first and skips the rest when no output is attached
-/// (the transactional [`packed_rgb_resample`] does the compare-only
-/// [`resample_preflight_check_only`](resample_preflight_check_only)).
-///
-/// Lazily creates the 3-channel area stream and checks strict row
-/// sequencing — run **before** a converting format stages its source
-/// row, so an out-of-sequence row is rejected without the scratch
-/// allocation/conversion (matching the `Rgb24` / YUV ordering).
-///
-/// `rgb-legacy` reuses this u8 stream to bin its **native** R/G/B
-/// channels (5/6/5, 5/5/5 or 4/4/4 values — each fits in a `u8`); the
-/// per-format emit re-packs the binned native channels and runs the
-/// direct kernels, so the RGB888 [`packed_rgb_resample_emit`] is not
-/// shared with that family.
-#[cfg(any(
-  feature = "rgb",
-  feature = "gbr",
-  feature = "bayer",
-  feature = "rgb-legacy"
-))]
-#[cfg_attr(
-  not(any(
-    feature = "rgb",
-    feature = "gbr",
-    feature = "bayer",
-    feature = "rgb-legacy"
-  )),
-  allow(dead_code)
-)]
-pub(super) fn packed_rgb_resample_stream<'s>(
-  rgb_stream: &'s mut Option<std::boxed::Box<crate::resample::AreaStream<u8>>>,
-  plan: &ResamplePlan,
-  idx: usize,
-) -> Result<&'s mut crate::resample::AreaStream<u8>, MixedSinkerError> {
-  // Area-only sink: a filter plan would feed empty area spans (silent
-  // zero-output). Routed RGB reaches this only from the Area arm of its
-  // `plan.kind()` match, so this never trips for a routed format.
-  if plan.kind().is_filter() {
-    return Err(plan.unsupported_filter().into());
-  }
-  // Sequence-check before allocating: a fresh stream expects row 0, so
-  // an out-of-sequence first row is rejected without creating the
-  // output-width buffers — keeping freeze, then sequence-check, then
-  // stage, and never letting AllocationFailed mask OutOfSequenceRow.
-  let expected = rgb_stream.as_ref().map_or(0, |stream| stream.next_y());
-  if expected != idx {
-    return Err(MixedSinkerError::Resample(ResampleError::OutOfSequenceRow(
-      crate::resample::OutOfSequenceRow::new(expected, idx),
-    )));
-  }
-  let stream = match rgb_stream {
-    Some(stream) => stream,
-    None => rgb_stream.insert({
-      let stream =
-        crate::resample::AreaStream::new(plan.h(), plan.v(), plan.src_w(), plan.src_h(), 3)?;
-      crate::resample::try_box(stream).map_err(|_| {
-        MixedSinkerError::Resample(crate::resample::ResampleError::AllocationFailed(
-          crate::resample::PlanGeometry::new(
-            plan.src_w(),
-            plan.src_h(),
-            plan.out_w(),
-            plan.out_h(),
-          ),
-        ))
-      })?
-    }),
-  };
-  Ok(stream)
-}
-
 /// Feeds the prepared source-width canonical RGB row into the (already
 /// sequence-checked) stream and derives every attached output (rgb,
 /// rgba, luma, luma_u16, hsv) from each finalized output row.
@@ -6450,9 +6378,10 @@ pub(super) fn packed_rgb_resample(
   )? {
     return Ok(());
   }
-  // Area-only sink: reject a filter plan before any allocation (mirrors the
-  // pre-collapse `packed_rgb_resample_stream` guard). Runs AFTER the compare-only
-  // preflight, so a no-output sink stays a no-op even under a filter plan.
+  // Area-only sink: reject a filter plan before any allocation (the area
+  // stream would feed empty spans under a filter plan). Runs AFTER the
+  // compare-only preflight, so a no-output sink stays a no-op even under a
+  // filter plan.
   if plan.kind().is_filter() {
     return Err(plan.unsupported_filter().into());
   }
@@ -7266,73 +7195,6 @@ std::thread_local! {
 #[cfg(all(test, feature = "std", any(feature = "rgb", feature = "gbr")))]
 pub(crate) fn arm_source_rgb_u16_scratch_failure() {
   FORCE_SOURCE_RGB_U16_SCRATCH_FAILURE.with(|f| f.set(true));
-}
-
-/// Freezes the output configuration for a resampled packed-RGB frame —
-/// the full u8 **and** u16 output set — and reports whether any output is
-/// attached. Enforces the split-preflight conditional ordering (a no-output
-/// call returns before the freeze, and an out-of-sequence FIRST row is
-/// rejected before the freeze via `stream_next_y`, so a rejected first row
-/// stores no snapshot to poison a retry; a later row's sequence check stays in
-/// the companion `*_stream`), extended with the native-depth `rgb_u16` /
-/// `rgba_u16` / `luma_u16` channels.
-///
-/// The high-bit (`rgb` / `gbr`) and native-`u32` families that once shared this
-/// committing preflight now fold it into their transactional compare-before /
-/// commit-after resample helpers under RFC #238 (the u8 twin is
-/// [`packed_rgb_resample`]). The legacy 16-bit packed-RGB family (`rgb-legacy`)
-/// is its sole remaining caller, pending its own tail-collapse increment: its
-/// output set is exactly `rgb` / `rgba` / `rgb_u16` / `rgba_u16` / `luma` /
-/// `luma_u16` / `hsv`, and it bins its native 5/6/5 channels through the u8
-/// [`packed_rgb_resample_stream`], so its `stream_next_y` is that u8 stream's
-/// counter — element type is irrelevant to the row index.
-#[cfg(feature = "rgb-legacy")]
-#[allow(clippy::too_many_arguments)]
-pub(super) fn packed_rgb_u16_resample_preflight(
-  resample_outputs: &mut Option<FrozenOutputs>,
-  rgb: &Option<&mut [u8]>,
-  rgba: &Option<&mut [u8]>,
-  luma: &Option<&mut [u8]>,
-  rgb_u16: &Option<&mut [u16]>,
-  rgba_u16: &Option<&mut [u16]>,
-  luma_u16: &Option<&mut [u16]>,
-  hsv: &mut Option<HsvFrameMut<'_>>,
-  stream_next_y: usize,
-  idx: usize,
-) -> Result<bool, MixedSinkerError> {
-  let has_output = rgb.is_some()
-    || rgba.is_some()
-    || luma.is_some()
-    || rgb_u16.is_some()
-    || rgba_u16.is_some()
-    || luma_u16.is_some()
-    || hsv.is_some();
-  if !has_output {
-    return Ok(false);
-  }
-  if resample_outputs.is_none() && stream_next_y != idx {
-    return Err(MixedSinkerError::Resample(ResampleError::OutOfSequenceRow(
-      crate::resample::OutOfSequenceRow::new(stream_next_y, idx),
-    )));
-  }
-  frozen_outputs_check(
-    resample_outputs,
-    luma,
-    luma_u16,
-    rgb,
-    rgba,
-    rgb_u16,
-    rgba_u16,
-    &None,
-    &None,
-    &None,
-    &None,
-    &None,
-    hsv,
-    &None,
-    idx,
-  )?;
-  Ok(true)
 }
 
 /// Feeds the prepared source-width `u16` RGB row into the (already

@@ -8,7 +8,8 @@
 //!
 //! The out-of-sequence / mid-frame contract is exercised by the shared
 //! tail's `resample_rgb24` / `resample_padding_byte` suites against the
-//! exact same `packed_rgb_resample_stream` / `_preflight` functions;
+//! exact same shared `resample_preflight_check_only` / `frozen_outputs_check`
+//! transactional preflight;
 //! `GbrpRow::new` is `pub(crate)` in `mediaframe`, so a `Gbrp` row can
 //! only reach `process` through the in-order `gbrp_to` walker and a
 //! direct out-of-order `process` call cannot be constructed here.
