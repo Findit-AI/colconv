@@ -146,6 +146,7 @@ pub(crate) fn gbra32_to_rgba_u16_row<const BE: bool>(
 /// narrow): reorder to R, G, B and swap each surviving channel to host order.
 /// The source-width staging row fed to the native-`u32` packed-RGB resample
 /// tier so binning runs at full `u32` precision (0-ULP, issue #289).
+#[cfg(any(feature = "std", feature = "alloc"))]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn gbr32_to_rgb_u32_row<const BE: bool>(
   g: &[u32],
@@ -170,6 +171,7 @@ pub(crate) fn gbr32_to_rgb_u32_row<const BE: bool>(
 /// narrow): reorder color to R, G, B and swap every channel to host order. The
 /// canonical host-native RGBA staging row fed to the native-`u32` alpha-aware
 /// packed-RGBA resample tier (0-ULP, issue #289).
+#[cfg(any(feature = "std", feature = "alloc"))]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn gbra32_to_rgba_u32_row<const BE: bool>(
   g: &[u32],

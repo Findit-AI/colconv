@@ -818,6 +818,7 @@ pub(crate) fn gray32_to_luma_u16_row<const BE: bool>(
 /// The emitted samples derive through the `gray32_to_*::<HOST_NATIVE_BE>`
 /// kernels, whose swap is then the identity recovery for an already-native
 /// value. Scalar-only (the `u32` resample tier ships no SIMD).
+#[cfg(any(feature = "std", feature = "alloc"))]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn gray32_to_native_u32_row<const BE: bool>(
   y_plane: &[u32],
