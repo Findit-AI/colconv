@@ -50,7 +50,9 @@ pub(crate) unsafe fn p_n_444_to_rgb_row<const BITS: u32, const BE: bool>(
 ) {
   // SAFETY: caller obligations forwarded to the shared impl.
   unsafe {
-    p_n_444_to_rgb_or_rgba_row::<BITS, false, BE>(y, uv_full, rgb_out, width, matrix, full_range);
+    p_n_444_to_rgb_or_rgba_row::<BITS, false, BE, false>(
+      y, uv_full, rgb_out, width, matrix, full_range,
+    );
   }
 }
 
@@ -74,7 +76,9 @@ pub(crate) unsafe fn p_n_444_to_rgba_row<const BITS: u32, const BE: bool>(
 ) {
   // SAFETY: caller obligations forwarded to the shared impl.
   unsafe {
-    p_n_444_to_rgb_or_rgba_row::<BITS, true, BE>(y, uv_full, rgba_out, width, matrix, full_range);
+    p_n_444_to_rgb_or_rgba_row::<BITS, true, BE, false>(
+      y, uv_full, rgba_out, width, matrix, full_range,
+    );
   }
 }
 
@@ -95,6 +99,7 @@ pub(crate) unsafe fn p_n_444_to_rgb_or_rgba_row<
   const BITS: u32,
   const ALPHA: bool,
   const BE: bool,
+  const LOW_PACKED: bool,
 >(
   y: &[u16],
   uv_full: &[u16],
@@ -120,11 +125,14 @@ pub(crate) unsafe fn p_n_444_to_rgb_or_rgba_row<
     let y_scale_v = vdupq_n_s32(y_scale);
     let c_scale_v = vdupq_n_s32(c_scale);
     let bias_v = vdupq_n_s16(bias as i16);
-    // `vshlq_u16(_, vdupq_n_s16(-(16 - BITS)))` is a logical right shift
-    // by `(16 - BITS)` (NEON variable shift treats negative count as right
-    // shift). Same pattern as `p_n_to_rgb_row<BITS>` for the high-bit
-    // packing extraction.
+    // `depack_u16x8::<LOW_PACKED>` extracts the active `BITS`: a logical
+    // right shift by `16 - BITS` (`shr_count`, high-bit-packed P410/P412)
+    // or a low mask `& ((1 << BITS) - 1)` (`low_mask`, low-bit-packed
+    // NV20). Same helper as the 4:2:0 sibling; byte-identical to scalar
+    // `depack_pn` per lane, so a mispacked input's dirty bits are discarded
+    // exactly as the scalar path.
     let shr_count = vdupq_n_s16(-((16 - BITS) as i16));
+    let low_mask = vdupq_n_u16(((1u32 << BITS) - 1) as u16);
     let cru = vdupq_n_s32(coeffs.r_u());
     let crv = vdupq_n_s32(coeffs.r_v());
     let cgu = vdupq_n_s32(coeffs.g_u());
@@ -139,8 +147,8 @@ pub(crate) unsafe fn p_n_444_to_rgb_or_rgba_row<
       // extraction shift.
       let y_raw_lo = endian::load_endian_u16x8::<BE>(y.as_ptr().add(x) as *const u8);
       let y_raw_hi = endian::load_endian_u16x8::<BE>(y.as_ptr().add(x + 8) as *const u8);
-      let y_vec_lo = vshlq_u16(y_raw_lo, shr_count);
-      let y_vec_hi = vshlq_u16(y_raw_hi, shr_count);
+      let y_vec_lo = depack_u16x8::<LOW_PACKED>(y_raw_lo, shr_count, low_mask);
+      let y_vec_hi = depack_u16x8::<LOW_PACKED>(y_raw_hi, shr_count, low_mask);
 
       // 32 UV elements = 16 interleaved (U, V) pairs. Two `vld2q_u16`
       // calls deinterleave them into two pairs of (U, V) u16x8 vectors.
@@ -149,10 +157,10 @@ pub(crate) unsafe fn p_n_444_to_rgb_or_rgba_row<
       let uv_raw_hi = vld2q_u16(uv_full.as_ptr().add(x * 2 + 16));
       let uv_sw_lo = deinterleave_endian::<BE>(uv_raw_lo);
       let uv_sw_hi = deinterleave_endian::<BE>(uv_raw_hi);
-      let u_lo_u16 = vshlq_u16(uv_sw_lo.0, shr_count);
-      let v_lo_u16 = vshlq_u16(uv_sw_lo.1, shr_count);
-      let u_hi_u16 = vshlq_u16(uv_sw_hi.0, shr_count);
-      let v_hi_u16 = vshlq_u16(uv_sw_hi.1, shr_count);
+      let u_lo_u16 = depack_u16x8::<LOW_PACKED>(uv_sw_lo.0, shr_count, low_mask);
+      let v_lo_u16 = depack_u16x8::<LOW_PACKED>(uv_sw_lo.1, shr_count, low_mask);
+      let u_hi_u16 = depack_u16x8::<LOW_PACKED>(uv_sw_hi.0, shr_count, low_mask);
+      let v_hi_u16 = depack_u16x8::<LOW_PACKED>(uv_sw_hi.1, shr_count, low_mask);
 
       let y_lo = vreinterpretq_s16_u16(y_vec_lo);
       let y_hi = vreinterpretq_s16_u16(y_vec_hi);
@@ -222,15 +230,12 @@ pub(crate) unsafe fn p_n_444_to_rgb_or_rgba_row<
       let tail_uv = &uv_full[x * 2..width * 2];
       let tail_out = &mut out[x * bpp..width * bpp];
       let tail_w = width - x;
-      if ALPHA {
-        scalar::p_n_444_to_rgba_row::<BITS, BE>(
-          tail_y, tail_uv, tail_out, tail_w, matrix, full_range,
-        );
-      } else {
-        scalar::p_n_444_to_rgb_row::<BITS, BE>(
-          tail_y, tail_uv, tail_out, tail_w, matrix, full_range,
-        );
-      }
+      // Route the scalar tail through the same `LOW_PACKED` de-pack (the
+      // ALPHA-generic shared kernel, so the tail's packing matches the
+      // vector body's).
+      scalar::p_n_444_to_rgb_or_rgba_row::<BITS, ALPHA, BE, LOW_PACKED>(
+        tail_y, tail_uv, tail_out, tail_w, matrix, full_range,
+      );
     }
   }
 }
@@ -257,7 +262,7 @@ pub(crate) unsafe fn p_n_444_to_rgb_u16_row<const BITS: u32, const BE: bool>(
 ) {
   // SAFETY: caller obligations forwarded to the shared impl.
   unsafe {
-    p_n_444_to_rgb_or_rgba_u16_row::<BITS, false, BE>(
+    p_n_444_to_rgb_or_rgba_u16_row::<BITS, false, BE, false>(
       y, uv_full, rgb_out, width, matrix, full_range,
     );
   }
@@ -284,7 +289,7 @@ pub(crate) unsafe fn p_n_444_to_rgba_u16_row<const BITS: u32, const BE: bool>(
 ) {
   // SAFETY: caller obligations forwarded to the shared impl.
   unsafe {
-    p_n_444_to_rgb_or_rgba_u16_row::<BITS, true, BE>(
+    p_n_444_to_rgb_or_rgba_u16_row::<BITS, true, BE, false>(
       y, uv_full, rgba_out, width, matrix, full_range,
     );
   }
@@ -307,6 +312,7 @@ pub(crate) unsafe fn p_n_444_to_rgb_or_rgba_u16_row<
   const BITS: u32,
   const ALPHA: bool,
   const BE: bool,
+  const LOW_PACKED: bool,
 >(
   y: &[u16],
   uv_full: &[u16],
@@ -333,7 +339,10 @@ pub(crate) unsafe fn p_n_444_to_rgb_or_rgba_u16_row<
     let y_scale_v = vdupq_n_s32(y_scale);
     let c_scale_v = vdupq_n_s32(c_scale);
     let bias_v = vdupq_n_s16(bias as i16);
+    // `depack_u16x8::<LOW_PACKED>`: `>> (16 - BITS)` (high-packed) or
+    // `& ((1 << BITS) - 1)` (low-packed NV20), byte-identical to scalar.
     let shr_count = vdupq_n_s16(-((16 - BITS) as i16));
+    let low_mask = vdupq_n_u16(((1u32 << BITS) - 1) as u16);
     let zero_v = vdupq_n_s16(0);
     let max_v = vdupq_n_s16(out_max);
     let cru = vdupq_n_s32(coeffs.r_u());
@@ -348,17 +357,17 @@ pub(crate) unsafe fn p_n_444_to_rgb_or_rgba_u16_row<
     while x + 16 <= width {
       let y_raw_lo = endian::load_endian_u16x8::<BE>(y.as_ptr().add(x) as *const u8);
       let y_raw_hi = endian::load_endian_u16x8::<BE>(y.as_ptr().add(x + 8) as *const u8);
-      let y_vec_lo = vshlq_u16(y_raw_lo, shr_count);
-      let y_vec_hi = vshlq_u16(y_raw_hi, shr_count);
+      let y_vec_lo = depack_u16x8::<LOW_PACKED>(y_raw_lo, shr_count, low_mask);
+      let y_vec_hi = depack_u16x8::<LOW_PACKED>(y_raw_hi, shr_count, low_mask);
 
       let uv_raw_lo = vld2q_u16(uv_full.as_ptr().add(x * 2));
       let uv_raw_hi = vld2q_u16(uv_full.as_ptr().add(x * 2 + 16));
       let uv_sw_lo = deinterleave_endian::<BE>(uv_raw_lo);
       let uv_sw_hi = deinterleave_endian::<BE>(uv_raw_hi);
-      let u_lo_u16 = vshlq_u16(uv_sw_lo.0, shr_count);
-      let v_lo_u16 = vshlq_u16(uv_sw_lo.1, shr_count);
-      let u_hi_u16 = vshlq_u16(uv_sw_hi.0, shr_count);
-      let v_hi_u16 = vshlq_u16(uv_sw_hi.1, shr_count);
+      let u_lo_u16 = depack_u16x8::<LOW_PACKED>(uv_sw_lo.0, shr_count, low_mask);
+      let v_lo_u16 = depack_u16x8::<LOW_PACKED>(uv_sw_lo.1, shr_count, low_mask);
+      let u_hi_u16 = depack_u16x8::<LOW_PACKED>(uv_sw_hi.0, shr_count, low_mask);
+      let v_hi_u16 = depack_u16x8::<LOW_PACKED>(uv_sw_hi.1, shr_count, low_mask);
 
       let y_lo = vreinterpretq_s16_u16(y_vec_lo);
       let y_hi = vreinterpretq_s16_u16(y_vec_hi);
@@ -425,15 +434,9 @@ pub(crate) unsafe fn p_n_444_to_rgb_or_rgba_u16_row<
       let tail_uv = &uv_full[x * 2..width * 2];
       let tail_out = &mut out[x * bpp..width * bpp];
       let tail_w = width - x;
-      if ALPHA {
-        scalar::p_n_444_to_rgba_u16_row::<BITS, BE>(
-          tail_y, tail_uv, tail_out, tail_w, matrix, full_range,
-        );
-      } else {
-        scalar::p_n_444_to_rgb_u16_row::<BITS, BE>(
-          tail_y, tail_uv, tail_out, tail_w, matrix, full_range,
-        );
-      }
+      scalar::p_n_444_to_rgb_or_rgba_u16_row::<BITS, ALPHA, BE, LOW_PACKED>(
+        tail_y, tail_uv, tail_out, tail_w, matrix, full_range,
+      );
     }
   }
 }
@@ -906,7 +909,7 @@ unsafe fn pn_hsv_via_rgb_chunks(
 #[inline]
 #[target_feature(enable = "neon")]
 #[allow(clippy::too_many_arguments)]
-pub(crate) unsafe fn p_n_444_to_hsv_row<const BITS: u32, const BE: bool>(
+pub(crate) unsafe fn p_n_444_to_hsv_row<const BITS: u32, const BE: bool, const LOW_PACKED: bool>(
   y: &[u16],
   uv_full: &[u16],
   h_out: &mut [u8],
@@ -924,12 +927,12 @@ pub(crate) unsafe fn p_n_444_to_hsv_row<const BITS: u32, const BE: bool>(
 
   // SAFETY: the feature is the caller's obligation; the chunk filler
   // forwards the per-chunk sub-slices to the NEON 4:4:4 RGB kernel under
-  // the same contract (its own scalar tail covers small n). The UV
-  // sub-slice is offset by `offset * 2` because 4:4:4 carries one
-  // interleaved U/V pair per pixel.
+  // the same contract (its own scalar tail covers small n), threading the
+  // same `LOW_PACKED` de-pack. The UV sub-slice is offset by `offset * 2`
+  // because 4:4:4 carries one interleaved U/V pair per pixel.
   unsafe {
     pn_hsv_via_rgb_chunks(h_out, s_out, v_out, width, |offset, n, rgb| {
-      p_n_444_to_rgb_or_rgba_row::<BITS, false, BE>(
+      p_n_444_to_rgb_or_rgba_row::<BITS, false, BE, LOW_PACKED>(
         &y[offset..],
         &uv_full[offset * 2..],
         rgb,

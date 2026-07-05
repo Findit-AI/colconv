@@ -52,7 +52,9 @@ pub(crate) unsafe fn p_n_444_to_rgb_row<const BITS: u32, const BE: bool>(
 ) {
   // SAFETY: caller obligations forwarded to the shared impl.
   unsafe {
-    p_n_444_to_rgb_or_rgba_row::<BITS, false, BE>(y, uv_full, rgb_out, width, matrix, full_range);
+    p_n_444_to_rgb_or_rgba_row::<BITS, false, BE, false>(
+      y, uv_full, rgb_out, width, matrix, full_range,
+    );
   }
 }
 
@@ -76,7 +78,9 @@ pub(crate) unsafe fn p_n_444_to_rgba_row<const BITS: u32, const BE: bool>(
 ) {
   // SAFETY: caller obligations forwarded to the shared impl.
   unsafe {
-    p_n_444_to_rgb_or_rgba_row::<BITS, true, BE>(y, uv_full, rgba_out, width, matrix, full_range);
+    p_n_444_to_rgb_or_rgba_row::<BITS, true, BE, false>(
+      y, uv_full, rgba_out, width, matrix, full_range,
+    );
   }
 }
 
@@ -97,6 +101,7 @@ pub(crate) unsafe fn p_n_444_to_rgb_or_rgba_row<
   const BITS: u32,
   const ALPHA: bool,
   const BE: bool,
+  const LOW_PACKED: bool,
 >(
   y: &[u16],
   uv_full: &[u16],
@@ -130,19 +135,24 @@ pub(crate) unsafe fn p_n_444_to_rgb_or_rgba_row<
     let cbv = i32x4_splat(coeffs.b_v());
     let alpha_u8 = u8x16_splat(0xFF);
 
+    // `depack_u16x8::<LOW_PACKED>`: `>> (16 - BITS)` (high-packed) or
+    // `& ((1 << BITS) - 1)` (low-packed NV20), byte-identical to scalar.
     let shr = 16 - BITS;
+    let low_mask = u16x8_splat(((1u32 << BITS) - 1) as u16);
 
     let mut x = 0usize;
     while x + 16 <= width {
       // BE input is byte-swapped via `load_endian_u16x8::<BE>` for Y,
       // and via `byteswap_u16x8::<BE>` after deinterleave for UV.
-      let y_low_i16 = u16x8_shr(
+      let y_low_i16 = depack_u16x8::<LOW_PACKED>(
         endian::load_endian_u16x8::<BE>(y.as_ptr().add(x) as *const u8),
         shr,
+        low_mask,
       );
-      let y_high_i16 = u16x8_shr(
+      let y_high_i16 = depack_u16x8::<LOW_PACKED>(
         endian::load_endian_u16x8::<BE>(y.as_ptr().add(x + 8) as *const u8),
         shr,
+        low_mask,
       );
 
       // 32 UV elements (= 16 pairs) — two deinterleave calls.
@@ -152,10 +162,10 @@ pub(crate) unsafe fn p_n_444_to_rgb_or_rgba_row<
       let v_lo_vec = byteswap_u16x8::<BE>(v_lo_vec);
       let u_hi_vec = byteswap_u16x8::<BE>(u_hi_vec);
       let v_hi_vec = byteswap_u16x8::<BE>(v_hi_vec);
-      let u_lo_vec = u16x8_shr(u_lo_vec, shr);
-      let v_lo_vec = u16x8_shr(v_lo_vec, shr);
-      let u_hi_vec = u16x8_shr(u_hi_vec, shr);
-      let v_hi_vec = u16x8_shr(v_hi_vec, shr);
+      let u_lo_vec = depack_u16x8::<LOW_PACKED>(u_lo_vec, shr, low_mask);
+      let v_lo_vec = depack_u16x8::<LOW_PACKED>(v_lo_vec, shr, low_mask);
+      let u_hi_vec = depack_u16x8::<LOW_PACKED>(u_hi_vec, shr, low_mask);
+      let v_hi_vec = depack_u16x8::<LOW_PACKED>(v_hi_vec, shr, low_mask);
 
       let u_lo_i16 = i16x8_sub(u_lo_vec, bias_v);
       let u_hi_i16 = i16x8_sub(u_hi_vec, bias_v);
@@ -215,15 +225,10 @@ pub(crate) unsafe fn p_n_444_to_rgb_or_rgba_row<
       let tail_uv = &uv_full[x * 2..width * 2];
       let tail_out = &mut out[x * bpp..width * bpp];
       let tail_w = width - x;
-      if ALPHA {
-        scalar::p_n_444_to_rgba_row::<BITS, BE>(
-          tail_y, tail_uv, tail_out, tail_w, matrix, full_range,
-        );
-      } else {
-        scalar::p_n_444_to_rgb_row::<BITS, BE>(
-          tail_y, tail_uv, tail_out, tail_w, matrix, full_range,
-        );
-      }
+      // Route the scalar tail through the same `LOW_PACKED` de-pack.
+      scalar::p_n_444_to_rgb_or_rgba_row::<BITS, ALPHA, BE, LOW_PACKED>(
+        tail_y, tail_uv, tail_out, tail_w, matrix, full_range,
+      );
     }
   }
 }
@@ -248,7 +253,7 @@ pub(crate) unsafe fn p_n_444_to_rgb_u16_row<const BITS: u32, const BE: bool>(
 ) {
   // SAFETY: caller obligations forwarded to the shared impl.
   unsafe {
-    p_n_444_to_rgb_or_rgba_u16_row::<BITS, false, BE>(
+    p_n_444_to_rgb_or_rgba_u16_row::<BITS, false, BE, false>(
       y, uv_full, rgb_out, width, matrix, full_range,
     );
   }
@@ -273,7 +278,7 @@ pub(crate) unsafe fn p_n_444_to_rgba_u16_row<const BITS: u32, const BE: bool>(
 ) {
   // SAFETY: caller obligations forwarded to the shared impl.
   unsafe {
-    p_n_444_to_rgb_or_rgba_u16_row::<BITS, true, BE>(
+    p_n_444_to_rgb_or_rgba_u16_row::<BITS, true, BE, false>(
       y, uv_full, rgba_out, width, matrix, full_range,
     );
   }
@@ -296,6 +301,7 @@ pub(crate) unsafe fn p_n_444_to_rgb_or_rgba_u16_row<
   const BITS: u32,
   const ALPHA: bool,
   const BE: bool,
+  const LOW_PACKED: bool,
 >(
   y: &[u16],
   uv_full: &[u16],
@@ -332,19 +338,24 @@ pub(crate) unsafe fn p_n_444_to_rgb_or_rgba_u16_row<
     let cbv = i32x4_splat(coeffs.b_v());
     let alpha_u16 = u16x8_splat(out_max as u16);
 
+    // `depack_u16x8::<LOW_PACKED>`: `>> (16 - BITS)` (high-packed) or
+    // `& ((1 << BITS) - 1)` (low-packed NV20), byte-identical to scalar.
     let shr = 16 - BITS;
+    let low_mask = u16x8_splat(((1u32 << BITS) - 1) as u16);
 
     let mut x = 0usize;
     while x + 16 <= width {
       // BE input is byte-swapped via `load_endian_u16x8::<BE>` for Y,
       // and via `byteswap_u16x8::<BE>` after deinterleave for UV.
-      let y_low_i16 = u16x8_shr(
+      let y_low_i16 = depack_u16x8::<LOW_PACKED>(
         endian::load_endian_u16x8::<BE>(y.as_ptr().add(x) as *const u8),
         shr,
+        low_mask,
       );
-      let y_high_i16 = u16x8_shr(
+      let y_high_i16 = depack_u16x8::<LOW_PACKED>(
         endian::load_endian_u16x8::<BE>(y.as_ptr().add(x + 8) as *const u8),
         shr,
+        low_mask,
       );
 
       let (u_lo_vec, v_lo_vec) = deinterleave_uv_u16_wasm(uv_full.as_ptr().add(x * 2));
@@ -353,10 +364,10 @@ pub(crate) unsafe fn p_n_444_to_rgb_or_rgba_u16_row<
       let v_lo_vec = byteswap_u16x8::<BE>(v_lo_vec);
       let u_hi_vec = byteswap_u16x8::<BE>(u_hi_vec);
       let v_hi_vec = byteswap_u16x8::<BE>(v_hi_vec);
-      let u_lo_vec = u16x8_shr(u_lo_vec, shr);
-      let v_lo_vec = u16x8_shr(v_lo_vec, shr);
-      let u_hi_vec = u16x8_shr(u_hi_vec, shr);
-      let v_hi_vec = u16x8_shr(v_hi_vec, shr);
+      let u_lo_vec = depack_u16x8::<LOW_PACKED>(u_lo_vec, shr, low_mask);
+      let v_lo_vec = depack_u16x8::<LOW_PACKED>(v_lo_vec, shr, low_mask);
+      let u_hi_vec = depack_u16x8::<LOW_PACKED>(u_hi_vec, shr, low_mask);
+      let v_hi_vec = depack_u16x8::<LOW_PACKED>(v_hi_vec, shr, low_mask);
 
       let u_lo_i16 = i16x8_sub(u_lo_vec, bias_v);
       let u_hi_i16 = i16x8_sub(u_hi_vec, bias_v);
@@ -421,15 +432,10 @@ pub(crate) unsafe fn p_n_444_to_rgb_or_rgba_u16_row<
       let tail_uv = &uv_full[x * 2..width * 2];
       let tail_out = &mut out[x * bpp..width * bpp];
       let tail_w = width - x;
-      if ALPHA {
-        scalar::p_n_444_to_rgba_u16_row::<BITS, BE>(
-          tail_y, tail_uv, tail_out, tail_w, matrix, full_range,
-        );
-      } else {
-        scalar::p_n_444_to_rgb_u16_row::<BITS, BE>(
-          tail_y, tail_uv, tail_out, tail_w, matrix, full_range,
-        );
-      }
+      // Route the scalar tail through the same `LOW_PACKED` de-pack.
+      scalar::p_n_444_to_rgb_or_rgba_u16_row::<BITS, ALPHA, BE, LOW_PACKED>(
+        tail_y, tail_uv, tail_out, tail_w, matrix, full_range,
+      );
     }
   }
 }
@@ -874,7 +880,7 @@ unsafe fn pn_hsv_via_rgb_chunks(
 #[inline]
 #[target_feature(enable = "simd128")]
 #[allow(clippy::too_many_arguments)]
-pub(crate) unsafe fn p_n_444_to_hsv_row<const BITS: u32, const BE: bool>(
+pub(crate) unsafe fn p_n_444_to_hsv_row<const BITS: u32, const BE: bool, const LOW_PACKED: bool>(
   y: &[u16],
   uv_full: &[u16],
   h_out: &mut [u8],
@@ -892,12 +898,12 @@ pub(crate) unsafe fn p_n_444_to_hsv_row<const BITS: u32, const BE: bool>(
 
   // SAFETY: the feature is the caller's obligation; the chunk filler
   // forwards the per-chunk sub-slices to the wasm 4:4:4 RGB kernel under
-  // the same contract (its own scalar tail covers small n). The UV
-  // sub-slice is offset by `offset * 2` because 4:4:4 carries one
-  // interleaved U/V pair per pixel.
+  // the same contract (its own scalar tail covers small n), threading the
+  // same `LOW_PACKED` de-pack. The UV sub-slice is offset by `offset * 2`
+  // because 4:4:4 carries one interleaved U/V pair per pixel.
   unsafe {
     pn_hsv_via_rgb_chunks(h_out, s_out, v_out, width, |offset, n, rgb| {
-      p_n_444_to_rgb_or_rgba_row::<BITS, false, BE>(
+      p_n_444_to_rgb_or_rgba_row::<BITS, false, BE, LOW_PACKED>(
         &y[offset..],
         &uv_full[offset * 2..],
         rgb,

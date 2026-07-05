@@ -133,7 +133,12 @@ fn center_upsample_p0xx_kernel_matches_hand_computed() {
     uv_half[2 * j + 1] = pack(v[j], 10);
   }
   let mut uv_full = [0u16; 16];
-  crate::row::scalar::chroma_upsample_2to1_center_h_p0xx::<10>(&uv_half, &mut uv_full, 8, false);
+  crate::row::scalar::chroma_upsample_2to1_center_h_p0xx::<10, false>(
+    &uv_half,
+    &mut uv_full,
+    8,
+    false,
+  );
 
   // Decode back to logical (>> 6) and split U / V.
   let dec: Vec<u16> = uv_full.iter().map(|&x| x >> 6).collect();
@@ -161,8 +166,18 @@ fn center_upsample_p0xx_kernel_big_endian_matches_le_logical() {
   }
   let mut out_le = [0u16; 16];
   let mut out_be = [0u16; 16];
-  crate::row::scalar::chroma_upsample_2to1_center_h_p0xx::<10>(&half_le, &mut out_le, 8, false);
-  crate::row::scalar::chroma_upsample_2to1_center_h_p0xx::<10>(&half_be, &mut out_be, 8, true);
+  crate::row::scalar::chroma_upsample_2to1_center_h_p0xx::<10, false>(
+    &half_le,
+    &mut out_le,
+    8,
+    false,
+  );
+  crate::row::scalar::chroma_upsample_2to1_center_h_p0xx::<10, false>(
+    &half_be,
+    &mut out_be,
+    8,
+    true,
+  );
   let dec_le: Vec<u16> = out_le.iter().map(|&x| u16::from_le(x) >> 6).collect();
   let dec_be: Vec<u16> = out_be.iter().map(|&x| u16::from_be(x) >> 6).collect();
   assert_eq!(
@@ -199,8 +214,18 @@ fn center_upsample_p0xx_kernel_sanitizes_dirty_low_bits() {
       }
       let mut out_clean = [0u16; 16];
       let mut out_dirty = [0u16; 16];
-      crate::row::scalar::chroma_upsample_2to1_center_h_p0xx::<BITS>(&clean, &mut out_clean, 8, be);
-      crate::row::scalar::chroma_upsample_2to1_center_h_p0xx::<BITS>(&dirty, &mut out_dirty, 8, be);
+      crate::row::scalar::chroma_upsample_2to1_center_h_p0xx::<BITS, false>(
+        &clean,
+        &mut out_clean,
+        8,
+        be,
+      );
+      crate::row::scalar::chroma_upsample_2to1_center_h_p0xx::<BITS, false>(
+        &dirty,
+        &mut out_dirty,
+        8,
+        be,
+      );
       let dec_clean: Vec<u16> = out_clean.iter().map(|&v| dec(v)).collect();
       let dec_dirty: Vec<u16> = out_dirty.iter().map(|&v| dec(v)).collect();
       assert_eq!(

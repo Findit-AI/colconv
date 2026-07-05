@@ -38,6 +38,7 @@ pub(crate) use p0xx::arm_p0xx_alloc_failure;
 pub(crate) use p0xx::{
   reserve_420_chroma_full_u16 as reserve_pn_chroma_full_u16,
   upsample_420_chroma_center_h_p0xx as upsample_pn_chroma_center_h,
+  upsample_420_chroma_center_h_p0xx_low_packed as upsample_pn_chroma_center_h_low_packed,
 };
 #[cfg(feature = "yuv-planar")]
 pub(crate) use yuv420p::reserve_420_chroma_full_u16;

@@ -718,3 +718,234 @@ fn filter_tail_geometry_nv20_equals_p210() {
     assert_nv20_equals_p210::<false>(4, 4, 7, 7, Tier::Filter(k), "LE filter upscale 4->7");
   }
 }
+
+// ---- ★ Identity CENTERED chroma siting (RFC #238 NV20-PR1) ------------------
+//
+// The IDENTITY (no-resample) centered path is net-new in PR1: a centered NV20
+// identity decode reconstructs full-width chroma via the low-packed
+// `chroma_upsample_2to1_center_h_p0xx::<10, true>` + the low-packed `nv20_444_*`
+// 4:4:4 kernels, instead of the co-sited fused decode. The load-bearing checks:
+//
+//  1. NV20-centered == P210-centered (cross-packing): the SAME logical samples,
+//     packed low (NV20, with STRAY dirty high bits) vs high (P210), decode
+//     identically — proving the low-packed 4:4:4 kernel + upsample sanitize the
+//     dirty bits exactly as P210's `>> 6` shift and reconstruct the same chroma.
+//     The identity twin of `assert_nv20_equals_p210`.
+//  2. centered != co-sited on a horizontal chroma ramp (the phase-0.5 shift is
+//     observable) — the negative control.
+//  3. centered == co-sited on FLAT chroma (the 1/4–3/4 blend of equal samples,
+//     with edge clamp, is a no-op) — the positive control.
+
+/// Identity (no-resample) NV20 conversion at `loc` for the full output set.
+#[cfg(feature = "yuv-planar")]
+fn direct_nv20_sited<const BE: bool>(
+  yp: &[u16],
+  uvp: &[u16],
+  sw: usize,
+  sh: usize,
+  loc: crate::ChromaLocation,
+) -> Outputs {
+  let src = Nv20Frame::<BE>::new(yp, uvp, sw as u32, sh as u32, sw as u32, sw as u32);
+  let mut o = blank_outputs(sw, sh);
+  let mut sink = MixedSinker::<Nv20<BE>>::new(sw, sh)
+    .with_chroma_location(loc)
+    .with_rgb(&mut o.rgb)
+    .unwrap()
+    .with_rgba(&mut o.rgba)
+    .unwrap()
+    .with_rgb_u16(&mut o.rgb_u16)
+    .unwrap()
+    .with_rgba_u16(&mut o.rgba_u16)
+    .unwrap()
+    .with_luma(&mut o.luma)
+    .unwrap()
+    .with_hsv(&mut o.hsv.0, &mut o.hsv.1, &mut o.hsv.2)
+    .unwrap();
+  nv20_to_endian::<_, BE>(&src, FR, M, &mut sink).unwrap();
+  o
+}
+
+/// Identity (no-resample) P210 conversion at `loc` — the high-bit-packed
+/// reference for the centered cross-packing check.
+#[cfg(feature = "yuv-planar")]
+fn direct_p210_sited<const BE: bool>(
+  yp: &[u16],
+  uvp: &[u16],
+  sw: usize,
+  sh: usize,
+  loc: crate::ChromaLocation,
+) -> Outputs {
+  let src = PnFrame422::<10, BE>::new(yp, uvp, sw as u32, sh as u32, sw as u32, sw as u32);
+  let mut o = blank_outputs(sw, sh);
+  let mut sink = MixedSinker::<P210<BE>>::new(sw, sh)
+    .with_chroma_location(loc)
+    .with_rgb(&mut o.rgb)
+    .unwrap()
+    .with_rgba(&mut o.rgba)
+    .unwrap()
+    .with_rgb_u16(&mut o.rgb_u16)
+    .unwrap()
+    .with_rgba_u16(&mut o.rgba_u16)
+    .unwrap()
+    .with_luma(&mut o.luma)
+    .unwrap()
+    .with_hsv(&mut o.hsv.0, &mut o.hsv.1, &mut o.hsv.2)
+    .unwrap();
+  p210_to_endian::<_, BE>(&src, FR, M, &mut sink).unwrap();
+  o
+}
+
+/// Logical Y ramp + FLAT (constant) chroma — the positive control for the
+/// centered==co-sited check (a constant survives the phase-0.5 blend unchanged).
+#[cfg(feature = "yuv-planar")]
+fn logical_flat_chroma(sw: usize, sh: usize) -> (Vec<u16>, Vec<u16>) {
+  let cw = sw / 2;
+  let mut y = vec![0u16; sw * sh];
+  for (i, yi) in y.iter_mut().enumerate() {
+    *yi = ((40u32 + i as u32 * 37) & MASK as u32) as u16;
+  }
+  // Constant U = 500, V = 520 across every chroma sample.
+  let mut uv = vec![0u16; cw * sh * 2];
+  for i in 0..cw * sh {
+    uv[2 * i] = 500 & MASK;
+    uv[2 * i + 1] = 520 & MASK;
+  }
+  (y, uv)
+}
+
+#[cfg(feature = "yuv-planar")]
+fn assert_identity_center_nv20_equals_p210<const BE: bool>(sw: usize, sh: usize, ctx: &str) {
+  let (y_log, uv_log) = logical_ramp(sw, sh);
+  let (nv_y, nv_uv) = nv20_planes(&y_log, &uv_log, BE); // low-packed + STRAY dirty bits
+  let (p_y, p_uv) = p210_planes(&y_log, &uv_log, BE); // high-packed
+  let center = crate::ChromaLocation::Center;
+  let nv = direct_nv20_sited::<BE>(&nv_y, &nv_uv, sw, sh, center);
+  let p = direct_p210_sited::<BE>(&p_y, &p_uv, sw, sh, center);
+  assert_outputs_eq(&nv, &p, ctx);
+}
+
+#[cfg(feature = "yuv-planar")]
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn identity_center_nv20_equals_p210_le() {
+  assert_identity_center_nv20_equals_p210::<false>(8, 4, "LE identity centered NV20==P210");
+}
+
+#[cfg(feature = "yuv-planar")]
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn identity_center_nv20_equals_p210_be() {
+  assert_identity_center_nv20_equals_p210::<true>(8, 4, "BE identity centered NV20==P210");
+}
+
+/// Centered ≠ co-sited on a horizontal chroma ramp: the phase-0.5 reconstruction
+/// shifts chroma, so the colour outputs must diverge from the fused co-sited
+/// decode (luma is siting-independent, so compare rgb only).
+#[cfg(feature = "yuv-planar")]
+fn assert_identity_center_differs_from_cosited<const BE: bool>(sw: usize, sh: usize) {
+  let (y_log, uv_log) = logical_ramp(sw, sh);
+  let (nv_y, nv_uv) = nv20_planes(&y_log, &uv_log, BE);
+  let centered = direct_nv20_sited::<BE>(&nv_y, &nv_uv, sw, sh, crate::ChromaLocation::Center);
+  let cosited = direct_nv20_sited::<BE>(&nv_y, &nv_uv, sw, sh, crate::ChromaLocation::Left);
+  assert_ne!(
+    centered.rgb, cosited.rgb,
+    "centered chroma siting must differ from co-sited on a horizontal ramp (be={BE})"
+  );
+}
+
+#[cfg(feature = "yuv-planar")]
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn identity_center_differs_from_cosited_on_ramp_le() {
+  assert_identity_center_differs_from_cosited::<false>(8, 4);
+}
+
+#[cfg(feature = "yuv-planar")]
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn identity_center_differs_from_cosited_on_ramp_be() {
+  assert_identity_center_differs_from_cosited::<true>(8, 4);
+}
+
+/// Centered == co-sited on FLAT chroma: the 1/4–3/4 blend (+ edge clamp) of a
+/// constant is that constant, so the reconstructed decode is byte-identical to
+/// the fused co-sited decode across the whole output set.
+#[cfg(feature = "yuv-planar")]
+fn assert_identity_center_equals_cosited_on_flat<const BE: bool>(sw: usize, sh: usize, ctx: &str) {
+  let (y_log, uv_log) = logical_flat_chroma(sw, sh);
+  let (nv_y, nv_uv) = nv20_planes(&y_log, &uv_log, BE);
+  let centered = direct_nv20_sited::<BE>(&nv_y, &nv_uv, sw, sh, crate::ChromaLocation::Center);
+  let cosited = direct_nv20_sited::<BE>(&nv_y, &nv_uv, sw, sh, crate::ChromaLocation::Left);
+  assert_outputs_eq(&centered, &cosited, ctx);
+}
+
+#[cfg(feature = "yuv-planar")]
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn identity_center_equals_cosited_on_flat_le() {
+  assert_identity_center_equals_cosited_on_flat::<false>(8, 4, "LE flat centered==cosited");
+}
+
+#[cfg(feature = "yuv-planar")]
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn identity_center_equals_cosited_on_flat_be() {
+  assert_identity_center_equals_cosited_on_flat::<true>(8, 4, "BE flat centered==cosited");
+}
+
+/// Per-frame chroma-siting freeze on the IDENTITY path: process the first
+/// output-bearing row at one siting, flip `set_chroma_location`, then process
+/// the next in-sequence row — the sink must reject it with `ChromaSitingChanged`
+/// (a mid-frame flip would decode a mixture of centered + co-sited chroma into
+/// ONE frame). Both directions (co-sited ⇆ centered).
+#[cfg(feature = "yuv-planar")]
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn identity_mid_frame_siting_flip_rejected() {
+  use crate::{ChromaLocation, PixelSink, sinker::MixedSinkerError, source::Nv20Row};
+  let (sw, sh) = (8usize, 4usize);
+  let cw = sw / 2;
+  let (y_log, uv_log) = logical_ramp(sw, sh);
+  let (yp, uvp) = nv20_planes(&y_log, &uv_log, false); // LE wire
+  for (loc1, loc2) in [
+    (ChromaLocation::Center, ChromaLocation::Left),
+    (ChromaLocation::Left, ChromaLocation::Center),
+  ] {
+    let mut rgb = vec![0u8; sw * sh * 3];
+    let mut sink = MixedSinker::<Nv20>::new(sw, sh)
+      .with_chroma_location(loc1)
+      .with_rgb(&mut rgb)
+      .unwrap();
+    PixelSink::begin_frame(&mut sink, sw as u32, sh as u32).unwrap();
+    let row0 = Nv20Row::new(&yp[0..sw], &uvp[0..2 * cw], 0, M, FR);
+    PixelSink::process(&mut sink, row0).unwrap();
+    sink.set_chroma_location(loc2);
+    let row1 = Nv20Row::new(&yp[sw..2 * sw], &uvp[2 * cw..4 * cw], 1, M, FR);
+    let err = PixelSink::process(&mut sink, row1).unwrap_err();
+    assert!(
+      matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
+      "identity {loc1:?}->{loc2:?}: want ChromaSitingChanged, got {err:?}"
+    );
+  }
+}
