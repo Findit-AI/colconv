@@ -988,3 +988,217 @@ lowbit_resample_tests! { mod_name: rgb4_byte, marker: Rgb4Byte, frame: Rgb4ByteF
 lowbit_resample_tests! { mod_name: bgr4_byte, marker: Bgr4Byte, frame: Bgr4ByteFrame, walker: bgr4_byte_to, layout: LowbitLayout::BGR4BYTE, }
 lowbit_resample_tests! { mod_name: rgb4, marker: Rgb4, frame: Rgb4Frame, walker: rgb4_to, layout: LowbitLayout::RGB4, }
 lowbit_resample_tests! { mod_name: bgr4, marker: Bgr4, frame: Bgr4Frame, walker: bgr4_to, layout: LowbitLayout::BGR4, }
+
+// =========================================================================
+// RFC #238 tail-collapse atomicity: a first-row scratch OOM AFTER the area
+// stream builds into a LOCAL and BEFORE the field insert + freeze leaves the
+// stream field `None` AND `resample_outputs` uncommitted — a retryable first
+// row, provable directly (no walker retry needed) via `rgb_stream_allocated()`
+// and `resample_outputs_frozen()`. Covers BOTH legacy families (16-bit packed
+// + 8-/4-bpp) and BOTH scratch classes reachable through the shared
+// `source_rgb_scratch` grow failpoint:
+//   * source-width native staging (an `rgb_u16`-only sink stages nothing through
+//     the emit's u8 RGB scratch, so the native grow is the first
+//     `source_rgb_scratch` after the stream build), and
+//   * the emit-owned u8 RGB stage (a luma-only sink — rgb absent — pre-grows it
+//     before the freeze, so its OOM is the first `source_rgb_scratch`).
+// The emit-owned re-pack scratch uses a distinct `try_reserve_exact` helper, so
+// the single-shot failpoint targets exactly the two `source_rgb_scratch` grows.
+// =========================================================================
+
+/// Non-packed 16-bit family, source-width native scratch: an `rgb_u16`-only sink
+/// grows only the native staging row through `source_rgb_scratch`, so the armed
+/// failpoint fires there — after the stream box builds, before the commit.
+#[test]
+#[cfg(feature = "std")]
+#[cfg_attr(miri, ignore = "SIMD intrinsics unsupported by Miri")]
+fn rgb565_first_row_native_scratch_oom_leaves_stream_and_freeze_uncommitted_for_retry() {
+  const SRC: usize = 8;
+  const OUT: usize = 4;
+  let words = random_words(SRC * SRC, 0xA110_C8ED, Layout::RGB565);
+  let wire = pack_frame(&words);
+  let src = Rgb565Frame::try_new(&wire, SRC as u32, SRC as u32, (SRC * 2) as u32).unwrap();
+  let mut rgb_u16 = std::vec![0u16; OUT * OUT * 3];
+  let mut rgb = std::vec![0u8; OUT * OUT * 3];
+  {
+    let mut sink =
+      MixedSinker::<Rgb565, AreaResampler>::with_resampler(SRC, SRC, AreaResampler::to(OUT, OUT))
+        .unwrap()
+        .with_rgb_u16(&mut rgb_u16)
+        .unwrap();
+    // The row-0 area stream box builds OK (into a LOCAL); the source-width native
+    // grow — before the field insert + freeze — refuses, surfacing AllocationFailed
+    // with BOTH the stream field `None` and the freeze uncommitted.
+    crate::sinker::mixed::arm_source_rgb_scratch_failure();
+    let err = rgb565_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap_err();
+    assert!(
+      matches!(
+        err,
+        MixedSinkerError::Resample(ResampleError::AllocationFailed(_))
+      ),
+      "first-row native scratch OOM must surface AllocationFailed, got {err:?}"
+    );
+    // DIRECT stream-rollback proof: the stream is built into a LOCAL and inserted
+    // only after the scratch grows, so it must be `None` here. The
+    // insert-before-scratch shape would leave it `Some` and FAIL this.
+    assert!(
+      !sink.rgb_stream_allocated(),
+      "a scratch OOM must leave the rgb_stream field None (no partial commit)"
+    );
+    // DIRECT freeze-rollback proof (same frame, BEFORE any begin_frame reset): the
+    // output-set snapshot must NOT be committed. The freeze-before-scratch shape
+    // would commit it and FAIL this — the half a walker retry cannot observe.
+    assert!(
+      !sink.resample_outputs_frozen(),
+      "a first-row scratch OOM must leave resample_outputs uncommitted (no partial commit)"
+    );
+    // Recoverability: attaching rgb (a CHANGED output set) and re-walking is ACCEPTED.
+    sink.set_rgb(&mut rgb).unwrap();
+    rgb565_to(&src, true, ColorMatrix::Bt709, &mut sink)
+      .expect("frame replay after a first-row native scratch OOM must succeed");
+  }
+  assert!(
+    rgb.iter().any(|&b| b != 0),
+    "the recovered frame produced real rgb output (scratch OOM was recoverable)"
+  );
+}
+
+/// Non-packed 16-bit family, emit-owned u8 RGB stage: a luma-only sink (rgb
+/// absent) pre-grows the emit's u8 RGB stage before the freeze, so the armed
+/// failpoint fires on THAT grow — proving the emit-owned scratch is pre-grown, so
+/// nothing fallible runs post-freeze.
+#[test]
+#[cfg(feature = "std")]
+#[cfg_attr(miri, ignore = "SIMD intrinsics unsupported by Miri")]
+fn rgb565_first_row_emit_stage_scratch_oom_leaves_stream_and_freeze_uncommitted_for_retry() {
+  const SRC: usize = 8;
+  const OUT: usize = 4;
+  let words = random_words(SRC * SRC, 0x5CA7_C400, Layout::RGB565);
+  let wire = pack_frame(&words);
+  let src = Rgb565Frame::try_new(&wire, SRC as u32, SRC as u32, (SRC * 2) as u32).unwrap();
+  let mut luma = std::vec![0u8; OUT * OUT];
+  let mut rgb = std::vec![0u8; OUT * OUT * 3];
+  {
+    let mut sink =
+      MixedSinker::<Rgb565, AreaResampler>::with_resampler(SRC, SRC, AreaResampler::to(OUT, OUT))
+        .unwrap()
+        .with_luma(&mut luma)
+        .unwrap();
+    crate::sinker::mixed::arm_source_rgb_scratch_failure();
+    let err = rgb565_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap_err();
+    assert!(
+      matches!(
+        err,
+        MixedSinkerError::Resample(ResampleError::AllocationFailed(_))
+      ),
+      "first-row emit-stage scratch OOM must surface AllocationFailed, got {err:?}"
+    );
+    assert!(
+      !sink.rgb_stream_allocated(),
+      "an emit-owned scratch OOM must leave the rgb_stream field None (no partial commit)"
+    );
+    assert!(
+      !sink.resample_outputs_frozen(),
+      "a first-row scratch OOM must leave resample_outputs uncommitted (no partial commit)"
+    );
+    sink.set_rgb(&mut rgb).unwrap();
+    rgb565_to(&src, true, ColorMatrix::Bt709, &mut sink)
+      .expect("frame replay after a first-row emit-stage scratch OOM must succeed");
+  }
+  assert!(
+    rgb.iter().any(|&b| b != 0),
+    "the recovered frame produced real rgb output (scratch OOM was recoverable)"
+  );
+}
+
+/// Packed 8-/4-bpp family, source-width native scratch (twin of the 16-bit case).
+#[test]
+#[cfg(feature = "std")]
+#[cfg_attr(miri, ignore = "SIMD intrinsics unsupported by Miri")]
+fn rgb8_first_row_native_scratch_oom_leaves_stream_and_freeze_uncommitted_for_retry() {
+  const SRC: usize = 8;
+  const OUT: usize = 4;
+  let layout = LowbitLayout::RGB8;
+  let plane = random_lowbit_plane(layout, SRC, SRC, 0xA110_C8ED);
+  let stride = layout.row_bytes(SRC) as u32;
+  let src = Rgb8Frame::try_new(&plane, SRC as u32, SRC as u32, stride).unwrap();
+  let mut rgb_u16 = std::vec![0u16; OUT * OUT * 3];
+  let mut rgb = std::vec![0u8; OUT * OUT * 3];
+  {
+    let mut sink =
+      MixedSinker::<Rgb8, AreaResampler>::with_resampler(SRC, SRC, AreaResampler::to(OUT, OUT))
+        .unwrap()
+        .with_rgb_u16(&mut rgb_u16)
+        .unwrap();
+    crate::sinker::mixed::arm_source_rgb_scratch_failure();
+    let err = rgb8_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap_err();
+    assert!(
+      matches!(
+        err,
+        MixedSinkerError::Resample(ResampleError::AllocationFailed(_))
+      ),
+      "first-row native scratch OOM must surface AllocationFailed, got {err:?}"
+    );
+    assert!(
+      !sink.rgb_stream_allocated(),
+      "a scratch OOM must leave the rgb_stream field None (no partial commit)"
+    );
+    assert!(
+      !sink.resample_outputs_frozen(),
+      "a first-row scratch OOM must leave resample_outputs uncommitted (no partial commit)"
+    );
+    sink.set_rgb(&mut rgb).unwrap();
+    rgb8_to(&src, true, ColorMatrix::Bt709, &mut sink)
+      .expect("frame replay after a first-row native scratch OOM must succeed");
+  }
+  assert!(
+    rgb.iter().any(|&b| b != 0),
+    "the recovered frame produced real rgb output (scratch OOM was recoverable)"
+  );
+}
+
+/// Packed 8-/4-bpp family, emit-owned u8 RGB stage (twin of the 16-bit case).
+#[test]
+#[cfg(feature = "std")]
+#[cfg_attr(miri, ignore = "SIMD intrinsics unsupported by Miri")]
+fn rgb8_first_row_emit_stage_scratch_oom_leaves_stream_and_freeze_uncommitted_for_retry() {
+  const SRC: usize = 8;
+  const OUT: usize = 4;
+  let layout = LowbitLayout::RGB8;
+  let plane = random_lowbit_plane(layout, SRC, SRC, 0x5CA7_C400);
+  let stride = layout.row_bytes(SRC) as u32;
+  let src = Rgb8Frame::try_new(&plane, SRC as u32, SRC as u32, stride).unwrap();
+  let mut luma = std::vec![0u8; OUT * OUT];
+  let mut rgb = std::vec![0u8; OUT * OUT * 3];
+  {
+    let mut sink =
+      MixedSinker::<Rgb8, AreaResampler>::with_resampler(SRC, SRC, AreaResampler::to(OUT, OUT))
+        .unwrap()
+        .with_luma(&mut luma)
+        .unwrap();
+    crate::sinker::mixed::arm_source_rgb_scratch_failure();
+    let err = rgb8_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap_err();
+    assert!(
+      matches!(
+        err,
+        MixedSinkerError::Resample(ResampleError::AllocationFailed(_))
+      ),
+      "first-row emit-stage scratch OOM must surface AllocationFailed, got {err:?}"
+    );
+    assert!(
+      !sink.rgb_stream_allocated(),
+      "an emit-owned scratch OOM must leave the rgb_stream field None (no partial commit)"
+    );
+    assert!(
+      !sink.resample_outputs_frozen(),
+      "a first-row scratch OOM must leave resample_outputs uncommitted (no partial commit)"
+    );
+    sink.set_rgb(&mut rgb).unwrap();
+    rgb8_to(&src, true, ColorMatrix::Bt709, &mut sink)
+      .expect("frame replay after a first-row emit-stage scratch OOM must succeed");
+  }
+  assert!(
+    rgb.iter().any(|&b| b != 0),
+    "the recovered frame produced real rgb output (scratch OOM was recoverable)"
+  );
+}
