@@ -25,9 +25,12 @@
 //! planes, so the siting math is depth- and endian-independent (pinned by the
 //! BE↔LE parity test). Representative depths `p210` (low-packed native codes) and
 //! `p216` (full u16) cover the family; every centered assertion is an EXACT match
-//! (single rounding), never a tolerance. `Nv20` is intentionally excluded: its
-//! low-packed 4:4:4 decode has no full-chroma kernel yet, so its centered siting
-//! is not routed and it stays byte-identical to the pre-siting resample.
+//! (single rounding), never a tolerance. `Nv20` — the low-packed 4:2:2 twin — is
+//! now routed too; rather than re-pin it here, its centered resample is
+//! cross-checked against `P210` (the same logical samples, low- vs high-packed)
+//! in [`super::resample_nv20`], which this file pins to the `Yuv422pN` /
+//! `Yuv444pN` oracle — so `Nv20`-centered inherits that ground truth
+//! transitively.
 
 use crate::{
   ChromaLocation, ColorMatrix, PixelSink,
