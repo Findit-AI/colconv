@@ -14,7 +14,7 @@ const HOST_NATIVE_BE: bool = cfg!(target_endian = "big");
 /// const, so the unused branch is eliminated; byte-identical to the
 /// scalar de-pack per lane.
 #[inline(always)]
-fn depack_u16x8<const LOW_PACKED: bool>(v: v128, shr: u32, low_mask: v128) -> v128 {
+pub(crate) fn depack_u16x8<const LOW_PACKED: bool>(v: v128, shr: u32, low_mask: v128) -> v128 {
   if LOW_PACKED {
     v128_and(v, low_mask)
   } else {

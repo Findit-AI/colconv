@@ -38,7 +38,7 @@ unsafe fn deinterleave_endian<const BE: bool>(pair: uint16x8x2_t) -> uint16x8x2_
 /// twin of the scalar `depack_pn`. `LOW_PACKED` is const, so the unused
 /// branch is eliminated; byte-identical to the scalar de-pack per lane.
 #[inline(always)]
-unsafe fn depack_u16x8<const LOW_PACKED: bool>(
+pub(crate) unsafe fn depack_u16x8<const LOW_PACKED: bool>(
   raw: uint16x8_t,
   shr_count: int16x8_t,
   low_mask: uint16x8_t,

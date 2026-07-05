@@ -420,7 +420,36 @@ pub(crate) fn upsample_420_chroma_center_h_p0xx<'s, const BITS: u32>(
     chroma_full.len() >= 2 * width,
     "chroma_full must be reserved via reserve_420_chroma_full_u16 first"
   );
-  crate::row::scalar::chroma_upsample_2to1_center_h_p0xx::<BITS>(
+  crate::row::scalar::chroma_upsample_2to1_center_h_p0xx::<BITS, false>(
+    uv_half,
+    &mut chroma_full[..2 * width],
+    width,
+    big_endian,
+  );
+  &chroma_full[..2 * width]
+}
+
+/// Low-bit-packed (`LOW_PACKED = true`) sibling of
+/// [`upsample_420_chroma_center_h_p0xx`] for NV20 (the sole low-bit-packed
+/// semi-planar 4:2:2 format). Identical staging, but the fused de-pack /
+/// re-pack keeps the active value in the **low** `BITS` (`& ((1 << BITS) -
+/// 1)`, no MSB re-alignment) so the output feeds the low-packed
+/// `nv20_444_*` decode kernels, bit-identical per tier.
+///
+/// **Infallible**: the caller must have run [`reserve_420_chroma_full_u16`]
+/// up front, so `chroma_full` is `>= 2 * width` here.
+#[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
+pub(crate) fn upsample_420_chroma_center_h_p0xx_low_packed<'s, const BITS: u32>(
+  chroma_full: &'s mut [u16],
+  uv_half: &[u16],
+  width: usize,
+  big_endian: bool,
+) -> &'s [u16] {
+  debug_assert!(
+    chroma_full.len() >= 2 * width,
+    "chroma_full must be reserved via reserve_420_chroma_full_u16 first"
+  );
+  crate::row::scalar::chroma_upsample_2to1_center_h_p0xx::<BITS, true>(
     uv_half,
     &mut chroma_full[..2 * width],
     width,

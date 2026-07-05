@@ -570,6 +570,106 @@ fn neon_p410_p412_matches_scalar_tail_widths() {
   }
 }
 
+// ---- NV20 low-bit-packed 4:4:4 (LOW_PACKED = true) dirty-bit parity -------
+//
+// ★ The load-bearing SIMD check for RFC #238 NV20-PR1: the low-packed de-pack
+// masks (`& 0x03FF`) the LOW 10 bits and discards STRAY garbage in the top 6 —
+// where the high-packed shift (`>> 6`) discards the low 6. Feed garbage in the
+// top 6 bits and assert every NEON lane == scalar, so the mask sanitizes
+// identically per lane (a regression that shifted instead of masked, or masked
+// the wrong bits, would leak the garbage and diverge). Reuses the same
+// `depack_u16x8::<true>` helper the merged 4:2:0 NV20 half-chroma path uses.
+
+/// Low-bit-packed `u16` plane: active 10-bit value in the LOW bits, STRAY
+/// non-zero garbage in the top 6 (the `<< 10` padding the de-pack must discard).
+#[cfg(feature = "yuv-semi-planar")]
+fn nv20_dirty_plane(n: usize, seed: usize) -> std::vec::Vec<u16> {
+  (0..n)
+    .map(|i| {
+      let logical = ((i.wrapping_mul(seed).wrapping_add(seed * 3)) as u16) & 0x03FF;
+      let stray = (((i as u16).wrapping_mul(37).wrapping_add(1)) & 0x3F) | 1;
+      logical | (stray << 10)
+    })
+    .collect()
+}
+
+#[cfg(feature = "yuv-semi-planar")]
+fn check_nv20_444_lowpacked_neon_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+  let y = nv20_dirty_plane(width, 37);
+  let u = nv20_dirty_plane(width, 53);
+  let v = nv20_dirty_plane(width, 71);
+  let uv = interleave_uv(&u, &v);
+
+  let mut rgb_scalar = std::vec![0u8; width * 3];
+  let mut rgb_neon = std::vec![0u8; width * 3];
+  scalar::p_n_444_to_rgb_or_rgba_row::<10, false, false, true>(
+    &y,
+    &uv,
+    &mut rgb_scalar,
+    width,
+    matrix,
+    full_range,
+  );
+  unsafe {
+    p_n_444_to_rgb_or_rgba_row::<10, false, false, true>(
+      &y,
+      &uv,
+      &mut rgb_neon,
+      width,
+      matrix,
+      full_range,
+    );
+  }
+  assert_eq!(
+    rgb_scalar, rgb_neon,
+    "NEON NV20 4:4:4 low-packed → u8 diverges (width={width}, matrix={matrix:?}, full_range={full_range})"
+  );
+
+  let mut u16_scalar = std::vec![0u16; width * 3];
+  let mut u16_neon = std::vec![0u16; width * 3];
+  scalar::p_n_444_to_rgb_or_rgba_u16_row::<10, false, false, true>(
+    &y,
+    &uv,
+    &mut u16_scalar,
+    width,
+    matrix,
+    full_range,
+  );
+  unsafe {
+    p_n_444_to_rgb_or_rgba_u16_row::<10, false, false, true>(
+      &y,
+      &uv,
+      &mut u16_neon,
+      width,
+      matrix,
+      full_range,
+    );
+  }
+  assert_eq!(
+    u16_scalar, u16_neon,
+    "NEON NV20 4:4:4 low-packed → u16 diverges (width={width}, matrix={matrix:?}, full_range={full_range})"
+  );
+}
+
+#[cfg(feature = "yuv-semi-planar")]
+#[test]
+#[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
+fn neon_nv20_444_lowpacked_matches_scalar_dirty_widths() {
+  // Widths straddling every 16-pixel chunk boundary + the scalar tail; both
+  // matrices, both range modes. The dirty top-6-bit garbage must vanish per lane.
+  for w in [1usize, 3, 7, 8, 15, 16, 17, 31, 32, 33, 48, 1920, 1921] {
+    for m in [
+      ColorMatrix::Bt601,
+      ColorMatrix::Bt709,
+      ColorMatrix::Bt2020Ncl,
+    ] {
+      for full in [true, false] {
+        check_nv20_444_lowpacked_neon_equivalence(w, m, full);
+      }
+    }
+  }
+}
+
 #[cfg(feature = "yuv-semi-planar")]
 #[test]
 #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]

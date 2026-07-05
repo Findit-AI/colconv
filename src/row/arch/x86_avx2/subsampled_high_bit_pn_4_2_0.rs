@@ -17,7 +17,7 @@ const HOST_NATIVE_BE: bool = cfg!(target_endian = "big");
 /// AVX2 must be available on the current CPU.
 #[inline]
 #[target_feature(enable = "avx2")]
-unsafe fn depack_u16x16<const LOW_PACKED: bool>(
+pub(crate) unsafe fn depack_u16x16<const LOW_PACKED: bool>(
   v: __m256i,
   shr_count: __m128i,
   low_mask: __m256i,

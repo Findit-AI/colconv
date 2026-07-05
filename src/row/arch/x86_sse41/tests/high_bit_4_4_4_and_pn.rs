@@ -581,6 +581,102 @@ fn sse41_p410_p412_matches_scalar_tail_widths() {
   }
 }
 
+// ---- NV20 low-bit-packed 4:4:4 (LOW_PACKED = true) dirty-bit parity -------
+//
+// ★ The low-packed de-pack masks (`& 0x03FF`) the LOW 10 bits and discards
+// STRAY garbage in the top 6; feed garbage in the top 6 and assert every SSE4.1
+// lane == scalar, so the mask (`depack_u16x8::<true>`) sanitizes identically.
+
+/// Low-bit-packed plane: active 10-bit value in the LOW bits, STRAY non-zero
+/// garbage in the top 6 (the de-pack must discard it).
+#[cfg(feature = "yuv-semi-planar")]
+fn nv20_dirty_plane_sse41(n: usize, seed: usize) -> std::vec::Vec<u16> {
+  (0..n)
+    .map(|i| {
+      let logical = ((i.wrapping_mul(seed).wrapping_add(seed * 3)) as u16) & 0x03FF;
+      let stray = (((i as u16).wrapping_mul(37).wrapping_add(1)) & 0x3F) | 1;
+      logical | (stray << 10)
+    })
+    .collect()
+}
+
+#[cfg(feature = "yuv-semi-planar")]
+fn check_nv20_444_lowpacked_sse41_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+  if !std::arch::is_x86_feature_detected!("sse4.1") {
+    return;
+  }
+  let y = nv20_dirty_plane_sse41(width, 37);
+  let u = nv20_dirty_plane_sse41(width, 53);
+  let v = nv20_dirty_plane_sse41(width, 71);
+  let uv = interleave_uv_sse41(&u, &v);
+
+  let mut rgb_scalar = std::vec![0u8; width * 3];
+  let mut rgb_simd = std::vec![0u8; width * 3];
+  scalar::p_n_444_to_rgb_or_rgba_row::<10, false, false, true>(
+    &y,
+    &uv,
+    &mut rgb_scalar,
+    width,
+    matrix,
+    full_range,
+  );
+  unsafe {
+    p_n_444_to_rgb_or_rgba_row::<10, false, false, true>(
+      &y,
+      &uv,
+      &mut rgb_simd,
+      width,
+      matrix,
+      full_range,
+    );
+  }
+  assert_eq!(
+    rgb_scalar, rgb_simd,
+    "SSE4.1 NV20 4:4:4 low-packed → u8 diverges (width={width}, matrix={matrix:?}, full_range={full_range})"
+  );
+
+  let mut u16_scalar = std::vec![0u16; width * 3];
+  let mut u16_simd = std::vec![0u16; width * 3];
+  scalar::p_n_444_to_rgb_or_rgba_u16_row::<10, false, false, true>(
+    &y,
+    &uv,
+    &mut u16_scalar,
+    width,
+    matrix,
+    full_range,
+  );
+  unsafe {
+    p_n_444_to_rgb_or_rgba_u16_row::<10, false, false, true>(
+      &y,
+      &uv,
+      &mut u16_simd,
+      width,
+      matrix,
+      full_range,
+    );
+  }
+  assert_eq!(
+    u16_scalar, u16_simd,
+    "SSE4.1 NV20 4:4:4 low-packed → u16 diverges (width={width}, matrix={matrix:?}, full_range={full_range})"
+  );
+}
+
+#[cfg(feature = "yuv-semi-planar")]
+#[test]
+fn sse41_nv20_444_lowpacked_matches_scalar_dirty_widths() {
+  for w in [1usize, 3, 7, 8, 15, 16, 17, 31, 32, 33, 48, 1920, 1921] {
+    for m in [
+      ColorMatrix::Bt601,
+      ColorMatrix::Bt709,
+      ColorMatrix::Bt2020Ncl,
+    ] {
+      for full in [true, false] {
+        check_nv20_444_lowpacked_sse41_equivalence(w, m, full);
+      }
+    }
+  }
+}
+
 #[cfg(feature = "yuv-semi-planar")]
 #[test]
 fn sse41_p416_matches_scalar_all_matrices() {

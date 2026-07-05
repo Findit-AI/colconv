@@ -17,7 +17,7 @@ const HOST_NATIVE_BE: bool = cfg!(target_endian = "big");
 /// SSE4.1 must be available on the current CPU.
 #[inline]
 #[target_feature(enable = "sse4.1")]
-unsafe fn depack_u16x8<const LOW_PACKED: bool>(
+pub(crate) unsafe fn depack_u16x8<const LOW_PACKED: bool>(
   v: __m128i,
   shr_count: __m128i,
   low_mask: __m128i,

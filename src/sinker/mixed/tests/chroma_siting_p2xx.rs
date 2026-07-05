@@ -134,7 +134,12 @@ fn center_upsample_2to1_kernel_matches_hand_computed() {
     uv_half[2 * j + 1] = pack(v[j], 10);
   }
   let mut uv_full = [0u16; 16];
-  crate::row::scalar::chroma_upsample_2to1_center_h_p0xx::<10>(&uv_half, &mut uv_full, 8, false);
+  crate::row::scalar::chroma_upsample_2to1_center_h_p0xx::<10, false>(
+    &uv_half,
+    &mut uv_full,
+    8,
+    false,
+  );
 
   let dec: Vec<u16> = uv_full.iter().map(|&x| x >> 6).collect();
   let u_out: Vec<u16> = (0..8).map(|i| dec[2 * i]).collect();

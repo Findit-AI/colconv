@@ -20,7 +20,9 @@ use super::super::{
   chroma_422_center_sited_h, native_planar_hb_preflight_check_only,
   planar_8bit::YUV422P_CENTERED_H_PHASE,
   resample_preflight_check_only,
-  subsampled_4_2_0_high_bit::{reserve_pn_chroma_full_u16, upsample_pn_chroma_center_h},
+  subsampled_4_2_0_high_bit::{
+    reserve_pn_chroma_full_u16, upsample_pn_chroma_center_h, upsample_pn_chroma_center_h_low_packed,
+  },
   yuv_planar16_process_native,
 };
 #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
@@ -3060,6 +3062,14 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Nv20<BE>, R> {
       ));
     }
 
+    // Chroma siting (RFC #238): drives the identity-plan centered-vs-cosited
+    // horizontal chroma decode. Read before the field destructure (which
+    // reborrows `self`). `yuv-planar` gates the reconstruction (the predicate
+    // + the low-packed 4:4:4 kernels); a semi-planar-only build keeps the
+    // default fused decode.
+    #[cfg(feature = "yuv-planar")]
+    let chroma_location = self.chroma_location;
+
     let Self {
       rgb,
       rgb_u16,
@@ -3090,6 +3100,18 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Nv20<BE>, R> {
       p0xx_v_half,
       #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
       frozen_native_route,
+      // Full-width interleaved chroma staging for the centered-siting (RFC
+      // #238) identity decode; reuses the 4:2:0 `p0xx` scratch + the
+      // low-packed upsample wrapper.
+      #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
+      chroma_full_u16,
+      // The identity-plan chroma siting phase frozen on the first output row,
+      // so a mid-frame `set_chroma_location` flip is rejected instead of
+      // producing a mixed-phase frame (the `u16` semi-planar twin of the
+      // planar Yuv422p `frozen_chroma_centered`). Reset each frame by
+      // `reset_high_bit_yuv_streams`.
+      #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
+      frozen_chroma_centered,
       ..
     } = self;
 
@@ -3249,6 +3271,53 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Nv20<BE>, R> {
     let want_rgb = rgb.is_some();
     let want_rgba = rgba.is_some();
     let want_hsv = hsv.is_some();
+    // u16 outputs are low-bit-packed (yuv420p10le convention).
+    let want_rgb_u16 = rgb_u16.is_some();
+    let want_rgba_u16 = rgba_u16.is_some();
+    // The full output set (matching the P210 identity `need_output`, INCLUDING
+    // the u16 twins): gates the chroma-siting freeze so a luma-only / no-output
+    // row neither freezes nor rejects. Only the centered path consumes it, so
+    // it carries the same `yuv-planar` gate (a semi-planar-solo build has no
+    // centered decode and never reads it).
+    #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
+    let need_output =
+      luma.is_some() || want_rgb || want_rgba || want_hsv || want_rgb_u16 || want_rgba_u16;
+
+    // Centered chroma siting (RFC #238): when the horizontal siting is
+    // centered, reconstruct a full-width interleaved chroma plane ONCE (the
+    // low-bit-packed 4:2:2 twin of the P210 identity path) and decode via the
+    // `nv20_444_*` kernels; the default / co-sited path keeps the
+    // byte-identical fused `nv20_*` decode. Reserve the scratch up front
+    // (atomicity, before any output write); 4:2:2 is horizontal-only (no
+    // vertical / `Bottom` phase). `yuv-planar` gates both halves (the
+    // predicate + the low-packed 4:4:4 kernels).
+    #[cfg(feature = "yuv-planar")]
+    let center_sited = chroma_422_center_sited_h(chroma_location);
+
+    // Per-frame chroma-siting freeze (RFC #238, mirroring the resample-path
+    // guard + the planar Yuv422p direct-path freeze): the first output-bearing
+    // row pins the phase; a later row whose siting flipped would decode a
+    // mixture of centered and co-sited chroma into ONE frame, so reject it here
+    // BEFORE any scratch reserve or output write. `begin_frame`'s
+    // `reset_high_bit_yuv_streams` clears the freeze so the next frame may pick
+    // either phase.
+    #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
+    if need_output
+      && let Some(frozen) = *frozen_chroma_centered
+      && frozen != center_sited
+    {
+      return Err(MixedSinkerError::ChromaSitingChanged(
+        ChromaSitingChanged::new(idx),
+      ));
+    }
+
+    #[cfg(feature = "yuv-planar")]
+    let need_centered_chroma =
+      center_sited && (want_rgb || want_rgba || want_hsv || want_rgb_u16 || want_rgba_u16);
+    #[cfg(feature = "yuv-planar")]
+    if need_centered_chroma {
+      reserve_pn_chroma_full_u16(chroma_full_u16, w, h)?;
+    }
 
     // Atomicity preflight (#308, cf. the crate's #180 resample fix and the
     // high-bit 4:2:0 sibling): reserve the only growable row scratch this
@@ -3277,6 +3346,36 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Nv20<BE>, R> {
       )?;
     }
 
+    // Centered full-width INTERLEAVED chroma (phase-0.5, low-bit-packed),
+    // reconstructed ONCE per row from the wire half-width interleaved UV and
+    // reused by every colour decode (u16 + u8). Infallible — the scratch was
+    // reserved above. The default left/unspecified siting leaves it `None`, so
+    // the fused `nv20_*` kernels de-interleave + upsample in-register and the
+    // output stays byte-identical to the co-sited decode.
+    #[cfg(feature = "yuv-planar")]
+    let centered: Option<&[u16]> = if need_centered_chroma {
+      Some(upsample_pn_chroma_center_h_low_packed::<BITS>(
+        chroma_full_u16,
+        row.uv(),
+        w,
+        BE,
+      ))
+    } else {
+      None
+    };
+    #[cfg(not(feature = "yuv-planar"))]
+    let centered: Option<&[u16]> = None;
+
+    // Freeze the phase on the first output-bearing row — AFTER the fallible
+    // scratch reserves above have succeeded, so an `AllocationFailed` row stays
+    // retryable (frozen stays unset); later rows are checked against it up top.
+    // The remaining fallible ops below are geometry / bounds checks,
+    // deterministic regardless of siting.
+    #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
+    if need_output && frozen_chroma_centered.is_none() {
+      *frozen_chroma_centered = Some(center_sited);
+    }
+
     if let Some(luma) = luma.as_deref_mut() {
       let dst = &mut luma[one_plane_start..one_plane_end];
       // NV20 native luma: de-pack the low 10 then narrow to 8 bits
@@ -3289,24 +3388,33 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Nv20<BE>, R> {
     }
 
     // ===== u16 RGB / RGBA path (Strategy A) =====
-    // u16 outputs are low-bit-packed (yuv420p10le convention).
-    let want_rgb_u16 = rgb_u16.is_some();
-    let want_rgba_u16 = rgba_u16.is_some();
-
     if want_rgba_u16 && !want_rgb_u16 {
       let rgba_u16_buf = rgba_u16.as_deref_mut().unwrap();
       let rgba_u16_row =
         rgba_u16_plane_row_slice(rgba_u16_buf, one_plane_start, one_plane_end, w, h)?;
-      nv20_to_rgba_u16_row_endian(
-        row.y(),
-        row.uv(),
-        rgba_u16_row,
-        w,
-        row.matrix(),
-        row.full_range(),
-        use_simd,
-        BE,
-      );
+      if let Some(uv_full) = centered {
+        nv20_444_to_rgba_u16_row_endian(
+          row.y(),
+          uv_full,
+          rgba_u16_row,
+          w,
+          row.matrix(),
+          row.full_range(),
+          use_simd,
+          BE,
+        );
+      } else {
+        nv20_to_rgba_u16_row_endian(
+          row.y(),
+          row.uv(),
+          rgba_u16_row,
+          w,
+          row.matrix(),
+          row.full_range(),
+          use_simd,
+          BE,
+        );
+      }
     } else if want_rgb_u16 {
       let rgb_u16_buf = rgb_u16.as_deref_mut().unwrap();
       let rgb_plane_end =
@@ -3317,16 +3425,29 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Nv20<BE>, R> {
           )))?;
       let rgb_plane_start = one_plane_start * 3;
       let rgb_u16_row = &mut rgb_u16_buf[rgb_plane_start..rgb_plane_end];
-      nv20_to_rgb_u16_row_endian(
-        row.y(),
-        row.uv(),
-        rgb_u16_row,
-        w,
-        row.matrix(),
-        row.full_range(),
-        use_simd,
-        BE,
-      );
+      if let Some(uv_full) = centered {
+        nv20_444_to_rgb_u16_row_endian(
+          row.y(),
+          uv_full,
+          rgb_u16_row,
+          w,
+          row.matrix(),
+          row.full_range(),
+          use_simd,
+          BE,
+        );
+      } else {
+        nv20_to_rgb_u16_row_endian(
+          row.y(),
+          row.uv(),
+          rgb_u16_row,
+          w,
+          row.matrix(),
+          row.full_range(),
+          use_simd,
+          BE,
+        );
+      }
       if want_rgba_u16 {
         let rgba_u16_buf = rgba_u16.as_deref_mut().unwrap();
         let rgba_u16_row =
@@ -3341,16 +3462,29 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Nv20<BE>, R> {
     if want_rgba && !need_rgb_kernel {
       let rgba_buf = rgba.as_deref_mut().unwrap();
       let rgba_row = rgba_plane_row_slice(rgba_buf, one_plane_start, one_plane_end, w, h)?;
-      nv20_to_rgba_row_endian(
-        row.y(),
-        row.uv(),
-        rgba_row,
-        w,
-        row.matrix(),
-        row.full_range(),
-        use_simd,
-        BE,
-      );
+      if let Some(uv_full) = centered {
+        nv20_444_to_rgba_row_endian(
+          row.y(),
+          uv_full,
+          rgba_row,
+          w,
+          row.matrix(),
+          row.full_range(),
+          use_simd,
+          BE,
+        );
+      } else {
+        nv20_to_rgba_row_endian(
+          row.y(),
+          row.uv(),
+          rgba_row,
+          w,
+          row.matrix(),
+          row.full_range(),
+          use_simd,
+          BE,
+        );
+      }
       return Ok(());
     }
 
@@ -3367,16 +3501,31 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Nv20<BE>, R> {
       h,
     )?;
 
-    nv20_to_rgb_row_endian(
-      row.y(),
-      row.uv(),
-      rgb_row,
-      w,
-      row.matrix(),
-      row.full_range(),
-      use_simd,
-      BE,
-    );
+    // Centered → decode from the reconstructed full-width chroma; HSV then
+    // derives off this RGB row (NV20 has no direct low-packed YUV→HSV kernel).
+    if let Some(uv_full) = centered {
+      nv20_444_to_rgb_row_endian(
+        row.y(),
+        uv_full,
+        rgb_row,
+        w,
+        row.matrix(),
+        row.full_range(),
+        use_simd,
+        BE,
+      );
+    } else {
+      nv20_to_rgb_row_endian(
+        row.y(),
+        row.uv(),
+        rgb_row,
+        w,
+        row.matrix(),
+        row.full_range(),
+        use_simd,
+        BE,
+      );
+    }
 
     if let Some(hsv) = hsv.as_mut() {
       let (h, s, v) = hsv.hsv();
