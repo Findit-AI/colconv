@@ -13,10 +13,13 @@ mod p0xx;
 #[cfg(feature = "yuv-planar")]
 mod yuv420p;
 
-#[cfg(all(test, feature = "std", feature = "yuv-planar"))]
-pub(crate) use native::arm_native_u16_alloc_failure;
 #[cfg(feature = "yuv-planar")]
 pub(crate) use native::{NativeYuv420U16, yuv420p16_process_native};
+#[cfg(all(test, feature = "std", feature = "yuv-planar"))]
+pub(crate) use native::{
+  arm_native_u16_alloc_failure, arm_native_u16_chroma_failure, arm_native_u16_rgb_scratch_failure,
+  arm_native_u16_rgb_u16_scratch_failure,
+};
 // Shared by the 4:2:2 high-bit centered-siting path (#302): the same u16
 // half-width->full-width phase-0.5 INTERLEAVED chroma staging (4:2:0 and 4:2:2
 // subsample chroma 2:1 horizontally identically), exported under format-neutral

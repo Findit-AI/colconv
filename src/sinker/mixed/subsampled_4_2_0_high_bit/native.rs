@@ -39,6 +39,7 @@
 
 use super::super::{
   GeometryOverflow, HsvFrameMut, MixedSinkerError, deinterleave_y_high_bit_masked,
+  frozen_outputs_check,
 };
 use crate::{
   ColorMatrix,
@@ -77,6 +78,53 @@ std::thread_local! {
 #[cfg(all(test, feature = "std", feature = "yuv-planar"))]
 pub(crate) fn arm_native_u16_alloc_failure() {
   FORCE_NATIVE_U16_ALLOC_FAILURE.with(|f| f.set(true));
+}
+
+#[cfg(all(test, feature = "std", feature = "yuv-planar"))]
+std::thread_local! {
+  static FORCE_NATIVE_U16_CHROMA_FAILURE: core::cell::Cell<bool> =
+    const { core::cell::Cell::new(false) };
+  /// Fires at the u8 output-width RGB-scratch grow, a pre-feed step that runs
+  /// BEFORE the delegate commits (installs the rebuilt join + freezes the output
+  /// set) — the pre-commit failure path the transactional delegate must leave
+  /// state-atomic (cached join + `resample_outputs` untouched, retryable).
+  static FORCE_NATIVE_U16_RGB_SCRATCH_FAILURE: core::cell::Cell<bool> =
+    const { core::cell::Cell::new(false) };
+  /// Fires at the native-depth u16 colour-scratch (`rgb_scratch_u16`) grow, which
+  /// runs AFTER the u8 colour scratch — a LATER pre-feed grow, so arming it proves
+  /// a late failure still leaves the cached join, the `resample_outputs` freeze,
+  /// and the output frame untouched and the row retryable.
+  static FORCE_NATIVE_U16_RGB_U16_SCRATCH_FAILURE: core::cell::Cell<bool> =
+    const { core::cell::Cell::new(false) };
+}
+
+/// Arms a failpoint that fires when (and only when) the native join PLANS its
+/// chroma grid — which happens exactly when colour output is requested, so a
+/// colour-capability rebuild reaches it. A luma-only sink never does, so an armed
+/// flag survives a luma-only row unconsumed and is taken by the first colour row.
+/// Test-only — the 4:2:0 high-bit sibling of `arm_planar_hb_native_chroma_failure`.
+#[cfg(all(test, feature = "std", feature = "yuv-planar"))]
+pub(crate) fn arm_native_u16_chroma_failure() {
+  FORCE_NATIVE_U16_CHROMA_FAILURE.with(|f| f.set(true));
+}
+
+/// Arms [`FORCE_NATIVE_U16_RGB_SCRATCH_FAILURE`] for the NEXT native output-width
+/// u8 RGB-scratch grow on this thread (a pre-feed step that runs BEFORE the
+/// delegate commits the rebuilt join + output-set freeze), consumed on read so it
+/// fires exactly once. Test-only.
+#[cfg(all(test, feature = "std", feature = "yuv-planar"))]
+pub(crate) fn arm_native_u16_rgb_scratch_failure() {
+  FORCE_NATIVE_U16_RGB_SCRATCH_FAILURE.with(|f| f.set(true));
+}
+
+/// Arms [`FORCE_NATIVE_U16_RGB_U16_SCRATCH_FAILURE`] for the NEXT native-depth
+/// u16 colour-scratch grow on this thread — a LATER pre-feed grow than the u8
+/// scratch, so a test arming it proves a late pre-feed failure still leaves the
+/// cached join, the `resample_outputs` freeze, and the output frame untouched and
+/// the row retryable. Consumed on read so it fires exactly once. Test-only.
+#[cfg(all(test, feature = "std", feature = "yuv-planar"))]
+pub(crate) fn arm_native_u16_rgb_u16_scratch_failure() {
+  FORCE_NATIVE_U16_RGB_U16_SCRATCH_FAILURE.with(|f| f.set(true));
 }
 
 /// Native decimation join for the high-bit planar 4:2:0 family — the
@@ -162,6 +210,15 @@ impl NativeYuv420U16 {
     let mut chroma_centered = false;
     let mut chroma_bottom = false;
     let chroma = if need_color {
+      #[cfg(all(test, feature = "std", feature = "yuv-planar"))]
+      if FORCE_NATIVE_U16_CHROMA_FAILURE.with(|f| f.take()) {
+        return Err(ResampleError::AllocationFailed(PlanGeometry::new(
+          w,
+          h,
+          plan.out_w(),
+          plan.out_h(),
+        )));
+      }
       // Vertical chroma weighting runs in the LUMA domain so an odd trailing
       // luma row weights its chroma row by half; the plan's stored dims are the
       // per-plane denominators (scaled on the H axis for the centered fold, and
@@ -250,55 +307,26 @@ impl NativeYuv420U16 {
   }
 }
 
-/// Thin high-bit wrapper over
-/// [`native_preflight_core`](crate::sinker::mixed::planar_8bit::native_preflight_core)
-/// — supplies the u16-join-typed expected row
-/// ([`NativeYuv420U16::next_y`]) and threads the native-depth u16 colour
-/// outputs (`rgb_u16` / `rgba_u16`) into the frozen-output check (the
-/// 8-bit wrapper freezes those as absent). See `native_preflight_core` for
-/// the 4-point rejection logic and its ordering contract.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn yuv420p16_native_preflight(
-  native_420_u16: &Option<std::boxed::Box<NativeYuv420U16>>,
-  resample_outputs: &mut Option<super::super::FrozenOutputs>,
-  rgb: &Option<&mut [u8]>,
-  rgba: &Option<&mut [u8]>,
-  rgb_u16: &Option<&mut [u16]>,
-  rgba_u16: &Option<&mut [u16]>,
-  luma: &Option<&mut [u8]>,
-  hsv: &mut Option<HsvFrameMut<'_>>,
-  idx: usize,
-  need_luma: bool,
-  need_color: bool,
-) -> Result<bool, MixedSinkerError> {
-  super::super::planar_8bit::native_preflight_core(
-    native_420_u16.as_ref().map_or(0, |j| j.next_y()),
-    resample_outputs,
-    rgb,
-    rgba,
-    rgb_u16,
-    rgba_u16,
-    luma,
-    // The high-bit planar 4:2:0 family exposes no `luma_u16` output.
-    &None,
-    hsv,
-    idx,
-    need_luma,
-    need_color,
-  )
-}
-
-/// Compare-only twin of [`yuv420p16_native_preflight`]: the same 4-point pre-feed
-/// rejection via
+/// The COMPLETE compare-only 4-point pre-feed rejection preflight for the high-bit
+/// planar 4:2:0 native fast tier — the no-output short-circuit, first-row
+/// out-of-sequence check, output-set compare, and post-compare sequence check via
 /// [`native_preflight_core_check_only`](crate::sinker::mixed::planar_8bit::native_preflight_core_check_only),
-/// threading the native-depth u16 colour outputs, but with **NO commit** — it
-/// COMPARES the frozen output set against a fresh snapshot instead of storing it.
-/// The semi-planar 4:2:0 P-format wrapper
-/// ([`p0xx_process_native`](super::p0xx)) runs it ahead of its own fallible
-/// de-pack scratch grow, so a rejected / failed pre-feed row leaves the wrapper
-/// scratch untouched WITHOUT a committed freeze; the delegate
-/// [`yuv420p16_process_native`] re-runs the committing preflight and owns the
-/// single commit. The 4:2:0 high-bit sibling of
+/// keyed on the u16-join-typed expected row ([`NativeYuv420U16::next_y`]) and
+/// threading the native-depth u16 colour outputs (`rgb_u16` / `rgba_u16`) into the
+/// compare (the 8-bit twin treats those as absent).
+///
+/// **NO commit** — it COMPARES the frozen output set against a fresh snapshot
+/// instead of storing it. Every native 4:2:0 caller runs it: the semi-planar 4:2:0
+/// P-format wrapper ([`p0xx_process_native`](super::p0xx)) runs it ahead of its own
+/// fallible de-pack scratch grow, and [`yuv420p16_process_native`] itself runs it
+/// (the double-run is idempotent). [`yuv420p16_process_native`] builds its join into
+/// a LOCAL and grows its colour / source scratch AFTER this passes, then performs the
+/// SINGLE output-set freeze once every pre-feed allocation (the wrapper's de-pack
+/// grows AND the delegate's colour / source grows) has succeeded — so a first-row /
+/// rebuild-row / later-grow failure leaves the cached join, the `resample_outputs`
+/// freeze, and the output frame untouched and the row retryable (the persistent
+/// scratch may keep grown capacity — join / freeze / output-atomic, not
+/// memory-exact). The 4:2:0 high-bit sibling of
 /// [`native_planar_hb_preflight_check_only`](crate::sinker::mixed::planar_high_bit_native::native_planar_hb_preflight_check_only).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn yuv420p16_native_preflight_check_only(
@@ -368,10 +396,21 @@ fn grow_src_scratch(
 
 /// Native-tier path for the high-bit planar 4:2:0 family. Const-generic
 /// over `BITS` (one body, the call sites 9 / 10 / 12 / 14 / 16) and `BE` (the
-/// source wire endianness). Phasing mirrors the 8-bit native twin and the
-/// row-stage tier: the COMPLETE pre-feed preflight (idempotent double-run
-/// vs the wrapper), the join build, sequencing, source / colour scratch
-/// sizing, then the feeds — with nothing fallible after the first feed.
+/// source wire endianness). Preflight-transactional (mirrors the 8-bit 4:2:0
+/// twin [`yuv420p_process_native`](crate::sinker::mixed::planar_8bit::yuv420p_process_native)
+/// and the non-4:2:0 high-bit twin
+/// [`yuv_planar16_process_native`](crate::sinker::mixed::planar_high_bit_native::yuv_planar16_process_native)):
+/// the compare-only pre-feed preflight, the join built into a LOCAL, then the
+/// colour and source scratch sizing — and only once every pre-feed allocation
+/// has succeeded does it COMMIT (install the rebuilt join, freeze the output
+/// set), sequence-check, and feed. So on ANY pre-feed allocation failure the
+/// cached join, the `resample_outputs` freeze, and the output frame stay
+/// untouched and the row is retryable (a deterministic typed error, never a
+/// committed-then-corrupt state); the persistent reused scratch buffers
+/// (`rgb_scratch` / `rgb_scratch_u16` / the join's source-plane scratch) MAY keep
+/// already-grown capacity, which a retry reuses correctly and the sink frees on
+/// drop — join / freeze / output-atomic, not memory-exact. Nothing is fallible
+/// after the first feed.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn yuv420p16_process_native<const BITS: u32, const BE: bool>(
   plan: &ResamplePlan,
@@ -419,14 +458,16 @@ pub(crate) fn yuv420p16_process_native<const BITS: u32, const BE: bool>(
   // derive path. The u16 colour scratch is independent and unaffected.
   let want_hsv_direct = hsv.is_some() && rgb.is_none() && rgba.is_none();
 
-  // Complete pre-feed rejection preflight (no-output short-circuit,
-  // first-row out-of-sequence, frozen-output, post-freeze sequence) ahead
-  // of any fallible allocation — re-run in place of an inline block, as
-  // the 8-bit native does; the double-run vs the routing wrapper is
-  // idempotent (the freeze stores on the first output-bearing row, the
-  // second run is a matching check, the OOS-first-row branch is
-  // `is_none()`-guarded so it is skipped once frozen).
-  if !yuv420p16_native_preflight(
+  // Compare-only pre-feed rejection preflight (no-output short-circuit,
+  // first-row out-of-sequence, output-set compare, post-compare sequence)
+  // ahead of any fallible allocation — the check-only preflight
+  // [`yuv420p16_native_preflight_check_only`]. It does NOT commit the output-set
+  // freeze; that commit is deferred below until every pre-feed allocation has
+  // succeeded, so a first-row / rebuild-row failure leaves the cached join and
+  // `resample_outputs` untouched. The direct planar callers reach this as their
+  // only preflight; the semi-planar P-format wrapper runs the identical compare
+  // first and the double-run is idempotent. `Ok(false)` is the no-output no-op.
+  if !yuv420p16_native_preflight_check_only(
     native_420_u16,
     resample_outputs,
     rgb,
@@ -442,42 +483,42 @@ pub(crate) fn yuv420p16_process_native<const BITS: u32, const BE: bool>(
     return Ok(());
   }
 
-  // The join's chroma half is fixed at creation; if the frame's colour
-  // capability differs (outputs attached since the previous frame — the
-  // frozen check pins them WITHIN a frame, not across frames), rebuild it.
-  if native_420_u16
-    .as_ref()
-    .is_some_and(|join| join.chroma.is_some() != need_color)
-  {
-    *native_420_u16 = None;
-  }
-  let join = match native_420_u16 {
-    Some(join) => join,
-    None => {
-      // Build the join (its de-interleave / stage scratch allocates recoverably)
-      // and box it recoverably (`try_box`, not `Box::new` — the latter aborts on
-      // OOM). Both fallible steps run BEFORE `native_420_u16.insert`, so a
-      // refusal at either returns `Err` with the field still `None` — no caller
-      // output is touched and the next row retries (first-row-transactional).
-      let join = NativeYuv420U16::new(plan, build_chroma_plan, w, h, need_color)?;
-      let boxed = try_box(join).map_err(|_| {
-        MixedSinkerError::Resample(ResampleError::AllocationFailed(PlanGeometry::new(
-          w,
-          h,
-          plan.out_w(),
-          plan.out_h(),
-        )))
-      })?;
-      native_420_u16.insert(boxed)
-    }
+  // A fresh join is needed on a first-ever build (`None`) or a colour-capability
+  // change (the cached join's chroma half no longer matches `need_color` —
+  // outputs attached / detached since the previous frame; the frozen check pins
+  // them WITHIN a frame, not across frames). Build the replacement into a LOCAL
+  // and do NOT clear the field yet: the cached join stays intact until every
+  // pre-feed allocation has succeeded, so a build / box refusal leaves it, the
+  // `resample_outputs` freeze, and the output frame untouched and the row
+  // retryable.
+  let rebuild = native_420_u16.is_none()
+    || native_420_u16
+      .as_ref()
+      .is_some_and(|join| join.chroma.is_some() != need_color);
+  let mut new_join = if rebuild {
+    // Build the join (its de-interleave / stage scratch allocates recoverably)
+    // and box it recoverably (`try_box`, not `Box::new` — the latter aborts on
+    // OOM).
+    let join = NativeYuv420U16::new(plan, build_chroma_plan, w, h, need_color)?;
+    Some(try_box(join).map_err(|_| {
+      MixedSinkerError::Resample(ResampleError::AllocationFailed(PlanGeometry::new(
+        w,
+        h,
+        plan.out_w(),
+        plan.out_h(),
+      )))
+    })?)
+  } else {
+    None
   };
-  join.check_sequence(idx)?;
 
   // Colour OUTPUT scratch at output width (one binned row converts here
   // before fanning to the caller buffers). Both grows are fallible and
-  // precede the first feed, keeping the call atomic. The u8 RGB scratch
-  // is skipped entirely for the HSV-direct case — the emit loop converts
-  // the binned Y/U/V straight to HSV.
+  // precede the commit, so a failure here (e.g. the u16 grow after the u8 grow
+  // already succeeded) leaves the join / freeze / output untouched and the row
+  // retryable; the already-grown persistent scratch simply keeps its capacity for
+  // the retry. The u8 RGB scratch is skipped entirely for the HSV-direct case —
+  // the emit loop converts the binned Y/U/V straight to HSV.
   if need_color_u8 && !want_hsv_direct {
     let row_bytes =
       ow.checked_mul(3)
@@ -487,6 +528,12 @@ pub(crate) fn yuv420p16_process_native<const BITS: u32, const BE: bool>(
           3,
         )))?;
     if rgb_scratch.len() < row_bytes {
+      #[cfg(all(test, feature = "std", feature = "yuv-planar"))]
+      if FORCE_NATIVE_U16_RGB_SCRATCH_FAILURE.with(|f| f.take()) {
+        return Err(MixedSinkerError::Resample(ResampleError::AllocationFailed(
+          PlanGeometry::new(w, h, plan.out_w(), plan.out_h()),
+        )));
+      }
       rgb_scratch
         .try_reserve_exact(row_bytes - rgb_scratch.len())
         .map_err(|_| {
@@ -509,6 +556,12 @@ pub(crate) fn yuv420p16_process_native<const BITS: u32, const BE: bool>(
           3,
         )))?;
     if rgb_scratch_u16.len() < row_elems {
+      #[cfg(all(test, feature = "std", feature = "yuv-planar"))]
+      if FORCE_NATIVE_U16_RGB_U16_SCRATCH_FAILURE.with(|f| f.take()) {
+        return Err(MixedSinkerError::Resample(ResampleError::AllocationFailed(
+          PlanGeometry::new(w, h, plan.out_w(), plan.out_h()),
+        )));
+      }
       rgb_scratch_u16
         .try_reserve_exact(row_elems - rgb_scratch_u16.len())
         .map_err(|_| {
@@ -523,20 +576,64 @@ pub(crate) fn yuv420p16_process_native<const BITS: u32, const BE: bool>(
     }
   }
 
-  // Source-width de-interleave scratch (wire → host-native), grown after
-  // the colour-output scratch so the FIRST grow here carries the test
-  // failpoint. The chroma scratch is grown only on chroma-bearing rows,
-  // exactly where the join reads chroma.
-  grow_src_scratch(&mut join.y_src, w, w, h, plan)?;
+  // Source-width de-interleave scratch (wire → host-native), grown after the
+  // colour-output scratch so the FIRST grow here carries the test failpoint.
+  // Grown on the rebuilt LOCAL join if rebuilding, else the cached join — all
+  // fallible, all BEFORE the commit, so a failure at any of them leaves the join /
+  // freeze / output untouched and the row retryable (an earlier source scratch
+  // keeps its grown capacity). The chroma scratch is grown only on chroma-bearing
+  // rows, exactly where the join reads chroma.
   let cw = w / 2;
-  let feed_chroma = join.chroma.is_some() && idx.is_multiple_of(2);
-  if feed_chroma {
-    // Split-borrow: grow the two chroma scratches without holding `join`
-    // immutably across the call.
-    let chroma = join.chroma.as_mut().expect("feed_chroma implies Some");
-    grow_src_scratch(&mut chroma.u_src, cw, w, h, plan)?;
-    grow_src_scratch(&mut chroma.v_src, cw, w, h, plan)?;
+  let feed_chroma;
+  {
+    let target: &mut NativeYuv420U16 = match new_join.as_deref_mut() {
+      Some(join) => join,
+      None => native_420_u16
+        .as_deref_mut()
+        .expect("reuse implies a cached join"),
+    };
+    grow_src_scratch(&mut target.y_src, w, w, h, plan)?;
+    feed_chroma = target.chroma.is_some() && idx.is_multiple_of(2);
+    if feed_chroma {
+      // Split-borrow: grow the two chroma scratches without holding `target`
+      // immutably across the call.
+      let chroma = target.chroma.as_mut().expect("feed_chroma implies Some");
+      grow_src_scratch(&mut chroma.u_src, cw, w, h, plan)?;
+      grow_src_scratch(&mut chroma.v_src, cw, w, h, plan)?;
+    }
   }
+
+  // Every pre-feed allocation succeeded — COMMIT: install the rebuilt join
+  // (dropping the old) then freeze the output set. A build only reaches here on
+  // the first output-bearing row (its `resample_outputs` is still `None`), so the
+  // freeze just stores the snapshot; a reuse row builds nothing and re-freezes
+  // nothing new. The native-depth u16 colour outputs are frozen as present (the
+  // 8-bit twin freezes them absent).
+  if let Some(boxed) = new_join {
+    *native_420_u16 = Some(boxed);
+  }
+  frozen_outputs_check(
+    resample_outputs,
+    luma,
+    // The high-bit planar 4:2:0 family exposes no `luma_u16` output.
+    &None,
+    rgb,
+    rgba,
+    rgb_u16,
+    rgba_u16,
+    &None,
+    &None,
+    &None,
+    &None,
+    &None,
+    hsv,
+    &None,
+    idx,
+  )?;
+  let join = native_420_u16
+    .as_mut()
+    .expect("built or reused in the preflight");
+  join.check_sequence(idx)?;
 
   // De-interleave the wire planes into host-native scratch. Everything
   // past this point is infallible.

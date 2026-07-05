@@ -1042,6 +1042,254 @@ macro_rules! yuv420p_high_bit_native_suite {
         );
       }
 
+      // ---- colour-capability rebuild transactionality (RFC #238) --------
+
+      /// Per-source-row `$row` over the suite's `ramp()` planes (chroma row
+      /// `r / 2`), the shared fixture the rebuild-atomicity tests below feed
+      /// row by row.
+      fn rebuild_row<'a>(y: &'a [u16], u: &'a [u16], v: &'a [u16], r: usize) -> $row<'a> {
+        let cr = (r / 2) * CW;
+        $row::new(
+          &y[r * SRC..(r + 1) * SRC],
+          &u[cr..cr + CW],
+          &v[cr..cr + CW],
+          r,
+          M,
+          FR,
+        )
+      }
+
+      /// RFC #238 — the 4:2:0 high-bit native delegate is preflight-transactional.
+      /// A colour-capability REBUILD (frame 2 attaches colour to a frame-1
+      /// luma-only join) whose CHROMA-PLAN build fails must surface the typed
+      /// `AllocationFailed` while leaving the cached luma-only join AND the
+      /// output-set freeze INTACT (uncommitted): the join stays installed and
+      /// `resample_outputs` stays unfrozen, so retrying row 0 with YET ANOTHER
+      /// output attached is accepted — a committed `{luma, hsv}` freeze would
+      /// reject it as `ResampleOutputsChanged`. The pre-fix delegate froze the
+      /// output set and eager-cleared the join BEFORE this fallible rebuild,
+      /// corrupting the retry.
+      #[test]
+      #[cfg_attr(
+        miri,
+        ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+      )]
+      fn native_colour_capability_rebuild_chroma_oom_is_transactional() {
+        let (y, u, v) = ramp();
+        let (mut hh, mut ss, mut vv) = (
+          vec![0u8; OUT * OUT],
+          vec![0u8; OUT * OUT],
+          vec![0u8; OUT * OUT],
+        );
+        let mut luma = vec![0u8; OUT * OUT];
+        let mut rgb = vec![0u8; OUT * OUT * 3];
+        let mut sink = MixedSinker::<$marker, AreaResampler>::with_resampler(
+          SRC,
+          SRC,
+          AreaResampler::to(OUT, OUT),
+        )
+        .unwrap()
+        .with_native(true)
+        .with_luma(&mut luma)
+        .unwrap();
+        // Frame 1: a luma-only native join (chroma absent), frozen as `{luma}`.
+        sink.begin_frame(SRC as u32, SRC as u32).unwrap();
+        for r in 0..SRC {
+          sink
+            .process(rebuild_row(&y, &u, &v, r))
+            .expect("luma-only frame builds the native join");
+        }
+        // Frame 2: attach HSV -> the row-0 rebuild MUST build the chroma half;
+        // arm the chroma-plan failpoint so that rebuild fails.
+        sink.begin_frame(SRC as u32, SRC as u32).unwrap();
+        sink.set_hsv(&mut hh, &mut ss, &mut vv).unwrap();
+        crate::sinker::mixed::subsampled_4_2_0_high_bit::arm_native_u16_chroma_failure();
+        let err = sink.process(rebuild_row(&y, &u, &v, 0)).unwrap_err();
+        assert!(
+          matches!(
+            err,
+            MixedSinkerError::Resample(ResampleError::AllocationFailed(_))
+          ),
+          "the colour-capability rebuild chroma-plan OOM must surface \
+           AllocationFailed, got {err:?}"
+        );
+        // Both halves of the commit-together shape rolled back: the cached
+        // luma-only join is still installed and `resample_outputs` is unfrozen.
+        assert!(
+          sink.native_420_u16.is_some(),
+          "the cached luma-only join must survive a failed colour rebuild"
+        );
+        assert!(
+          !sink.resample_outputs_frozen(),
+          "a failed rebuild must leave resample_outputs uncommitted"
+        );
+        // Attaching ANOTHER output (rgb) and retrying row 0 is ACCEPTED — the
+        // changed output set proves the freeze rolled back (a committed
+        // `{luma, hsv}` would reject this as ResampleOutputsChanged).
+        sink.set_rgb(&mut rgb).unwrap();
+        sink
+          .process(rebuild_row(&y, &u, &v, 0))
+          .expect("row 0 with a changed output set must succeed after a rebuild chroma OOM");
+        for r in 1..SRC {
+          sink
+            .process(rebuild_row(&y, &u, &v, r))
+            .expect("the recovered join must process the rest of the frame");
+        }
+        assert!(
+          rgb.iter().any(|&b| b != 0),
+          "the recovered join must produce real colour output"
+        );
+      }
+
+      /// RFC #238 — the u8 colour-scratch failpoint companion: the same
+      /// colour-capability rebuild, but the fallible step that fails is the u8
+      /// `rgb_scratch` grow (attaching `rgb`). It too must leave the cached join
+      /// and output-set freeze uncommitted so a retry with a changed output set
+      /// is accepted and drives real output.
+      #[test]
+      #[cfg_attr(
+        miri,
+        ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+      )]
+      fn native_colour_capability_rebuild_rgb_scratch_oom_is_transactional() {
+        let (y, u, v) = ramp();
+        let (mut hh, mut ss, mut vv) = (
+          vec![0u8; OUT * OUT],
+          vec![0u8; OUT * OUT],
+          vec![0u8; OUT * OUT],
+        );
+        let mut luma = vec![0u8; OUT * OUT];
+        let mut rgb = vec![0u8; OUT * OUT * 3];
+        let mut sink = MixedSinker::<$marker, AreaResampler>::with_resampler(
+          SRC,
+          SRC,
+          AreaResampler::to(OUT, OUT),
+        )
+        .unwrap()
+        .with_native(true)
+        .with_luma(&mut luma)
+        .unwrap();
+        sink.begin_frame(SRC as u32, SRC as u32).unwrap();
+        for r in 0..SRC {
+          sink
+            .process(rebuild_row(&y, &u, &v, r))
+            .expect("luma-only frame builds the native join");
+        }
+        // Frame 2: attach RGB -> the rebuild builds the chroma half then grows the
+        // (now-needed, empty) output RGB scratch; arm that u8 grow to refuse.
+        sink.begin_frame(SRC as u32, SRC as u32).unwrap();
+        sink.set_rgb(&mut rgb).unwrap();
+        crate::sinker::mixed::subsampled_4_2_0_high_bit::arm_native_u16_rgb_scratch_failure();
+        let err = sink.process(rebuild_row(&y, &u, &v, 0)).unwrap_err();
+        assert!(
+          matches!(
+            err,
+            MixedSinkerError::Resample(ResampleError::AllocationFailed(_))
+          ),
+          "the colour-capability rebuild u8-scratch OOM must surface \
+           AllocationFailed, got {err:?}"
+        );
+        assert!(
+          sink.native_420_u16.is_some(),
+          "the cached luma-only join must survive a failed u8-scratch rebuild"
+        );
+        assert!(
+          !sink.resample_outputs_frozen(),
+          "a failed u8-scratch rebuild must leave resample_outputs uncommitted"
+        );
+        sink.set_hsv(&mut hh, &mut ss, &mut vv).unwrap();
+        sink
+          .process(rebuild_row(&y, &u, &v, 0))
+          .expect("row 0 with a changed output set must succeed after a u8-scratch OOM");
+        for r in 1..SRC {
+          sink
+            .process(rebuild_row(&y, &u, &v, r))
+            .expect("the recovered join must process the rest of the frame");
+        }
+        assert!(
+          rgb.iter().any(|&b| b != 0),
+          "the recovered join must produce real colour output"
+        );
+      }
+
+      /// RFC #238 — a LATER pre-feed grow failing is atomic too. With BOTH a u8
+      /// colour scratch (`rgb`) and a native-depth u16 colour scratch
+      /// (`rgb_u16`) attached, the u8 `rgb_scratch` grows FIRST and then the u16
+      /// `rgb_scratch_u16` grow refuses. The already-grown `rgb_scratch` keeps
+      /// its capacity (join / freeze / output-atomic, not memory-exact), but the
+      /// cached join + `resample_outputs` freeze + output frame stay untouched, so
+      /// a retry with yet another output attached is accepted and drives real
+      /// output.
+      #[test]
+      #[cfg_attr(
+        miri,
+        ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+      )]
+      fn native_colour_capability_rebuild_rgb_u16_scratch_oom_is_transactional() {
+        let (y, u, v) = ramp();
+        let (mut hh, mut ss, mut vv) = (
+          vec![0u8; OUT * OUT],
+          vec![0u8; OUT * OUT],
+          vec![0u8; OUT * OUT],
+        );
+        let mut luma = vec![0u8; OUT * OUT];
+        let mut rgb = vec![0u8; OUT * OUT * 3];
+        let mut rgb_u16 = vec![0u16; OUT * OUT * 3];
+        let mut sink = MixedSinker::<$marker, AreaResampler>::with_resampler(
+          SRC,
+          SRC,
+          AreaResampler::to(OUT, OUT),
+        )
+        .unwrap()
+        .with_native(true)
+        .with_luma(&mut luma)
+        .unwrap();
+        sink.begin_frame(SRC as u32, SRC as u32).unwrap();
+        for r in 0..SRC {
+          sink
+            .process(rebuild_row(&y, &u, &v, r))
+            .expect("luma-only frame builds the native join");
+        }
+        // Frame 2: attach BOTH u8 (rgb) and u16 (rgb_u16) colour -> the rebuild
+        // grows `rgb_scratch` then `rgb_scratch_u16`; arm the LATER (u16) grow.
+        sink.begin_frame(SRC as u32, SRC as u32).unwrap();
+        sink.set_rgb(&mut rgb).unwrap();
+        sink.set_rgb_u16(&mut rgb_u16).unwrap();
+        crate::sinker::mixed::subsampled_4_2_0_high_bit::arm_native_u16_rgb_u16_scratch_failure();
+        let err = sink.process(rebuild_row(&y, &u, &v, 0)).unwrap_err();
+        assert!(
+          matches!(
+            err,
+            MixedSinkerError::Resample(ResampleError::AllocationFailed(_))
+          ),
+          "the u16 colour-scratch OOM (after the u8 scratch grew) must surface \
+           AllocationFailed, got {err:?}"
+        );
+        assert!(
+          sink.native_420_u16.is_some(),
+          "the cached luma-only join must survive a failed u16-scratch rebuild"
+        );
+        assert!(
+          !sink.resample_outputs_frozen(),
+          "a failed u16-scratch rebuild must leave resample_outputs uncommitted"
+        );
+        // The freeze was never committed: attaching hsv and retrying row 0 is
+        // accepted.
+        sink.set_hsv(&mut hh, &mut ss, &mut vv).unwrap();
+        sink
+          .process(rebuild_row(&y, &u, &v, 0))
+          .expect("row 0 with a changed output set must succeed after a u16-scratch OOM");
+        for r in 1..SRC {
+          sink
+            .process(rebuild_row(&y, &u, &v, r))
+            .expect("the recovered join must process the rest of the frame");
+        }
+        assert!(
+          rgb.iter().any(|&b| b != 0) && rgb_u16.iter().any(|&b| b != 0),
+          "the recovered join must produce real u8 and u16 colour output"
+        );
+      }
+
       // ---- frozen native-vs-row-stage route (issue #186) ----------------
 
       /// Flipping `set_native(true) -> false` mid-frame must reject as the

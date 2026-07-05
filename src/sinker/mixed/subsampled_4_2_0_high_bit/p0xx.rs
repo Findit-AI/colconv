@@ -794,7 +794,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P010<BE>, R> {
       let want_color =
         rgb.is_some() || rgba.is_some() || hsv.is_some() || rgb_u16.is_some() || rgba_u16.is_some();
       // Whether this call carries any output — the EXACT set the tier preflight
-      // (`yuv420p16_native_preflight`'s `need_luma || need_color`) tests. The
+      // (`yuv420p16_native_preflight_check_only`'s `need_luma || need_color`) tests. The
       // route (and the siting phase) freezes only on an output-bearing row a tier
       // ACCEPTS; a no-output call consumes no stream state, so it must not freeze.
       #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
@@ -1816,7 +1816,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P012<BE>, R> {
       let want_color =
         rgb.is_some() || rgba.is_some() || hsv.is_some() || rgb_u16.is_some() || rgba_u16.is_some();
       // Whether this call carries any output — the EXACT set the tier preflight
-      // (`yuv420p16_native_preflight`'s `need_luma || need_color`) tests. The
+      // (`yuv420p16_native_preflight_check_only`'s `need_luma || need_color`) tests. The
       // route (and the siting phase) freezes only on an output-bearing row a tier
       // ACCEPTS; a no-output call consumes no stream state, so it must not freeze.
       #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
@@ -2830,7 +2830,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P016<BE>, R> {
       let want_color =
         rgb.is_some() || rgba.is_some() || hsv.is_some() || rgb_u16.is_some() || rgba_u16.is_some();
       // Whether this call carries any output — the EXACT set the tier preflight
-      // (`yuv420p16_native_preflight`'s `need_luma || need_color`) tests. The
+      // (`yuv420p16_native_preflight_check_only`'s `need_luma || need_color`) tests. The
       // route (and the siting phase) freezes only on an output-bearing row a tier
       // ACCEPTS; a no-output call consumes no stream state, so it must not freeze.
       #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
