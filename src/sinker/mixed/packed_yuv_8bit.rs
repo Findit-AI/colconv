@@ -265,7 +265,7 @@ fn packed_yuv422_dual_resample(
   // streams untouched — state-atomic, retryable even with a changed output
   // attachment. (The centered siting in Part B adds a fallible chroma reserve
   // before this delegate, so the freeze must not commit until every alloc has.)
-  if let core::ops::ControlFlow::Break(()) = super::planar_resample::resample_preflight_check_only(
+  if let core::ops::ControlFlow::Break(()) = super::resample_preflight_check_only(
     resample_outputs,
     luma,
     luma_u16,
@@ -440,7 +440,7 @@ pub(super) fn packed_yuv422_dual_filter_resample(
   // output-set freeze and the stream inserts commit TOGETHER only after every
   // pre-feed allocation below has succeeded, so a first-row allocation failure
   // is state-atomic (retryable with a changed output attachment).
-  if let core::ops::ControlFlow::Break(()) = super::planar_resample::resample_preflight_check_only(
+  if let core::ops::ControlFlow::Break(()) = super::resample_preflight_check_only(
     resample_outputs,
     luma,
     luma_u16,
@@ -1037,26 +1037,24 @@ impl<R> PixelSink for MixedSinker<'_, Yuyv422, R> {
             } else {
               rgb_filter_stream.as_ref().map_or(0, |s| s.next_y())
             };
-            if let core::ops::ControlFlow::Break(()) =
-              super::planar_resample::resample_preflight_check_only(
-                resample_outputs,
-                luma,
-                luma_u16,
-                rgb,
-                rgba,
-                &None,
-                &None,
-                &None,
-                &None,
-                &None,
-                &None,
-                &None,
-                hsv,
-                &None,
-                Some(expected),
-                idx,
-              )?
-            {
+            if let core::ops::ControlFlow::Break(()) = super::resample_preflight_check_only(
+              resample_outputs,
+              luma,
+              luma_u16,
+              rgb,
+              rgba,
+              &None,
+              &None,
+              &None,
+              &None,
+              &None,
+              &None,
+              &None,
+              hsv,
+              &None,
+              Some(expected),
+              idx,
+            )? {
               return Ok(());
             }
             reserve_420_chroma_full(chroma_full, w, h)?;
@@ -1257,26 +1255,24 @@ impl<R> PixelSink for MixedSinker<'_, Yuyv422, R> {
         } else {
           rgb_stream.as_ref().map_or(0, |s| s.next_y())
         };
-        if let core::ops::ControlFlow::Break(()) =
-          super::planar_resample::resample_preflight_check_only(
-            resample_outputs,
-            luma,
-            luma_u16,
-            rgb,
-            rgba,
-            &None,
-            &None,
-            &None,
-            &None,
-            &None,
-            &None,
-            &None,
-            hsv,
-            &None,
-            Some(expected),
-            idx,
-          )?
-        {
+        if let core::ops::ControlFlow::Break(()) = super::resample_preflight_check_only(
+          resample_outputs,
+          luma,
+          luma_u16,
+          rgb,
+          rgba,
+          &None,
+          &None,
+          &None,
+          &None,
+          &None,
+          &None,
+          &None,
+          hsv,
+          &None,
+          Some(expected),
+          idx,
+        )? {
           return Ok(());
         }
         reserve_420_chroma_full(chroma_full, w, h)?;
@@ -1819,26 +1815,24 @@ impl<R> PixelSink for MixedSinker<'_, Uyvy422, R> {
             } else {
               rgb_filter_stream.as_ref().map_or(0, |s| s.next_y())
             };
-            if let core::ops::ControlFlow::Break(()) =
-              super::planar_resample::resample_preflight_check_only(
-                resample_outputs,
-                luma,
-                luma_u16,
-                rgb,
-                rgba,
-                &None,
-                &None,
-                &None,
-                &None,
-                &None,
-                &None,
-                &None,
-                hsv,
-                &None,
-                Some(expected),
-                idx,
-              )?
-            {
+            if let core::ops::ControlFlow::Break(()) = super::resample_preflight_check_only(
+              resample_outputs,
+              luma,
+              luma_u16,
+              rgb,
+              rgba,
+              &None,
+              &None,
+              &None,
+              &None,
+              &None,
+              &None,
+              &None,
+              hsv,
+              &None,
+              Some(expected),
+              idx,
+            )? {
               return Ok(());
             }
             reserve_420_chroma_full(chroma_full, w, h)?;
@@ -2006,26 +2000,24 @@ impl<R> PixelSink for MixedSinker<'_, Uyvy422, R> {
         } else {
           rgb_stream.as_ref().map_or(0, |s| s.next_y())
         };
-        if let core::ops::ControlFlow::Break(()) =
-          super::planar_resample::resample_preflight_check_only(
-            resample_outputs,
-            luma,
-            luma_u16,
-            rgb,
-            rgba,
-            &None,
-            &None,
-            &None,
-            &None,
-            &None,
-            &None,
-            &None,
-            hsv,
-            &None,
-            Some(expected),
-            idx,
-          )?
-        {
+        if let core::ops::ControlFlow::Break(()) = super::resample_preflight_check_only(
+          resample_outputs,
+          luma,
+          luma_u16,
+          rgb,
+          rgba,
+          &None,
+          &None,
+          &None,
+          &None,
+          &None,
+          &None,
+          &None,
+          hsv,
+          &None,
+          Some(expected),
+          idx,
+        )? {
           return Ok(());
         }
         reserve_420_chroma_full(chroma_full, w, h)?;
@@ -2563,26 +2555,24 @@ impl<R> PixelSink for MixedSinker<'_, Yvyu422, R> {
             } else {
               rgb_filter_stream.as_ref().map_or(0, |s| s.next_y())
             };
-            if let core::ops::ControlFlow::Break(()) =
-              super::planar_resample::resample_preflight_check_only(
-                resample_outputs,
-                luma,
-                luma_u16,
-                rgb,
-                rgba,
-                &None,
-                &None,
-                &None,
-                &None,
-                &None,
-                &None,
-                &None,
-                hsv,
-                &None,
-                Some(expected),
-                idx,
-              )?
-            {
+            if let core::ops::ControlFlow::Break(()) = super::resample_preflight_check_only(
+              resample_outputs,
+              luma,
+              luma_u16,
+              rgb,
+              rgba,
+              &None,
+              &None,
+              &None,
+              &None,
+              &None,
+              &None,
+              &None,
+              hsv,
+              &None,
+              Some(expected),
+              idx,
+            )? {
               return Ok(());
             }
             reserve_420_chroma_full(chroma_full, w, h)?;
@@ -2750,26 +2740,24 @@ impl<R> PixelSink for MixedSinker<'_, Yvyu422, R> {
         } else {
           rgb_stream.as_ref().map_or(0, |s| s.next_y())
         };
-        if let core::ops::ControlFlow::Break(()) =
-          super::planar_resample::resample_preflight_check_only(
-            resample_outputs,
-            luma,
-            luma_u16,
-            rgb,
-            rgba,
-            &None,
-            &None,
-            &None,
-            &None,
-            &None,
-            &None,
-            &None,
-            hsv,
-            &None,
-            Some(expected),
-            idx,
-          )?
-        {
+        if let core::ops::ControlFlow::Break(()) = super::resample_preflight_check_only(
+          resample_outputs,
+          luma,
+          luma_u16,
+          rgb,
+          rgba,
+          &None,
+          &None,
+          &None,
+          &None,
+          &None,
+          &None,
+          &None,
+          hsv,
+          &None,
+          Some(expected),
+          idx,
+        )? {
           return Ok(());
         }
         reserve_420_chroma_full(chroma_full, w, h)?;

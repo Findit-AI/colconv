@@ -579,6 +579,69 @@ fn gray16_resample_rejects_mid_frame_output_change() {
   );
 }
 
+// The source-width host-native u16 luma staging scratch — grown for every attached
+// output (Gray16 always stages the source luma before binning), pregrown BEFORE the
+// freeze via the shared driver's `None`-stream pass.
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn gray16_first_row_scratch_oom_leaves_stream_and_freeze_uncommitted_for_retry() {
+  let plane = ramp();
+  let pix = as_le_u16(&plane);
+  let mut luma_u16 = vec![0u16; OUT * OUT];
+  let mut rgb = vec![0u8; OUT * OUT * 3];
+  {
+    let mut sink =
+      MixedSinker::<Gray16, AreaResampler>::with_resampler(SRC, SRC, AreaResampler::to(OUT, OUT))
+        .unwrap()
+        .with_luma_u16(&mut luma_u16)
+        .unwrap();
+    sink.begin_frame(SRC as u32, SRC as u32).unwrap();
+    // Arm the source-luma-u16 scratch grow failpoint: the row-0 stream box builds OK
+    // (into a local) and the source-luma staging grow — which the emit pregrows BEFORE
+    // the field insert + freeze — refuses, surfacing AllocationFailed with BOTH the
+    // stream field `None` and the freeze uncommitted (the commit-together atomic shape;
+    // the insert-before-scratch shape would have left the stream committed).
+    crate::sinker::mixed::arm_source_luma_u16_scratch_failure();
+    let err = sink
+      .process(Gray16Row::new(&pix[..SRC], 0, M, FR))
+      .unwrap_err();
+    assert!(
+      matches!(
+        err,
+        MixedSinkerError::Resample(ResampleError::AllocationFailed(_))
+      ),
+      "first-row scratch OOM must surface AllocationFailed, got {err:?}"
+    );
+    // DIRECT stream-rollback proof: the u16 luma stream field must be `None` — the
+    // driver builds it into a LOCAL and inserts only after the scratch grows, so a
+    // failed scratch leaves nothing committed. The insert-before-scratch shape would
+    // leave it `Some` here, so this FAILS against that shape and PASSES against the fix.
+    assert!(
+      !sink.luma_stream_u16_allocated(),
+      "a scratch OOM must leave the luma_stream_u16 field None (no partial commit)"
+    );
+    // The freeze was likewise never committed — attaching rgb (a CHANGED output set)
+    // and replaying from row 0 is ACCEPTED, not ResampleOutputsChanged.
+    sink.set_rgb(&mut rgb).unwrap();
+    for r in 0..SRC {
+      sink
+        .process(Gray16Row::new(&pix[r * SRC..(r + 1) * SRC], r, M, FR))
+        .expect("frame replay after a first-row scratch OOM must succeed");
+    }
+  }
+  assert!(
+    luma_u16.iter().any(|&b| b != 0),
+    "the recovered frame produced real luma_u16 output (scratch OOM was recoverable)"
+  );
+  assert!(
+    rgb.iter().any(|&b| b != 0),
+    "the newly-attached rgb output was driven on the accepted retry"
+  );
+}
+
 // ---- Filter-plan routing ----------------------------------------------------
 //
 // Gray16 *is* a u16 luma plane: the area path converts the wire row to a

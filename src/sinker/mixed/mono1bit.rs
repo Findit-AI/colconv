@@ -30,9 +30,7 @@ use super::{
 };
 use crate::{
   PixelSink,
-  resample::{
-    AreaStream, FilterStream, OutOfSequenceRow, ResampleError, ResamplePlan, RowResampler,
-  },
+  resample::{AreaStream, FilterStream, ResamplePlan, RowResampler},
   row,
   source::{Monoblack, MonoblackRow, MonoblackSink, Monowhite, MonowhiteRow, MonowhiteSink},
 };
@@ -87,42 +85,33 @@ fn mono_luma_resample(
   // mono luma stream is single-kernel, so a bicublin plan would mis-filter.
   plan.ensure_single_kernel_filter()?;
   let is_filter = plan.kind().is_filter();
-  let any_output = luma.is_some()
+  let need_any = luma.is_some()
     || luma_u16.is_some()
     || rgb.is_some()
     || rgba.is_some()
     || rgb_u16.is_some()
     || rgba_u16.is_some()
     || hsv.is_some();
-
-  // No-output call: nothing to sequence, stays a no-op (no freeze, no
-  // allocation) regardless of the row index — and stores no frozen-output
-  // snapshot that a later attach-then-retry would trip on.
-  if !any_output {
-    return Ok(());
-  }
-
-  // Sequence-check before the freeze (single luma stream — it advances
-  // every row regardless of which outputs are attached, so a mid-frame
-  // attach never spins a fresh row-0 stream): an out-of-sequence row is
-  // rejected before the freeze, so a rejected row stores no snapshot that
-  // would poison a retry, and before any allocation, so AllocationFailed
-  // never masks OutOfSequenceRow. The plan kind is fixed per sink, so only
-  // one of the two streams is ever fed.
-  let expected = if is_filter {
-    luma_filter_stream
-      .as_ref()
-      .map_or(0, |stream| stream.next_y())
+  // Sequence-counter row for the shared L1 preflight (the fed stream is the sole
+  // per-row stream), or `None` when no output is attached so the preflight
+  // short-circuits to a no-op. The plan kind is fixed per sink, so only one of the
+  // two streams is ever fed.
+  let expected = if need_any {
+    Some(if is_filter {
+      luma_filter_stream
+        .as_ref()
+        .map_or(0, |stream| stream.next_y())
+    } else {
+      luma_stream.as_ref().map_or(0, |stream| stream.next_y())
+    })
   } else {
-    luma_stream.as_ref().map_or(0, |stream| stream.next_y())
+    None
   };
-  if expected != idx {
-    return Err(MixedSinkerError::Resample(ResampleError::OutOfSequenceRow(
-      OutOfSequenceRow::new(expected, idx),
-    )));
-  }
-
-  frozen_outputs_check(
+  // Compare-only preflight (NO commit): the output-set freeze commits only AFTER the
+  // fallible stream alloc + scratch pregrow below succeed, so a first-row allocation
+  // failure leaves `resample_outputs` uncommitted (retryable with a changed output
+  // attachment). A no-output sink short-circuits to a no-op.
+  if let core::ops::ControlFlow::Break(()) = super::resample_preflight_check_only(
     resample_outputs,
     luma,
     luma_u16,
@@ -137,13 +126,19 @@ fn mono_luma_resample(
     &None,
     hsv,
     &None,
+    expected,
     idx,
-  )?;
+  )? {
+    return Ok(());
+  }
 
-  // Build the per-kind stream before any scratch staging (raising
-  // OutOfSequenceRow above ran before this allocation). The expanded luma
-  // spans the full `u8` range, so neither stream needs a native-depth
-  // clamp. Stage + feed + emit is shared via [`mono_luma_feed_emit`].
+  // Build the missing per-kind stream into a LOCAL and pregrow the source-luma
+  // scratch, then insert the stream field and freeze the output set TOGETHER — so a
+  // scratch OOM after a successful stream build leaves the field `None` AND
+  // `resample_outputs` uncommitted (the #180 commit-together discipline). The
+  // expanded luma spans the full `u8` range, so neither stream needs a native-depth
+  // clamp. Stage + feed + emit is shared via [`mono_luma_feed_emit`], which re-runs
+  // the (now no-op) source-luma grow before the feed.
   if is_filter {
     let (fh, fv) = (
       plan
@@ -153,21 +148,42 @@ fn mono_luma_resample(
         .filter_v()
         .expect("filter plan carries vertical windows"),
     );
-    if luma_filter_stream.is_none() {
-      *luma_filter_stream = Some({
-        let stream = FilterStream::new(fh, fv, plan.src_w(), plan.src_h(), 1)?;
-        crate::resample::try_box(stream).map_err(|_| {
-          MixedSinkerError::Resample(crate::resample::ResampleError::AllocationFailed(
-            crate::resample::PlanGeometry::new(
-              plan.src_w(),
-              plan.src_h(),
-              plan.out_w(),
-              plan.out_h(),
-            ),
-          ))
-        })?
-      });
+    let new_stream = if luma_filter_stream.is_none() {
+      let stream = FilterStream::new(fh, fv, plan.src_w(), plan.src_h(), 1)?;
+      Some(crate::resample::try_box(stream).map_err(|_| {
+        MixedSinkerError::Resample(crate::resample::ResampleError::AllocationFailed(
+          crate::resample::PlanGeometry::new(
+            plan.src_w(),
+            plan.src_h(),
+            plan.out_w(),
+            plan.out_h(),
+          ),
+        ))
+      })?)
+    } else {
+      None
+    };
+    source_luma_scratch(scratch, w, plan)?;
+    if let Some(s) = new_stream {
+      *luma_filter_stream = Some(s);
     }
+    frozen_outputs_check(
+      resample_outputs,
+      luma,
+      luma_u16,
+      rgb,
+      rgba,
+      rgb_u16,
+      rgba_u16,
+      &None,
+      &None,
+      &None,
+      &None,
+      &None,
+      hsv,
+      &None,
+      idx,
+    )?;
     let stream = luma_filter_stream.as_mut().expect("created above");
     mono_luma_feed_emit(
       stream,
@@ -186,21 +202,42 @@ fn mono_luma_resample(
       expand_luma,
     )
   } else {
-    if luma_stream.is_none() {
-      *luma_stream = Some({
-        let stream = AreaStream::new(plan.h(), plan.v(), plan.src_w(), plan.src_h(), 1)?;
-        crate::resample::try_box(stream).map_err(|_| {
-          MixedSinkerError::Resample(crate::resample::ResampleError::AllocationFailed(
-            crate::resample::PlanGeometry::new(
-              plan.src_w(),
-              plan.src_h(),
-              plan.out_w(),
-              plan.out_h(),
-            ),
-          ))
-        })?
-      });
+    let new_stream = if luma_stream.is_none() {
+      let stream = AreaStream::new(plan.h(), plan.v(), plan.src_w(), plan.src_h(), 1)?;
+      Some(crate::resample::try_box(stream).map_err(|_| {
+        MixedSinkerError::Resample(crate::resample::ResampleError::AllocationFailed(
+          crate::resample::PlanGeometry::new(
+            plan.src_w(),
+            plan.src_h(),
+            plan.out_w(),
+            plan.out_h(),
+          ),
+        ))
+      })?)
+    } else {
+      None
+    };
+    source_luma_scratch(scratch, w, plan)?;
+    if let Some(s) = new_stream {
+      *luma_stream = Some(s);
     }
+    frozen_outputs_check(
+      resample_outputs,
+      luma,
+      luma_u16,
+      rgb,
+      rgba,
+      rgb_u16,
+      rgba_u16,
+      &None,
+      &None,
+      &None,
+      &None,
+      &None,
+      hsv,
+      &None,
+      idx,
+    )?;
     let stream = luma_stream.as_mut().expect("created above");
     mono_luma_feed_emit(
       stream,
