@@ -61,96 +61,6 @@ use crate::{
   row::*,
 };
 
-/// Compare-only resample preflight (RFC #238 L1): the no-output short-circuit,
-/// out-of-sequence rejection, and mid-frame output-set-change rejection every
-/// routed row-stage / filter resample arm runs before it allocates a stream —
-/// but with **NO commit** (the output freeze is NOT stored). Each arm builds its
-/// streams (and any centered-chroma scratch) into locals, then commits the
-/// output-set freeze via [`frozen_outputs_check`] and inserts the streams only
-/// AFTER every pre-feed allocation has succeeded — so a first-row allocation
-/// failure leaves `resample_outputs` and the streams untouched, state-atomic and
-/// retryable even with a changed output attachment (the same compare-before /
-/// commit-after discipline the linear-light tail uses). It also gates the RFC
-/// #238 centered filter / row-stage chroma reserve, so a recoverable reserve
-/// failure likewise leaves `resample_outputs` `None`.
-///
-/// `expected` is supplied by the caller because the per-row sequence counter
-/// lives on whichever concrete stream (`AreaStream` / `FilterStream` / the HSV
-/// join's Y stream) is fed every row, keeping this helper free of any
-/// stream-element type. `ControlFlow::Break` (no output attached) is turned into
-/// `Ok(())` by the caller. Rejects mirror the committing path exactly, minus the
-/// freeze:
-/// [`ResampleOutputsChanged`](super::MixedSinkerError::ResampleOutputsChanged)
-/// on a mid-frame output-set change,
-/// [`OutOfSequenceRow`] on a row-order violation.
-#[allow(clippy::too_many_arguments)]
-pub(super) fn resample_preflight_check_only(
-  resample_outputs: &Option<super::FrozenOutputs>,
-  luma: &Option<&mut [u8]>,
-  luma_u16: &Option<&mut [u16]>,
-  rgb: &Option<&mut [u8]>,
-  rgba: &Option<&mut [u8]>,
-  rgb_u16: &Option<&mut [u16]>,
-  rgba_u16: &Option<&mut [u16]>,
-  rgb_f32: &Option<&mut [f32]>,
-  rgba_f32: &Option<&mut [f32]>,
-  xyz_f32: &Option<&mut [f32]>,
-  rgb_f16: &Option<&mut [half::f16]>,
-  rgba_f16: &Option<&mut [half::f16]>,
-  hsv: &mut Option<HsvFrameMut<'_>>,
-  luma_f32: &Option<&mut [f32]>,
-  expected: Option<usize>,
-  idx: usize,
-) -> Result<ControlFlow<()>, MixedSinkerError> {
-  let Some(expected) = expected else {
-    return Ok(ControlFlow::Break(()));
-  };
-  // First row only: reject an out-of-sequence row BEFORE the output-set compare,
-  // exactly mirroring the committing path's ordering (minus the commit). On a
-  // LATER row the compare runs first, so a genuine mid-frame output attachment
-  // change surfaces as ResampleOutputsChanged, never OutOfSequenceRow.
-  if resample_outputs.is_none() && expected != idx {
-    return Err(MixedSinkerError::Resample(ResampleError::OutOfSequenceRow(
-      OutOfSequenceRow::new(expected, idx),
-    )));
-  }
-  // Mid-frame output-set change → reject WITHOUT committing (a later row only;
-  // the first row's `None` stores no snapshot).
-  if let Some(frozen) = resample_outputs {
-    let snapshot = super::FrozenOutputs::snapshot(
-      luma.as_deref(),
-      luma_u16.as_deref(),
-      rgb.as_deref(),
-      rgba.as_deref(),
-      rgb_u16.as_deref(),
-      rgba_u16.as_deref(),
-      rgb_f32.as_deref(),
-      rgba_f32.as_deref(),
-      xyz_f32.as_deref(),
-      rgb_f16.as_deref(),
-      rgba_f16.as_deref(),
-      hsv.as_mut().map(|f| {
-        let (h, s, v) = f.hsv();
-        (&h[..], &s[..], &v[..])
-      }),
-      luma_f32.as_deref(),
-    );
-    if *frozen != snapshot {
-      return Err(MixedSinkerError::ResampleOutputsChanged(
-        super::ResampleOutputsChanged::new(idx),
-      ));
-    }
-  }
-  // Post-compare: reject an out-of-sequence later row (mirrors
-  // the committing path's post-freeze sequence check).
-  if expected != idx {
-    return Err(MixedSinkerError::Resample(ResampleError::OutOfSequenceRow(
-      OutOfSequenceRow::new(expected, idx),
-    )));
-  }
-  Ok(ControlFlow::Continue(()))
-}
-
 /// RGB-free YUV-domain HSV-only **area** join for the shared planar /
 /// semi-planar row-stage resample — the colour twin of the native fast
 /// tier's HSV-only path, structurally a near-verbatim copy of
@@ -426,7 +336,7 @@ fn hsv_direct_feed_emit(
 ///    is frozen yet, so an out-of-sequence row is rejected BEFORE the
 ///    output-set compare — a rejected first row stores no snapshot to poison
 ///    a retry.
-/// 2. The compare-only preflight ([`resample_preflight_check_only`]) verifies
+/// 2. The compare-only preflight ([`super::resample_preflight_check_only`]) verifies
 ///    the output set (HSV + optional luma) WITHOUT committing; on a later row
 ///    it runs first, so a mid-frame output change surfaces as
 ///    `ResampleOutputsChanged` rather than being masked by a freshly-built
@@ -471,7 +381,7 @@ pub(super) fn hsv_direct_resample(
   // output attachment (mirrors `planar_dual_resample`). `want_hsv_direct` implies
   // HSV is attached, so `expected` is always `Some` and the no-output Break never
   // fires.
-  if let ControlFlow::Break(()) = resample_preflight_check_only(
+  if let ControlFlow::Break(()) = super::resample_preflight_check_only(
     resample_outputs,
     luma,
     luma_u16,
@@ -604,7 +514,7 @@ pub(super) fn planar_dual_resample(
   // `linear_light_resample`'s compare-before / commit-after). A first-row
   // allocation failure therefore leaves `resample_outputs` and both streams
   // untouched — state-atomic, retryable even with a changed output attachment.
-  if let ControlFlow::Break(()) = resample_preflight_check_only(
+  if let ControlFlow::Break(()) = super::resample_preflight_check_only(
     resample_outputs,
     luma,
     luma_u16,
@@ -886,7 +796,7 @@ pub(super) fn planar_dual_filter_resample(
   // output-set freeze and the stream inserts commit TOGETHER only after every
   // pre-feed allocation below has succeeded, so a first-row allocation failure
   // is state-atomic (retryable with a changed output attachment).
-  if let ControlFlow::Break(()) = resample_preflight_check_only(
+  if let ControlFlow::Break(()) = super::resample_preflight_check_only(
     resample_outputs,
     luma,
     luma_u16,

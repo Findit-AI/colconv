@@ -359,6 +359,69 @@ fn monoblack_resample_begin_frame_resets_stream_sequencing() {
   );
 }
 
+// The source-width `u8` expanded-luma staging scratch — grown for every attached
+// output (mono expands each 1-bit row to a source-width 0/255 luma plane before
+// binning), pregrown BEFORE the freeze via the transactional preflight's build-local
+// / grow-scratch / commit-together shape.
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn mono_first_row_scratch_oom_leaves_stream_uncommitted_for_retry() {
+  let src = MonoblackFrame::try_new(&PATTERN, SRC_W as u32, SRC_H as u32, STRIDE as u32).unwrap();
+  let mut luma = vec![0u8; OUT_W * OUT_H];
+  let mut rgb = vec![0u8; OUT_W * OUT_H * 3];
+  {
+    let mut sink = MixedSinker::<Monoblack, AreaResampler>::with_resampler(
+      SRC_W,
+      SRC_H,
+      AreaResampler::to(OUT_W, OUT_H),
+    )
+    .unwrap()
+    .with_luma(&mut luma)
+    .unwrap();
+    // Arm the source-luma scratch grow failpoint: the row-0 stream box builds OK (into
+    // a local) and the expanded-luma staging grow — pregrown BEFORE the field insert +
+    // freeze — refuses, surfacing AllocationFailed with the luma stream field `None`
+    // (the commit-together atomic shape; the insert-before-scratch shape would have
+    // left the stream committed).
+    crate::sinker::mixed::arm_source_luma_scratch_failure();
+    let err = monoblack_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap_err();
+    assert!(
+      matches!(
+        err,
+        crate::sinker::MixedSinkerError::Resample(
+          crate::resample::ResampleError::AllocationFailed(_)
+        )
+      ),
+      "first-row scratch OOM must surface AllocationFailed, got {err:?}"
+    );
+    // DIRECT stream-rollback proof (the non-vacuous part): the luma stream field must
+    // be `None` — the fix builds it into a LOCAL and inserts only after the scratch
+    // grows, so a failed scratch leaves nothing committed. The insert-before-scratch
+    // shape would leave it `Some` here, so this assertion FAILS against that shape and
+    // PASSES against the fix.
+    assert!(
+      !sink.luma_stream_allocated(),
+      "a scratch OOM must leave the luma stream field None (no partial commit)"
+    );
+    // The frame is recoverable: attaching rgb (a CHANGED output set) and re-walking
+    // (begin_frame re-sequences from row 0) succeeds and drives both outputs.
+    sink.set_rgb(&mut rgb).unwrap();
+    monoblack_to(&src, true, ColorMatrix::Bt709, &mut sink)
+      .expect("re-walk after a first-row scratch OOM must succeed");
+  }
+  assert!(
+    luma.iter().any(|&b| b != 0),
+    "the recovered frame produced real luma output (scratch OOM was recoverable)"
+  );
+  assert!(
+    rgb.iter().any(|&b| b != 0),
+    "the newly-attached rgb output was driven on the accepted re-walk"
+  );
+}
+
 // ---- Separable-filter resample ----------------------------------------
 //
 // A 1-bit bilevel image filtered to continuous grayscale *is* antialiasing

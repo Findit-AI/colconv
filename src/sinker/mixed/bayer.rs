@@ -132,26 +132,24 @@ impl<R> PixelSink for MixedSinker<'_, Bayer, R> {
       } else {
         None
       };
-      if let core::ops::ControlFlow::Break(()) =
-        super::planar_resample::resample_preflight_check_only(
-          resample_outputs,
-          luma,
-          &None,
-          rgb,
-          &None,
-          &None,
-          &None,
-          &None,
-          &None,
-          &None,
-          &None,
-          &None,
-          hsv,
-          &None,
-          expected,
-          idx,
-        )?
-      {
+      if let core::ops::ControlFlow::Break(()) = super::resample_preflight_check_only(
+        resample_outputs,
+        luma,
+        &None,
+        rgb,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        hsv,
+        &None,
+        expected,
+        idx,
+      )? {
         return Ok(());
       }
       // Area-only: reject a filter plan before any allocation (Bayer is not routed

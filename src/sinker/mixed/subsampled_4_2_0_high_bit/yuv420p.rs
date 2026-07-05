@@ -5,8 +5,8 @@ use super::{
     check_dimensions_match, chroma_420_bottom_sited_v, chroma_420_center_sited_h,
     deinterleave_y_high_bit_masked, packed_yuv422_triple_filter_resample,
     packed_yuv422_triple_resample, planar_8bit::YUV422P_CENTERED_H_PHASE,
-    planar_resample::resample_preflight_check_only, reset_high_bit_yuv_streams,
-    rgb_row_buf_or_scratch, rgba_plane_row_slice, rgba_u16_plane_row_slice,
+    resample_preflight_check_only, reset_high_bit_yuv_streams, rgb_row_buf_or_scratch,
+    rgba_plane_row_slice, rgba_u16_plane_row_slice,
   },
   yuv420p16_process_native,
 };

@@ -14,7 +14,7 @@ use crate::{PixelSink, row::*, source::*};
 #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
 use super::super::{
   ChromaSitingChanged, FrozenOutputs, HsvFrameMut, NativeRouteChanged,
-  planar_8bit::YUV422P_CENTERED_H_PHASE, planar_resample::resample_preflight_check_only,
+  planar_8bit::YUV422P_CENTERED_H_PHASE, resample_preflight_check_only,
 };
 #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
 use super::native::{

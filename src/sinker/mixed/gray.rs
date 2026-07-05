@@ -41,7 +41,7 @@ use super::{
 };
 use crate::{
   PixelSink,
-  resample::{AreaStream, OutOfSequenceRow, ResampleError, ResamplePlan},
+  resample::{AreaStream, ResampleError, ResamplePlan},
   row::{
     expand_rgb_to_rgba_row, expand_rgb_u16_to_rgba_u16_row, gray_n_to_hsv_row, gray_n_to_luma_row,
     gray_n_to_luma_u16_row, gray_n_to_rgb_row, gray_n_to_rgb_u16_row, gray_n_to_rgba_row,
@@ -325,10 +325,13 @@ impl<R> PixelSink for MixedSinker<'_, Gray8, R> {
 /// already holds the resampled Y. The span kind picks the engine: `Area`
 /// bins through [`AreaStream<u8>`], `Filter` runs the signed-coefficient
 /// single-channel [`FilterStream<u8>`] (the filter twin of the bin) —
-/// full-range u8, so no native-depth clamp on either. Atomic preflight:
-/// freeze, sequence check, stream creation, and (for the colour group)
-/// scratch growth all precede the first feed, so a failure mutates no
-/// caller output.
+/// full-range u8, so no native-depth clamp on either. Transactional
+/// preflight (RFC #238 tail-collapse): the shared
+/// [`gray_luma_resample`](super::gray_luma_resample) driver runs the compare-only
+/// preflight, builds the missing luma stream into a local, pregrows the emit-owned
+/// RGB scratch, then commits the stream insert + the output-set freeze together —
+/// so a first-row allocation failure leaves the stream field `None` and
+/// `resample_outputs` uncommitted (retryable).
 #[allow(clippy::too_many_arguments)]
 fn gray8_process_resampled(
   luma_stream: &mut Option<std::boxed::Box<AreaStream<u8>>>,
@@ -346,221 +349,134 @@ fn gray8_process_resampled(
   use_simd: bool,
   full_range: bool,
 ) -> Result<(), MixedSinkerError> {
-  // Single-kernel filter tail — reject a BICUBLIN plan (its chroma windows are
-  // read only by the `Yuv420p` per-plane route) before any state change. The
-  // gray luma stream is single-kernel, so a bicublin plan would mis-filter.
-  plan.ensure_single_kernel_filter()?;
   let ow = plan.out_w();
-  let want_rgb = rgb.is_some();
-  let want_rgba = rgba.is_some();
-  let want_hsv = hsv.is_some();
-  // The RGB kernel runs when RGB output is requested, or HSV is wanted
-  // alongside RGBA (HSV-only and RGBA-only take dedicated fast paths).
-  let need_rgb_kernel = want_rgb || (want_hsv && want_rgba);
-
-  // No-output call: nothing to sequence, stays a no-op (no freeze, no
-  // allocation) regardless of the row index — and, critically, stores no
-  // frozen-output snapshot that a later attach-then-retry would trip on.
-  let any_output = luma.is_some() || luma_u16.is_some() || want_rgb || want_rgba || want_hsv;
-  if !any_output {
-    return Ok(());
-  }
-  // Sequence-check before the freeze (single luma stream per kind — it
-  // advances every row regardless of which outputs are attached, so a
-  // mid-frame attach never spins a fresh row-0 stream): an out-of-sequence
-  // row is rejected before the freeze, so a rejected row stores no snapshot
-  // that would poison a retry, and before any allocation, so
-  // AllocationFailed never masks OutOfSequenceRow. The span kind selects
-  // which engine's stream advances.
-  let expected = match plan.kind() {
-    crate::resample::SpanKind::Area => luma_stream.as_ref().map_or(0, |s| s.next_y()),
-    crate::resample::SpanKind::Filter => luma_filter_stream.as_ref().map_or(0, |s| s.next_y()),
-  };
-  if expected != idx {
-    return Err(MixedSinkerError::Resample(ResampleError::OutOfSequenceRow(
-      OutOfSequenceRow::new(expected, idx),
-    )));
-  }
-  frozen_outputs_check(
+  // Gray8 feeds the source Y row directly (Gray *is* a full-range u8 luma plane), so
+  // the emit needs no source-luma staging scratch — its only fallible scratch is the
+  // emit-owned out-width RGB row (the `need_rgb_kernel && !want_rgb` shape), pregrown
+  // before the freeze via the `None`-stream pass.
+  super::gray_luma_resample::<u8>(
+    luma_stream,
+    luma_filter_stream,
     resample_outputs,
-    luma,
-    luma_u16,
     rgb,
     rgba,
-    &None,
-    &None,
-    &None,
-    &None,
-    &None,
-    &None,
-    &None,
+    &mut None,
+    &mut None,
+    luma,
+    luma_u16,
+    &mut None,
+    &mut None,
     hsv,
-    &None,
+    plan,
     idx,
-  )?;
-  // The RGB kernel writes into the user buffer when RGB is attached,
-  // else into an output-width scratch shared with the HSV-from-RGB step.
-  // Size it in the preflight so the feed closure stays infallible.
-  if need_rgb_kernel && !want_rgb {
-    let row_bytes =
-      ow.checked_mul(3)
-        .ok_or(MixedSinkerError::GeometryOverflow(GeometryOverflow::new(
-          ow,
-          plan.out_h(),
-          3,
-        )))?;
-    if rgb_scratch.len() < row_bytes {
-      rgb_scratch
-        .try_reserve_exact(row_bytes - rgb_scratch.len())
-        .map_err(|_| {
-          MixedSinkerError::Resample(ResampleError::AllocationFailed(
-            crate::resample::PlanGeometry::new(
-              plan.src_w(),
-              plan.src_h(),
-              plan.out_w(),
-              plan.out_h(),
-            ),
-          ))
-        })?;
-      rgb_scratch.resize(row_bytes, 0);
-    }
-  }
-
-  // The per-output fan-out is identical for both engines, so build it once
-  // as a reusable `FnMut` and feed it to whichever stream the span kind
-  // selects (`&mut F` is itself `FnMut`); only one engine runs per frame.
-  let mut emit = |oy: usize, binned_y: &[u8]| {
-    // Luma u8 — Gray8: Y IS luma; copy the resampled row directly.
-    if let Some(buf) = luma.as_deref_mut() {
-      buf[oy * ow..(oy + 1) * ow].copy_from_slice(binned_y);
-    }
-    // Luma u16 — zero-extend the resampled Y bytes to u16.
-    if let Some(buf) = luma_u16.as_deref_mut() {
-      y_plane_to_luma_u16_row(binned_y, &mut buf[oy * ow..(oy + 1) * ow], ow, use_simd);
-    }
-
-    // Standalone RGBA fast path — no RGB or HSV requested.
-    if want_rgba && !want_rgb && !want_hsv {
-      let buf = rgba.as_deref_mut().unwrap();
-      gray8_to_rgba_row(
-        binned_y,
-        &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow],
-        ow,
-        use_simd,
-        full_range,
-      );
-      return;
-    }
-
-    // Standalone HSV fast path — H=0/S=0/V=Y with no RGB computation.
-    if want_hsv && !want_rgb && !want_rgba {
-      let hsv = hsv.as_mut().unwrap();
-      let (hp, sp, vp) = hsv.hsv();
-      gray8_to_hsv_row(
-        binned_y,
-        &mut hp[oy * ow..(oy + 1) * ow],
-        &mut sp[oy * ow..(oy + 1) * ow],
-        &mut vp[oy * ow..(oy + 1) * ow],
-        ow,
-        use_simd,
-        full_range,
-      );
-      return;
-    }
-
-    if !need_rgb_kernel {
-      return;
-    }
-
-    // RGB kernel once — into the user buffer if attached, else scratch.
-    if let Some(buf) = rgb.as_deref_mut() {
-      let rgb_row = &mut buf[oy * 3 * ow..(oy + 1) * 3 * ow];
-      gray8_to_rgb_row(binned_y, rgb_row, ow, use_simd, full_range);
-      if let Some(hsv) = hsv.as_mut() {
-        let (hp, sp, vp) = hsv.hsv();
-        rgb_to_hsv_row(
-          rgb_row,
-          &mut hp[oy * ow..(oy + 1) * ow],
-          &mut sp[oy * ow..(oy + 1) * ow],
-          &mut vp[oy * ow..(oy + 1) * ow],
-          ow,
-          use_simd,
-        );
+    |stream, rgb, rgba, _rgb_u16, _rgba_u16, luma, luma_u16, _rgb_f32, _luma_f32, hsv| {
+      let want_rgb = rgb.is_some();
+      let want_rgba = rgba.is_some();
+      let want_hsv = hsv.is_some();
+      // The RGB kernel runs when RGB output is requested, or HSV is wanted
+      // alongside RGBA (HSV-only and RGBA-only take dedicated fast paths).
+      let need_rgb_kernel = want_rgb || (want_hsv && want_rgba);
+      // Pregrow the emit-owned out-width RGB scratch BEFORE the freeze — only the
+      // `need_rgb_kernel && !want_rgb` shape stages RGB into it (every other
+      // `!want_rgb` case is a standalone RGBA / HSV fast path that never touches it).
+      // Routing the grow through `rgb_row_buf_or_scratch` sizes it AND consults the
+      // shared RGB-scratch failpoint, keeping the feed closure infallible.
+      if need_rgb_kernel && !want_rgb {
+        rgb_row_buf_or_scratch(None, rgb_scratch, 0, ow, ow, plan.out_h())?;
       }
-      if let Some(buf) = rgba.as_deref_mut() {
-        expand_rgb_to_rgba_row(rgb_row, &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow], ow);
-      }
-    } else {
-      let rgb_row = &mut rgb_scratch[..ow * 3];
-      gray8_to_rgb_row(binned_y, rgb_row, ow, use_simd, full_range);
-      if let Some(hsv) = hsv.as_mut() {
-        let (hp, sp, vp) = hsv.hsv();
-        rgb_to_hsv_row(
-          rgb_row,
-          &mut hp[oy * ow..(oy + 1) * ow],
-          &mut sp[oy * ow..(oy + 1) * ow],
-          &mut vp[oy * ow..(oy + 1) * ow],
-          ow,
-          use_simd,
-        );
-      }
-      if let Some(buf) = rgba.as_deref_mut() {
-        expand_rgb_to_rgba_row(rgb_row, &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow], ow);
-      }
-    }
-  };
+      let Some(stream) = stream else {
+        return Ok(());
+      };
+      let mut emit = |oy: usize, binned_y: &[u8]| {
+        // Luma u8 — Gray8: Y IS luma; copy the resampled row directly.
+        if let Some(buf) = luma.as_deref_mut() {
+          buf[oy * ow..(oy + 1) * ow].copy_from_slice(binned_y);
+        }
+        // Luma u16 — zero-extend the resampled Y bytes to u16.
+        if let Some(buf) = luma_u16.as_deref_mut() {
+          y_plane_to_luma_u16_row(binned_y, &mut buf[oy * ow..(oy + 1) * ow], ow, use_simd);
+        }
 
-  // Create + feed the kind-appropriate single-channel u8 stream. The stream
-  // creation runs after the freeze + sequence check + scratch growth,
-  // matching the area-only ordering.
-  match plan.kind() {
-    crate::resample::SpanKind::Area => {
-      if luma_stream.is_none() {
-        *luma_stream = Some({
-          let stream = AreaStream::new(plan.h(), plan.v(), plan.src_w(), plan.src_h(), 1)?;
-          crate::resample::try_box(stream).map_err(|_| {
-            MixedSinkerError::Resample(crate::resample::ResampleError::AllocationFailed(
-              crate::resample::PlanGeometry::new(
-                plan.src_w(),
-                plan.src_h(),
-                plan.out_w(),
-                plan.out_h(),
-              ),
-            ))
-          })?
-        });
-      }
-      let stream = luma_stream.as_mut().expect("created above");
-      stream.feed_row(idx, y_row, use_simd, &mut emit)?;
-    }
-    crate::resample::SpanKind::Filter => {
-      if luma_filter_stream.is_none() {
-        let fh = plan
-          .filter_h()
-          .expect("filter plan carries horizontal windows");
-        let fv = plan
-          .filter_v()
-          .expect("filter plan carries vertical windows");
-        *luma_filter_stream = Some({
-          let stream = crate::resample::FilterStream::new(fh, fv, plan.src_w(), plan.src_h(), 1)?;
-          crate::resample::try_box(stream).map_err(|_| {
-            MixedSinkerError::Resample(crate::resample::ResampleError::AllocationFailed(
-              crate::resample::PlanGeometry::new(
-                plan.src_w(),
-                plan.src_h(),
-                plan.out_w(),
-                plan.out_h(),
-              ),
-            ))
-          })?
-        });
-      }
-      let stream = luma_filter_stream.as_mut().expect("created above");
-      stream.feed_row(idx, y_row, use_simd, &mut emit)?;
-    }
-  }
+        // Standalone RGBA fast path — no RGB or HSV requested.
+        if want_rgba && !want_rgb && !want_hsv {
+          let buf = rgba.as_deref_mut().unwrap();
+          gray8_to_rgba_row(
+            binned_y,
+            &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow],
+            ow,
+            use_simd,
+            full_range,
+          );
+          return;
+        }
 
-  Ok(())
+        // Standalone HSV fast path — H=0/S=0/V=Y with no RGB computation.
+        if want_hsv && !want_rgb && !want_rgba {
+          let hsv = hsv.as_mut().unwrap();
+          let (hp, sp, vp) = hsv.hsv();
+          gray8_to_hsv_row(
+            binned_y,
+            &mut hp[oy * ow..(oy + 1) * ow],
+            &mut sp[oy * ow..(oy + 1) * ow],
+            &mut vp[oy * ow..(oy + 1) * ow],
+            ow,
+            use_simd,
+            full_range,
+          );
+          return;
+        }
+
+        if !need_rgb_kernel {
+          return;
+        }
+
+        // RGB kernel once — into the user buffer if attached, else scratch.
+        if let Some(buf) = rgb.as_deref_mut() {
+          let rgb_row = &mut buf[oy * 3 * ow..(oy + 1) * 3 * ow];
+          gray8_to_rgb_row(binned_y, rgb_row, ow, use_simd, full_range);
+          if let Some(hsv) = hsv.as_mut() {
+            let (hp, sp, vp) = hsv.hsv();
+            rgb_to_hsv_row(
+              rgb_row,
+              &mut hp[oy * ow..(oy + 1) * ow],
+              &mut sp[oy * ow..(oy + 1) * ow],
+              &mut vp[oy * ow..(oy + 1) * ow],
+              ow,
+              use_simd,
+            );
+          }
+          if let Some(buf) = rgba.as_deref_mut() {
+            expand_rgb_to_rgba_row(rgb_row, &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow], ow);
+          }
+        } else {
+          let rgb_row = &mut rgb_scratch[..ow * 3];
+          gray8_to_rgb_row(binned_y, rgb_row, ow, use_simd, full_range);
+          if let Some(hsv) = hsv.as_mut() {
+            let (hp, sp, vp) = hsv.hsv();
+            rgb_to_hsv_row(
+              rgb_row,
+              &mut hp[oy * ow..(oy + 1) * ow],
+              &mut sp[oy * ow..(oy + 1) * ow],
+              &mut vp[oy * ow..(oy + 1) * ow],
+              ow,
+              use_simd,
+            );
+          }
+          if let Some(buf) = rgba.as_deref_mut() {
+            expand_rgb_to_rgba_row(rgb_row, &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow], ow);
+          }
+        }
+      };
+      // The per-output fan-out is identical for both engines, so feed it to
+      // whichever stream the span kind selected (`&mut F` is itself `FnMut`);
+      // only one engine runs per frame.
+      match stream {
+        super::GrayLumaStreamMut::Area(s) => s.feed_row(idx, y_row, use_simd, &mut emit),
+        super::GrayLumaStreamMut::Filter(s) => s.feed_row(idx, y_row, use_simd, &mut emit),
+      }?;
+      Ok(())
+    },
+  )
 }
 
 // ---- GrayN impl (const BITS) ------------------------------------------------
@@ -990,10 +906,6 @@ fn gray_n_process_resampled<'a, const BITS: u32, const BE: bool>(
   full_range: bool,
 ) -> Result<(), MixedSinkerError> {
   const { assert!(BITS < 16, "GrayN carries fewer than 16 active bits") };
-  // Single-kernel filter tail — reject a BICUBLIN plan (its chroma windows are
-  // read only by the `Yuv420p` per-plane route) before any state change. The
-  // gray luma stream is single-kernel, so a bicublin plan would mis-filter.
-  plan.ensure_single_kernel_filter()?;
   // The resampled u16 luma row is host-native; the direct kernels recover
   // an already-host-native sample with `::<HOST_NATIVE_BE>` (a no-op swap),
   // matching the direct path's `::<BE>` applied to a wire sample.
@@ -1002,265 +914,200 @@ fn gray_n_process_resampled<'a, const BITS: u32, const BE: bool>(
   // here so the derive kernels' `& mask` doesn't wrap an over-range sample.
   let native_max: u16 = ((1u32 << BITS) - 1) as u16;
   let ow = plan.out_w();
-  let want_rgb = rgb.is_some();
-  let want_rgb_u16 = rgb_u16.is_some();
-  let want_rgba = rgba.is_some();
-  let want_rgba_u16 = rgba_u16.is_some();
-  let want_hsv = hsv.is_some();
-  // The u8 RGB kernel runs only when RGB output is requested; HSV (with or
-  // without RGBA) and standalone RGBA derive directly from luma, so the
-  // resample path needs no RGB scratch.
-  let need_rgb_kernel = want_rgb;
-
-  // No-output call: nothing to sequence, stays a no-op (no freeze, no
-  // allocation) regardless of the row index — and stores no frozen-output
-  // snapshot that a later attach-then-retry would trip on.
-  let any_output = luma.is_some()
-    || luma_u16.is_some()
-    || want_rgb
-    || want_rgb_u16
-    || want_rgba
-    || want_rgba_u16
-    || want_hsv;
-  if !any_output {
-    return Ok(());
-  }
-  // Sequence-check before the freeze (single luma stream per kind — it
-  // advances every row regardless of which outputs are attached, so a
-  // mid-frame attach never spins a fresh row-0 stream): an out-of-sequence
-  // row is rejected before the freeze (so a rejected row stores no snapshot
-  // that would poison a retry) and before any allocation (so
-  // AllocationFailed never masks OutOfSequenceRow). The span kind selects
-  // which engine's stream advances.
-  let expected = match plan.kind() {
-    crate::resample::SpanKind::Area => luma_stream_u16.as_ref().map_or(0, |s| s.next_y()),
-    crate::resample::SpanKind::Filter => luma_filter_stream_u16.as_ref().map_or(0, |s| s.next_y()),
-  };
-  if expected != idx {
-    return Err(MixedSinkerError::Resample(ResampleError::OutOfSequenceRow(
-      OutOfSequenceRow::new(expected, idx),
-    )));
-  }
-  frozen_outputs_check(
+  // Transactional 1-channel gray luma resample (RFC #238 tail-collapse): GrayN *is*
+  // a low-bit-packed u16 luma plane — the wire row converts to a source-width
+  // host-native u16 luma plane (staged in the emit's `None` pregrow), a single u16
+  // stream resamples it, and every output derives from each finalized
+  // native-max-clamped u16 luma row via the direct kernels.
+  super::gray_luma_resample::<u16>(
+    luma_stream_u16,
+    luma_filter_stream_u16,
     resample_outputs,
-    luma,
-    luma_u16,
     rgb,
     rgba,
     rgb_u16,
     rgba_u16,
-    &None,
-    &None,
-    &None,
-    &None,
-    &None,
+    luma,
+    luma_u16,
+    &mut None,
+    &mut None,
     hsv,
-    &None,
+    plan,
     idx,
-  )?;
-  // Recoverable source-width host-native u16 luma staging plus an out-width
-  // clamp staging, both allocated before any caller-buffer write. The
-  // clamp scratch holds the native-max-clamped resampled row the derive
-  // kernels read (their `& mask` is then a value no-op).
-  let src_len = w;
-  let clamp_len = ow;
-  if luma_scratch_u16.len() < src_len + clamp_len {
-    let extra = src_len + clamp_len - luma_scratch_u16.len();
-    luma_scratch_u16.try_reserve_exact(extra).map_err(|_| {
-      MixedSinkerError::Resample(ResampleError::AllocationFailed(
-        crate::resample::PlanGeometry::new(plan.src_w(), plan.src_h(), plan.out_w(), plan.out_h()),
-      ))
-    })?;
-    luma_scratch_u16.resize(src_len + clamp_len, 0);
-  }
-  let (src_luma, clamp_scratch) = luma_scratch_u16.split_at_mut(src_len);
-  let src_luma = &mut src_luma[..src_len];
-  let clamp_scratch = &mut clamp_scratch[..clamp_len];
-  // Convert the wire GrayN row to host-native u16 luma — the source wire
-  // `::<BE>`, the same kernel the direct `luma_u16` path uses (masks to
-  // the low `BITS` bits).
-  gray_n_to_luma_u16_row::<BITS, BE>(y_row, src_luma, w, use_simd);
-
-  // The per-output fan-out is identical for both engines, so build it once
-  // as a reusable `FnMut` and feed it to whichever stream the span kind
-  // selects (`&mut F` is itself `FnMut`); only one engine runs per frame.
-  let mut emit = |oy: usize, resampled_y: &[u16]| {
-    // Clamp the resampled row to the native max so the derive kernels'
-    // `& mask` doesn't wrap a signed-filter overshoot (value no-op for
-    // the area path).
-    let binned_y = &mut clamp_scratch[..ow];
-    for (d, &s) in binned_y.iter_mut().zip(resampled_y.iter()) {
-      *d = s.min(native_max);
-    }
-    let binned_y: &[u16] = binned_y;
-
-    // Luma u16 — host-native pass-through of the clamped u16 luma (the
-    // kernel's mask is a value no-op after the clamp).
-    if let Some(buf) = luma_u16.as_deref_mut() {
-      gray_n_to_luma_u16_row::<BITS, HOST_NATIVE_BE>(
-        binned_y,
-        &mut buf[oy * ow..(oy + 1) * ow],
-        ow,
-        use_simd,
-      );
-    }
-    // Luma u8 — `>> (BITS - 8)` narrowing of the clamped u16 luma.
-    if let Some(buf) = luma.as_deref_mut() {
-      gray_n_to_luma_row::<BITS, HOST_NATIVE_BE>(
-        binned_y,
-        &mut buf[oy * ow..(oy + 1) * ow],
-        ow,
-        use_simd,
-      );
-    }
-
-    // u16 RGB / RGBA (Strategy A) — native broadcast at the source depth.
-    if want_rgba_u16 && !want_rgb_u16 {
-      let buf = rgba_u16.as_deref_mut().unwrap();
-      gray_n_to_rgba_u16_row::<BITS, HOST_NATIVE_BE>(
-        binned_y,
-        &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow],
-        ow,
-        use_simd,
-        full_range,
-      );
-    } else if want_rgb_u16 {
-      let buf = rgb_u16.as_deref_mut().unwrap();
-      let rgb_u16_row = &mut buf[oy * 3 * ow..(oy + 1) * 3 * ow];
-      gray_n_to_rgb_u16_row::<BITS, HOST_NATIVE_BE>(
-        binned_y,
-        rgb_u16_row,
-        ow,
-        use_simd,
-        full_range,
-      );
-      if let Some(buf) = rgba_u16.as_deref_mut() {
-        expand_rgb_u16_to_rgba_u16_row::<BITS>(
-          rgb_u16_row,
-          &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow],
-          ow,
-        );
+    |stream, rgb, rgba, rgb_u16, rgba_u16, luma, luma_u16, _rgb_f32, _luma_f32, hsv| {
+      let want_rgb = rgb.is_some();
+      let want_rgb_u16 = rgb_u16.is_some();
+      let want_rgba = rgba.is_some();
+      let want_rgba_u16 = rgba_u16.is_some();
+      let want_hsv = hsv.is_some();
+      // The u8 RGB kernel runs only when RGB output is requested; HSV (with or
+      // without RGBA) and standalone RGBA derive directly from luma, so the
+      // resample path needs no RGB scratch.
+      let need_rgb_kernel = want_rgb;
+      // Pregrow the source-width host-native u16 luma staging plus the out-width
+      // native-max clamp staging BEFORE the freeze (the clamp holds the clamped
+      // resampled row the derive kernels read, so their `& mask` is a value no-op).
+      let src_len = w;
+      let clamp_len = ow;
+      if luma_scratch_u16.len() < src_len + clamp_len {
+        let extra = src_len + clamp_len - luma_scratch_u16.len();
+        luma_scratch_u16.try_reserve_exact(extra).map_err(|_| {
+          MixedSinkerError::Resample(ResampleError::AllocationFailed(
+            crate::resample::PlanGeometry::new(
+              plan.src_w(),
+              plan.src_h(),
+              plan.out_w(),
+              plan.out_h(),
+            ),
+          ))
+        })?;
+        luma_scratch_u16.resize(src_len + clamp_len, 0);
       }
-    }
+      let Some(stream) = stream else {
+        return Ok(());
+      };
+      let (src_luma, clamp_scratch) = luma_scratch_u16.split_at_mut(src_len);
+      let src_luma = &mut src_luma[..src_len];
+      let clamp_scratch = &mut clamp_scratch[..clamp_len];
+      // Convert the wire GrayN row to host-native u16 luma — the source wire
+      // `::<BE>`, the same kernel the direct `luma_u16` path uses (masks to
+      // the low `BITS` bits).
+      gray_n_to_luma_u16_row::<BITS, BE>(y_row, src_luma, w, use_simd);
+      let src_luma: &[u16] = src_luma;
+      let mut emit = |oy: usize, resampled_y: &[u16]| {
+        // Clamp the resampled row to the native max so the derive kernels'
+        // `& mask` doesn't wrap a signed-filter overshoot (value no-op for
+        // the area path).
+        let binned_y = &mut clamp_scratch[..ow];
+        for (d, &s) in binned_y.iter_mut().zip(resampled_y.iter()) {
+          *d = s.min(native_max);
+        }
+        let binned_y: &[u16] = binned_y;
 
-    // Standalone u8 RGBA fast path — no RGB or HSV requested.
-    if want_rgba && !need_rgb_kernel && !want_hsv {
-      let buf = rgba.as_deref_mut().unwrap();
-      gray_n_to_rgba_row::<BITS, HOST_NATIVE_BE>(
-        binned_y,
-        &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow],
-        ow,
-        use_simd,
-        full_range,
-      );
-      return;
-    }
+        // Luma u16 — host-native pass-through of the clamped u16 luma (the
+        // kernel's mask is a value no-op after the clamp).
+        if let Some(buf) = luma_u16.as_deref_mut() {
+          gray_n_to_luma_u16_row::<BITS, HOST_NATIVE_BE>(
+            binned_y,
+            &mut buf[oy * ow..(oy + 1) * ow],
+            ow,
+            use_simd,
+          );
+        }
+        // Luma u8 — `>> (BITS - 8)` narrowing of the clamped u16 luma.
+        if let Some(buf) = luma.as_deref_mut() {
+          gray_n_to_luma_row::<BITS, HOST_NATIVE_BE>(
+            binned_y,
+            &mut buf[oy * ow..(oy + 1) * ow],
+            ow,
+            use_simd,
+          );
+        }
 
-    // Standalone HSV fast path — H=0 / S=0 / V=Y8 with no RGB computation
-    // (plus an optional standalone RGBA, matching the direct path).
-    if want_hsv && !want_rgb {
-      let hsv = hsv.as_mut().unwrap();
-      let (hp, sp, vp) = hsv.hsv();
-      gray_n_to_hsv_row::<BITS, HOST_NATIVE_BE>(
-        binned_y,
-        &mut hp[oy * ow..(oy + 1) * ow],
-        &mut sp[oy * ow..(oy + 1) * ow],
-        &mut vp[oy * ow..(oy + 1) * ow],
-        ow,
-        use_simd,
-        full_range,
-      );
-      if let Some(buf) = rgba.as_deref_mut() {
-        gray_n_to_rgba_row::<BITS, HOST_NATIVE_BE>(
-          binned_y,
-          &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow],
-          ow,
-          use_simd,
-          full_range,
-        );
-      }
-      return;
-    }
+        // u16 RGB / RGBA (Strategy A) — native broadcast at the source depth.
+        if want_rgba_u16 && !want_rgb_u16 {
+          let buf = rgba_u16.as_deref_mut().unwrap();
+          gray_n_to_rgba_u16_row::<BITS, HOST_NATIVE_BE>(
+            binned_y,
+            &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow],
+            ow,
+            use_simd,
+            full_range,
+          );
+        } else if want_rgb_u16 {
+          let buf = rgb_u16.as_deref_mut().unwrap();
+          let rgb_u16_row = &mut buf[oy * 3 * ow..(oy + 1) * 3 * ow];
+          gray_n_to_rgb_u16_row::<BITS, HOST_NATIVE_BE>(
+            binned_y,
+            rgb_u16_row,
+            ow,
+            use_simd,
+            full_range,
+          );
+          if let Some(buf) = rgba_u16.as_deref_mut() {
+            expand_rgb_u16_to_rgba_u16_row::<BITS>(
+              rgb_u16_row,
+              &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow],
+              ow,
+            );
+          }
+        }
 
-    if !need_rgb_kernel {
-      return;
-    }
+        // Standalone u8 RGBA fast path — no RGB or HSV requested.
+        if want_rgba && !need_rgb_kernel && !want_hsv {
+          let buf = rgba.as_deref_mut().unwrap();
+          gray_n_to_rgba_row::<BITS, HOST_NATIVE_BE>(
+            binned_y,
+            &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow],
+            ow,
+            use_simd,
+            full_range,
+          );
+          return;
+        }
 
-    // Reached only when RGB is attached (need_rgb_kernel == want_rgb), so
-    // the kernel writes the user buffer; HSV-from-RGB and the RGBA fan-out
-    // follow, exactly as the direct path's RGB-kernel branch does.
-    let buf = rgb
-      .as_deref_mut()
-      .expect("need_rgb_kernel implies RGB is attached");
-    let rgb_row = &mut buf[oy * 3 * ow..(oy + 1) * 3 * ow];
-    gray_n_to_rgb_row::<BITS, HOST_NATIVE_BE>(binned_y, rgb_row, ow, use_simd, full_range);
-    if let Some(hsv) = hsv.as_mut() {
-      let (hp, sp, vp) = hsv.hsv();
-      rgb_to_hsv_row(
-        rgb_row,
-        &mut hp[oy * ow..(oy + 1) * ow],
-        &mut sp[oy * ow..(oy + 1) * ow],
-        &mut vp[oy * ow..(oy + 1) * ow],
-        ow,
-        use_simd,
-      );
-    }
-    if let Some(buf) = rgba.as_deref_mut() {
-      expand_rgb_to_rgba_row(rgb_row, &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow], ow);
-    }
-  };
+        // Standalone HSV fast path — H=0 / S=0 / V=Y8 with no RGB computation
+        // (plus an optional standalone RGBA, matching the direct path).
+        if want_hsv && !want_rgb {
+          let hsv = hsv.as_mut().unwrap();
+          let (hp, sp, vp) = hsv.hsv();
+          gray_n_to_hsv_row::<BITS, HOST_NATIVE_BE>(
+            binned_y,
+            &mut hp[oy * ow..(oy + 1) * ow],
+            &mut sp[oy * ow..(oy + 1) * ow],
+            &mut vp[oy * ow..(oy + 1) * ow],
+            ow,
+            use_simd,
+            full_range,
+          );
+          if let Some(buf) = rgba.as_deref_mut() {
+            gray_n_to_rgba_row::<BITS, HOST_NATIVE_BE>(
+              binned_y,
+              &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow],
+              ow,
+              use_simd,
+              full_range,
+            );
+          }
+          return;
+        }
 
-  // Create + feed the kind-appropriate single-channel u16 stream. The
-  // stream creation runs after the freeze + sequence check + staging,
-  // matching the area-only ordering.
-  match plan.kind() {
-    crate::resample::SpanKind::Area => {
-      if luma_stream_u16.is_none() {
-        *luma_stream_u16 = Some({
-          let stream = AreaStream::new(plan.h(), plan.v(), plan.src_w(), plan.src_h(), 1)?;
-          crate::resample::try_box(stream).map_err(|_| {
-            MixedSinkerError::Resample(crate::resample::ResampleError::AllocationFailed(
-              crate::resample::PlanGeometry::new(
-                plan.src_w(),
-                plan.src_h(),
-                plan.out_w(),
-                plan.out_h(),
-              ),
-            ))
-          })?
-        });
-      }
-      let stream = luma_stream_u16.as_mut().expect("created above");
-      stream.feed_row(idx, src_luma, use_simd, &mut emit)?;
-    }
-    crate::resample::SpanKind::Filter => {
-      if luma_filter_stream_u16.is_none() {
-        let fh = plan
-          .filter_h()
-          .expect("filter plan carries horizontal windows");
-        let fv = plan
-          .filter_v()
-          .expect("filter plan carries vertical windows");
-        *luma_filter_stream_u16 = Some({
-          let stream = crate::resample::FilterStream::new(fh, fv, plan.src_w(), plan.src_h(), 1)?;
-          crate::resample::try_box(stream).map_err(|_| {
-            MixedSinkerError::Resample(crate::resample::ResampleError::AllocationFailed(
-              crate::resample::PlanGeometry::new(
-                plan.src_w(),
-                plan.src_h(),
-                plan.out_w(),
-                plan.out_h(),
-              ),
-            ))
-          })?
-        });
-      }
-      let stream = luma_filter_stream_u16.as_mut().expect("created above");
-      stream.feed_row(idx, src_luma, use_simd, &mut emit)?;
-    }
-  }
+        if !need_rgb_kernel {
+          return;
+        }
 
-  Ok(())
+        // Reached only when RGB is attached (need_rgb_kernel == want_rgb), so
+        // the kernel writes the user buffer; HSV-from-RGB and the RGBA fan-out
+        // follow, exactly as the direct path's RGB-kernel branch does.
+        let buf = rgb
+          .as_deref_mut()
+          .expect("need_rgb_kernel implies RGB is attached");
+        let rgb_row = &mut buf[oy * 3 * ow..(oy + 1) * 3 * ow];
+        gray_n_to_rgb_row::<BITS, HOST_NATIVE_BE>(binned_y, rgb_row, ow, use_simd, full_range);
+        if let Some(hsv) = hsv.as_mut() {
+          let (hp, sp, vp) = hsv.hsv();
+          rgb_to_hsv_row(
+            rgb_row,
+            &mut hp[oy * ow..(oy + 1) * ow],
+            &mut sp[oy * ow..(oy + 1) * ow],
+            &mut vp[oy * ow..(oy + 1) * ow],
+            ow,
+            use_simd,
+          );
+        }
+        if let Some(buf) = rgba.as_deref_mut() {
+          expand_rgb_to_rgba_row(rgb_row, &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow], ow);
+        }
+      };
+      // The per-output fan-out is identical for both engines, so feed it to
+      // whichever stream the span kind selected; only one runs per frame.
+      match stream {
+        super::GrayLumaStreamMut::Area(s) => s.feed_row(idx, src_luma, use_simd, &mut emit),
+        super::GrayLumaStreamMut::Filter(s) => s.feed_row(idx, src_luma, use_simd, &mut emit),
+      }?;
+      Ok(())
+    },
+  )
 }
 
 // ---- Gray16 impl ------------------------------------------------------------
@@ -1601,238 +1448,163 @@ fn gray16_process_resampled<const BE: bool>(
   // kernel's overshoot is already clipped by the `FilterStream`'s
   // `0..=65535` clamp — no extra native-depth clamp is needed.
   const HOST_NATIVE_BE: bool = cfg!(target_endian = "big");
-  // Single-kernel filter tail — reject a BICUBLIN plan (its chroma windows are
-  // read only by the `Yuv420p` per-plane route) before any state change. The
-  // gray luma stream is single-kernel, so a bicublin plan would mis-filter.
-  plan.ensure_single_kernel_filter()?;
   let ow = plan.out_w();
-  let want_rgb = rgb.is_some();
-  let want_rgb_u16 = rgb_u16.is_some();
-  let want_rgba = rgba.is_some();
-  let want_rgba_u16 = rgba_u16.is_some();
-  let want_hsv = hsv.is_some();
-  // The u8 RGB kernel runs only when RGB output is requested; HSV (with
-  // or without RGBA) and standalone RGBA derive directly from luma, so
-  // the resample path needs no RGB scratch.
-  let need_rgb_kernel = want_rgb;
-
-  // No-output call: nothing to sequence, stays a no-op (no freeze, no
-  // allocation) regardless of the row index — and stores no frozen-output
-  // snapshot that a later attach-then-retry would trip on.
-  let any_output = luma.is_some()
-    || luma_u16.is_some()
-    || want_rgb
-    || want_rgb_u16
-    || want_rgba
-    || want_rgba_u16
-    || want_hsv;
-  if !any_output {
-    return Ok(());
-  }
-  // Sequence-check before the freeze (single luma stream per kind — it
-  // advances every row regardless of which outputs are attached, so a
-  // mid-frame attach never spins a fresh row-0 stream): an out-of-sequence
-  // row is rejected before the freeze, so a rejected row stores no snapshot
-  // that would poison a retry, and before any allocation, so
-  // AllocationFailed never masks OutOfSequenceRow. The span kind selects
-  // which engine's stream advances.
-  let expected = match plan.kind() {
-    crate::resample::SpanKind::Area => luma_stream_u16.as_ref().map_or(0, |s| s.next_y()),
-    crate::resample::SpanKind::Filter => luma_filter_stream_u16.as_ref().map_or(0, |s| s.next_y()),
-  };
-  if expected != idx {
-    return Err(MixedSinkerError::Resample(ResampleError::OutOfSequenceRow(
-      OutOfSequenceRow::new(expected, idx),
-    )));
-  }
-  frozen_outputs_check(
+  // Transactional 1-channel gray luma resample (RFC #238 tail-collapse): Gray16 *is*
+  // a u16 luma plane — the wire row converts to a source-width host-native u16 luma
+  // plane (staged in the emit's `None` pregrow), a single u16 stream resamples it,
+  // and every output derives from each finalized u16 luma row via the direct kernels.
+  super::gray_luma_resample::<u16>(
+    luma_stream_u16,
+    luma_filter_stream_u16,
     resample_outputs,
-    luma,
-    luma_u16,
     rgb,
     rgba,
     rgb_u16,
     rgba_u16,
-    &None,
-    &None,
-    &None,
-    &None,
-    &None,
+    luma,
+    luma_u16,
+    &mut None,
+    &mut None,
     hsv,
-    &None,
+    plan,
     idx,
-  )?;
-  // Recoverable source-width host-native u16 luma staging, allocated
-  // before any caller-buffer write.
-  let src_luma = source_luma_u16_scratch(luma_scratch_u16, w, plan)?;
-  // Convert the wire Gray16 row to host-native u16 luma — the source
-  // wire `::<BE>`, the same kernel the direct `luma_u16` path uses.
-  gray16_to_luma_u16_row::<BE>(y_row, src_luma, w, use_simd);
+    |stream, rgb, rgba, rgb_u16, rgba_u16, luma, luma_u16, _rgb_f32, _luma_f32, hsv| {
+      let want_rgb = rgb.is_some();
+      let want_rgb_u16 = rgb_u16.is_some();
+      let want_rgba = rgba.is_some();
+      let want_rgba_u16 = rgba_u16.is_some();
+      let want_hsv = hsv.is_some();
+      // The u8 RGB kernel runs only when RGB output is requested; HSV (with
+      // or without RGBA) and standalone RGBA derive directly from luma, so
+      // the resample path needs no RGB scratch.
+      let need_rgb_kernel = want_rgb;
+      // Pregrow the source-width host-native u16 luma staging BEFORE the freeze.
+      let src_luma = source_luma_u16_scratch(luma_scratch_u16, w, plan)?;
+      let Some(stream) = stream else {
+        return Ok(());
+      };
+      // Convert the wire Gray16 row to host-native u16 luma — the source
+      // wire `::<BE>`, the same kernel the direct `luma_u16` path uses.
+      gray16_to_luma_u16_row::<BE>(y_row, src_luma, w, use_simd);
+      let src_luma: &[u16] = src_luma;
+      let mut emit = |oy: usize, binned_y: &[u16]| {
+        // Luma u16 — host-native pass-through of the binned u16 luma.
+        if let Some(buf) = luma_u16.as_deref_mut() {
+          gray16_to_luma_u16_row::<HOST_NATIVE_BE>(
+            binned_y,
+            &mut buf[oy * ow..(oy + 1) * ow],
+            ow,
+            use_simd,
+          );
+        }
+        // Luma u8 — `>> 8` narrowing of the binned u16 luma.
+        if let Some(buf) = luma.as_deref_mut() {
+          gray16_to_luma_row::<HOST_NATIVE_BE>(
+            binned_y,
+            &mut buf[oy * ow..(oy + 1) * ow],
+            ow,
+            use_simd,
+          );
+        }
 
-  // The per-output fan-out is identical for both engines, so build it once
-  // as a reusable `FnMut` and feed it to whichever stream the span kind
-  // selects (`&mut F` is itself `FnMut`); only one engine runs per frame.
-  let mut emit = |oy: usize, binned_y: &[u16]| {
-    // Luma u16 — host-native pass-through of the binned u16 luma.
-    if let Some(buf) = luma_u16.as_deref_mut() {
-      gray16_to_luma_u16_row::<HOST_NATIVE_BE>(
-        binned_y,
-        &mut buf[oy * ow..(oy + 1) * ow],
-        ow,
-        use_simd,
-      );
-    }
-    // Luma u8 — `>> 8` narrowing of the binned u16 luma.
-    if let Some(buf) = luma.as_deref_mut() {
-      gray16_to_luma_row::<HOST_NATIVE_BE>(
-        binned_y,
-        &mut buf[oy * ow..(oy + 1) * ow],
-        ow,
-        use_simd,
-      );
-    }
+        // u16 RGB / RGBA (Strategy A) — native 16-bit broadcast.
+        if want_rgba_u16 && !want_rgb_u16 {
+          let buf = rgba_u16.as_deref_mut().unwrap();
+          gray16_to_rgba_u16_row::<HOST_NATIVE_BE>(
+            binned_y,
+            &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow],
+            ow,
+            use_simd,
+            full_range,
+          );
+        } else if want_rgb_u16 {
+          let buf = rgb_u16.as_deref_mut().unwrap();
+          let rgb_u16_row = &mut buf[oy * 3 * ow..(oy + 1) * 3 * ow];
+          gray16_to_rgb_u16_row::<HOST_NATIVE_BE>(binned_y, rgb_u16_row, ow, use_simd, full_range);
+          if let Some(buf) = rgba_u16.as_deref_mut() {
+            expand_rgb_u16_to_rgba_u16_row::<16>(
+              rgb_u16_row,
+              &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow],
+              ow,
+            );
+          }
+        }
 
-    // u16 RGB / RGBA (Strategy A) — native 16-bit broadcast.
-    if want_rgba_u16 && !want_rgb_u16 {
-      let buf = rgba_u16.as_deref_mut().unwrap();
-      gray16_to_rgba_u16_row::<HOST_NATIVE_BE>(
-        binned_y,
-        &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow],
-        ow,
-        use_simd,
-        full_range,
-      );
-    } else if want_rgb_u16 {
-      let buf = rgb_u16.as_deref_mut().unwrap();
-      let rgb_u16_row = &mut buf[oy * 3 * ow..(oy + 1) * 3 * ow];
-      gray16_to_rgb_u16_row::<HOST_NATIVE_BE>(binned_y, rgb_u16_row, ow, use_simd, full_range);
-      if let Some(buf) = rgba_u16.as_deref_mut() {
-        expand_rgb_u16_to_rgba_u16_row::<16>(
-          rgb_u16_row,
-          &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow],
-          ow,
-        );
-      }
-    }
+        // Standalone u8 RGBA fast path — no RGB or HSV requested.
+        if want_rgba && !need_rgb_kernel && !want_hsv {
+          let buf = rgba.as_deref_mut().unwrap();
+          gray16_to_rgba_row::<HOST_NATIVE_BE>(
+            binned_y,
+            &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow],
+            ow,
+            use_simd,
+            full_range,
+          );
+          return;
+        }
 
-    // Standalone u8 RGBA fast path — no RGB or HSV requested.
-    if want_rgba && !need_rgb_kernel && !want_hsv {
-      let buf = rgba.as_deref_mut().unwrap();
-      gray16_to_rgba_row::<HOST_NATIVE_BE>(
-        binned_y,
-        &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow],
-        ow,
-        use_simd,
-        full_range,
-      );
-      return;
-    }
+        // Standalone HSV fast path — H=0/S=0/V=Y>>8 with no RGB computation
+        // (plus an optional standalone RGBA, matching the direct path).
+        if want_hsv && !want_rgb {
+          let hsv = hsv.as_mut().unwrap();
+          let (hp, sp, vp) = hsv.hsv();
+          gray16_to_hsv_row::<HOST_NATIVE_BE>(
+            binned_y,
+            &mut hp[oy * ow..(oy + 1) * ow],
+            &mut sp[oy * ow..(oy + 1) * ow],
+            &mut vp[oy * ow..(oy + 1) * ow],
+            ow,
+            use_simd,
+            full_range,
+          );
+          if let Some(buf) = rgba.as_deref_mut() {
+            gray16_to_rgba_row::<HOST_NATIVE_BE>(
+              binned_y,
+              &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow],
+              ow,
+              use_simd,
+              full_range,
+            );
+          }
+          return;
+        }
 
-    // Standalone HSV fast path — H=0/S=0/V=Y>>8 with no RGB computation
-    // (plus an optional standalone RGBA, matching the direct path).
-    if want_hsv && !want_rgb {
-      let hsv = hsv.as_mut().unwrap();
-      let (hp, sp, vp) = hsv.hsv();
-      gray16_to_hsv_row::<HOST_NATIVE_BE>(
-        binned_y,
-        &mut hp[oy * ow..(oy + 1) * ow],
-        &mut sp[oy * ow..(oy + 1) * ow],
-        &mut vp[oy * ow..(oy + 1) * ow],
-        ow,
-        use_simd,
-        full_range,
-      );
-      if let Some(buf) = rgba.as_deref_mut() {
-        gray16_to_rgba_row::<HOST_NATIVE_BE>(
-          binned_y,
-          &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow],
-          ow,
-          use_simd,
-          full_range,
-        );
-      }
-      return;
-    }
+        if !need_rgb_kernel {
+          return;
+        }
 
-    if !need_rgb_kernel {
-      return;
-    }
-
-    // Reached only when RGB is attached (need_rgb_kernel == want_rgb), so
-    // the kernel writes the user buffer; HSV-from-RGB and the RGBA
-    // fan-out follow, exactly as the direct path's RGB-kernel branch does.
-    let buf = rgb
-      .as_deref_mut()
-      .expect("need_rgb_kernel implies RGB is attached");
-    let rgb_row = &mut buf[oy * 3 * ow..(oy + 1) * 3 * ow];
-    gray16_to_rgb_row::<HOST_NATIVE_BE>(binned_y, rgb_row, ow, use_simd, full_range);
-    if let Some(hsv) = hsv.as_mut() {
-      let (hp, sp, vp) = hsv.hsv();
-      rgb_to_hsv_row(
-        rgb_row,
-        &mut hp[oy * ow..(oy + 1) * ow],
-        &mut sp[oy * ow..(oy + 1) * ow],
-        &mut vp[oy * ow..(oy + 1) * ow],
-        ow,
-        use_simd,
-      );
-    }
-    if let Some(buf) = rgba.as_deref_mut() {
-      expand_rgb_to_rgba_row(rgb_row, &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow], ow);
-    }
-  };
-
-  // Create + feed the kind-appropriate single-channel u16 stream. The
-  // stream creation runs after the freeze + sequence check + staging,
-  // matching the area-only ordering.
-  match plan.kind() {
-    crate::resample::SpanKind::Area => {
-      if luma_stream_u16.is_none() {
-        *luma_stream_u16 = Some({
-          let stream = AreaStream::new(plan.h(), plan.v(), plan.src_w(), plan.src_h(), 1)?;
-          crate::resample::try_box(stream).map_err(|_| {
-            MixedSinkerError::Resample(crate::resample::ResampleError::AllocationFailed(
-              crate::resample::PlanGeometry::new(
-                plan.src_w(),
-                plan.src_h(),
-                plan.out_w(),
-                plan.out_h(),
-              ),
-            ))
-          })?
-        });
-      }
-      let stream = luma_stream_u16.as_mut().expect("created above");
-      stream.feed_row(idx, src_luma, use_simd, &mut emit)?;
-    }
-    crate::resample::SpanKind::Filter => {
-      if luma_filter_stream_u16.is_none() {
-        let fh = plan
-          .filter_h()
-          .expect("filter plan carries horizontal windows");
-        let fv = plan
-          .filter_v()
-          .expect("filter plan carries vertical windows");
-        *luma_filter_stream_u16 = Some({
-          let stream = crate::resample::FilterStream::new(fh, fv, plan.src_w(), plan.src_h(), 1)?;
-          crate::resample::try_box(stream).map_err(|_| {
-            MixedSinkerError::Resample(crate::resample::ResampleError::AllocationFailed(
-              crate::resample::PlanGeometry::new(
-                plan.src_w(),
-                plan.src_h(),
-                plan.out_w(),
-                plan.out_h(),
-              ),
-            ))
-          })?
-        });
-      }
-      let stream = luma_filter_stream_u16.as_mut().expect("created above");
-      stream.feed_row(idx, src_luma, use_simd, &mut emit)?;
-    }
-  }
-
-  Ok(())
+        // Reached only when RGB is attached (need_rgb_kernel == want_rgb), so
+        // the kernel writes the user buffer; HSV-from-RGB and the RGBA
+        // fan-out follow, exactly as the direct path's RGB-kernel branch does.
+        let buf = rgb
+          .as_deref_mut()
+          .expect("need_rgb_kernel implies RGB is attached");
+        let rgb_row = &mut buf[oy * 3 * ow..(oy + 1) * 3 * ow];
+        gray16_to_rgb_row::<HOST_NATIVE_BE>(binned_y, rgb_row, ow, use_simd, full_range);
+        if let Some(hsv) = hsv.as_mut() {
+          let (hp, sp, vp) = hsv.hsv();
+          rgb_to_hsv_row(
+            rgb_row,
+            &mut hp[oy * ow..(oy + 1) * ow],
+            &mut sp[oy * ow..(oy + 1) * ow],
+            &mut vp[oy * ow..(oy + 1) * ow],
+            ow,
+            use_simd,
+          );
+        }
+        if let Some(buf) = rgba.as_deref_mut() {
+          expand_rgb_to_rgba_row(rgb_row, &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow], ow);
+        }
+      };
+      // The per-output fan-out is identical for both engines, so feed it to
+      // whichever stream the span kind selected; only one runs per frame.
+      match stream {
+        super::GrayLumaStreamMut::Area(s) => s.feed_row(idx, src_luma, use_simd, &mut emit),
+        super::GrayLumaStreamMut::Filter(s) => s.feed_row(idx, src_luma, use_simd, &mut emit),
+      }?;
+      Ok(())
+    },
+  )
 }
 
 // ---- Gray32 impl ------------------------------------------------------------
@@ -2179,245 +1951,168 @@ fn gray32_process_resampled<const BE: bool>(
   // overshoot is already clipped by the `FilterStream<u32>`'s `0..=u32::MAX`
   // clamp (the full native range), so no extra clamp is needed.
   const HOST_NATIVE_BE: bool = cfg!(target_endian = "big");
-  // Single-kernel filter tail — reject a BICUBLIN plan (its chroma windows are
-  // read only by the `Yuv420p` per-plane route) before any state change. The
-  // gray luma stream is single-kernel, so a bicublin plan would mis-filter.
-  plan.ensure_single_kernel_filter()?;
   let ow = plan.out_w();
-  let want_rgb = rgb.is_some();
-  let want_rgb_u16 = rgb_u16.is_some();
-  let want_rgba = rgba.is_some();
-  let want_rgba_u16 = rgba_u16.is_some();
-  let want_hsv = hsv.is_some();
-  // The u8 RGB kernel runs only when RGB output is requested; HSV (with
-  // or without RGBA) and standalone RGBA derive directly from luma, so
-  // the resample path needs no RGB scratch.
-  let need_rgb_kernel = want_rgb;
-
-  // No-output call: nothing to sequence, stays a no-op (no freeze, no
-  // allocation) regardless of the row index — and stores no frozen-output
-  // snapshot that a later attach-then-retry would trip on.
-  let any_output = luma.is_some()
-    || luma_u16.is_some()
-    || want_rgb
-    || want_rgb_u16
-    || want_rgba
-    || want_rgba_u16
-    || want_hsv;
-  if !any_output {
-    return Ok(());
-  }
-  // Sequence-check before the freeze (single luma stream per kind — it
-  // advances every row regardless of which outputs are attached, so a
-  // mid-frame attach never spins a fresh row-0 stream): an out-of-sequence
-  // row is rejected before the freeze, so a rejected row stores no snapshot
-  // that would poison a retry, and before any allocation, so
-  // AllocationFailed never masks OutOfSequenceRow. The span kind selects
-  // which engine's stream advances.
-  let expected = match plan.kind() {
-    crate::resample::SpanKind::Area => luma_stream_u32.as_ref().map_or(0, |s| s.next_y()),
-    crate::resample::SpanKind::Filter => luma_filter_stream_u32.as_ref().map_or(0, |s| s.next_y()),
-  };
-  if expected != idx {
-    return Err(MixedSinkerError::Resample(ResampleError::OutOfSequenceRow(
-      OutOfSequenceRow::new(expected, idx),
-    )));
-  }
-  frozen_outputs_check(
+  // Transactional 1-channel gray luma resample (RFC #238 tail-collapse): Gray32 *is*
+  // a u32 luma plane — the wire row converts to a source-width host-native u32 luma
+  // plane (staged in the emit's `None` pregrow), a single u32 stream resamples it at
+  // full precision, and every output narrows only in the direct-path derive kernels.
+  super::gray_luma_resample::<u32>(
+    luma_stream_u32,
+    luma_filter_stream_u32,
     resample_outputs,
-    luma,
-    luma_u16,
     rgb,
     rgba,
     rgb_u16,
     rgba_u16,
-    &None,
-    &None,
-    &None,
-    &None,
-    &None,
+    luma,
+    luma_u16,
+    &mut None,
+    &mut None,
     hsv,
-    &None,
+    plan,
     idx,
-  )?;
-  // Recoverable source-width host-native u32 luma staging, allocated before
-  // any caller-buffer write.
-  let src_luma = source_luma_u32_scratch(luma_scratch_u32, w, plan)?;
-  // Convert the wire Gray32 row to the host-native u32 value (the wire `BE`
-  // swap only — NO depth narrow), so binning runs at full u32 precision and
-  // each output narrows only afterwards. Binning the full u32 then narrowing
-  // is byte-identical to the direct Gray32 sink over the u32-binned luma, for
-  // both full_range true and false (closes issue #289 — the prior
-  // `>> 16`-narrow-first staging dropped the low 16 bits ahead of the affine,
-  // ≤1 LSB off the exact u32-domain mean).
-  crate::row::scalar::gray::gray32_to_native_u32_row::<BE>(y_row, src_luma, w);
+    |stream, rgb, rgba, rgb_u16, rgba_u16, luma, luma_u16, _rgb_f32, _luma_f32, hsv| {
+      let want_rgb = rgb.is_some();
+      let want_rgb_u16 = rgb_u16.is_some();
+      let want_rgba = rgba.is_some();
+      let want_rgba_u16 = rgba_u16.is_some();
+      let want_hsv = hsv.is_some();
+      // The u8 RGB kernel runs only when RGB output is requested; HSV (with
+      // or without RGBA) and standalone RGBA derive directly from luma, so
+      // the resample path needs no RGB scratch.
+      let need_rgb_kernel = want_rgb;
+      // Pregrow the source-width host-native u32 luma staging BEFORE the freeze.
+      let src_luma = source_luma_u32_scratch(luma_scratch_u32, w, plan)?;
+      let Some(stream) = stream else {
+        return Ok(());
+      };
+      // Convert the wire Gray32 row to the host-native u32 value (the wire `BE`
+      // swap only — NO depth narrow), so binning runs at full u32 precision and
+      // each output narrows only afterwards. Binning the full u32 then narrowing
+      // is byte-identical to the direct Gray32 sink over the u32-binned luma, for
+      // both full_range true and false (closes issue #289 — the prior
+      // `>> 16`-narrow-first staging dropped the low 16 bits ahead of the affine,
+      // ≤1 LSB off the exact u32-domain mean).
+      crate::row::scalar::gray::gray32_to_native_u32_row::<BE>(y_row, src_luma, w);
+      let src_luma: &[u32] = src_luma;
+      let mut emit = |oy: usize, binned_y: &[u32]| {
+        // Luma u16 — `>> 16` native narrow of the binned u32 luma.
+        if let Some(buf) = luma_u16.as_deref_mut() {
+          gray32_to_luma_u16_row::<HOST_NATIVE_BE>(
+            binned_y,
+            &mut buf[oy * ow..(oy + 1) * ow],
+            ow,
+            use_simd,
+          );
+        }
+        // Luma u8 — `>> 24` narrow of the binned u32 luma.
+        if let Some(buf) = luma.as_deref_mut() {
+          gray32_to_luma_row::<HOST_NATIVE_BE>(
+            binned_y,
+            &mut buf[oy * ow..(oy + 1) * ow],
+            ow,
+            use_simd,
+          );
+        }
 
-  // The per-output fan-out is identical for both engines, so build it once
-  // as a reusable `FnMut` and feed it to whichever stream the span kind
-  // selects (`&mut F` is itself `FnMut`); only one engine runs per frame.
-  // The binned row is host-native u32; every output derives from it through
-  // the same `gray32_to_*` kernels the direct path uses, narrowing only here.
-  let mut emit = |oy: usize, binned_y: &[u32]| {
-    // Luma u16 — `>> 16` native narrow of the binned u32 luma.
-    if let Some(buf) = luma_u16.as_deref_mut() {
-      gray32_to_luma_u16_row::<HOST_NATIVE_BE>(
-        binned_y,
-        &mut buf[oy * ow..(oy + 1) * ow],
-        ow,
-        use_simd,
-      );
-    }
-    // Luma u8 — `>> 24` narrow of the binned u32 luma.
-    if let Some(buf) = luma.as_deref_mut() {
-      gray32_to_luma_row::<HOST_NATIVE_BE>(
-        binned_y,
-        &mut buf[oy * ow..(oy + 1) * ow],
-        ow,
-        use_simd,
-      );
-    }
+        // u16 RGB / RGBA (Strategy A) — native `>> 16` broadcast of the binned u32.
+        if want_rgba_u16 && !want_rgb_u16 {
+          let buf = rgba_u16.as_deref_mut().unwrap();
+          gray32_to_rgba_u16_row::<HOST_NATIVE_BE>(
+            binned_y,
+            &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow],
+            ow,
+            use_simd,
+            full_range,
+          );
+        } else if want_rgb_u16 {
+          let buf = rgb_u16.as_deref_mut().unwrap();
+          let rgb_u16_row = &mut buf[oy * 3 * ow..(oy + 1) * 3 * ow];
+          gray32_to_rgb_u16_row::<HOST_NATIVE_BE>(binned_y, rgb_u16_row, ow, use_simd, full_range);
+          if let Some(buf) = rgba_u16.as_deref_mut() {
+            expand_rgb_u16_to_rgba_u16_row::<16>(
+              rgb_u16_row,
+              &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow],
+              ow,
+            );
+          }
+        }
 
-    // u16 RGB / RGBA (Strategy A) — native `>> 16` broadcast of the binned u32.
-    if want_rgba_u16 && !want_rgb_u16 {
-      let buf = rgba_u16.as_deref_mut().unwrap();
-      gray32_to_rgba_u16_row::<HOST_NATIVE_BE>(
-        binned_y,
-        &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow],
-        ow,
-        use_simd,
-        full_range,
-      );
-    } else if want_rgb_u16 {
-      let buf = rgb_u16.as_deref_mut().unwrap();
-      let rgb_u16_row = &mut buf[oy * 3 * ow..(oy + 1) * 3 * ow];
-      gray32_to_rgb_u16_row::<HOST_NATIVE_BE>(binned_y, rgb_u16_row, ow, use_simd, full_range);
-      if let Some(buf) = rgba_u16.as_deref_mut() {
-        expand_rgb_u16_to_rgba_u16_row::<16>(
-          rgb_u16_row,
-          &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow],
-          ow,
-        );
-      }
-    }
+        // Standalone u8 RGBA fast path — no RGB or HSV requested.
+        if want_rgba && !need_rgb_kernel && !want_hsv {
+          let buf = rgba.as_deref_mut().unwrap();
+          gray32_to_rgba_row::<HOST_NATIVE_BE>(
+            binned_y,
+            &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow],
+            ow,
+            use_simd,
+            full_range,
+          );
+          return;
+        }
 
-    // Standalone u8 RGBA fast path — no RGB or HSV requested.
-    if want_rgba && !need_rgb_kernel && !want_hsv {
-      let buf = rgba.as_deref_mut().unwrap();
-      gray32_to_rgba_row::<HOST_NATIVE_BE>(
-        binned_y,
-        &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow],
-        ow,
-        use_simd,
-        full_range,
-      );
-      return;
-    }
+        // Standalone HSV fast path — H=0/S=0/V=Y>>24 with no RGB computation
+        // (plus an optional standalone RGBA, matching the direct path).
+        if want_hsv && !want_rgb {
+          let hsv = hsv.as_mut().unwrap();
+          let (hp, sp, vp) = hsv.hsv();
+          gray32_to_hsv_row::<HOST_NATIVE_BE>(
+            binned_y,
+            &mut hp[oy * ow..(oy + 1) * ow],
+            &mut sp[oy * ow..(oy + 1) * ow],
+            &mut vp[oy * ow..(oy + 1) * ow],
+            ow,
+            use_simd,
+            full_range,
+          );
+          if let Some(buf) = rgba.as_deref_mut() {
+            gray32_to_rgba_row::<HOST_NATIVE_BE>(
+              binned_y,
+              &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow],
+              ow,
+              use_simd,
+              full_range,
+            );
+          }
+          return;
+        }
 
-    // Standalone HSV fast path — H=0/S=0/V=Y>>24 with no RGB computation
-    // (plus an optional standalone RGBA, matching the direct path).
-    if want_hsv && !want_rgb {
-      let hsv = hsv.as_mut().unwrap();
-      let (hp, sp, vp) = hsv.hsv();
-      gray32_to_hsv_row::<HOST_NATIVE_BE>(
-        binned_y,
-        &mut hp[oy * ow..(oy + 1) * ow],
-        &mut sp[oy * ow..(oy + 1) * ow],
-        &mut vp[oy * ow..(oy + 1) * ow],
-        ow,
-        use_simd,
-        full_range,
-      );
-      if let Some(buf) = rgba.as_deref_mut() {
-        gray32_to_rgba_row::<HOST_NATIVE_BE>(
-          binned_y,
-          &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow],
-          ow,
-          use_simd,
-          full_range,
-        );
-      }
-      return;
-    }
+        if !need_rgb_kernel {
+          return;
+        }
 
-    if !need_rgb_kernel {
-      return;
-    }
-
-    // Reached only when RGB is attached (need_rgb_kernel == want_rgb), so
-    // the kernel writes the user buffer; HSV-from-RGB and the RGBA
-    // fan-out follow, exactly as the direct path's RGB-kernel branch does.
-    let buf = rgb
-      .as_deref_mut()
-      .expect("need_rgb_kernel implies RGB is attached");
-    let rgb_row = &mut buf[oy * 3 * ow..(oy + 1) * 3 * ow];
-    gray32_to_rgb_row::<HOST_NATIVE_BE>(binned_y, rgb_row, ow, use_simd, full_range);
-    if let Some(hsv) = hsv.as_mut() {
-      let (hp, sp, vp) = hsv.hsv();
-      rgb_to_hsv_row(
-        rgb_row,
-        &mut hp[oy * ow..(oy + 1) * ow],
-        &mut sp[oy * ow..(oy + 1) * ow],
-        &mut vp[oy * ow..(oy + 1) * ow],
-        ow,
-        use_simd,
-      );
-    }
-    if let Some(buf) = rgba.as_deref_mut() {
-      expand_rgb_to_rgba_row(rgb_row, &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow], ow);
-    }
-  };
-
-  // Create + feed the kind-appropriate single-channel u32 stream. The
-  // stream creation runs after the freeze + sequence check + staging,
-  // matching the area-only ordering.
-  match plan.kind() {
-    crate::resample::SpanKind::Area => {
-      if luma_stream_u32.is_none() {
-        *luma_stream_u32 = Some({
-          let stream = AreaStream::new(plan.h(), plan.v(), plan.src_w(), plan.src_h(), 1)?;
-          crate::resample::try_box(stream).map_err(|_| {
-            MixedSinkerError::Resample(crate::resample::ResampleError::AllocationFailed(
-              crate::resample::PlanGeometry::new(
-                plan.src_w(),
-                plan.src_h(),
-                plan.out_w(),
-                plan.out_h(),
-              ),
-            ))
-          })?
-        });
-      }
-      let stream = luma_stream_u32.as_mut().expect("created above");
-      stream.feed_row(idx, src_luma, use_simd, &mut emit)?;
-    }
-    crate::resample::SpanKind::Filter => {
-      if luma_filter_stream_u32.is_none() {
-        let fh = plan
-          .filter_h()
-          .expect("filter plan carries horizontal windows");
-        let fv = plan
-          .filter_v()
-          .expect("filter plan carries vertical windows");
-        *luma_filter_stream_u32 = Some({
-          let stream = crate::resample::FilterStream::new(fh, fv, plan.src_w(), plan.src_h(), 1)?;
-          crate::resample::try_box(stream).map_err(|_| {
-            MixedSinkerError::Resample(crate::resample::ResampleError::AllocationFailed(
-              crate::resample::PlanGeometry::new(
-                plan.src_w(),
-                plan.src_h(),
-                plan.out_w(),
-                plan.out_h(),
-              ),
-            ))
-          })?
-        });
-      }
-      let stream = luma_filter_stream_u32.as_mut().expect("created above");
-      stream.feed_row(idx, src_luma, use_simd, &mut emit)?;
-    }
-  }
-
-  Ok(())
+        // Reached only when RGB is attached (need_rgb_kernel == want_rgb), so
+        // the kernel writes the user buffer; HSV-from-RGB and the RGBA
+        // fan-out follow, exactly as the direct path's RGB-kernel branch does.
+        let buf = rgb
+          .as_deref_mut()
+          .expect("need_rgb_kernel implies RGB is attached");
+        let rgb_row = &mut buf[oy * 3 * ow..(oy + 1) * 3 * ow];
+        gray32_to_rgb_row::<HOST_NATIVE_BE>(binned_y, rgb_row, ow, use_simd, full_range);
+        if let Some(hsv) = hsv.as_mut() {
+          let (hp, sp, vp) = hsv.hsv();
+          rgb_to_hsv_row(
+            rgb_row,
+            &mut hp[oy * ow..(oy + 1) * ow],
+            &mut sp[oy * ow..(oy + 1) * ow],
+            &mut vp[oy * ow..(oy + 1) * ow],
+            ow,
+            use_simd,
+          );
+        }
+        if let Some(buf) = rgba.as_deref_mut() {
+          expand_rgb_to_rgba_row(rgb_row, &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow], ow);
+        }
+      };
+      // The per-output fan-out is identical for both engines, so feed it to
+      // whichever stream the span kind selected; only one runs per frame.
+      match stream {
+        super::GrayLumaStreamMut::Area(s) => s.feed_row(idx, src_luma, use_simd, &mut emit),
+        super::GrayLumaStreamMut::Filter(s) => s.feed_row(idx, src_luma, use_simd, &mut emit),
+      }?;
+      Ok(())
+    },
+  )
 }
 
 // ---- Grayf32 impl -----------------------------------------------------------
@@ -2808,229 +2503,42 @@ fn grayf32_process_resampled<const BE: bool>(
   // `::<BE>` applied to a wire sample. Passing `::<false>` here would
   // byte-swap every binned sample on a big-endian host.
   const HOST_NATIVE_BE: bool = cfg!(target_endian = "big");
-  // Single-kernel filter tail — reject a BICUBLIN plan (its chroma windows are
-  // read only by the `Yuv420p` per-plane route) before any state change. The
-  // gray luma stream is single-kernel, so a bicublin plan would mis-filter.
-  plan.ensure_single_kernel_filter()?;
   let ow = plan.out_w();
-  let want_rgb = rgb.is_some();
-  let want_rgb_u16 = rgb_u16.is_some();
-  let want_rgba = rgba.is_some();
-  let want_rgba_u16 = rgba_u16.is_some();
-  let want_hsv = hsv.is_some();
-  // The u8 RGB kernel runs only when RGB output is requested; HSV (with
-  // or without RGBA) and standalone RGBA derive directly from luma, so
-  // the resample path needs no RGB scratch.
-  let need_rgb_kernel = want_rgb;
-
-  // No-output call: nothing to sequence, stays a no-op (no freeze, no
-  // allocation) regardless of the row index — and stores no frozen-output
-  // snapshot that a later attach-then-retry would trip on.
-  let any_output = luma.is_some()
-    || luma_u16.is_some()
-    || luma_f32.is_some()
-    || rgb_f32.is_some()
-    || want_rgb
-    || want_rgb_u16
-    || want_rgba
-    || want_rgba_u16
-    || want_hsv;
-  if !any_output {
-    return Ok(());
-  }
-  // Sequence-check before the freeze (single luma stream per kind — it
-  // advances every row regardless of which outputs are attached, so a
-  // mid-frame attach never spins a fresh row-0 stream): an out-of-sequence
-  // row is rejected before the freeze, so a rejected row stores no
-  // snapshot that would poison a retry, and before any allocation, so
-  // AllocationFailed never masks OutOfSequenceRow. The span kind selects
-  // which engine's stream advances.
-  let expected = match plan.kind() {
-    crate::resample::SpanKind::Area => luma_stream_f32.as_ref().map_or(0, |s| s.next_y()),
-    crate::resample::SpanKind::Filter => luma_filter_stream_f32.as_ref().map_or(0, |s| s.next_y()),
-  };
-  if expected != idx {
-    return Err(MixedSinkerError::Resample(ResampleError::OutOfSequenceRow(
-      OutOfSequenceRow::new(expected, idx),
-    )));
-  }
-  frozen_outputs_check(
+  // Transactional 1-channel gray luma resample (RFC #238 tail-collapse): Grayf32 *is*
+  // an f32 luma plane — the wire row converts to a source-width host-native f32 luma
+  // plane (staged in the emit's `None` pregrow), a single f32 stream bins it at f32
+  // precision, and every output derives from each finalized f32 luma row.
+  super::gray_luma_resample::<f32>(
+    luma_stream_f32,
+    luma_filter_stream_f32,
     resample_outputs,
-    luma,
-    luma_u16,
     rgb,
     rgba,
     rgb_u16,
     rgba_u16,
+    luma,
+    luma_u16,
     rgb_f32,
-    &None,
-    &None,
-    &None,
-    &None,
-    hsv,
     luma_f32,
+    hsv,
+    plan,
     idx,
-  )?;
-  // Recoverable source-width host-native f32 luma staging, allocated
-  // before any caller-buffer write.
-  if luma_scratch_f32.len() < w {
-    luma_scratch_f32
-      .try_reserve_exact(w - luma_scratch_f32.len())
-      .map_err(|_| {
-        MixedSinkerError::Resample(ResampleError::AllocationFailed(
-          crate::resample::PlanGeometry::new(
-            plan.src_w(),
-            plan.src_h(),
-            plan.out_w(),
-            plan.out_h(),
-          ),
-        ))
-      })?;
-    luma_scratch_f32.resize(w, 0.0);
-  }
-  // Convert the wire Grayf32 row to host-native f32 luma — the source
-  // wire `::<BE>`, the same kernel the direct `luma_f32` path uses.
-  let src_luma = &mut luma_scratch_f32[..w];
-  grayf32_to_luma_f32_row::<BE>(y_row, src_luma, w, use_simd);
-
-  // The per-output fan-out is identical for both engines, so build it once
-  // as a reusable `FnMut` and feed it to whichever stream the span kind
-  // selects (`&mut F` is itself `FnMut`); only one engine runs per frame.
-  let mut emit = |oy: usize, binned_y: &[f32]| {
-    // luma f32 — host-native pass-through of the binned f32 luma.
-    if let Some(buf) = luma_f32.as_deref_mut() {
-      grayf32_to_luma_f32_row::<HOST_NATIVE_BE>(
-        binned_y,
-        &mut buf[oy * ow..(oy + 1) * ow],
-        ow,
-        use_simd,
-      );
-    }
-    // rgb_f32 — lossless replicate of the binned f32 luma Y → R=G=B.
-    if let Some(buf) = rgb_f32.as_deref_mut() {
-      grayf32_to_rgb_f32_row::<HOST_NATIVE_BE>(
-        binned_y,
-        &mut buf[oy * 3 * ow..(oy + 1) * 3 * ow],
-        ow,
-        use_simd,
-      );
-    }
-    // luma u8 — clamp [0,1] x 255 of the binned f32 luma.
-    if let Some(buf) = luma.as_deref_mut() {
-      grayf32_to_luma_row::<HOST_NATIVE_BE>(
-        binned_y,
-        &mut buf[oy * ow..(oy + 1) * ow],
-        ow,
-        use_simd,
-      );
-    }
-    // luma u16 — clamp [0,1] x 65535 of the binned f32 luma.
-    if let Some(buf) = luma_u16.as_deref_mut() {
-      grayf32_to_luma_u16_row::<HOST_NATIVE_BE>(
-        binned_y,
-        &mut buf[oy * ow..(oy + 1) * ow],
-        ow,
-        use_simd,
-      );
-    }
-
-    // u16 RGB / RGBA (Strategy A) — clamp [0,1] x 65535 broadcast.
-    if want_rgba_u16 && !want_rgb_u16 {
-      let buf = rgba_u16.as_deref_mut().unwrap();
-      grayf32_to_rgba_u16_row::<HOST_NATIVE_BE>(
-        binned_y,
-        &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow],
-        ow,
-        use_simd,
-      );
-    } else if want_rgb_u16 {
-      let buf = rgb_u16.as_deref_mut().unwrap();
-      let rgb_u16_row = &mut buf[oy * 3 * ow..(oy + 1) * 3 * ow];
-      grayf32_to_rgb_u16_row::<HOST_NATIVE_BE>(binned_y, rgb_u16_row, ow, use_simd);
-      if let Some(buf) = rgba_u16.as_deref_mut() {
-        expand_rgb_u16_to_rgba_u16_row::<16>(
-          rgb_u16_row,
-          &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow],
-          ow,
-        );
-      }
-    }
-
-    // Standalone u8 RGBA fast path — no RGB or HSV requested.
-    if want_rgba && !need_rgb_kernel && !want_hsv {
-      let buf = rgba.as_deref_mut().unwrap();
-      grayf32_to_rgba_row::<HOST_NATIVE_BE>(
-        binned_y,
-        &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow],
-        ow,
-        use_simd,
-      );
-      return;
-    }
-
-    // Standalone HSV fast path — H=0/S=0/V=clamp(Y)x255 with no RGB
-    // computation (plus an optional standalone RGBA, matching the direct
-    // path).
-    if want_hsv && !want_rgb {
-      let hsv = hsv.as_mut().unwrap();
-      let (hp, sp, vp) = hsv.hsv();
-      grayf32_to_hsv_row::<HOST_NATIVE_BE>(
-        binned_y,
-        &mut hp[oy * ow..(oy + 1) * ow],
-        &mut sp[oy * ow..(oy + 1) * ow],
-        &mut vp[oy * ow..(oy + 1) * ow],
-        ow,
-        use_simd,
-      );
-      if let Some(buf) = rgba.as_deref_mut() {
-        grayf32_to_rgba_row::<HOST_NATIVE_BE>(
-          binned_y,
-          &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow],
-          ow,
-          use_simd,
-        );
-      }
-      return;
-    }
-
-    if !need_rgb_kernel {
-      return;
-    }
-
-    // Reached only when RGB is attached (need_rgb_kernel == want_rgb), so
-    // the kernel writes the user buffer; HSV-from-RGB and the RGBA
-    // fan-out follow, exactly as the direct path's RGB-kernel branch does.
-    let buf = rgb
-      .as_deref_mut()
-      .expect("need_rgb_kernel implies RGB is attached");
-    let rgb_row = &mut buf[oy * 3 * ow..(oy + 1) * 3 * ow];
-    grayf32_to_rgb_row::<HOST_NATIVE_BE>(binned_y, rgb_row, ow, use_simd);
-    if let Some(hsv) = hsv.as_mut() {
-      let (hp, sp, vp) = hsv.hsv();
-      rgb_to_hsv_row(
-        rgb_row,
-        &mut hp[oy * ow..(oy + 1) * ow],
-        &mut sp[oy * ow..(oy + 1) * ow],
-        &mut vp[oy * ow..(oy + 1) * ow],
-        ow,
-        use_simd,
-      );
-    }
-    if let Some(buf) = rgba.as_deref_mut() {
-      expand_rgb_to_rgba_row(rgb_row, &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow], ow);
-    }
-  };
-
-  // Create + feed the kind-appropriate single-channel f32 stream. The
-  // stream creation runs after the freeze + sequence check + staging,
-  // matching the area-only ordering.
-  match plan.kind() {
-    crate::resample::SpanKind::Area => {
-      if luma_stream_f32.is_none() {
-        *luma_stream_f32 = Some({
-          let stream = AreaStream::new(plan.h(), plan.v(), plan.src_w(), plan.src_h(), 1)?;
-          crate::resample::try_box(stream).map_err(|_| {
-            MixedSinkerError::Resample(crate::resample::ResampleError::AllocationFailed(
+    |stream, rgb, rgba, rgb_u16, rgba_u16, luma, luma_u16, rgb_f32, luma_f32, hsv| {
+      let want_rgb = rgb.is_some();
+      let want_rgb_u16 = rgb_u16.is_some();
+      let want_rgba = rgba.is_some();
+      let want_rgba_u16 = rgba_u16.is_some();
+      let want_hsv = hsv.is_some();
+      // The u8 RGB kernel runs only when RGB output is requested; HSV (with
+      // or without RGBA) and standalone RGBA derive directly from luma, so
+      // the resample path needs no RGB scratch.
+      let need_rgb_kernel = want_rgb;
+      // Pregrow the source-width host-native f32 luma staging BEFORE the freeze.
+      if luma_scratch_f32.len() < w {
+        luma_scratch_f32
+          .try_reserve_exact(w - luma_scratch_f32.len())
+          .map_err(|_| {
+            MixedSinkerError::Resample(ResampleError::AllocationFailed(
               crate::resample::PlanGeometry::new(
                 plan.src_w(),
                 plan.src_h(),
@@ -3038,40 +2546,150 @@ fn grayf32_process_resampled<const BE: bool>(
                 plan.out_h(),
               ),
             ))
-          })?
-        });
+          })?;
+        luma_scratch_f32.resize(w, 0.0);
       }
-      let stream = luma_stream_f32.as_mut().expect("created above");
-      stream.feed_row(idx, src_luma, use_simd, &mut emit)?;
-    }
-    crate::resample::SpanKind::Filter => {
-      if luma_filter_stream_f32.is_none() {
-        let fh = plan
-          .filter_h()
-          .expect("filter plan carries horizontal windows");
-        let fv = plan
-          .filter_v()
-          .expect("filter plan carries vertical windows");
-        *luma_filter_stream_f32 = Some({
-          let stream = crate::resample::FilterStream::new(fh, fv, plan.src_w(), plan.src_h(), 1)?;
-          crate::resample::try_box(stream).map_err(|_| {
-            MixedSinkerError::Resample(crate::resample::ResampleError::AllocationFailed(
-              crate::resample::PlanGeometry::new(
-                plan.src_w(),
-                plan.src_h(),
-                plan.out_w(),
-                plan.out_h(),
-              ),
-            ))
-          })?
-        });
-      }
-      let stream = luma_filter_stream_f32.as_mut().expect("created above");
-      stream.feed_row(idx, src_luma, use_simd, &mut emit)?;
-    }
-  }
+      let Some(stream) = stream else {
+        return Ok(());
+      };
+      // Convert the wire Grayf32 row to host-native f32 luma — the source
+      // wire `::<BE>`, the same kernel the direct `luma_f32` path uses.
+      let src_luma = &mut luma_scratch_f32[..w];
+      grayf32_to_luma_f32_row::<BE>(y_row, src_luma, w, use_simd);
+      let src_luma: &[f32] = src_luma;
+      let mut emit = |oy: usize, binned_y: &[f32]| {
+        // luma f32 — host-native pass-through of the binned f32 luma.
+        if let Some(buf) = luma_f32.as_deref_mut() {
+          grayf32_to_luma_f32_row::<HOST_NATIVE_BE>(
+            binned_y,
+            &mut buf[oy * ow..(oy + 1) * ow],
+            ow,
+            use_simd,
+          );
+        }
+        // rgb_f32 — lossless replicate of the binned f32 luma Y → R=G=B.
+        if let Some(buf) = rgb_f32.as_deref_mut() {
+          grayf32_to_rgb_f32_row::<HOST_NATIVE_BE>(
+            binned_y,
+            &mut buf[oy * 3 * ow..(oy + 1) * 3 * ow],
+            ow,
+            use_simd,
+          );
+        }
+        // luma u8 — clamp [0,1] x 255 of the binned f32 luma.
+        if let Some(buf) = luma.as_deref_mut() {
+          grayf32_to_luma_row::<HOST_NATIVE_BE>(
+            binned_y,
+            &mut buf[oy * ow..(oy + 1) * ow],
+            ow,
+            use_simd,
+          );
+        }
+        // luma u16 — clamp [0,1] x 65535 of the binned f32 luma.
+        if let Some(buf) = luma_u16.as_deref_mut() {
+          grayf32_to_luma_u16_row::<HOST_NATIVE_BE>(
+            binned_y,
+            &mut buf[oy * ow..(oy + 1) * ow],
+            ow,
+            use_simd,
+          );
+        }
 
-  Ok(())
+        // u16 RGB / RGBA (Strategy A) — clamp [0,1] x 65535 broadcast.
+        if want_rgba_u16 && !want_rgb_u16 {
+          let buf = rgba_u16.as_deref_mut().unwrap();
+          grayf32_to_rgba_u16_row::<HOST_NATIVE_BE>(
+            binned_y,
+            &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow],
+            ow,
+            use_simd,
+          );
+        } else if want_rgb_u16 {
+          let buf = rgb_u16.as_deref_mut().unwrap();
+          let rgb_u16_row = &mut buf[oy * 3 * ow..(oy + 1) * 3 * ow];
+          grayf32_to_rgb_u16_row::<HOST_NATIVE_BE>(binned_y, rgb_u16_row, ow, use_simd);
+          if let Some(buf) = rgba_u16.as_deref_mut() {
+            expand_rgb_u16_to_rgba_u16_row::<16>(
+              rgb_u16_row,
+              &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow],
+              ow,
+            );
+          }
+        }
+
+        // Standalone u8 RGBA fast path — no RGB or HSV requested.
+        if want_rgba && !need_rgb_kernel && !want_hsv {
+          let buf = rgba.as_deref_mut().unwrap();
+          grayf32_to_rgba_row::<HOST_NATIVE_BE>(
+            binned_y,
+            &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow],
+            ow,
+            use_simd,
+          );
+          return;
+        }
+
+        // Standalone HSV fast path — H=0/S=0/V=clamp(Y)x255 with no RGB
+        // computation (plus an optional standalone RGBA, matching the direct
+        // path).
+        if want_hsv && !want_rgb {
+          let hsv = hsv.as_mut().unwrap();
+          let (hp, sp, vp) = hsv.hsv();
+          grayf32_to_hsv_row::<HOST_NATIVE_BE>(
+            binned_y,
+            &mut hp[oy * ow..(oy + 1) * ow],
+            &mut sp[oy * ow..(oy + 1) * ow],
+            &mut vp[oy * ow..(oy + 1) * ow],
+            ow,
+            use_simd,
+          );
+          if let Some(buf) = rgba.as_deref_mut() {
+            grayf32_to_rgba_row::<HOST_NATIVE_BE>(
+              binned_y,
+              &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow],
+              ow,
+              use_simd,
+            );
+          }
+          return;
+        }
+
+        if !need_rgb_kernel {
+          return;
+        }
+
+        // Reached only when RGB is attached (need_rgb_kernel == want_rgb), so
+        // the kernel writes the user buffer; HSV-from-RGB and the RGBA
+        // fan-out follow, exactly as the direct path's RGB-kernel branch does.
+        let buf = rgb
+          .as_deref_mut()
+          .expect("need_rgb_kernel implies RGB is attached");
+        let rgb_row = &mut buf[oy * 3 * ow..(oy + 1) * 3 * ow];
+        grayf32_to_rgb_row::<HOST_NATIVE_BE>(binned_y, rgb_row, ow, use_simd);
+        if let Some(hsv) = hsv.as_mut() {
+          let (hp, sp, vp) = hsv.hsv();
+          rgb_to_hsv_row(
+            rgb_row,
+            &mut hp[oy * ow..(oy + 1) * ow],
+            &mut sp[oy * ow..(oy + 1) * ow],
+            &mut vp[oy * ow..(oy + 1) * ow],
+            ow,
+            use_simd,
+          );
+        }
+        if let Some(buf) = rgba.as_deref_mut() {
+          expand_rgb_to_rgba_row(rgb_row, &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow], ow);
+        }
+      };
+      // The per-output fan-out is identical for both engines, so feed it to
+      // whichever stream the span kind selected; only one runs per frame.
+      match stream {
+        super::GrayLumaStreamMut::Area(s) => s.feed_row(idx, src_luma, use_simd, &mut emit),
+        super::GrayLumaStreamMut::Filter(s) => s.feed_row(idx, src_luma, use_simd, &mut emit),
+      }?;
+      Ok(())
+    },
+  )
 }
 
 // ---- Grayf16 impl -----------------------------------------------------------
@@ -3460,206 +3078,39 @@ fn grayf16_process_resampled<const BE: bool>(
   // clamp/scale integer paths). Passing `::<false>` here would byte-swap every
   // binned sample on a big-endian host.
   const HOST_NATIVE_BE: bool = cfg!(target_endian = "big");
-  // Single-kernel filter tail — reject a BICUBLIN plan before any state change.
-  plan.ensure_single_kernel_filter()?;
   let ow = plan.out_w();
-  let want_rgb = rgb.is_some();
-  let want_rgb_u16 = rgb_u16.is_some();
-  let want_rgba = rgba.is_some();
-  let want_rgba_u16 = rgba_u16.is_some();
-  let want_hsv = hsv.is_some();
-  let need_rgb_kernel = want_rgb;
-
-  let any_output = luma.is_some()
-    || luma_u16.is_some()
-    || luma_f32.is_some()
-    || rgb_f32.is_some()
-    || want_rgb
-    || want_rgb_u16
-    || want_rgba
-    || want_rgba_u16
-    || want_hsv;
-  if !any_output {
-    return Ok(());
-  }
-  let expected = match plan.kind() {
-    crate::resample::SpanKind::Area => luma_stream_f32.as_ref().map_or(0, |s| s.next_y()),
-    crate::resample::SpanKind::Filter => luma_filter_stream_f32.as_ref().map_or(0, |s| s.next_y()),
-  };
-  if expected != idx {
-    return Err(MixedSinkerError::Resample(ResampleError::OutOfSequenceRow(
-      OutOfSequenceRow::new(expected, idx),
-    )));
-  }
-  frozen_outputs_check(
+  // Transactional 1-channel gray luma resample (RFC #238 tail-collapse): Grayf16 *is*
+  // an f16 luma plane — the wire row widens to a source-width host-native f32 luma
+  // plane (staged in the emit's `None` pregrow), a single f32 stream bins it at f32
+  // precision, and every output derives from each finalized f32 luma row.
+  super::gray_luma_resample::<f32>(
+    luma_stream_f32,
+    luma_filter_stream_f32,
     resample_outputs,
-    luma,
-    luma_u16,
     rgb,
     rgba,
     rgb_u16,
     rgba_u16,
+    luma,
+    luma_u16,
     rgb_f32,
-    &None,
-    &None,
-    &None,
-    &None,
-    hsv,
     luma_f32,
+    hsv,
+    plan,
     idx,
-  )?;
-  // Recoverable source-width host-native f32 luma staging, allocated before any
-  // caller-buffer write.
-  if luma_scratch_f32.len() < w {
-    luma_scratch_f32
-      .try_reserve_exact(w - luma_scratch_f32.len())
-      .map_err(|_| {
-        MixedSinkerError::Resample(ResampleError::AllocationFailed(
-          crate::resample::PlanGeometry::new(
-            plan.src_w(),
-            plan.src_h(),
-            plan.out_w(),
-            plan.out_h(),
-          ),
-        ))
-      })?;
-    luma_scratch_f32.resize(w, 0.0);
-  }
-  // Widen the wire Grayf16 row to host-native f32 luma — the source wire
-  // `::<BE>`, the same kernel the direct `luma_f32` path uses.
-  let src_luma = &mut luma_scratch_f32[..w];
-  grayf16_to_luma_f32_row::<BE>(y_row, src_luma, w, use_simd);
-
-  // The per-output fan-out runs on the binned f32 luma, identical to the
-  // Grayf32 emit (binned domain is f32), so it uses the `grayf32` kernels.
-  let mut emit = |oy: usize, binned_y: &[f32]| {
-    // luma f32 — host-native pass-through of the binned f32 luma.
-    if let Some(buf) = luma_f32.as_deref_mut() {
-      grayf32_to_luma_f32_row::<HOST_NATIVE_BE>(
-        binned_y,
-        &mut buf[oy * ow..(oy + 1) * ow],
-        ow,
-        use_simd,
-      );
-    }
-    // rgb_f32 — lossless replicate of the binned f32 luma Y → R=G=B.
-    if let Some(buf) = rgb_f32.as_deref_mut() {
-      grayf32_to_rgb_f32_row::<HOST_NATIVE_BE>(
-        binned_y,
-        &mut buf[oy * 3 * ow..(oy + 1) * 3 * ow],
-        ow,
-        use_simd,
-      );
-    }
-    // luma u8 — clamp [0,1] x 255 of the binned f32 luma.
-    if let Some(buf) = luma.as_deref_mut() {
-      grayf32_to_luma_row::<HOST_NATIVE_BE>(
-        binned_y,
-        &mut buf[oy * ow..(oy + 1) * ow],
-        ow,
-        use_simd,
-      );
-    }
-    // luma u16 — clamp [0,1] x 65535 of the binned f32 luma.
-    if let Some(buf) = luma_u16.as_deref_mut() {
-      grayf32_to_luma_u16_row::<HOST_NATIVE_BE>(
-        binned_y,
-        &mut buf[oy * ow..(oy + 1) * ow],
-        ow,
-        use_simd,
-      );
-    }
-
-    // u16 RGB / RGBA (Strategy A) — clamp [0,1] x 65535 broadcast.
-    if want_rgba_u16 && !want_rgb_u16 {
-      let buf = rgba_u16.as_deref_mut().unwrap();
-      grayf32_to_rgba_u16_row::<HOST_NATIVE_BE>(
-        binned_y,
-        &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow],
-        ow,
-        use_simd,
-      );
-    } else if want_rgb_u16 {
-      let buf = rgb_u16.as_deref_mut().unwrap();
-      let rgb_u16_row = &mut buf[oy * 3 * ow..(oy + 1) * 3 * ow];
-      grayf32_to_rgb_u16_row::<HOST_NATIVE_BE>(binned_y, rgb_u16_row, ow, use_simd);
-      if let Some(buf) = rgba_u16.as_deref_mut() {
-        expand_rgb_u16_to_rgba_u16_row::<16>(
-          rgb_u16_row,
-          &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow],
-          ow,
-        );
-      }
-    }
-
-    // Standalone u8 RGBA fast path — no RGB or HSV requested.
-    if want_rgba && !need_rgb_kernel && !want_hsv {
-      let buf = rgba.as_deref_mut().unwrap();
-      grayf32_to_rgba_row::<HOST_NATIVE_BE>(
-        binned_y,
-        &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow],
-        ow,
-        use_simd,
-      );
-      return;
-    }
-
-    // Standalone HSV fast path — H=0/S=0/V=clamp(Y)x255 with no RGB computation.
-    if want_hsv && !want_rgb {
-      let hsv = hsv.as_mut().unwrap();
-      let (hp, sp, vp) = hsv.hsv();
-      grayf32_to_hsv_row::<HOST_NATIVE_BE>(
-        binned_y,
-        &mut hp[oy * ow..(oy + 1) * ow],
-        &mut sp[oy * ow..(oy + 1) * ow],
-        &mut vp[oy * ow..(oy + 1) * ow],
-        ow,
-        use_simd,
-      );
-      if let Some(buf) = rgba.as_deref_mut() {
-        grayf32_to_rgba_row::<HOST_NATIVE_BE>(
-          binned_y,
-          &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow],
-          ow,
-          use_simd,
-        );
-      }
-      return;
-    }
-
-    if !need_rgb_kernel {
-      return;
-    }
-
-    let buf = rgb
-      .as_deref_mut()
-      .expect("need_rgb_kernel implies RGB is attached");
-    let rgb_row = &mut buf[oy * 3 * ow..(oy + 1) * 3 * ow];
-    grayf32_to_rgb_row::<HOST_NATIVE_BE>(binned_y, rgb_row, ow, use_simd);
-    if let Some(hsv) = hsv.as_mut() {
-      let (hp, sp, vp) = hsv.hsv();
-      rgb_to_hsv_row(
-        rgb_row,
-        &mut hp[oy * ow..(oy + 1) * ow],
-        &mut sp[oy * ow..(oy + 1) * ow],
-        &mut vp[oy * ow..(oy + 1) * ow],
-        ow,
-        use_simd,
-      );
-    }
-    if let Some(buf) = rgba.as_deref_mut() {
-      expand_rgb_to_rgba_row(rgb_row, &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow], ow);
-    }
-  };
-
-  // Create + feed the kind-appropriate single-channel f32 stream.
-  match plan.kind() {
-    crate::resample::SpanKind::Area => {
-      if luma_stream_f32.is_none() {
-        *luma_stream_f32 = Some({
-          let stream = AreaStream::new(plan.h(), plan.v(), plan.src_w(), plan.src_h(), 1)?;
-          crate::resample::try_box(stream).map_err(|_| {
-            MixedSinkerError::Resample(crate::resample::ResampleError::AllocationFailed(
+    |stream, rgb, rgba, rgb_u16, rgba_u16, luma, luma_u16, rgb_f32, luma_f32, hsv| {
+      let want_rgb = rgb.is_some();
+      let want_rgb_u16 = rgb_u16.is_some();
+      let want_rgba = rgba.is_some();
+      let want_rgba_u16 = rgba_u16.is_some();
+      let want_hsv = hsv.is_some();
+      let need_rgb_kernel = want_rgb;
+      // Pregrow the source-width host-native f32 luma staging BEFORE the freeze.
+      if luma_scratch_f32.len() < w {
+        luma_scratch_f32
+          .try_reserve_exact(w - luma_scratch_f32.len())
+          .map_err(|_| {
+            MixedSinkerError::Resample(ResampleError::AllocationFailed(
               crate::resample::PlanGeometry::new(
                 plan.src_w(),
                 plan.src_h(),
@@ -3667,40 +3118,145 @@ fn grayf16_process_resampled<const BE: bool>(
                 plan.out_h(),
               ),
             ))
-          })?
-        });
+          })?;
+        luma_scratch_f32.resize(w, 0.0);
       }
-      let stream = luma_stream_f32.as_mut().expect("created above");
-      stream.feed_row(idx, src_luma, use_simd, &mut emit)?;
-    }
-    crate::resample::SpanKind::Filter => {
-      if luma_filter_stream_f32.is_none() {
-        let fh = plan
-          .filter_h()
-          .expect("filter plan carries horizontal windows");
-        let fv = plan
-          .filter_v()
-          .expect("filter plan carries vertical windows");
-        *luma_filter_stream_f32 = Some({
-          let stream = crate::resample::FilterStream::new(fh, fv, plan.src_w(), plan.src_h(), 1)?;
-          crate::resample::try_box(stream).map_err(|_| {
-            MixedSinkerError::Resample(crate::resample::ResampleError::AllocationFailed(
-              crate::resample::PlanGeometry::new(
-                plan.src_w(),
-                plan.src_h(),
-                plan.out_w(),
-                plan.out_h(),
-              ),
-            ))
-          })?
-        });
-      }
-      let stream = luma_filter_stream_f32.as_mut().expect("created above");
-      stream.feed_row(idx, src_luma, use_simd, &mut emit)?;
-    }
-  }
+      let Some(stream) = stream else {
+        return Ok(());
+      };
+      // Widen the wire Grayf16 row to host-native f32 luma — the source wire
+      // `::<BE>`, the same kernel the direct `luma_f32` path uses.
+      let src_luma = &mut luma_scratch_f32[..w];
+      grayf16_to_luma_f32_row::<BE>(y_row, src_luma, w, use_simd);
+      let src_luma: &[f32] = src_luma;
+      let mut emit = |oy: usize, binned_y: &[f32]| {
+        // luma f32 — host-native pass-through of the binned f32 luma.
+        if let Some(buf) = luma_f32.as_deref_mut() {
+          grayf32_to_luma_f32_row::<HOST_NATIVE_BE>(
+            binned_y,
+            &mut buf[oy * ow..(oy + 1) * ow],
+            ow,
+            use_simd,
+          );
+        }
+        // rgb_f32 — lossless replicate of the binned f32 luma Y → R=G=B.
+        if let Some(buf) = rgb_f32.as_deref_mut() {
+          grayf32_to_rgb_f32_row::<HOST_NATIVE_BE>(
+            binned_y,
+            &mut buf[oy * 3 * ow..(oy + 1) * 3 * ow],
+            ow,
+            use_simd,
+          );
+        }
+        // luma u8 — clamp [0,1] x 255 of the binned f32 luma.
+        if let Some(buf) = luma.as_deref_mut() {
+          grayf32_to_luma_row::<HOST_NATIVE_BE>(
+            binned_y,
+            &mut buf[oy * ow..(oy + 1) * ow],
+            ow,
+            use_simd,
+          );
+        }
+        // luma u16 — clamp [0,1] x 65535 of the binned f32 luma.
+        if let Some(buf) = luma_u16.as_deref_mut() {
+          grayf32_to_luma_u16_row::<HOST_NATIVE_BE>(
+            binned_y,
+            &mut buf[oy * ow..(oy + 1) * ow],
+            ow,
+            use_simd,
+          );
+        }
 
-  Ok(())
+        // u16 RGB / RGBA (Strategy A) — clamp [0,1] x 65535 broadcast.
+        if want_rgba_u16 && !want_rgb_u16 {
+          let buf = rgba_u16.as_deref_mut().unwrap();
+          grayf32_to_rgba_u16_row::<HOST_NATIVE_BE>(
+            binned_y,
+            &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow],
+            ow,
+            use_simd,
+          );
+        } else if want_rgb_u16 {
+          let buf = rgb_u16.as_deref_mut().unwrap();
+          let rgb_u16_row = &mut buf[oy * 3 * ow..(oy + 1) * 3 * ow];
+          grayf32_to_rgb_u16_row::<HOST_NATIVE_BE>(binned_y, rgb_u16_row, ow, use_simd);
+          if let Some(buf) = rgba_u16.as_deref_mut() {
+            expand_rgb_u16_to_rgba_u16_row::<16>(
+              rgb_u16_row,
+              &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow],
+              ow,
+            );
+          }
+        }
+
+        // Standalone u8 RGBA fast path — no RGB or HSV requested.
+        if want_rgba && !need_rgb_kernel && !want_hsv {
+          let buf = rgba.as_deref_mut().unwrap();
+          grayf32_to_rgba_row::<HOST_NATIVE_BE>(
+            binned_y,
+            &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow],
+            ow,
+            use_simd,
+          );
+          return;
+        }
+
+        // Standalone HSV fast path — H=0/S=0/V=clamp(Y)x255 with no RGB computation.
+        if want_hsv && !want_rgb {
+          let hsv = hsv.as_mut().unwrap();
+          let (hp, sp, vp) = hsv.hsv();
+          grayf32_to_hsv_row::<HOST_NATIVE_BE>(
+            binned_y,
+            &mut hp[oy * ow..(oy + 1) * ow],
+            &mut sp[oy * ow..(oy + 1) * ow],
+            &mut vp[oy * ow..(oy + 1) * ow],
+            ow,
+            use_simd,
+          );
+          if let Some(buf) = rgba.as_deref_mut() {
+            grayf32_to_rgba_row::<HOST_NATIVE_BE>(
+              binned_y,
+              &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow],
+              ow,
+              use_simd,
+            );
+          }
+          return;
+        }
+
+        if !need_rgb_kernel {
+          return;
+        }
+
+        let buf = rgb
+          .as_deref_mut()
+          .expect("need_rgb_kernel implies RGB is attached");
+        let rgb_row = &mut buf[oy * 3 * ow..(oy + 1) * 3 * ow];
+        grayf32_to_rgb_row::<HOST_NATIVE_BE>(binned_y, rgb_row, ow, use_simd);
+        if let Some(hsv) = hsv.as_mut() {
+          let (hp, sp, vp) = hsv.hsv();
+          rgb_to_hsv_row(
+            rgb_row,
+            &mut hp[oy * ow..(oy + 1) * ow],
+            &mut sp[oy * ow..(oy + 1) * ow],
+            &mut vp[oy * ow..(oy + 1) * ow],
+            ow,
+            use_simd,
+          );
+        }
+        if let Some(buf) = rgba.as_deref_mut() {
+          expand_rgb_to_rgba_row(rgb_row, &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow], ow);
+        }
+      };
+      // The per-output fan-out is identical for both engines, so feed it to
+      // whichever stream the span kind selected; only one runs per frame.
+      match stream {
+        super::GrayLumaStreamMut::Area(s) => s.feed_row(idx, src_luma, use_simd, &mut emit),
+        super::GrayLumaStreamMut::Filter(s) => s.feed_row(idx, src_luma, use_simd, &mut emit),
+      }?;
+      Ok(())
+    },
+  )
 }
 
 // ---- Ya8 impl ---------------------------------------------------------------
@@ -5367,7 +4923,7 @@ fn yaf_process_resampled(
   // RGBA derive directly from the colour-Y plane.
   let need_rgb_kernel = want_rgb;
 
-  let any_output = luma.is_some()
+  let need_any = luma.is_some()
     || luma_u16.is_some()
     || luma_f32.is_some()
     || rgb_f32.is_some()
@@ -5376,21 +4932,23 @@ fn yaf_process_resampled(
     || want_rgba
     || want_rgba_u16
     || want_hsv;
-  if !any_output {
-    return Ok(());
-  }
-  // Sequence-check before the freeze + before any allocation. The span kind
-  // selects which engine's stream advances.
-  let expected = match plan.kind() {
-    crate::resample::SpanKind::Area => yaf_stream_f32.as_ref().map_or(0, |s| s.next_y()),
-    crate::resample::SpanKind::Filter => yaf_filter_stream_f32.as_ref().map_or(0, |s| s.next_y()),
+  let is_filter = plan.kind().is_filter();
+  // Sequence-counter row for the shared L1 preflight (the fed stream is the sole
+  // per-row stream), or `None` when no output is attached so the preflight
+  // short-circuits to a no-op. The span kind selects which engine's stream advances.
+  let expected = if need_any {
+    Some(if is_filter {
+      yaf_filter_stream_f32.as_ref().map_or(0, |s| s.next_y())
+    } else {
+      yaf_stream_f32.as_ref().map_or(0, |s| s.next_y())
+    })
+  } else {
+    None
   };
-  if expected != idx {
-    return Err(MixedSinkerError::Resample(ResampleError::OutOfSequenceRow(
-      OutOfSequenceRow::new(expected, idx),
-    )));
-  }
-  frozen_outputs_check(
+  // Compare-only preflight (NO commit): the output-set freeze commits only AFTER the
+  // fallible stream alloc + scratch grows below succeed, so a first-row allocation
+  // failure leaves `resample_outputs` uncommitted (retryable).
+  if let core::ops::ControlFlow::Break(()) = super::resample_preflight_check_only(
     resample_outputs,
     luma,
     luma_u16,
@@ -5405,11 +4963,13 @@ fn yaf_process_resampled(
     &None,
     hsv,
     luma_f32,
+    expected,
     idx,
-  )?;
+  )? {
+    return Ok(());
+  }
 
-  // Recoverable source-width 3-channel `[Yc, A, Y]` staging, allocated before
-  // any caller-buffer write.
+  // Recoverable source-width 3-channel `[Yc, A, Y]` staging, grown before the freeze.
   let stage_len =
     w.checked_mul(3)
       .ok_or(MixedSinkerError::GeometryOverflow(GeometryOverflow::new(
@@ -5466,6 +5026,61 @@ fn yaf_process_resampled(
       })?;
     plane_scratch.resize(plane_len, 0.0);
   }
+  // Build the missing 3-channel stream into a LOCAL, then insert the stream field and
+  // freeze the output set TOGETHER — so a scratch OOM (above) leaves the field `None`
+  // AND `resample_outputs` uncommitted (the #180 commit-together discipline; a pure
+  // reordering of the pre-collapse split path).
+  let new_area = if !is_filter && yaf_stream_f32.is_none() {
+    let stream = AreaStream::new(plan.h(), plan.v(), plan.src_w(), plan.src_h(), 3)?;
+    Some(crate::resample::try_box(stream).map_err(|_| {
+      MixedSinkerError::Resample(ResampleError::AllocationFailed(
+        crate::resample::PlanGeometry::new(plan.src_w(), plan.src_h(), plan.out_w(), plan.out_h()),
+      ))
+    })?)
+  } else {
+    None
+  };
+  let new_filter = if is_filter && yaf_filter_stream_f32.is_none() {
+    let (fh, fv) = (
+      plan
+        .filter_h()
+        .expect("filter plan carries horizontal windows"),
+      plan
+        .filter_v()
+        .expect("filter plan carries vertical windows"),
+    );
+    let stream = crate::resample::FilterStream::new(fh, fv, plan.src_w(), plan.src_h(), 3)?;
+    Some(crate::resample::try_box(stream).map_err(|_| {
+      MixedSinkerError::Resample(ResampleError::AllocationFailed(
+        crate::resample::PlanGeometry::new(plan.src_w(), plan.src_h(), plan.out_w(), plan.out_h()),
+      ))
+    })?)
+  } else {
+    None
+  };
+  if let Some(s) = new_area {
+    *yaf_stream_f32 = Some(s);
+  }
+  if let Some(s) = new_filter {
+    *yaf_filter_stream_f32 = Some(s);
+  }
+  frozen_outputs_check(
+    resample_outputs,
+    luma,
+    luma_u16,
+    rgb,
+    rgba,
+    rgb_u16,
+    rgba_u16,
+    rgb_f32,
+    &None,
+    &None,
+    &None,
+    &None,
+    hsv,
+    luma_f32,
+    idx,
+  )?;
 
   let mut emit = |oy: usize, binned: &[f32]| {
     let planes = &mut plane_scratch[..plane_len];
@@ -5600,50 +5215,13 @@ fn yaf_process_resampled(
     }
   };
 
-  // Create + feed the kind-appropriate 3-channel f32 stream, after the freeze
-  // + sequence check + staging.
+  // Feed the committed kind-appropriate 3-channel f32 stream; only one runs per frame.
   match plan.kind() {
     crate::resample::SpanKind::Area => {
-      if yaf_stream_f32.is_none() {
-        *yaf_stream_f32 = Some({
-          let stream = AreaStream::new(plan.h(), plan.v(), plan.src_w(), plan.src_h(), 3)?;
-          crate::resample::try_box(stream).map_err(|_| {
-            MixedSinkerError::Resample(ResampleError::AllocationFailed(
-              crate::resample::PlanGeometry::new(
-                plan.src_w(),
-                plan.src_h(),
-                plan.out_w(),
-                plan.out_h(),
-              ),
-            ))
-          })?
-        });
-      }
       let stream = yaf_stream_f32.as_mut().expect("created above");
       stream.feed_row(idx, stage, use_simd, &mut emit)?;
     }
     crate::resample::SpanKind::Filter => {
-      if yaf_filter_stream_f32.is_none() {
-        let fh = plan
-          .filter_h()
-          .expect("filter plan carries horizontal windows");
-        let fv = plan
-          .filter_v()
-          .expect("filter plan carries vertical windows");
-        *yaf_filter_stream_f32 = Some({
-          let stream = crate::resample::FilterStream::new(fh, fv, plan.src_w(), plan.src_h(), 3)?;
-          crate::resample::try_box(stream).map_err(|_| {
-            MixedSinkerError::Resample(ResampleError::AllocationFailed(
-              crate::resample::PlanGeometry::new(
-                plan.src_w(),
-                plan.src_h(),
-                plan.out_w(),
-                plan.out_h(),
-              ),
-            ))
-          })?
-        });
-      }
       let stream = yaf_filter_stream_f32.as_mut().expect("created above");
       stream.feed_row(idx, stage, use_simd, &mut emit)?;
     }

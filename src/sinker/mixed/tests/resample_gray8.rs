@@ -412,6 +412,77 @@ fn gray8_resample_rejects_mid_frame_output_change() {
   );
 }
 
+// The EMIT-owned out-width u8 RGB scratch — grown ONLY for the `hsv + rgba` shape
+// with no `rgb` attached (`need_rgb_kernel && !want_rgb`), pregrown BEFORE the freeze
+// via the shared driver's `None`-stream pass. Uses the crate's RGB-scratch
+// failpoint (widened to `gray`), and attaches `rgba` + `hsv` outputs, so this
+// test is `rgb`-gated (the module already provides `gray`).
+#[cfg(feature = "rgb")]
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn gray8_first_row_emit_scratch_oom_leaves_stream_and_freeze_uncommitted_for_retry() {
+  let plane = ramp();
+  let mut rgba = vec![0u8; OUT * OUT * 4];
+  let mut hh = vec![0u8; OUT * OUT];
+  let mut ss = vec![0u8; OUT * OUT];
+  let mut vv = vec![0u8; OUT * OUT];
+  let mut luma = vec![0u8; OUT * OUT];
+  {
+    let mut sink =
+      MixedSinker::<Gray8, AreaResampler>::with_resampler(SRC, SRC, AreaResampler::to(OUT, OUT))
+        .unwrap()
+        .with_rgba(&mut rgba)
+        .unwrap()
+        .with_hsv(&mut hh, &mut ss, &mut vv)
+        .unwrap();
+    sink.begin_frame(SRC as u32, SRC as u32).unwrap();
+    // Arm the RGB-scratch grow failpoint — the out-width u8 scratch the Gray8 emit
+    // pregrows for its `hsv + rgba` (no `rgb`) shape, AFTER the row-0 stream box builds
+    // into a local. The pregrow runs it BEFORE the freeze, so this OOM must leave BOTH
+    // the luma stream field `None` and the freeze uncommitted (the post-freeze-grow
+    // shape would have left the stream committed).
+    crate::sinker::mixed::arm_rgb_scratch_alloc_failure();
+    let err = sink
+      .process(Gray8Row::new(&plane[..SRC], 0, M, FR))
+      .unwrap_err();
+    assert!(
+      matches!(
+        err,
+        MixedSinkerError::Resample(ResampleError::AllocationFailed(_))
+      ),
+      "first-row emit-scratch OOM must surface AllocationFailed, got {err:?}"
+    );
+    // DIRECT stream-rollback proof (the non-vacuous part): the luma stream field must
+    // be `None` — the driver builds it into a LOCAL and inserts only after the emit
+    // scratch pregrows, so a failed scratch leaves nothing committed. The
+    // insert-before-scratch shape would leave it `Some` here, so this FAILS against
+    // that shape and PASSES against the fix.
+    assert!(
+      !sink.luma_stream_allocated(),
+      "an emit-owned scratch OOM must leave the luma stream field None (no partial commit)"
+    );
+    // The freeze was likewise never committed — attaching luma (a CHANGED output set)
+    // and replaying from row 0 is ACCEPTED, not ResampleOutputsChanged.
+    sink.set_luma(&mut luma).unwrap();
+    for r in 0..SRC {
+      sink
+        .process(Gray8Row::new(&plane[r * SRC..(r + 1) * SRC], r, M, FR))
+        .expect("frame replay after a first-row emit-scratch OOM must succeed");
+    }
+  }
+  assert!(
+    rgba.iter().any(|&b| b != 0),
+    "the recovered frame produced real rgba output (emit-scratch OOM was recoverable)"
+  );
+  assert!(
+    luma.iter().any(|&b| b != 0),
+    "the newly-attached luma output was driven on the accepted retry"
+  );
+}
+
 // ---- Filter-plan routing ----------------------------------------------------
 //
 // Gray8 *is* a luma plane: the area path bins the source Y through a 1-channel

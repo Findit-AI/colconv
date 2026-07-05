@@ -3,9 +3,9 @@ use super::super::{
   MixedSinkerError, NativeRouteChanged, RowIndexOutOfRange, RowShapeMismatch, RowSlice,
   WidthAlignment, check_dimensions_match, chroma_422_center_sited_h,
   deinterleave_y_high_bit_masked, packed_yuv422_triple_filter_resample,
-  packed_yuv422_triple_resample, planar_8bit::YUV422P_CENTERED_H_PHASE,
-  planar_resample::resample_preflight_check_only, reconstruct_chroma, reset_high_bit_yuv_streams,
-  rgb_row_buf_or_scratch, rgba_plane_row_slice, rgba_u16_plane_row_slice,
+  packed_yuv422_triple_resample, planar_8bit::YUV422P_CENTERED_H_PHASE, reconstruct_chroma,
+  resample_preflight_check_only, reset_high_bit_yuv_streams, rgb_row_buf_or_scratch,
+  rgba_plane_row_slice, rgba_u16_plane_row_slice,
   subsampled_4_2_0_high_bit::reserve_420_chroma_full_u16, yuv_planar16_process_native,
 };
 use crate::{

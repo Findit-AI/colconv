@@ -19,7 +19,7 @@ use super::super::{
   ChromaSitingChanged, FrozenOutputs, HsvFrameMut, NativePlanarYuvU16, NativeRouteChanged,
   chroma_422_center_sited_h, native_planar_hb_preflight_check_only,
   planar_8bit::YUV422P_CENTERED_H_PHASE,
-  planar_resample::resample_preflight_check_only,
+  resample_preflight_check_only,
   subsampled_4_2_0_high_bit::{reserve_pn_chroma_full_u16, upsample_pn_chroma_center_h},
   yuv_planar16_process_native,
 };
