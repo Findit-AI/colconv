@@ -4517,11 +4517,17 @@ impl<F: SourceFormat, R> MixedSinker<'_, F, R> {
   /// freeze half of the commit-together shape is proven directly, without
   /// relying on a walker retry (which would `begin_frame`-reset the field
   /// before it could be observed). Gated to cover the `xyz` + `mono` (Pal8) +
-  /// `rgb-legacy` test-module gates that consume it.
+  /// `rgb-legacy` + `yuv-planar` (the 4:2:0 high-bit native rebuild-atomicity
+  /// suite) test-module gates that consume it.
   #[cfg(all(
     test,
     feature = "std",
-    any(feature = "xyz", feature = "mono", feature = "rgb-legacy")
+    any(
+      feature = "xyz",
+      feature = "mono",
+      feature = "rgb-legacy",
+      feature = "yuv-planar"
+    )
   ))]
   pub(crate) fn resample_outputs_frozen(&self) -> bool {
     self.resample_outputs.is_some()
