@@ -30,9 +30,9 @@
 
 use super::{
   InsufficientBuffer, MixedSinker, MixedSinkerError, RowIndexOutOfRange, RowShapeMismatch,
-  RowSlice, check_dimensions_match, rgb_row_buf_or_scratch, rgba_plane_row_slice,
-  rgba_u16_plane_row_slice, source_xyz_f32_scratch, xyz12_resample_emit, xyz12_resample_filter,
-  xyz12_resample_preflight, xyz12_resample_stream,
+  RowSlice, check_dimensions_match, frozen_outputs_check, resample_preflight_check_only,
+  rgb_row_buf_or_scratch, rgba_plane_row_slice, rgba_u16_plane_row_slice, source_rgb_scratch,
+  source_xyz_f32_scratch, xyz12_resample_emit,
 };
 use crate::{
   PixelSink,
@@ -487,36 +487,109 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Xyz12<BE>, R> {
       // out-of-gamut negatives preserved) and the integer / f16 outputs
       // clamp `[0, 1]` in their own narrows, so a filter overshoot needs
       // no native-depth clamp.
-      let stream_next_y = match plan.kind() {
-        crate::resample::SpanKind::Area => xyz_stream_f32.as_ref().map_or(0, |s| s.next_y()),
-        crate::resample::SpanKind::Filter => {
-          xyz_filter_stream_f32.as_ref().map_or(0, |s| s.next_y())
-        }
+      let ow = plan.out_w();
+      let need_any = rgb.is_some()
+        || rgba.is_some()
+        || luma.is_some()
+        || luma_u16.is_some()
+        || rgb_u16.is_some()
+        || rgba_u16.is_some()
+        || rgb_f32.is_some()
+        || xyz_f32.is_some()
+        || rgb_f16.is_some()
+        || rgba_f16.is_some()
+        || hsv.is_some();
+      // Sequence-counter row for the shared L1 preflight (the kind-appropriate
+      // stream is the sole per-row stream), or `None` when no output is attached
+      // so the preflight short-circuits to a no-op.
+      let expected = if need_any {
+        Some(match plan.kind() {
+          crate::resample::SpanKind::Area => xyz_stream_f32.as_ref().map_or(0, |s| s.next_y()),
+          crate::resample::SpanKind::Filter => {
+            xyz_filter_stream_f32.as_ref().map_or(0, |s| s.next_y())
+          }
+        })
+      } else {
+        None
       };
-      if !xyz12_resample_preflight(
+      // Compare-only preflight (NO commit): the output-set freeze commits only
+      // AFTER the fallible stream alloc + scratch growth below succeed (RFC #238
+      // tail-collapse), so a first-row allocation failure leaves `resample_outputs`
+      // uncommitted — retryable with a changed output attachment.
+      if let core::ops::ControlFlow::Break(()) = resample_preflight_check_only(
         resample_outputs,
-        rgb,
-        rgba,
         luma,
         luma_u16,
+        rgb,
+        rgba,
         rgb_u16,
         rgba_u16,
         rgb_f32,
+        &None,
         xyz_f32,
         rgb_f16,
         rgba_f16,
         hsv,
-        stream_next_y,
+        &None,
+        expected,
         idx,
       )? {
         return Ok(());
       }
-      // Create + sequence-check the kind-appropriate stream BEFORE the
-      // source-width staging, so a later out-of-sequence row is rejected
-      // without the conversion (reject-before-staging atomicity).
+      // The u8 RGB / luma / luma_u16 / hsv outputs stage through the emit's own
+      // out-width narrow scratch; pre-grow it (and the source-width linear-XYZ
+      // staging) BEFORE the freeze so every fallible pre-feed alloc precedes the
+      // commit and NOTHING fallible runs post-freeze. The predicate is the one
+      // `xyz12_resample_emit` uses, so the pre-grow and its re-grow cannot drift.
+      let need_narrow = rgb.is_some() || luma.is_some() || luma_u16.is_some() || hsv.is_some();
+      // Build the missing kind-appropriate stream into a LOCAL and grow every
+      // scratch with NO field mutation, so the stream field insert and the freeze
+      // commit TOGETHER only after they all succeed (a scratch OOM leaves the
+      // stream field `None` AND `resample_outputs` uncommitted, never a partial
+      // commit).
       return match plan.kind() {
         crate::resample::SpanKind::Area => {
-          let stream = xyz12_resample_stream(xyz_stream_f32, plan, idx)?;
+          let new_stream = if xyz_stream_f32.is_none() {
+            let stream =
+              crate::resample::AreaStream::new(plan.h(), plan.v(), plan.src_w(), plan.src_h(), 3)?;
+            Some(crate::resample::try_box(stream).map_err(|_| {
+              MixedSinkerError::Resample(crate::resample::ResampleError::AllocationFailed(
+                crate::resample::PlanGeometry::new(
+                  plan.src_w(),
+                  plan.src_h(),
+                  plan.out_w(),
+                  plan.out_h(),
+                ),
+              ))
+            })?)
+          } else {
+            None
+          };
+          source_xyz_f32_scratch(xyz_scratch_f32, w, plan)?;
+          if need_narrow {
+            source_rgb_scratch(rgb_scratch, ow, plan)?;
+          }
+          if let Some(s) = new_stream {
+            *xyz_stream_f32 = Some(s);
+          }
+          frozen_outputs_check(
+            resample_outputs,
+            luma,
+            luma_u16,
+            rgb,
+            rgba,
+            rgb_u16,
+            rgba_u16,
+            rgb_f32,
+            &None,
+            xyz_f32,
+            rgb_f16,
+            rgba_f16,
+            hsv,
+            &None,
+            idx,
+          )?;
+          let stream = xyz_stream_f32.as_mut().expect("created above");
           let src_xyz = source_xyz_f32_scratch(xyz_scratch_f32, w, plan)?;
           xyz12_to_xyz_f32_row::<BE>(row.xyz(), src_xyz, w, use_simd);
           xyz12_resample_emit(
@@ -542,7 +615,57 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Xyz12<BE>, R> {
           )
         }
         crate::resample::SpanKind::Filter => {
-          let stream = xyz12_resample_filter(xyz_filter_stream_f32, plan, idx)?;
+          // Single-kernel filter: reject a BICUBLIN plan before any allocation
+          // (its chroma windows are read only by the `Yuv420p` per-plane route).
+          plan.ensure_single_kernel_filter()?;
+          let new_stream = if xyz_filter_stream_f32.is_none() {
+            let (fh, fv) = (
+              plan
+                .filter_h()
+                .expect("filter plan carries horizontal windows"),
+              plan
+                .filter_v()
+                .expect("filter plan carries vertical windows"),
+            );
+            let stream = crate::resample::FilterStream::new(fh, fv, plan.src_w(), plan.src_h(), 3)?;
+            Some(crate::resample::try_box(stream).map_err(|_| {
+              MixedSinkerError::Resample(crate::resample::ResampleError::AllocationFailed(
+                crate::resample::PlanGeometry::new(
+                  plan.src_w(),
+                  plan.src_h(),
+                  plan.out_w(),
+                  plan.out_h(),
+                ),
+              ))
+            })?)
+          } else {
+            None
+          };
+          source_xyz_f32_scratch(xyz_scratch_f32, w, plan)?;
+          if need_narrow {
+            source_rgb_scratch(rgb_scratch, ow, plan)?;
+          }
+          if let Some(s) = new_stream {
+            *xyz_filter_stream_f32 = Some(s);
+          }
+          frozen_outputs_check(
+            resample_outputs,
+            luma,
+            luma_u16,
+            rgb,
+            rgba,
+            rgb_u16,
+            rgba_u16,
+            rgb_f32,
+            &None,
+            xyz_f32,
+            rgb_f16,
+            rgba_f16,
+            hsv,
+            &None,
+            idx,
+          )?;
+          let stream = xyz_filter_stream_f32.as_mut().expect("created above");
           let src_xyz = source_xyz_f32_scratch(xyz_scratch_f32, w, plan)?;
           xyz12_to_xyz_f32_row::<BE>(row.xyz(), src_xyz, w, use_simd);
           xyz12_resample_emit(

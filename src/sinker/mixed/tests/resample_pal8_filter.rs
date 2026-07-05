@@ -541,3 +541,84 @@ fn filter_out_of_sequence_first_row_is_rejected() {
     "a rejected first row allocated the filter stream"
   );
 }
+
+// RFC #238 tail-collapse atomicity: the drop-alpha RGB scratch (`source_rgb_scratch`,
+// grown here because hsv is attached) is grown AFTER the 4-channel filter stream
+// builds into a LOCAL and BEFORE the field insert + freeze, so a scratch OOM leaves
+// the stream field `None` AND `resample_outputs` uncommitted — a retryable first row.
+#[test]
+#[cfg(feature = "std")]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn filter_first_row_scratch_oom_leaves_stream_and_freeze_uncommitted_for_retry() {
+  use crate::resample::Triangle;
+  let palette = varied_palette(0x33);
+  let indices = index_plane(SRC * SRC, 0x7A1C);
+  let mut rgba = std::vec![0u8; 4 * 4 * 4];
+  let mut h = std::vec![0u8; 4 * 4];
+  let mut s = std::vec![0u8; 4 * 4];
+  let mut v = std::vec![0u8; 4 * 4];
+  let mut luma = std::vec![0u8; 4 * 4];
+  {
+    let mut sink = MixedSinker::<Pal8, FilteredResampler<Triangle>>::with_resampler(
+      SRC,
+      SRC,
+      FilteredResampler::new(4, 4, Triangle),
+    )
+    .unwrap()
+    .with_rgba(&mut rgba)
+    .unwrap();
+    // Attach hsv so the drop-alpha RGB scratch (`source_rgb_scratch`) is grown.
+    sink.set_hsv(&mut h, &mut s, &mut v).unwrap();
+    sink.begin_frame(SRC as u32, SRC as u32).unwrap();
+    // Arm the single-shot source-RGB scratch grow failpoint: the row-0 filter stream
+    // box builds OK (into a LOCAL), then the drop-alpha RGB scratch grow refuses —
+    // surfacing AllocationFailed with BOTH the stream field `None` and the freeze
+    // uncommitted (the commit-together atomic shape).
+    crate::sinker::mixed::arm_source_rgb_scratch_failure();
+    let err = sink
+      .process(Pal8Row::new(&indices[..SRC], &palette, 0))
+      .unwrap_err();
+    assert!(
+      matches!(
+        err,
+        MixedSinkerError::Resample(ResampleError::AllocationFailed(_))
+      ),
+      "first-row drop-alpha scratch OOM must surface AllocationFailed, got {err:?}"
+    );
+    // DIRECT stream-rollback proof (the non-vacuous part): the filter stream field
+    // must be `None` — the fix builds it into a LOCAL and inserts only after the
+    // scratch grows. The insert-before-scratch shape would leave it `Some` here, so
+    // this assertion FAILS against that shape and PASSES against the fix.
+    assert!(
+      !sink.rgba_filter_stream_allocated(),
+      "a scratch OOM must leave the rgba_filter_stream field None (no partial commit)"
+    );
+    // DIRECT freeze-rollback proof: the output-set snapshot must NOT be committed. A
+    // freeze-before-scratch regression would commit it here even though the stream
+    // insertion is still delayed.
+    assert!(
+      !sink.resample_outputs_frozen(),
+      "a first-row scratch OOM must leave resample_outputs uncommitted (no partial commit)"
+    );
+    // The retry drives the same frame ROW-LEVEL (no re-begin), so the freeze snapshot
+    // stays frozen — attaching luma (a CHANGED output set) and replaying from row 0
+    // is ACCEPTED, not ResampleOutputsChanged.
+    sink.set_luma(&mut luma).unwrap();
+    for r in 0..SRC {
+      sink
+        .process(Pal8Row::new(&indices[r * SRC..(r + 1) * SRC], &palette, r))
+        .expect("frame replay after a first-row scratch OOM must succeed");
+    }
+  }
+  assert!(
+    rgba.iter().any(|&b| b != 0),
+    "the recovered frame produced real RGBA output (scratch OOM was recoverable)"
+  );
+  assert!(
+    luma.iter().any(|&b| b != 0),
+    "the changed-output retry drove the newly-attached luma"
+  );
+}
