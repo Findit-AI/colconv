@@ -24,14 +24,15 @@ TARGET="x86_64-unknown-linux-gnu"
 # feature set at once exceeds the runner's memory (the crate compile is
 # OOM-killed), so those two are sharded by feature group — mirroring the miri
 # jobs. Each shard compiles `std` plus one group, keeping the peak well under
-# the runner limit. Coverage note: each MSan shard additionally enables
-# yuv-planar, the conversion hub that 96% of the crate's cross-format
-# cfg(all(...)) paths pair with, so those conversions compile and are
-# MSan-instrumented in the shard carrying the other family; only the few
-# cross-group pairs involving neither yuv-planar (e.g. yuv-semi-planar plus rgb)
-# stay per-group. TSan shards are one-group-per-shard — these conversions are
-# single-threaded pure computation, so no data race is missed regardless. And
-# ASan/LSan still run the full `--all-features` suite, covering out-of-bounds,
+# the runner limit. Coverage note: each MSan shard enables yuv-planar, the
+# conversion hub that most of the crate's cross-format cfg(all(...)) paths pair
+# with, so those conversions are MSan-instrumented in the shard carrying the
+# other family; a final residual shard adds the YUV-to-RGB combos whose two
+# non-yuv-planar sides fall in different groups (semi-planar / yuva / packed-YUV
+# crossed with rgb), so no cross-format conversion path is left uninstrumented
+# by MSan. TSan shards are one-group-per-shard — these conversions are single-
+# threaded pure computation, so no data race is missed regardless. ASan/LSan
+# still run the full `--all-features` suite, covering out-of-bounds,
 # use-after-free and leaks across every cross-feature combination.
 WHICH="${1:-all}"
 FEATURE_GROUP="${2:-}"

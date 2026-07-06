@@ -316,18 +316,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Every MSan shard also enables yuv-planar, the conversion hub that 96%
-        # of the crate's cross-format cfg(all(...)) paths pair with. A path
-        # gated on yuv-planar plus another family therefore compiles, and is
-        # MSan-instrumented, in the shard carrying that other family — closing
-        # the uninitialised-read gap that pure disjoint groups would leave on
-        # cross-format conversions. TSan stays one-group-per-shard (its code is
-        # single-threaded, so no data race is missed regardless of grouping).
+        # Every MSan shard enables yuv-planar, the conversion hub that most of
+        # the crate's cross-format cfg(all(...)) paths pair with, so a path
+        # gated on yuv-planar plus family X is MSan-instrumented in the shard
+        # carrying X. The final residual shard adds the YUV-to-RGB conversion
+        # combos whose two non-yuv-planar sides fall in different groups
+        # (semi-planar / yuva / packed-YUV crossed with rgb); together the shards
+        # leave no cross-format conversion path uninstrumented by MSan. TSan
+        # stays one-group-per-shard (single-threaded code misses no race).
         feature-group:
           - yuv-planar yuv-semi-planar yuva
           - yuv-planar yuv-packed yuv-444-packed y2xx v210
           - yuv-planar rgb rgb-float gbr gray rgb-legacy
           - yuv-planar xyz bayer mono
+          - yuv-planar yuv-semi-planar yuva yuv-packed rgb
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
