@@ -308,18 +308,26 @@ jobs:
   # Instrumenting std *and* the whole feature set at once OOM-kills the crate
   # compile on the runner, so they are sharded by the same feature groups as
   # the miri jobs — each shard compiles std plus one group, keeping the peak
-  # under the runner's memory. Cross-group paths are not instrumented in any
-  # one shard (the same trade-off the sharded miri jobs make).
+  # under the runner's memory. MSan shards additionally carry yuv-planar so
+  # cross-format conversion paths stay instrumented (see the matrix note); TSan
+  # stays one-group-per-shard, which its single-threaded code makes lossless.
   sanitizer-msan:
     name: sanitizer-msan [${{ matrix.feature-group }}]
     strategy:
       fail-fast: false
       matrix:
+        # Every MSan shard also enables yuv-planar, the conversion hub that 96%
+        # of the crate's cross-format cfg(all(...)) paths pair with. A path
+        # gated on yuv-planar plus another family therefore compiles, and is
+        # MSan-instrumented, in the shard carrying that other family — closing
+        # the uninitialised-read gap that pure disjoint groups would leave on
+        # cross-format conversions. TSan stays one-group-per-shard (its code is
+        # single-threaded, so no data race is missed regardless of grouping).
         feature-group:
           - yuv-planar yuv-semi-planar yuva
-          - yuv-packed yuv-444-packed y2xx v210
-          - rgb rgb-float gbr gray rgb-legacy
-          - xyz bayer mono
+          - yuv-planar yuv-packed yuv-444-packed y2xx v210
+          - yuv-planar rgb rgb-float gbr gray rgb-legacy
+          - yuv-planar xyz bayer mono
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
