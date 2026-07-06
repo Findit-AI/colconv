@@ -330,6 +330,9 @@ fn ictcp_444p12_to_rgb_u16_matches_reference() {
 /// RGBA kernels match the RGB kernels channel-for-channel and append opaque
 /// alpha — `0xFF` for u8, native `(1 << BITS) - 1` (= 4095 at 12-bit) for
 /// u16, matching the affine + expand convention.
+// miri's interpreted floating-point diverges from hardware for the ICtCp
+// (LMS + PQ) transcendentals past this test's tolerance.
+#[cfg(not(miri))]
 #[test]
 fn rgba_kernels_match_rgb_plus_opaque_alpha() {
   let (y, u, v) = ([2048_u16], [2148_u16], [2248_u16]);

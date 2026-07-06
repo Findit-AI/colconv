@@ -133,6 +133,7 @@ impl LinearMode {
 /// domain splices at; the linear-light and premultiplied stages arrive
 /// with their domains in later phases. The [`select_insertion_point`]
 /// selector maps a resample's eligibility and plan onto one of these.
+#[cfg_attr(not(feature = "yuv-planar"), allow(dead_code))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum InsertionPoint {
   /// Splice at the **native codes**, before the convert: bin the source
@@ -159,6 +160,7 @@ pub(crate) enum InsertionPoint {
 /// any new information: a format's static eligibility for a native tier,
 /// the resample plan's [area-vs-filter](crate::resample::SpanKind) kind,
 /// and the sink's `with_native` request.
+#[cfg_attr(not(feature = "yuv-planar"), allow(dead_code))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct InsertionContext {
   /// Whether this format ships a native fast tier at all. Formats with
@@ -208,6 +210,7 @@ pub(crate) struct InsertionContext {
 ///
 /// [`Linear`]: AveragingDomain::Linear
 /// [`Premultiplied`]: AveragingDomain::Premultiplied
+#[cfg_attr(not(feature = "yuv-planar"), allow(dead_code))]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) const fn select_insertion_point(
   domain: AveragingDomain,
