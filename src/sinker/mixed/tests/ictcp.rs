@@ -31,7 +31,11 @@ fn decode_rgb(
 ) -> std::vec::Vec<u8> {
   let (w, h) = (4usize, 2usize);
   let n = w * h;
-  let (y, u, v) = (std::vec![le_wire_u16(i); n], std::vec![le_wire_u16(ct); n], std::vec![le_wire_u16(cp); n]);
+  let (y, u, v) = (
+    std::vec![le_wire_u16(i); n],
+    std::vec![le_wire_u16(ct); n],
+    std::vec![le_wire_u16(cp); n],
+  );
   let src = crate::frame::Yuv444pFrame16::<12>::new(
     &y, &u, &v, w as u32, h as u32, w as u32, w as u32, w as u32,
   );
@@ -71,7 +75,11 @@ fn decode_rgb_u16(
 ) -> std::vec::Vec<u16> {
   let (w, h) = (4usize, 2usize);
   let n = w * h;
-  let (y, u, v) = (std::vec![le_wire_u16(i); n], std::vec![le_wire_u16(ct); n], std::vec![le_wire_u16(cp); n]);
+  let (y, u, v) = (
+    std::vec![le_wire_u16(i); n],
+    std::vec![le_wire_u16(ct); n],
+    std::vec![le_wire_u16(cp); n],
+  );
   let src = crate::frame::Yuv444pFrame16::<12>::new(
     &y, &u, &v, w as u32, h as u32, w as u32, w as u32, w as u32,
   );
@@ -116,7 +124,11 @@ fn decode_rgba_u16(
 ) -> std::vec::Vec<u16> {
   let (w, h) = (4usize, 2usize);
   let n = w * h;
-  let (y, u, v) = (std::vec![le_wire_u16(i); n], std::vec![le_wire_u16(ct); n], std::vec![le_wire_u16(cp); n]);
+  let (y, u, v) = (
+    std::vec![le_wire_u16(i); n],
+    std::vec![le_wire_u16(ct); n],
+    std::vec![le_wire_u16(cp); n],
+  );
   let src = crate::frame::Yuv444pFrame16::<12>::new(
     &y, &u, &v, w as u32, h as u32, w as u32, w as u32, w as u32,
   );
@@ -356,7 +368,11 @@ fn decode_hsv(
 ) -> (std::vec::Vec<u8>, std::vec::Vec<u8>, std::vec::Vec<u8>) {
   let (w, h) = (4usize, 2usize);
   let n = w * h;
-  let (y, u, v) = (std::vec![le_wire_u16(i); n], std::vec![le_wire_u16(ct); n], std::vec![le_wire_u16(cp); n]);
+  let (y, u, v) = (
+    std::vec![le_wire_u16(i); n],
+    std::vec![le_wire_u16(ct); n],
+    std::vec![le_wire_u16(cp); n],
+  );
   let src = crate::frame::Yuv444pFrame16::<12>::new(
     &y, &u, &v, w as u32, h as u32, w as u32, w as u32, w as u32,
   );
@@ -498,7 +514,11 @@ fn resample_rgb(
   const SRC: usize = 4;
   const OUT: usize = 2;
   let n = SRC * SRC;
-  let (y, u, v) = (std::vec![le_wire_u16(i); n], std::vec![le_wire_u16(ct); n], std::vec![le_wire_u16(cp); n]);
+  let (y, u, v) = (
+    std::vec![le_wire_u16(i); n],
+    std::vec![le_wire_u16(ct); n],
+    std::vec![le_wire_u16(cp); n],
+  );
   let src = crate::frame::Yuv444pFrame16::<12>::new(
     &y, &u, &v, SRC as u32, SRC as u32, SRC as u32, SRC as u32, SRC as u32,
   );

@@ -239,7 +239,10 @@ fn center_upsample_u16_kernel_masks_dirty_upper_bits() {
     8,
     false,
   );
-  assert_eq!(out.map(u16::from_le), [0, 0, 0, 16384, 49151, 65535, 65535, 65535]);
+  assert_eq!(
+    out.map(u16::from_le),
+    [0, 0, 0, 16384, 49151, 65535, 65535, 65535]
+  );
 }
 
 // ---- u16 bottom (v = 1) kernel oracle (RFC #238 S6d) -----------------------
