@@ -94,13 +94,10 @@ pub(crate) unsafe fn area_h_reduce_row_c3(
       let mut acc2 = vdupq_n_u32(0);
       for (ci, chunk) in span.chunks_exact(8).enumerate() {
         let base = start + ci * 8;
-        let px = if base * 3 + 32 <= row.len() {
+        let px = if (base + 8) * 3 <= row.len() {
           vld3_u8(row.as_ptr().add(base * 3))
         } else {
-          // `vld3_u8` lowers to a 32-byte vector read (not the 24 bytes it
-          // consumes), so the staging buffer and the in-bounds guard above
-          // must both cover 32 bytes to keep the load inside the allocation.
-          let mut sbuf = [0u8; 32];
+          let mut sbuf = [0u8; 24];
           let take = row.len() - base * 3;
           sbuf[..take].copy_from_slice(&row[base * 3..]);
           vld3_u8(sbuf.as_ptr())
