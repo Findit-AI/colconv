@@ -996,10 +996,6 @@ fn p410_rgba_gray_alpha_is_ff() {
 // ---- p_n_444_16_to_rgba_u16_row (P416 → 16-bit u16 RGBA) -----------
 
 #[cfg(feature = "yuv-semi-planar")]
-#[cfg_attr(
-  miri,
-  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
-)]
 #[test]
 fn p416_rgba_u16_gray_alpha_is_ffff() {
   // P416: full 16-bit samples. Mid-gray Y=0x8000, neutral UV=0x8000.

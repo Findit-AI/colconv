@@ -509,10 +509,6 @@ fn gbrapf16_le_be_parity() {
   assert_eq!(render(false), render(true), "LE/BE outputs diverge");
 }
 
-#[cfg_attr(
-  miri,
-  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
-)]
 #[test]
 fn gbrapf16_default_alpha_mode_is_straight() {
   let sink = MixedSinker::<Gbrapf16>::new(SRC, SRC);

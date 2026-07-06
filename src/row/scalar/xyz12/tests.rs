@@ -363,10 +363,6 @@ fn xyz12_be_byte_swap_matches_le() {
   assert_eq!(out_le, out_be);
 }
 
-#[cfg_attr(
-  miri,
-  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
-)]
 #[test]
 fn xyz12_to_rgb_u16_full_range_scaling() {
   let xyz: [u16; 3] = [pack12_le(0xFFF), pack12_le(0xFFF), pack12_le(0xFFF)];

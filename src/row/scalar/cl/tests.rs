@@ -367,6 +367,9 @@ fn bt2020_oetf_matches_colour_science_anchors() {
 /// The negative side of both transfers is odd-extended through the origin, so
 /// a super-black excursion linearises symmetrically (rather than NaN-ing on a
 /// fractional power of a negative base).
+// miri's interpreted floating-point diverges from hardware for these
+// transcendental OETF paths, overshooting the odd-symmetry tolerance.
+#[cfg_attr(miri, ignore)]
 #[test]
 fn bt2020_oetf_is_odd_extended() {
   for &is12 in &[false, true] {
