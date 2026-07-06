@@ -149,6 +149,10 @@ fn bayer16_mixed_sinker_with_rgb_red_interior() {
   };
   let (w, h) = (8u32, 6u32);
   let raw = solid_rggb12(w, h, 4095, 0, 0);
+  let raw = raw
+    .iter()
+    .map(|&v| le_wire_u16(v))
+    .collect::<std::vec::Vec<u16>>();
   let frame = Bayer12Frame::try_new(&raw, w, h, w).unwrap();
   let mut rgb = std::vec![0u8; (w * h * 3) as usize];
   let mut sinker = MixedSinker::<Bayer16<12>>::new(w as usize, h as usize)
@@ -182,6 +186,10 @@ fn bayer16_mixed_sinker_with_rgb_u16_red_interior() {
   };
   let (w, h) = (8u32, 6u32);
   let raw = solid_rggb12(w, h, 4095, 0, 0);
+  let raw = raw
+    .iter()
+    .map(|&v| le_wire_u16(v))
+    .collect::<std::vec::Vec<u16>>();
   let frame = Bayer12Frame::try_new(&raw, w, h, w).unwrap();
   let mut rgb = std::vec![0u16; (w * h * 3) as usize];
   let mut sinker = MixedSinker::<Bayer16<12>>::new(w as usize, h as usize)
@@ -217,6 +225,10 @@ fn bayer16_mixed_sinker_dual_rgb_and_rgb_u16() {
   // Both u8 RGB and u16 RGB attached — both kernels run.
   let (w, h) = (8u32, 6u32);
   let raw = solid_rggb12(w, h, 4095, 0, 0);
+  let raw = raw
+    .iter()
+    .map(|&v| le_wire_u16(v))
+    .collect::<std::vec::Vec<u16>>();
   let frame = Bayer12Frame::try_new(&raw, w, h, w).unwrap();
   let mut rgb_u8 = std::vec![0u8; (w * h * 3) as usize];
   let mut rgb_u16 = std::vec![0u16; (w * h * 3) as usize];
@@ -465,6 +477,10 @@ fn bayer16_with_luma_coefficients_solid_red_differs_by_preset() {
   };
   let (w, h) = (8u32, 6u32);
   let raw = solid_rggb12(w, h, 4095, 0, 0);
+  let raw = raw
+    .iter()
+    .map(|&v| le_wire_u16(v))
+    .collect::<std::vec::Vec<u16>>();
   let frame = Bayer12Frame::try_new(&raw, w, h, w).unwrap();
 
   let run = |coeffs: LumaCoefficients| -> u8 {

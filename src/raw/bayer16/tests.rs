@@ -10,6 +10,18 @@ use crate::{
 };
 use core::convert::Infallible;
 
+/// Re-encode a logical low-packed Bayer `u16` sample as **LE wire storage**, so
+/// a `Bayer*Frame` (LE, `BE = false`) recovers the intended value via
+/// `u16::from_le` on both little- and big-endian hosts. Passing native samples
+/// directly (as these tests once did) only decodes correctly on a little-endian
+/// host, so the plain `vec![v; n]` planes failed under big-endian Miri.
+fn le_wire_plane(logical: &[u16]) -> std::vec::Vec<u16> {
+  logical
+    .iter()
+    .map(|&v| u16::from_ne_bytes(v.to_le_bytes()))
+    .collect()
+}
+
 /// Sink that walks each `BayerRow16<BITS>` through the public
 /// u8-output dispatcher with SIMD off.
 struct CaptureRgbU8<'a, const BITS: u32> {
@@ -141,6 +153,7 @@ fn bayer12_solid_red_rggb_yields_u8_red_full_frame() {
   // matches, including borders and corners.
   let (w, h) = (8u32, 6u32);
   let raw = solid_rggb_12bit(w, h, 4095, 0, 0);
+  let raw = le_wire_plane(&raw);
   let frame = Bayer12Frame::try_new(&raw, w, h, w).unwrap();
   let mut rgb = std::vec![0u8; (w * h * 3) as usize];
   let mut sink = CaptureRgbU8::<12> {
@@ -163,6 +176,7 @@ fn bayer12_solid_red_rggb_yields_u8_red_full_frame() {
 fn bayer12_solid_red_rggb_yields_u16_red_full_frame() {
   let (w, h) = (8u32, 6u32);
   let raw = solid_rggb_12bit(w, h, 4095, 0, 0);
+  let raw = le_wire_plane(&raw);
   let frame = Bayer12Frame::try_new(&raw, w, h, w).unwrap();
   let mut rgb = std::vec![0u16; (w * h * 3) as usize];
   let mut sink = CaptureRgbU16::<12> {
@@ -188,6 +202,7 @@ fn bayer12_uniform_value_yields_uniform_u8_output() {
   // so edge clamping doesn't shift the value).
   let (w, h) = (8u32, 6u32);
   let raw = std::vec![2048u16; (w * h) as usize];
+  let raw = le_wire_plane(&raw);
   let frame = Bayer12Frame::try_new(&raw, w, h, w).unwrap();
   let mut rgb = std::vec![0u8; (w * h * 3) as usize];
   let mut sink = CaptureRgbU8::<12> {
@@ -214,6 +229,7 @@ fn bayer12_uniform_value_yields_uniform_u16_output() {
   // should be 4095 (low-packed full white).
   let (w, h) = (8u32, 6u32);
   let raw = std::vec![4095u16; (w * h) as usize];
+  let raw = le_wire_plane(&raw);
   let frame = Bayer12Frame::try_new(&raw, w, h, w).unwrap();
   let mut rgb = std::vec![0u16; (w * h * 3) as usize];
   let mut sink = CaptureRgbU16::<12> {
@@ -239,6 +255,7 @@ fn bayer10_low_packed_white_yields_full_scale_u8() {
   // 10-bit low-packed white (1023). u8 output should be 255.
   let (w, h) = (8u32, 6u32);
   let raw = std::vec![1023u16; (w * h) as usize];
+  let raw = le_wire_plane(&raw);
   let frame = crate::frame::Bayer10Frame::try_new(&raw, w, h, w).unwrap();
   let mut rgb = std::vec![0u8; (w * h * 3) as usize];
   let mut sink = CaptureRgbU8::<10> {
@@ -264,6 +281,7 @@ fn bayer14_low_packed_white_yields_full_scale_u16() {
   // 14-bit low-packed white (16383). u16 output should be 16383.
   let (w, h) = (8u32, 6u32);
   let raw = std::vec![16383u16; (w * h) as usize];
+  let raw = le_wire_plane(&raw);
   let frame = crate::frame::Bayer14Frame::try_new(&raw, w, h, w).unwrap();
   let mut rgb = std::vec![0u16; (w * h * 3) as usize];
   let mut sink = CaptureRgbU16::<14> {
@@ -294,6 +312,7 @@ fn bayer12_try_new_rejects_sample_above_max() {
   let (w, h) = (4u32, 2u32);
   let mut raw = std::vec![100u16; (w * h) as usize];
   raw[3] = 4096; // just above 12-bit max
+  let raw = le_wire_plane(&raw);
   let e = Bayer12Frame::try_new(&raw, w, h, w).unwrap_err();
   let crate::frame::BayerFrame16Error::SampleOutOfRange(p) = e else {
     panic!("expected SampleOutOfRange, got {e:?}");
@@ -311,6 +330,7 @@ fn bayer12_try_new_rejects_sample_above_max() {
 fn bayer12_try_new_rejects_msb_aligned_input() {
   let (w, h) = (4u32, 2u32);
   let raw = std::vec![0x8000u16; (w * h) as usize]; // MSB-aligned 12-bit midgray
+  let raw = le_wire_plane(&raw);
   let e = Bayer12Frame::try_new(&raw, w, h, w).unwrap_err();
   let crate::frame::BayerFrame16Error::SampleOutOfRange(p) = e else {
     panic!("expected SampleOutOfRange, got {e:?}");
@@ -331,6 +351,7 @@ fn bayer12_try_new_rejects_bad_sample_in_later_row() {
   let mut raw = std::vec![100u16; (w * h) as usize];
   let off = (6 * w) as usize + 2;
   raw[off] = 4096; // exceeds 12-bit max
+  let raw = le_wire_plane(&raw);
   let e = Bayer12Frame::try_new(&raw, w, h, w).unwrap_err();
   let crate::frame::BayerFrame16Error::SampleOutOfRange(p) = e else {
     panic!("expected SampleOutOfRange, got {e:?}");
@@ -357,6 +378,7 @@ fn bayer12_walker_accepts_padded_stride_with_dirty_padding() {
       raw[r * stride as usize + c] = 0xFFFF;
     }
   }
+  let raw = le_wire_plane(&raw);
   let frame = Bayer12Frame::try_new(&raw, w, h, stride).unwrap();
   let mut rgb = std::vec![0u8; (w * h * 3) as usize];
   let mut sink = CaptureRgbU8::<12> {
@@ -392,6 +414,7 @@ fn bayer12_walker_accepts_overlong_slice_with_trailing_junk() {
   for v in raw.iter_mut().skip((stride * h) as usize) {
     *v = 0xFFFF;
   }
+  let raw = le_wire_plane(&raw);
   let frame = Bayer12Frame::try_new(&raw, w, h, stride).unwrap();
   let mut rgb = std::vec![0u8; (w * h * 3) as usize];
   let mut sink = CaptureRgbU8::<12> {
@@ -415,6 +438,7 @@ fn bayer12_walker_accepts_overlong_slice_with_trailing_junk() {
 fn bayer16bit_dispatcher_accepts_full_u16_range() {
   let (w, h) = (4u32, 2u32);
   let raw = std::vec![0xFFFFu16; (w * h) as usize];
+  let raw = le_wire_plane(&raw);
   let frame = crate::frame::Bayer16Frame::try_new(&raw, w, h, w).unwrap();
   let mut rgb = std::vec![0u8; (w * h * 3) as usize];
   let mut sink = CaptureRgbU8::<16> {
@@ -453,6 +477,7 @@ fn bayer12_walker_calls_sink_once_per_row() {
 
   let (w, h) = (8u32, 6u32);
   let raw = std::vec![0u16; (w * h) as usize];
+  let raw = le_wire_plane(&raw);
   let frame = Bayer12Frame::try_new(&raw, w, h, w).unwrap();
   let mut sink = CountSink::<12> { rows: 0 };
   bayer16_to(

@@ -1776,6 +1776,10 @@ fn gbr_float_dispatch_panics_on_width_overflow_gbrpf32_rgb_u16() {
 }
 
 #[cfg(target_pointer_width = "32")]
+#[cfg_attr(
+  miri,
+  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
+)]
 #[test]
 #[should_panic(expected = "overflows usize")]
 fn gbr_float_dispatch_panics_on_width_overflow_gbrpf32_rgba_u16() {

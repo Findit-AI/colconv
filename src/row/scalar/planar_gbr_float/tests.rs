@@ -538,6 +538,10 @@ fn gbrpf32_to_rgba_f32_alpha_is_one() {
   assert_eq!(out[3], 1.0, "alpha must be 1.0");
 }
 
+#[cfg_attr(
+  miri,
+  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
+)]
 #[test]
 fn gbrpf32_to_rgba_f32_lossless_passthrough() {
   let r = as_le_f32(&[2.5f32]);
@@ -551,6 +555,10 @@ fn gbrpf32_to_rgba_f32_lossless_passthrough() {
   assert_eq!(out[3], 1.0, "alpha = 1.0");
 }
 
+#[cfg_attr(
+  miri,
+  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
+)]
 #[test]
 fn gbrpf32_to_rgba_f32_be_parity() {
   let g_intended = [0.0f32, 0.25, 0.5, 1.0];
@@ -987,6 +995,10 @@ fn gbrapf32_to_rgba_f32_lossless_passthrough() {
   assert_eq!(out[3], 2.5, "HDR alpha preserved bit-exact");
 }
 
+#[cfg_attr(
+  miri,
+  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
+)]
 #[test]
 fn gbrapf32_to_rgba_f32_nan_alpha_preserved() {
   let g = as_le_f32(&[0.5f32]);
@@ -998,6 +1010,10 @@ fn gbrapf32_to_rgba_f32_nan_alpha_preserved() {
   assert!(out[3].is_nan(), "NaN alpha preserved");
 }
 
+#[cfg_attr(
+  miri,
+  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
+)]
 #[test]
 fn gbrapf32_to_rgba_f32_be_parity() {
   let g_intended = [0.0f32, 0.25, 0.5, 1.0];

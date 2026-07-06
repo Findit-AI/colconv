@@ -29,6 +29,10 @@ fn as_be(host: &[f32]) -> std::vec::Vec<half::f16> {
 
 // ---- yaf16_to_rgb_row (Y broadcast, alpha dropped) -----------------------
 
+#[cfg_attr(
+  miri,
+  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
+)]
 #[test]
 fn rgb_broadcasts_y_drops_alpha() {
   let packed = as_le(&[0.5, 0.0, 1.0, 0.25]);
@@ -37,6 +41,10 @@ fn rgb_broadcasts_y_drops_alpha() {
   assert_eq!(out, [128, 128, 128, 255, 255, 255]);
 }
 
+#[cfg_attr(
+  miri,
+  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
+)]
 #[test]
 fn rgb_be_matches_le() {
   let host = [0.25f32, 0.9, 0.5, 0.1];
@@ -49,6 +57,10 @@ fn rgb_be_matches_le() {
 
 // ---- yaf16_to_rgba_row (Y broadcast + real alpha) ------------------------
 
+#[cfg_attr(
+  miri,
+  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
+)]
 #[test]
 fn rgba_carries_source_alpha() {
   let packed = as_le(&[0.5, 0.5, 1.0, 0.0]);
@@ -57,6 +69,10 @@ fn rgba_carries_source_alpha() {
   assert_eq!(out, [128, 128, 128, 128, 255, 255, 255, 0]);
 }
 
+#[cfg_attr(
+  miri,
+  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
+)]
 #[test]
 fn rgba_alpha_saturates() {
   let packed = as_le(&[1.0, 2.0, 0.0, -0.5]);
@@ -65,6 +81,10 @@ fn rgba_alpha_saturates() {
   assert_eq!(out, [255, 255, 255, 255, 0, 0, 0, 0]);
 }
 
+#[cfg_attr(
+  miri,
+  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
+)]
 #[test]
 fn rgba_be_matches_le() {
   let host = [0.5f32, 0.25, 0.75, 1.0];
@@ -77,6 +97,10 @@ fn rgba_be_matches_le() {
 
 // ---- u16 outputs ----------------------------------------------------------
 
+#[cfg_attr(
+  miri,
+  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
+)]
 #[test]
 fn rgba_u16_carries_alpha() {
   let packed = as_le(&[1.0, 0.5]);
@@ -85,6 +109,10 @@ fn rgba_u16_carries_alpha() {
   assert_eq!(out, [65535, 65535, 65535, 32768]);
 }
 
+#[cfg_attr(
+  miri,
+  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
+)]
 #[test]
 fn rgb_u16_broadcasts() {
   let packed = as_le(&[1.0, 0.0]);
@@ -95,6 +123,10 @@ fn rgb_u16_broadcasts() {
 
 // ---- lossless f32 paths (widen, alpha dropped) ---------------------------
 
+#[cfg_attr(
+  miri,
+  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
+)]
 #[test]
 fn rgb_f32_lossless_widen() {
   // 2.5 / -1.0 are exact in f16; widen is lossless.
@@ -104,6 +136,10 @@ fn rgb_f32_lossless_widen() {
   assert_eq!(out, [2.5, 2.5, 2.5, -1.0, -1.0, -1.0]);
 }
 
+#[cfg_attr(
+  miri,
+  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
+)]
 #[test]
 fn luma_f32_lossless_widen() {
   let packed = as_le(&[3.0, 0.1, -2.0, 0.9]);
@@ -114,6 +150,10 @@ fn luma_f32_lossless_widen() {
 
 // ---- luma + hsv ----------------------------------------------------------
 
+#[cfg_attr(
+  miri,
+  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
+)]
 #[test]
 fn luma_clamps_and_rounds() {
   let packed = as_le(&[0.5, 0.9, 1.5, 0.0, -0.2, 0.0]);
@@ -122,6 +162,10 @@ fn luma_clamps_and_rounds() {
   assert_eq!(out, [128, 255, 0]);
 }
 
+#[cfg_attr(
+  miri,
+  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
+)]
 #[test]
 fn luma_u16_clamps() {
   let packed = as_le(&[0.5, 0.0]);
@@ -130,6 +174,10 @@ fn luma_u16_clamps() {
   assert_eq!(out, [32768]);
 }
 
+#[cfg_attr(
+  miri,
+  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
+)]
 #[test]
 fn hsv_gray_fast_path() {
   let packed = as_le(&[0.5, 0.9, 1.0, 0.0]);
