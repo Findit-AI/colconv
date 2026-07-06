@@ -57,9 +57,14 @@ use crate::{
   resample::{PlanGeometry, try_zeroed},
 };
 use crate::{
-  resample::{AreaStream, OutOfSequenceRow, ResampleError, ResamplePlan, RowResampler},
+  resample::{AreaStream, ResamplePlan, RowResampler},
   row::*,
 };
+// `OutOfSequenceRow` / `ResampleError` back the sequence checks + typed resample
+// errors of the `yuv-planar` HSV-direct join and the `yuv-packed` dual-resample;
+// a semi-planar-solo build reaches neither, so they carry the union gate.
+#[cfg(any(feature = "yuv-planar", feature = "yuv-packed"))]
+use crate::resample::{OutOfSequenceRow, ResampleError};
 
 /// RGB-free YUV-domain HSV-only **area** join for the shared planar /
 /// semi-planar row-stage resample — the colour twin of the native fast

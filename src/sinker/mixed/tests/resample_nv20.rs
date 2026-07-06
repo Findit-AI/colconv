@@ -157,6 +157,7 @@ enum Kernel {
 /// Drive an **NV20** source through `tier` for the full output set (rgb / rgba
 /// / rgb_u16 / rgba_u16 / luma / hsv), const-generic over the wire endianness.
 /// The `Nv20Frame<'_, BE>` plane data must already be wire-encoded for `BE`.
+#[allow(clippy::too_many_arguments)]
 fn run_nv20<const BE: bool>(
   yp: &[u16],
   uvp: &[u16],
@@ -165,12 +166,14 @@ fn run_nv20<const BE: bool>(
   ow: usize,
   oh: usize,
   tier: Tier,
+  loc: crate::ChromaLocation,
 ) -> Outputs {
   let src = Nv20Frame::<BE>::new(yp, uvp, sw as u32, sh as u32, sw as u32, sw as u32);
   let mut o = blank_outputs(ow, oh);
   macro_rules! drive {
     ($sink:expr) => {{
       let mut sink = $sink
+        .with_chroma_location(loc)
         .with_rgb(&mut o.rgb)
         .unwrap()
         .with_rgba(&mut o.rgba)
@@ -226,6 +229,7 @@ fn run_nv20<const BE: bool>(
 
 /// Drive a **P210** source through `tier` — the high-bit-packed reference. The
 /// `P210Frame<'_, BE>` plane data must already be wire-encoded for `BE`.
+#[allow(clippy::too_many_arguments)]
 fn run_p210<const BE: bool>(
   yp: &[u16],
   uvp: &[u16],
@@ -234,12 +238,14 @@ fn run_p210<const BE: bool>(
   ow: usize,
   oh: usize,
   tier: Tier,
+  loc: crate::ChromaLocation,
 ) -> Outputs {
   let src = PnFrame422::<10, BE>::new(yp, uvp, sw as u32, sh as u32, sw as u32, sw as u32);
   let mut o = blank_outputs(ow, oh);
   macro_rules! drive {
     ($sink:expr) => {{
       let mut sink = $sink
+        .with_chroma_location(loc)
         .with_rgb(&mut o.rgb)
         .unwrap()
         .with_rgba(&mut o.rgba)
@@ -436,6 +442,7 @@ fn area_rowstage_matches_area_bin_of_direct_le() {
     sw / 2,
     sh / 2,
     Tier::Area { native: false },
+    crate::ChromaLocation::Left,
   );
   let want = area_bin_of_direct::<false>(&y_log, &yp, &uvp, sw, sh);
   // hsv excluded from the rgb_to_hsv_row scalar-vs-SIMD detail: the resample
@@ -466,6 +473,7 @@ fn area_rowstage_matches_area_bin_of_direct_be() {
     sw / 2,
     sh / 2,
     Tier::Area { native: false },
+    crate::ChromaLocation::Left,
   );
   let want = area_bin_of_direct::<true>(&y_log, &yp, &uvp, sw, sh);
   assert_eq!(got.rgb, want.rgb, "BE rowstage area rgb");
@@ -499,6 +507,7 @@ fn native_luma_is_inter_area_bin_of_depacked_y() {
         sw / 2,
         sh / 2,
         Tier::Area { native: true },
+        crate::ChromaLocation::Left,
       );
       let want = area_bin_of_direct::<true>(&y_log, &yp, &uvp, sw, sh).luma;
       (got.luma, want)
@@ -512,6 +521,7 @@ fn native_luma_is_inter_area_bin_of_depacked_y() {
         sw / 2,
         sh / 2,
         Tier::Area { native: true },
+        crate::ChromaLocation::Left,
       );
       let want = area_bin_of_direct::<false>(&y_log, &yp, &uvp, sw, sh).luma;
       (got.luma, want)
@@ -538,13 +548,14 @@ fn assert_nv20_equals_p210<const BE: bool>(
   ow: usize,
   oh: usize,
   tier: Tier,
+  loc: crate::ChromaLocation,
   ctx: &str,
 ) {
   let (y_log, uv_log) = logical_ramp(sw, sh);
   let (nv_y, nv_uv) = nv20_planes(&y_log, &uv_log, BE);
   let (p_y, p_uv) = p210_planes(&y_log, &uv_log, BE);
-  let nv = run_nv20::<BE>(&nv_y, &nv_uv, sw, sh, ow, oh, tier);
-  let p = run_p210::<BE>(&p_y, &p_uv, sw, sh, ow, oh, tier);
+  let nv = run_nv20::<BE>(&nv_y, &nv_uv, sw, sh, ow, oh, tier, loc);
+  let p = run_p210::<BE>(&p_y, &p_uv, sw, sh, ow, oh, tier, loc);
   assert_outputs_eq(&nv, &p, ctx);
 }
 
@@ -560,6 +571,7 @@ fn area_rowstage_nv20_equals_p210_le() {
     4,
     4,
     Tier::Area { native: false },
+    crate::ChromaLocation::Left,
     "LE area row-stage",
   );
 }
@@ -576,6 +588,7 @@ fn area_rowstage_nv20_equals_p210_be() {
     4,
     4,
     Tier::Area { native: false },
+    crate::ChromaLocation::Left,
     "BE area row-stage",
   );
 }
@@ -586,7 +599,15 @@ fn area_rowstage_nv20_equals_p210_be() {
   ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
 )]
 fn area_native_nv20_equals_p210_le() {
-  assert_nv20_equals_p210::<false>(8, 8, 4, 4, Tier::Area { native: true }, "LE area native");
+  assert_nv20_equals_p210::<false>(
+    8,
+    8,
+    4,
+    4,
+    Tier::Area { native: true },
+    crate::ChromaLocation::Left,
+    "LE area native",
+  );
 }
 
 #[test]
@@ -595,7 +616,15 @@ fn area_native_nv20_equals_p210_le() {
   ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
 )]
 fn area_native_nv20_equals_p210_be() {
-  assert_nv20_equals_p210::<true>(8, 8, 4, 4, Tier::Area { native: true }, "BE area native");
+  assert_nv20_equals_p210::<true>(
+    8,
+    8,
+    4,
+    4,
+    Tier::Area { native: true },
+    crate::ChromaLocation::Left,
+    "BE area native",
+  );
 }
 
 #[test]
@@ -605,7 +634,15 @@ fn area_native_nv20_equals_p210_be() {
 )]
 fn filter_nv20_equals_p210_le() {
   for k in [Kernel::Triangle, Kernel::CatmullRom, Kernel::Lanczos3] {
-    assert_nv20_equals_p210::<false>(8, 8, 4, 4, Tier::Filter(k), "LE filter");
+    assert_nv20_equals_p210::<false>(
+      8,
+      8,
+      4,
+      4,
+      Tier::Filter(k),
+      crate::ChromaLocation::Left,
+      "LE filter",
+    );
   }
 }
 
@@ -616,7 +653,15 @@ fn filter_nv20_equals_p210_le() {
 )]
 fn filter_nv20_equals_p210_be() {
   for k in [Kernel::Triangle, Kernel::CatmullRom, Kernel::Lanczos3] {
-    assert_nv20_equals_p210::<true>(8, 8, 4, 4, Tier::Filter(k), "BE filter");
+    assert_nv20_equals_p210::<true>(
+      8,
+      8,
+      4,
+      4,
+      Tier::Filter(k),
+      crate::ChromaLocation::Left,
+      "BE filter",
+    );
   }
 }
 
@@ -634,8 +679,26 @@ fn native_and_rowstage_color_differ_on_ramp() {
   let (sw, sh) = (8, 8);
   let (y_log, uv_log) = logical_ramp(sw, sh);
   let (yp, uvp) = nv20_planes(&y_log, &uv_log, false);
-  let native = run_nv20::<false>(&yp, &uvp, sw, sh, 4, 4, Tier::Area { native: true });
-  let rowstage = run_nv20::<false>(&yp, &uvp, sw, sh, 4, 4, Tier::Area { native: false });
+  let native = run_nv20::<false>(
+    &yp,
+    &uvp,
+    sw,
+    sh,
+    4,
+    4,
+    Tier::Area { native: true },
+    crate::ChromaLocation::Left,
+  );
+  let rowstage = run_nv20::<false>(
+    &yp,
+    &uvp,
+    sw,
+    sh,
+    4,
+    4,
+    Tier::Area { native: false },
+    crate::ChromaLocation::Left,
+  );
   assert_eq!(
     native.luma, rowstage.luma,
     "luma is bit-identical across tiers"
@@ -668,6 +731,7 @@ fn area_tail_geometry_nv20_equals_p210_le() {
     4,
     4,
     Tier::Area { native: false },
+    crate::ChromaLocation::Left,
     "LE area tail 6->4",
   );
   assert_nv20_equals_p210::<false>(
@@ -676,6 +740,7 @@ fn area_tail_geometry_nv20_equals_p210_le() {
     4,
     4,
     Tier::Area { native: true },
+    crate::ChromaLocation::Left,
     "LE area tail native 6->4",
   );
 }
@@ -692,6 +757,7 @@ fn area_tail_geometry_nv20_equals_p210_be() {
     4,
     4,
     Tier::Area { native: false },
+    crate::ChromaLocation::Left,
     "BE area tail 6->4",
   );
   assert_nv20_equals_p210::<true>(
@@ -700,6 +766,7 @@ fn area_tail_geometry_nv20_equals_p210_be() {
     4,
     4,
     Tier::Area { native: true },
+    crate::ChromaLocation::Left,
     "BE area tail native 6->4",
   );
 }
@@ -713,9 +780,33 @@ fn filter_tail_geometry_nv20_equals_p210() {
   // 6x6 -> 5x5 (downscale, non-integer) and 4x4 -> 7x7 (upscale) both exercise
   // fractional kernel sampling. LE + BE, all three kernels.
   for k in [Kernel::Triangle, Kernel::CatmullRom, Kernel::Lanczos3] {
-    assert_nv20_equals_p210::<false>(6, 6, 5, 5, Tier::Filter(k), "LE filter tail 6->5");
-    assert_nv20_equals_p210::<true>(6, 6, 5, 5, Tier::Filter(k), "BE filter tail 6->5");
-    assert_nv20_equals_p210::<false>(4, 4, 7, 7, Tier::Filter(k), "LE filter upscale 4->7");
+    assert_nv20_equals_p210::<false>(
+      6,
+      6,
+      5,
+      5,
+      Tier::Filter(k),
+      crate::ChromaLocation::Left,
+      "LE filter tail 6->5",
+    );
+    assert_nv20_equals_p210::<true>(
+      6,
+      6,
+      5,
+      5,
+      Tier::Filter(k),
+      crate::ChromaLocation::Left,
+      "BE filter tail 6->5",
+    );
+    assert_nv20_equals_p210::<false>(
+      4,
+      4,
+      7,
+      7,
+      Tier::Filter(k),
+      crate::ChromaLocation::Left,
+      "LE filter upscale 4->7",
+    );
   }
 }
 
@@ -946,6 +1037,175 @@ fn identity_mid_frame_siting_flip_rejected() {
     assert!(
       matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
       "identity {loc1:?}->{loc2:?}: want ChromaSitingChanged, got {err:?}"
+    );
+  }
+}
+
+// ---- ★ Resample CENTERED chroma siting: NV20-centered == P210-centered ------
+//
+// The resample twin of the identity centered cross-check above, and of the
+// co-sited `assert_nv20_equals_p210` family: routing `ChromaLocation::Center`
+// through the 3 resample tiers, the SAME logical samples packed low (NV20, with
+// STRAY dirty high bits) vs high (P210) must resample IDENTICALLY. The sibling
+// `chroma_siting_hibit_422_semiplanar_resample` suite pins P210-centered to the
+// planar `Yuv422p` / `Yuv444p` oracle EXACTLY, so NV20-centered == P210-centered
+// transitively pins NV20's centered resample to the true oracle across the
+// native, row-stage, and filter tiers.
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn area_center_nv20_equals_p210_le() {
+  for native in [false, true] {
+    assert_nv20_equals_p210::<false>(
+      8,
+      8,
+      4,
+      4,
+      Tier::Area { native },
+      crate::ChromaLocation::Center,
+      "LE area centered",
+    );
+  }
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn area_center_nv20_equals_p210_be() {
+  for native in [false, true] {
+    assert_nv20_equals_p210::<true>(
+      8,
+      8,
+      4,
+      4,
+      Tier::Area { native },
+      crate::ChromaLocation::Center,
+      "BE area centered",
+    );
+  }
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn filter_center_nv20_equals_p210_le() {
+  for k in [Kernel::Triangle, Kernel::CatmullRom, Kernel::Lanczos3] {
+    assert_nv20_equals_p210::<false>(
+      8,
+      8,
+      4,
+      4,
+      Tier::Filter(k),
+      crate::ChromaLocation::Center,
+      "LE filter centered",
+    );
+  }
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn filter_center_nv20_equals_p210_be() {
+  for k in [Kernel::Triangle, Kernel::CatmullRom, Kernel::Lanczos3] {
+    assert_nv20_equals_p210::<true>(
+      8,
+      8,
+      4,
+      4,
+      Tier::Filter(k),
+      crate::ChromaLocation::Center,
+      "BE filter centered",
+    );
+  }
+}
+
+/// Non-vacuity: centered ≠ co-sited on a horizontal chroma ramp for EVERY
+/// resample tier. A "centered" arm that silently stayed on the co-sited decode
+/// would make these equal, so the phase-0.5 reconstruction must move the colour
+/// output — otherwise the cross-checks above would pass vacuously.
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn resample_centered_differs_from_cosited_on_ramp() {
+  let (sw, sh) = (8, 8);
+  let (ow, oh) = (4, 4);
+  let (y_log, uv_log) = logical_ramp(sw, sh);
+  let (yp, uvp) = nv20_planes(&y_log, &uv_log, false);
+  for tier in [
+    Tier::Area { native: false },
+    Tier::Area { native: true },
+    Tier::Filter(Kernel::Triangle),
+    Tier::Filter(Kernel::CatmullRom),
+    Tier::Filter(Kernel::Lanczos3),
+  ] {
+    let centered = run_nv20::<false>(
+      &yp,
+      &uvp,
+      sw,
+      sh,
+      ow,
+      oh,
+      tier,
+      crate::ChromaLocation::Center,
+    );
+    let cosited = run_nv20::<false>(&yp, &uvp, sw, sh, ow, oh, tier, crate::ChromaLocation::Left);
+    assert_ne!(
+      centered.rgb_u16, cosited.rgb_u16,
+      "centered chroma siting must differ from co-sited on a horizontal ramp"
+    );
+  }
+}
+
+/// Per-frame chroma-siting freeze on the RESAMPLE path (the resample-branch
+/// `frozen_chroma_centered` CHECK, the twin of PR1's identity-path freeze): feed
+/// the first output-bearing row at one siting, flip `set_chroma_location`, then
+/// feed the next in-sequence row — the resample sink must reject it with
+/// `ChromaSitingChanged` (a mid-frame flip would bin a mixture of centered +
+/// co-sited chroma into ONE frame). Both directions, on the row-stage area tier.
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn resample_mid_frame_siting_flip_rejected() {
+  use crate::{ChromaLocation, PixelSink, sinker::MixedSinkerError, source::Nv20Row};
+  let (sw, sh) = (8usize, 4usize);
+  let (ow, oh) = (4usize, 2usize);
+  let cw = sw / 2;
+  let (y_log, uv_log) = logical_ramp(sw, sh);
+  let (yp, uvp) = nv20_planes(&y_log, &uv_log, false); // LE wire
+  for (loc1, loc2) in [
+    (ChromaLocation::Center, ChromaLocation::Left),
+    (ChromaLocation::Left, ChromaLocation::Center),
+  ] {
+    let mut rgb = vec![0u8; ow * oh * 3];
+    let mut sink =
+      MixedSinker::<Nv20, AreaResampler>::with_resampler(sw, sh, AreaResampler::to(ow, oh))
+        .unwrap()
+        .with_native(false)
+        .with_chroma_location(loc1)
+        .with_rgb(&mut rgb)
+        .unwrap();
+    PixelSink::begin_frame(&mut sink, sw as u32, sh as u32).unwrap();
+    let row0 = Nv20Row::new(&yp[0..sw], &uvp[0..2 * cw], 0, M, FR);
+    PixelSink::process(&mut sink, row0).unwrap();
+    sink.set_chroma_location(loc2);
+    let row1 = Nv20Row::new(&yp[sw..2 * sw], &uvp[2 * cw..4 * cw], 1, M, FR);
+    let err = PixelSink::process(&mut sink, row1).unwrap_err();
+    assert!(
+      matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
+      "resample {loc1:?}->{loc2:?}: want ChromaSitingChanged, got {err:?}"
     );
   }
 }
