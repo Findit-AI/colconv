@@ -136,21 +136,22 @@ fn center_upsample_u16_kernel_matches_hand_computed() {
   // Values < 512 fit every depth, so the `BITS` mask is a no-op here; the
   // dirty-upper-bit masking is exercised by
   // `center_upsample_u16_kernel_masks_dirty_upper_bits`.
-  let c_half = [0u16, 0, 400, 400];
+  let c_half = [0u16, 0, 400, 400].map(u16::to_le);
   let mut out = [0u16; 8];
   crate::row::scalar::chroma_upsample_2to1_center_h_u16::<10>(&c_half, &mut out, 8, false);
-  assert_eq!(out, [0, 0, 0, 100, 300, 400, 400, 400]);
+  assert_eq!(out.map(u16::from_le), [0, 0, 0, 100, 300, 400, 400, 400]);
 }
 
 #[test]
 fn center_upsample_u16_kernel_clamps_edges() {
   // Width 4: left edge even = c[0] exactly, right edge odd = c[last] exactly.
-  let c_half = [1000u16, 2000];
+  let c_half = [1000u16, 2000].map(u16::to_le);
   let mut out = [0u16; 4];
   crate::row::scalar::chroma_upsample_2to1_center_h_u16::<12>(&c_half, &mut out, 4, false);
-  assert_eq!(out, [1000, 1250, 1750, 2000]);
-  assert_eq!(out[0], c_half[0], "left edge even column is co-sited");
-  assert_eq!(out[3], c_half[1], "right edge odd column is co-sited");
+  let dec = out.map(u16::from_le);
+  assert_eq!(dec, [1000, 1250, 1750, 2000]);
+  assert_eq!(dec[0], 1000, "left edge even column is co-sited");
+  assert_eq!(dec[3], 2000, "right edge odd column is co-sited");
 }
 
 #[test]
@@ -233,12 +234,12 @@ fn center_upsample_u16_kernel_masks_dirty_upper_bits() {
   // top-of-range sample is preserved through the blend.
   let mut out = [0u16; 8];
   crate::row::scalar::chroma_upsample_2to1_center_h_u16::<16>(
-    &[0u16, 0, 65535, 65535],
+    &[0u16, 0, 65535, 65535].map(u16::to_le),
     &mut out,
     8,
     false,
   );
-  assert_eq!(out, [0, 0, 0, 16384, 49151, 65535, 65535, 65535]);
+  assert_eq!(out.map(u16::from_le), [0, 0, 0, 16384, 49151, 65535, 65535, 65535]);
 }
 
 // ---- u16 bottom (v = 1) kernel oracle (RFC #238 S6d) -----------------------
@@ -249,11 +250,11 @@ fn bottom_even_upsample_u16_kernel_matches_hand_computed() {
   //   e = (prev + cur + 1) >> 1 = [20, 20, 80, 80], then the centered horizontal
   //   1/4-3/4 reconstruction: 2j = (e[j-1] + 3e[j] + 2) >> 2, 2j+1 = (3e[j] +
   //   e[j+1] + 2) >> 2. Values < 512 fit every depth, so the BITS mask is a no-op.
-  let prev = [0u16, 0, 100, 100];
-  let cur = [40u16, 40, 60, 60];
+  let prev = [0u16, 0, 100, 100].map(u16::to_le);
+  let cur = [40u16, 40, 60, 60].map(u16::to_le);
   let mut out = [0u16; 8];
   crate::row::scalar::chroma_upsample_420_bottom_even_h_u16::<10>(&prev, &cur, &mut out, 8, false);
-  assert_eq!(out, [20, 20, 20, 35, 65, 80, 80, 80]);
+  assert_eq!(out.map(u16::from_le), [20, 20, 20, 35, 65, 80, 80, 80]);
 }
 
 #[test]

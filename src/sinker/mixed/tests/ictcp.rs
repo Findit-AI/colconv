@@ -17,6 +17,10 @@ use crate::{
 /// Decodes a `w×h` solid-`(i,ct,cp)` 12-bit 4:4:4 frame to packed u8 RGB
 /// through the `MixedSinker`, with the sink's transfer set from a
 /// `ColorSpec`.
+fn le_wire_u16(v: u16) -> u16 {
+  u16::from_ne_bytes(v.to_le_bytes())
+}
+
 fn decode_rgb(
   i: u16,
   ct: u16,
@@ -27,7 +31,7 @@ fn decode_rgb(
 ) -> std::vec::Vec<u8> {
   let (w, h) = (4usize, 2usize);
   let n = w * h;
-  let (y, u, v) = (std::vec![i; n], std::vec![ct; n], std::vec![cp; n]);
+  let (y, u, v) = (std::vec![le_wire_u16(i); n], std::vec![le_wire_u16(ct); n], std::vec![le_wire_u16(cp); n]);
   let src = crate::frame::Yuv444pFrame16::<12>::new(
     &y, &u, &v, w as u32, h as u32, w as u32, w as u32, w as u32,
   );
@@ -67,7 +71,7 @@ fn decode_rgb_u16(
 ) -> std::vec::Vec<u16> {
   let (w, h) = (4usize, 2usize);
   let n = w * h;
-  let (y, u, v) = (std::vec![i; n], std::vec![ct; n], std::vec![cp; n]);
+  let (y, u, v) = (std::vec![le_wire_u16(i); n], std::vec![le_wire_u16(ct); n], std::vec![le_wire_u16(cp); n]);
   let src = crate::frame::Yuv444pFrame16::<12>::new(
     &y, &u, &v, w as u32, h as u32, w as u32, w as u32, w as u32,
   );
@@ -112,7 +116,7 @@ fn decode_rgba_u16(
 ) -> std::vec::Vec<u16> {
   let (w, h) = (4usize, 2usize);
   let n = w * h;
-  let (y, u, v) = (std::vec![i; n], std::vec![ct; n], std::vec![cp; n]);
+  let (y, u, v) = (std::vec![le_wire_u16(i); n], std::vec![le_wire_u16(ct); n], std::vec![le_wire_u16(cp); n]);
   let src = crate::frame::Yuv444pFrame16::<12>::new(
     &y, &u, &v, w as u32, h as u32, w as u32, w as u32, w as u32,
   );
@@ -352,7 +356,7 @@ fn decode_hsv(
 ) -> (std::vec::Vec<u8>, std::vec::Vec<u8>, std::vec::Vec<u8>) {
   let (w, h) = (4usize, 2usize);
   let n = w * h;
-  let (y, u, v) = (std::vec![i; n], std::vec![ct; n], std::vec![cp; n]);
+  let (y, u, v) = (std::vec![le_wire_u16(i); n], std::vec![le_wire_u16(ct); n], std::vec![le_wire_u16(cp); n]);
   let src = crate::frame::Yuv444pFrame16::<12>::new(
     &y, &u, &v, w as u32, h as u32, w as u32, w as u32, w as u32,
   );
@@ -494,7 +498,7 @@ fn resample_rgb(
   const SRC: usize = 4;
   const OUT: usize = 2;
   let n = SRC * SRC;
-  let (y, u, v) = (std::vec![i; n], std::vec![ct; n], std::vec![cp; n]);
+  let (y, u, v) = (std::vec![le_wire_u16(i); n], std::vec![le_wire_u16(ct); n], std::vec![le_wire_u16(cp); n]);
   let src = crate::frame::Yuv444pFrame16::<12>::new(
     &y, &u, &v, SRC as u32, SRC as u32, SRC as u32, SRC as u32, SRC as u32,
   );

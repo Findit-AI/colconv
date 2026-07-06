@@ -126,8 +126,11 @@ fn gbrap32_downscale_rgba_u16_is_exact_u32_area_mean_incl_alpha() {
   let r = plane_u32(0x0055_000B);
   let a = plane_u32(0x0077_000D);
   let staged = staged_rgba_u32(&g, &b, &r, &a, SRC);
+  // Wire-encode the frame's u32 planes so the LE frame decodes them via
+  // `from_le` on both endiannesses; `staged` stays in the logical domain.
+  let (gw, bw, rw, aw) = (as_le_u32(&g), as_le_u32(&b), as_le_u32(&r), as_le_u32(&a));
   let src = crate::frame::Gbrap32LeFrame::try_new(
-    &g, &b, &r, &a, SRC as u32, SRC as u32, SRC as u32, SRC as u32, SRC as u32, SRC as u32,
+    &gw, &bw, &rw, &aw, SRC as u32, SRC as u32, SRC as u32, SRC as u32, SRC as u32, SRC as u32,
   )
   .unwrap();
 
