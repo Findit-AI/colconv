@@ -739,6 +739,10 @@ fn grayf32_sinker_le_encoded_frame_decodes_correctly() {
 
 // ---- Grayf16 integration tests ----------------------------------------------
 
+#[cfg_attr(
+  miri,
+  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
+)]
 #[test]
 fn grayf16_with_luma_f32_widens() {
   // NaN, out-of-range, and normal f16 values all widen to f32 unchanged.
@@ -768,6 +772,10 @@ fn grayf16_with_luma_f32_widens() {
   }
 }
 
+#[cfg_attr(
+  miri,
+  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
+)]
 #[test]
 fn grayf16_with_rgb_f32_replicates_losslessly() {
   let intended: std::vec::Vec<f16> = std::vec![
@@ -791,6 +799,10 @@ fn grayf16_with_rgb_f32_replicates_losslessly() {
   }
 }
 
+#[cfg_attr(
+  miri,
+  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
+)]
 #[test]
 fn grayf16_with_rgb_saturates() {
   // -0.5 → 0, 0.5 → 128, 1.0 → 255, 1.5 → 255
@@ -815,6 +827,10 @@ fn grayf16_with_rgb_saturates() {
   assert_eq!(&rgb[12..15], &[255, 255, 255]); // 1.5 clamps to 255
 }
 
+#[cfg_attr(
+  miri,
+  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
+)]
 #[test]
 fn grayf16_with_hsv_h0_s0_v_saturated() {
   let intended: std::vec::Vec<f16> =
@@ -833,6 +849,10 @@ fn grayf16_with_hsv_h0_s0_v_saturated() {
   assert_eq!(v, [0, 128, 255]);
 }
 
+#[cfg_attr(
+  miri,
+  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
+)]
 #[test]
 fn grayf16_with_luma_u16_and_rgb_u16() {
   // 1x1 frame: Y = 0.5 → luma_u16 = 32768, rgb_u16 = [32768; 3]
@@ -852,6 +872,10 @@ fn grayf16_with_luma_u16_and_rgb_u16() {
   assert_eq!(rgb_u16, [32768, 32768, 32768]);
 }
 
+#[cfg_attr(
+  miri,
+  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
+)]
 #[test]
 fn grayf16_with_rgba_alpha_opaque() {
   let intended = std::vec![f16::from_f32(1.0), f16::from_f32(0.0)];

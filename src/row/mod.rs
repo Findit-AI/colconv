@@ -670,7 +670,11 @@ pub(crate) fn y2xx_row_elems(width: usize) -> usize {
 #[cfg(all(target_arch = "aarch64", feature = "std"))]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn neon_available() -> bool {
-  if cfg!(colconv_force_scalar) {
+  // Miri interprets the program and cannot execute SIMD intrinsics (e.g.
+  // `vld3q_u16`), so force every dispatcher onto the scalar reference under
+  // Miri — the runtime `is_*_feature_detected!` macros otherwise report the
+  // host's real features and route into unsupported intrinsics.
+  if cfg!(colconv_force_scalar) || cfg!(miri) {
     return false;
   }
   std::arch::is_aarch64_feature_detected!("neon")
@@ -680,7 +684,7 @@ pub(crate) fn neon_available() -> bool {
 #[cfg(all(target_arch = "aarch64", not(feature = "std")))]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) const fn neon_available() -> bool {
-  !cfg!(colconv_force_scalar) && cfg!(target_feature = "neon")
+  !cfg!(colconv_force_scalar) && !cfg!(miri) && cfg!(target_feature = "neon")
 }
 
 /// FP16 conversion-instruction availability on aarch64. Required for
@@ -721,7 +725,7 @@ pub(crate) const fn fp16_available() -> bool {
 #[cfg(all(target_arch = "x86_64", feature = "std"))]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn avx2_available() -> bool {
-  if cfg!(colconv_force_scalar) || cfg!(colconv_disable_avx2) {
+  if cfg!(colconv_force_scalar) || cfg!(colconv_disable_avx2) || cfg!(miri) {
     return false;
   }
   std::arch::is_x86_feature_detected!("avx2")
@@ -731,14 +735,17 @@ pub(crate) fn avx2_available() -> bool {
 #[cfg(all(target_arch = "x86_64", not(feature = "std")))]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) const fn avx2_available() -> bool {
-  !cfg!(colconv_force_scalar) && !cfg!(colconv_disable_avx2) && cfg!(target_feature = "avx2")
+  !cfg!(colconv_force_scalar)
+    && !cfg!(colconv_disable_avx2)
+    && !cfg!(miri)
+    && cfg!(target_feature = "avx2")
 }
 
 /// SSE4.1 availability on x86_64.
 #[cfg(all(target_arch = "x86_64", feature = "std"))]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn sse41_available() -> bool {
-  if cfg!(colconv_force_scalar) {
+  if cfg!(colconv_force_scalar) || cfg!(miri) {
     return false;
   }
   std::arch::is_x86_feature_detected!("sse4.1")
@@ -748,14 +755,14 @@ pub(crate) fn sse41_available() -> bool {
 #[cfg(all(target_arch = "x86_64", not(feature = "std")))]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) const fn sse41_available() -> bool {
-  !cfg!(colconv_force_scalar) && cfg!(target_feature = "sse4.1")
+  !cfg!(colconv_force_scalar) && !cfg!(miri) && cfg!(target_feature = "sse4.1")
 }
 
 /// AVX‑512 (F + BW) availability on x86_64.
 #[cfg(all(target_arch = "x86_64", feature = "std"))]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn avx512_available() -> bool {
-  if cfg!(colconv_force_scalar) || cfg!(colconv_disable_avx512) {
+  if cfg!(colconv_force_scalar) || cfg!(colconv_disable_avx512) || cfg!(miri) {
     return false;
   }
   std::arch::is_x86_feature_detected!("avx512bw")
@@ -766,7 +773,10 @@ pub(crate) fn avx512_available() -> bool {
 #[cfg(all(target_arch = "x86_64", not(feature = "std")))]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) const fn avx512_available() -> bool {
-  !cfg!(colconv_force_scalar) && !cfg!(colconv_disable_avx512) && cfg!(target_feature = "avx512bw")
+  !cfg!(colconv_force_scalar)
+    && !cfg!(colconv_disable_avx512)
+    && !cfg!(miri)
+    && cfg!(target_feature = "avx512bw")
 }
 
 /// F16C availability on x86_64. Used by the `Rgbf16` and `Grayf16` dispatchers to gate the
@@ -803,7 +813,7 @@ pub(crate) const fn f16c_available() -> bool {
 #[cfg(target_arch = "wasm32")]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) const fn simd128_available() -> bool {
-  !cfg!(colconv_force_scalar) && cfg!(target_feature = "simd128")
+  !cfg!(colconv_force_scalar) && !cfg!(miri) && cfg!(target_feature = "simd128")
 }
 #[cfg(all(test, feature = "std"))]
 mod overflow_tests {
@@ -1576,9 +1586,12 @@ mod bayer_dispatcher_tests {
   /// `Err(SampleOutOfRange)` from `try_new` instead.
   #[test]
   fn bayer16_u8_dispatcher_saturates_on_msb_aligned_input() {
-    let above = [0x8000u16; 4];
-    let mid = [0x8000u16; 4];
-    let below = [0x8000u16; 4];
+    // LE-wire storage of the logical `0x8000` so the `BE = false` kernel
+    // recovers it on both little- and big-endian hosts.
+    let msb = u16::from_ne_bytes(0x8000u16.to_le_bytes());
+    let above = [msb; 4];
+    let mid = [msb; 4];
+    let below = [msb; 4];
     let mut rgb = [0u8; 12];
     let m = ident();
     bayer16_to_rgb_row::<12>(
@@ -1605,9 +1618,12 @@ mod bayer_dispatcher_tests {
   /// panicking.
   #[test]
   fn bayer16_u16_dispatcher_saturates_on_msb_aligned_input() {
-    let above = [0xFFC0u16; 4]; // MSB-aligned 10-bit "white" (1023 << 6)
-    let mid = [0xFFC0u16; 4];
-    let below = [0xFFC0u16; 4];
+    // MSB-aligned 10-bit "white" (1023 << 6), stored as LE wire so the
+    // `BE = false` kernel recovers it on big-endian hosts too.
+    let msb = u16::from_ne_bytes(0xFFC0u16.to_le_bytes());
+    let above = [msb; 4];
+    let mid = [msb; 4];
+    let below = [msb; 4];
     let mut rgb = [0u16; 12];
     let m = ident();
     bayer16_to_rgb_u16_row::<10>(

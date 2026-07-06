@@ -97,10 +97,12 @@ unsafe fn deinterleave_rgb96_4px(v0: v128, v1: v128, v2: v128) -> (v128, v128, v
 /// `ptr` must point to at least 12 readable u32; `simd128` must be held.
 #[inline(always)]
 unsafe fn load_deint_rgb96_4px<const BE: bool>(ptr: *const u32) -> (v128, v128, v128) {
-  let v0 = byteswap32_if_be::<BE>(v128_load(ptr.cast()));
-  let v1 = byteswap32_if_be::<BE>(v128_load(ptr.add(4).cast()));
-  let v2 = byteswap32_if_be::<BE>(v128_load(ptr.add(8).cast()));
-  deinterleave_rgb96_4px(v0, v1, v2)
+  unsafe {
+    let v0 = byteswap32_if_be::<BE>(v128_load(ptr.cast()));
+    let v1 = byteswap32_if_be::<BE>(v128_load(ptr.add(4).cast()));
+    let v2 = byteswap32_if_be::<BE>(v128_load(ptr.add(8).cast()));
+    deinterleave_rgb96_4px(v0, v1, v2)
+  }
 }
 
 /// Narrows two `u32x4` planes (`>> 16` applied) into a `u16x8` channel vector.
@@ -301,11 +303,13 @@ unsafe fn deinterleave_rgba128_4px(
 /// `ptr` must point to at least 16 readable u32; `simd128` must be held.
 #[inline(always)]
 unsafe fn load_deint_rgba128_4px<const BE: bool>(ptr: *const u32) -> (v128, v128, v128, v128) {
-  let v0 = byteswap32_if_be::<BE>(v128_load(ptr.cast()));
-  let v1 = byteswap32_if_be::<BE>(v128_load(ptr.add(4).cast()));
-  let v2 = byteswap32_if_be::<BE>(v128_load(ptr.add(8).cast()));
-  let v3 = byteswap32_if_be::<BE>(v128_load(ptr.add(12).cast()));
-  deinterleave_rgba128_4px(v0, v1, v2, v3)
+  unsafe {
+    let v0 = byteswap32_if_be::<BE>(v128_load(ptr.cast()));
+    let v1 = byteswap32_if_be::<BE>(v128_load(ptr.add(4).cast()));
+    let v2 = byteswap32_if_be::<BE>(v128_load(ptr.add(8).cast()));
+    let v3 = byteswap32_if_be::<BE>(v128_load(ptr.add(12).cast()));
+    deinterleave_rgba128_4px(v0, v1, v2, v3)
+  }
 }
 
 // Rgba128 (R, G, B, A — 4 u32 elements per pixel).

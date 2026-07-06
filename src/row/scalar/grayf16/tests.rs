@@ -28,6 +28,10 @@ fn h(v: f32) -> f16 {
 
 // ---- grayf16_to_rgb_row --------------------------------------------------
 
+#[cfg_attr(
+  miri,
+  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
+)]
 #[test]
 fn grayf16_to_rgb_zero() {
   let plane = as_le_f16(&[h(0.0)]);
@@ -36,6 +40,10 @@ fn grayf16_to_rgb_zero() {
   assert_eq!(out, [0, 0, 0]);
 }
 
+#[cfg_attr(
+  miri,
+  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
+)]
 #[test]
 fn grayf16_to_rgb_max() {
   let plane = as_le_f16(&[h(1.0)]);
@@ -44,6 +52,10 @@ fn grayf16_to_rgb_max() {
   assert_eq!(out, [255, 255, 255]);
 }
 
+#[cfg_attr(
+  miri,
+  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
+)]
 #[test]
 fn grayf16_to_rgb_mid() {
   // 0.5 is exactly representable in f16. 0.5 * 255 + 0.5 = 128.0 → 128.
@@ -53,6 +65,10 @@ fn grayf16_to_rgb_mid() {
   assert_eq!(out, [128, 128, 128]);
 }
 
+#[cfg_attr(
+  miri,
+  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
+)]
 #[test]
 fn grayf16_to_rgb_saturates_high() {
   let plane = as_le_f16(&[h(1.5)]);
@@ -61,6 +77,10 @@ fn grayf16_to_rgb_saturates_high() {
   assert_eq!(out, [255, 255, 255]);
 }
 
+#[cfg_attr(
+  miri,
+  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
+)]
 #[test]
 fn grayf16_to_rgb_saturates_low() {
   let plane = as_le_f16(&[h(-0.1)]);
@@ -71,6 +91,10 @@ fn grayf16_to_rgb_saturates_low() {
 
 // ---- grayf16_to_rgba_row -------------------------------------------------
 
+#[cfg_attr(
+  miri,
+  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
+)]
 #[test]
 fn grayf16_to_rgba_zero_alpha_opaque() {
   let plane = as_le_f16(&[h(0.0)]);
@@ -79,6 +103,10 @@ fn grayf16_to_rgba_zero_alpha_opaque() {
   assert_eq!(out, [0, 0, 0, 0xFF]);
 }
 
+#[cfg_attr(
+  miri,
+  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
+)]
 #[test]
 fn grayf16_to_rgba_max_alpha_opaque() {
   let plane = as_le_f16(&[h(1.0)]);
@@ -89,6 +117,10 @@ fn grayf16_to_rgba_max_alpha_opaque() {
 
 // ---- grayf16_to_rgb_u16_row ----------------------------------------------
 
+#[cfg_attr(
+  miri,
+  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
+)]
 #[test]
 fn grayf16_to_rgb_u16_zero() {
   let plane = as_le_f16(&[h(0.0)]);
@@ -97,6 +129,10 @@ fn grayf16_to_rgb_u16_zero() {
   assert_eq!(out, [0, 0, 0]);
 }
 
+#[cfg_attr(
+  miri,
+  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
+)]
 #[test]
 fn grayf16_to_rgb_u16_max() {
   let plane = as_le_f16(&[h(1.0)]);
@@ -105,6 +141,10 @@ fn grayf16_to_rgb_u16_max() {
   assert_eq!(out, [65535, 65535, 65535]);
 }
 
+#[cfg_attr(
+  miri,
+  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
+)]
 #[test]
 fn grayf16_to_rgb_u16_saturates_high() {
   let plane = as_le_f16(&[h(2.0)]);
@@ -115,6 +155,10 @@ fn grayf16_to_rgb_u16_saturates_high() {
 
 // ---- grayf16_to_rgba_u16_row ---------------------------------------------
 
+#[cfg_attr(
+  miri,
+  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
+)]
 #[test]
 fn grayf16_to_rgba_u16_opaque() {
   let plane = as_le_f16(&[h(1.0)]);
@@ -125,6 +169,10 @@ fn grayf16_to_rgba_u16_opaque() {
 
 // ---- grayf16_to_rgb_f32_row ----------------------------------------------
 
+#[cfg_attr(
+  miri,
+  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
+)]
 #[test]
 fn grayf16_to_rgb_f32_lossless_replicate() {
   // 1.5 is exactly representable in f16; widening to f32 is exact.
@@ -134,6 +182,10 @@ fn grayf16_to_rgb_f32_lossless_replicate() {
   assert_eq!(out, [1.5, 1.5, 1.5]);
 }
 
+#[cfg_attr(
+  miri,
+  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
+)]
 #[test]
 fn grayf16_to_rgb_f32_negative_preserved() {
   let plane = as_le_f16(&[h(-0.5)]);
@@ -144,6 +196,10 @@ fn grayf16_to_rgb_f32_negative_preserved() {
 
 // ---- grayf16_to_luma_row -------------------------------------------------
 
+#[cfg_attr(
+  miri,
+  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
+)]
 #[test]
 fn grayf16_to_luma_zero() {
   let plane = as_le_f16(&[h(0.0)]);
@@ -152,6 +208,10 @@ fn grayf16_to_luma_zero() {
   assert_eq!(out, [0]);
 }
 
+#[cfg_attr(
+  miri,
+  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
+)]
 #[test]
 fn grayf16_to_luma_max() {
   let plane = as_le_f16(&[h(1.0)]);
@@ -162,6 +222,10 @@ fn grayf16_to_luma_max() {
 
 // ---- grayf16_to_luma_u16_row ---------------------------------------------
 
+#[cfg_attr(
+  miri,
+  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
+)]
 #[test]
 fn grayf16_to_luma_u16_max() {
   let plane = as_le_f16(&[h(1.0)]);
@@ -172,6 +236,10 @@ fn grayf16_to_luma_u16_max() {
 
 // ---- grayf16_to_luma_f32_row ---------------------------------------------
 
+#[cfg_attr(
+  miri,
+  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
+)]
 #[test]
 fn grayf16_to_luma_f32_identity() {
   let intended = [h(0.0), h(0.5), h(1.0), h(1.5), h(-0.1)];
@@ -185,6 +253,10 @@ fn grayf16_to_luma_f32_identity() {
 
 // ---- grayf16_to_hsv_row --------------------------------------------------
 
+#[cfg_attr(
+  miri,
+  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
+)]
 #[test]
 fn grayf16_to_hsv_zero() {
   let plane = as_le_f16(&[h(0.0)]);
@@ -197,6 +269,10 @@ fn grayf16_to_hsv_zero() {
   assert_eq!(v[0], 0);
 }
 
+#[cfg_attr(
+  miri,
+  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
+)]
 #[test]
 fn grayf16_to_hsv_max() {
   let plane = as_le_f16(&[h(1.0)]);
@@ -209,6 +285,10 @@ fn grayf16_to_hsv_max() {
   assert_eq!(v[0], 255);
 }
 
+#[cfg_attr(
+  miri,
+  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
+)]
 #[test]
 fn grayf16_to_hsv_mid() {
   let plane = as_le_f16(&[h(0.5)]);
@@ -221,6 +301,10 @@ fn grayf16_to_hsv_mid() {
   assert_eq!(v[0], 128);
 }
 
+#[cfg_attr(
+  miri,
+  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
+)]
 #[test]
 fn grayf16_to_hsv_clamps_hdr() {
   let plane = as_le_f16(&[h(2.0)]);
@@ -231,6 +315,10 @@ fn grayf16_to_hsv_clamps_hdr() {
   assert_eq!(v[0], 255);
 }
 
+#[cfg_attr(
+  miri,
+  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
+)]
 #[test]
 fn grayf16_to_rgb_multi_pixel() {
   let plane = as_le_f16(&[h(0.0), h(1.0), h(0.5)]);
@@ -266,6 +354,10 @@ fn ref_grayf16_to_luma(intended: &[f16], width: usize) -> std::vec::Vec<u8> {
   out
 }
 
+#[cfg_attr(
+  miri,
+  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
+)]
 #[test]
 fn grayf16_be_parity_rgb() {
   let intended = [h(0.5)];
@@ -281,6 +373,10 @@ fn grayf16_be_parity_rgb() {
   assert_eq!(out_le, out_be, "BE and LE grayf16 rgb outputs must agree");
 }
 
+#[cfg_attr(
+  miri,
+  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
+)]
 #[test]
 fn grayf16_be_parity_luma() {
   let intended = [h(0.25)];
@@ -296,6 +392,10 @@ fn grayf16_be_parity_luma() {
   assert_eq!(out_le, out_be, "BE and LE grayf16 luma outputs must agree");
 }
 
+#[cfg_attr(
+  miri,
+  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
+)]
 #[test]
 fn grayf16_to_luma_f32_row_be_le_parity_lossless() {
   // Mix of normal, HDR, negative, subnormal, and exact-zero f16 values.

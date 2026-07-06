@@ -1426,7 +1426,7 @@ pub(crate) unsafe fn yuv_411_to_hsv_row(
 /// 2. `prev.len() >= width`, `cur.len() >= width`, `out.len() >= width`.
 #[inline]
 #[target_feature(enable = "neon")]
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg_attr(not(all(test, feature = "std")), allow(dead_code))]
 pub(crate) unsafe fn chroma_upsample_440_bottom_v(
   prev: &[u8],
   cur: &[u8],
@@ -1466,7 +1466,7 @@ pub(crate) unsafe fn chroma_upsample_440_bottom_v(
 /// 2. `prev.len() >= width`, `cur.len() >= width`, `out.len() >= width`.
 #[inline]
 #[target_feature(enable = "neon")]
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg_attr(not(all(test, feature = "std")), allow(dead_code))]
 pub(crate) unsafe fn chroma_upsample_440_bottom_v_u16(
   prev: &[u16],
   cur: &[u16],

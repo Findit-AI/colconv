@@ -241,6 +241,7 @@ pub(crate) fn rgba128_to_rgba_u16_row<const BE: bool>(
 /// Rgb96 → host-native `u32` RGB (canonical `R, G, B`, no narrow). Each of the
 /// `width * 3` wire elements is swapped to host order; the channel order is
 /// already canonical, so this is a pure endian normalization.
+#[cfg(any(feature = "std", feature = "alloc"))]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn rgb96_to_rgb_u32_row<const BE: bool>(
   rgb96: &[u32],
@@ -256,6 +257,7 @@ pub(crate) fn rgb96_to_rgb_u32_row<const BE: bool>(
 
 /// Rgba128 → host-native `u32` RGBA (canonical `R, G, B, A`, no narrow). Pure
 /// endian normalization of the `width * 4` wire elements (α passes through).
+#[cfg(any(feature = "std", feature = "alloc"))]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn rgba128_to_rgba_u32_row<const BE: bool>(
   rgba128: &[u32],
@@ -274,6 +276,7 @@ pub(crate) fn rgba128_to_rgba_u32_row<const BE: bool>(
 
 /// Rgba128 → host-native `u32` RGB (drop alpha, no narrow). Reorders the `4`→`3`
 /// element stride; the surviving R/G/B are swapped to host order.
+#[cfg(any(feature = "std", feature = "alloc"))]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn rgba128_to_rgb_u32_row<const BE: bool>(
   rgba128: &[u32],

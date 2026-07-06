@@ -277,7 +277,10 @@ fn packed_rgba_frame_u32() -> Vec<u32> {
 #[test]
 fn rgba128_downscale_rgba_u16_is_exact_u32_area_mean_incl_alpha() {
   let host = packed_rgba_frame_u32();
-  let src = Rgba128Frame::new(&host, SRC as u32, SRC as u32, (SRC * 4) as u32);
+  // Wire-encode the frame's u32 samples so the LE frame decodes via `from_le`
+  // on both endiannesses; the reference below stays in the logical domain.
+  let hw = as_le_u32(&host);
+  let src = Rgba128Frame::new(&hw, SRC as u32, SRC as u32, (SRC * 4) as u32);
 
   let mut rgba_u16 = vec![0u16; OUT * OUT * 4];
   {

@@ -329,6 +329,10 @@ fn grayf16_identity_plan_matches_new_sink() {
   assert_eq!(direct, via_area, "identity plan must match the direct sink");
 }
 
+#[cfg_attr(
+  miri,
+  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
+)]
 #[test]
 fn grayf16_resample_no_outputs_is_a_no_op() {
   let plane = ramp();
@@ -344,6 +348,10 @@ fn grayf16_resample_no_outputs_is_a_no_op() {
   );
 }
 
+#[cfg_attr(
+  miri,
+  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
+)]
 #[test]
 fn grayf16_out_of_sequence_first_row_rejected_before_allocation() {
   let plane = ramp();
@@ -380,6 +388,10 @@ fn grayf16_out_of_sequence_first_row_rejected_before_allocation() {
   );
 }
 
+#[cfg_attr(
+  miri,
+  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
+)]
 #[test]
 fn grayf16_resample_reuses_luma_stream_across_frames() {
   let y1 = ramp();
@@ -418,6 +430,10 @@ fn grayf16_resample_reuses_luma_stream_across_frames() {
   );
 }
 
+#[cfg_attr(
+  miri,
+  ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
+)]
 #[test]
 fn grayf16_resample_rejects_mid_frame_output_change() {
   let plane = ramp();

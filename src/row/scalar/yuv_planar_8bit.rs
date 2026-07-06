@@ -640,7 +640,7 @@ pub(crate) fn chroma_upsample_440_bottom_v(prev: &[u8], cur: &[u8], out: &mut [u
 /// - `prev.len() >= width`, `cur.len() >= width`, `out.len() >= width`.
 #[cfg(any(feature = "std", feature = "alloc"))]
 #[cfg_attr(not(tarpaulin), inline(always))]
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg_attr(not(all(test, feature = "std")), allow(dead_code))]
 pub(crate) fn chroma_upsample_440_bottom_v_u16(
   prev: &[u16],
   cur: &[u16],

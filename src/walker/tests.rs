@@ -3178,6 +3178,7 @@ mod gbr_parity {
   /// Yuv444p10Msb LE — MSB-aligned high-bit planar YUV 4:4:4 (sample in high
   /// 10 bits). Drives the `@const_bits` impl at `<const BE = false>` against the
   /// LE `yuv444p10_msb_to` wrapper.
+  #[cfg(feature = "yuv-planar")]
   #[test]
   #[cfg_attr(
     miri,
@@ -3221,6 +3222,7 @@ mod gbr_parity {
   /// Yuv444p12Msb BE — drives the `@const_bits` impl at `Yuv444p12Msb<true>`
   /// against the `Yuv444p12MsbBeFrame` alias, compared to a direct
   /// `yuv444p12_msb_to_endian::<_, true>`.
+  #[cfg(feature = "yuv-planar")]
   #[test]
   #[cfg_attr(
     miri,

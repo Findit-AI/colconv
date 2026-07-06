@@ -508,6 +508,9 @@ fn transfer_function_pq_hlg_round_trip() {
   }
 }
 
+// miri's interpreted floating-point diverges from hardware for the PQ/HLG
+// transcendentals past this test's tolerance.
+#[cfg_attr(miri, ignore)]
 #[test]
 fn transfer_function_pq_hlg_odd_extension() {
   use super::transfer::pq_hlg::{hlg_eotf, hlg_oetf, pq_eotf, pq_oetf};

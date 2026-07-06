@@ -6,6 +6,10 @@ use crate::ColorMatrix;
 /// Re-encode a host-native u32 slice as LE-encoded byte storage. Kernels
 /// called with `BE = false` recover the intended logical values via
 /// `u32::from_le` on both LE (no-op) and BE (byte-swap) hosts.
+fn le_wire_u16(v: u16) -> u16 {
+  u16::from_ne_bytes(v.to_le_bytes())
+}
+
 fn as_le_u32(host: &[u32]) -> std::vec::Vec<u32> {
   host
     .iter()
@@ -207,9 +211,9 @@ fn gbr32_luma_matches_narrowed_high_bit_path() {
         matrix,
         full_range,
       );
-      let gn: std::vec::Vec<u16> = g_i.iter().map(|&v| (v >> 16) as u16).collect();
-      let bn: std::vec::Vec<u16> = b_i.iter().map(|&v| (v >> 16) as u16).collect();
-      let rn: std::vec::Vec<u16> = r_i.iter().map(|&v| (v >> 16) as u16).collect();
+      let gn: std::vec::Vec<u16> = g_i.iter().map(|&v| le_wire_u16((v >> 16) as u16)).collect();
+      let bn: std::vec::Vec<u16> = b_i.iter().map(|&v| le_wire_u16((v >> 16) as u16)).collect();
+      let rn: std::vec::Vec<u16> = r_i.iter().map(|&v| le_wire_u16((v >> 16) as u16)).collect();
       let mut out16 = std::vec![0u16; 8];
       super::super::planar_gbr_high_bit::gbr_to_luma_u16_high_bit_row::<16, false>(
         &gn, &bn, &rn, &mut out16, 8, matrix, full_range,

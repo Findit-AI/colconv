@@ -129,8 +129,8 @@ fn center_upsample_p0xx_kernel_matches_hand_computed() {
   let v = [400u16, 400, 0, 0];
   let mut uv_half = [0u16; 8];
   for j in 0..4 {
-    uv_half[2 * j] = pack(u[j], 10);
-    uv_half[2 * j + 1] = pack(v[j], 10);
+    uv_half[2 * j] = pack(u[j], 10).to_le();
+    uv_half[2 * j + 1] = pack(v[j], 10).to_le();
   }
   let mut uv_full = [0u16; 16];
   crate::row::scalar::chroma_upsample_2to1_center_h_p0xx::<10, false>(
@@ -141,7 +141,7 @@ fn center_upsample_p0xx_kernel_matches_hand_computed() {
   );
 
   // Decode back to logical (>> 6) and split U / V.
-  let dec: Vec<u16> = uv_full.iter().map(|&x| x >> 6).collect();
+  let dec: Vec<u16> = uv_full.iter().map(|&x| u16::from_le(x) >> 6).collect();
   let u_out: Vec<u16> = (0..8).map(|i| dec[2 * i]).collect();
   let v_out: Vec<u16> = (0..8).map(|i| dec[2 * i + 1]).collect();
   assert_eq!(u_out, std::vec![0, 0, 0, 100, 300, 400, 400, 400]);
