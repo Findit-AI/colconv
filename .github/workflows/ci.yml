@@ -280,8 +280,10 @@ jobs:
           RUSTFLAGS: -C target-feature=+simd128
         run: cargo test --lib --target wasm32-wasip1
 
+  # ASan + LSan instrument only the crate (no `-Zbuild-std`), so the whole
+  # `--all-features` suite fits in one job.
   sanitizer:
-    name: sanitizer
+    name: sanitizer-asan-lsan
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -299,8 +301,74 @@ jobs:
         run: rustup update nightly && rustup default nightly
       - name: Install rust-src
         run: rustup component add rust-src
-      - name: ASAN / LSAN / MSAN / TSAN
-        run: bash ci/sanitizer.sh
+      - name: ASan / LSan
+        run: bash ci/sanitizer.sh asan-lsan
+
+  # MSan / TSan additionally recompile an instrumented `std` via `-Zbuild-std`.
+  # Instrumenting std *and* the whole feature set at once OOM-kills the crate
+  # compile on the runner, so they are sharded by the same feature groups as
+  # the miri jobs — each shard compiles std plus one group, keeping the peak
+  # under the runner's memory. Cross-group paths are not instrumented in any
+  # one shard (the same trade-off the sharded miri jobs make).
+  sanitizer-msan:
+    name: sanitizer-msan [${{ matrix.feature-group }}]
+    strategy:
+      fail-fast: false
+      matrix:
+        feature-group:
+          - yuv-planar yuv-semi-planar yuva
+          - yuv-packed yuv-444-packed y2xx v210
+          - rgb rgb-float gbr gray rgb-legacy
+          - xyz bayer mono
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Cache cargo build and registry
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-sanitizer-msan-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-sanitizer-msan-
+      - name: Install Rust
+        run: rustup update nightly && rustup default nightly
+      - name: Install rust-src
+        run: rustup component add rust-src
+      - name: MSan
+        run: bash ci/sanitizer.sh msan "${{ matrix.feature-group }}"
+
+  sanitizer-tsan:
+    name: sanitizer-tsan [${{ matrix.feature-group }}]
+    strategy:
+      fail-fast: false
+      matrix:
+        feature-group:
+          - yuv-planar yuv-semi-planar yuva
+          - yuv-packed yuv-444-packed y2xx v210
+          - rgb rgb-float gbr gray rgb-legacy
+          - xyz bayer mono
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Cache cargo build and registry
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-sanitizer-tsan-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-sanitizer-tsan-
+      - name: Install Rust
+        run: rustup update nightly && rustup default nightly
+      - name: Install rust-src
+        run: rustup component add rust-src
+      - name: TSan
+        run: bash ci/sanitizer.sh tsan "${{ matrix.feature-group }}"
 
   miri-tb:
     name: miri-tb-${{ matrix.target }}${{ matrix.feature-group && format(' [{0}]', matrix.feature-group) || '' }}
