@@ -24,8 +24,14 @@ TARGET="x86_64-unknown-linux-gnu"
 # feature set at once exceeds the runner's memory (the crate compile is
 # OOM-killed), so those two are sharded by feature group — mirroring the miri
 # jobs. Each shard compiles `std` plus one group, keeping the peak well under
-# the runner limit. Coverage note: cross-group code paths are not MSan/TSan
-# instrumented in any single shard (same trade-off the sharded miri jobs make).
+# the runner limit. Coverage note: because each MSan/TSan shard enables only one
+# feature group, a path gated on features from two different groups (a
+# cross-format conversion) is not MSan/TSan instrumented in any single shard —
+# the same trade-off the sharded miri jobs make. ASan/LSan still run the full
+# `--all-features` suite, so out-of-bounds, use-after-free and leaks ARE covered
+# across every cross-feature combination; only MSan's uninitialised-read and
+# TSan's data-race checks are per-group (and these conversions are single-
+# threaded pure computation, leaving TSan no cross-thread state to miss).
 WHICH="${1:-all}"
 FEATURE_GROUP="${2:-}"
 

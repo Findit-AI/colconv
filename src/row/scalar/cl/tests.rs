@@ -190,6 +190,9 @@ fn bt2020_oetf_round_trips() {
 /// `colour.oetf_inverse_BT2020(Ep, is_12_bits_system=True)`.
 ///
 /// Boundaries: `oetf(β12) = 0.0814472 < 4.5·β12 = 0.0814500 < T = 0.0816979`.
+// miri's interpreted floating-point diverges from hardware for these
+// transcendental OETF paths, overshooting the round-trip tolerance.
+#[cfg_attr(miri, ignore)]
 #[test]
 fn bt2020_inverse_oetf_12bit_four_interval_partition() {
   let inv = |ep: f32| bt2020_oetf::oetf_inverse(ep, true);
