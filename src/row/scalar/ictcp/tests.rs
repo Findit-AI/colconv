@@ -332,7 +332,7 @@ fn ictcp_444p12_to_rgb_u16_matches_reference() {
 /// u16, matching the affine + expand convention.
 // miri's interpreted floating-point diverges from hardware for the ICtCp
 // (LMS + PQ) transcendentals past this test's tolerance.
-#[cfg(not(miri))]
+#[cfg_attr(miri, ignore)]
 #[test]
 fn rgba_kernels_match_rgb_plus_opaque_alpha() {
   let (y, u, v) = ([2048_u16], [2148_u16], [2248_u16]);

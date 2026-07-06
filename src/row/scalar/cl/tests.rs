@@ -156,7 +156,7 @@ fn gray_axis_full_range_round_trips_to_native_code() {
 /// there is no overlap, so it stays in the 10-bit set.)
 // miri's interpreted floating-point diverges from hardware for these
 // transcendental OETF paths, overshooting the round-trip tolerance.
-#[cfg(not(miri))]
+#[cfg_attr(miri, ignore)]
 #[test]
 fn bt2020_oetf_round_trips() {
   // 10-bit: `β10 = 0.018` round-trips exactly (`oetf(β10) > 4.5·β10`, no
@@ -315,7 +315,7 @@ fn bt2020_inverse_oetf_12bit_four_interval_partition() {
 /// `4.5·β10` (the bug an earlier `4.5·β` threshold introduced).
 // miri's interpreted floating-point diverges from hardware for these
 // transcendental OETF paths, overshooting the round-trip tolerance.
-#[cfg(not(miri))]
+#[cfg_attr(miri, ignore)]
 #[test]
 fn bt2020_inverse_oetf_10bit_two_interval_partition() {
   let inv = |ep: f32| bt2020_oetf::oetf_inverse(ep, false);

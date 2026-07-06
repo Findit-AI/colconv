@@ -297,7 +297,7 @@ fn non_ictcp_matrix_ignores_transfer() {
 
 // miri's interpreted floating-point diverges from hardware for the ICtCp
 // (LMS + PQ) transcendentals past this test's tolerance.
-#[cfg(not(miri))]
+#[cfg_attr(miri, ignore)]
 #[test]
 fn ictcp_u16_rgba_route_consistent_and_native_depth() {
   // The SAME ICtCp sample decoded to rgba_u16 two ways must be identical:
