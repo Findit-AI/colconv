@@ -670,11 +670,7 @@ pub(crate) fn y2xx_row_elems(width: usize) -> usize {
 #[cfg(all(target_arch = "aarch64", feature = "std"))]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn neon_available() -> bool {
-  // Miri cannot execute the NEON intrinsics (e.g. the `vst3` interleaving
-  // store), so fall back to the scalar path under Miri — mirroring how the
-  // x86 runtime feature detection reports no SIMD there, and keeping the
-  // dispatch-level tests runnable on aarch64 under Miri.
-  if cfg!(colconv_force_scalar) || cfg!(miri) {
+  if cfg!(colconv_force_scalar) {
     return false;
   }
   std::arch::is_aarch64_feature_detected!("neon")
@@ -684,7 +680,7 @@ pub(crate) fn neon_available() -> bool {
 #[cfg(all(target_arch = "aarch64", not(feature = "std")))]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) const fn neon_available() -> bool {
-  !cfg!(colconv_force_scalar) && !cfg!(miri) && cfg!(target_feature = "neon")
+  !cfg!(colconv_force_scalar) && cfg!(target_feature = "neon")
 }
 
 /// FP16 conversion-instruction availability on aarch64. Required for
