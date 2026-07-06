@@ -21,6 +21,14 @@ use super::*;
 
 use crate::resample::bt2020_oetf;
 
+/// Re-encode a logical `u16` sample as LE wire storage, so a `BE = false`
+/// kernel recovers it via `u16::from_le` on both little- and big-endian hosts.
+/// The `cl_444p_*` kernels read wire-ordered samples (like the bayer/xv36
+/// kernels); a bare `[v]` plane only decodes correctly on little-endian.
+fn le_wire_u16(v: u16) -> u16 {
+  u16::from_ne_bytes(v.to_le_bytes())
+}
+
 /// f32 tolerance for the linear-RGB reference cross-check: the decode is f32
 /// throughout and `colour-science` is f64, so the gap is a few ULP after the
 /// transcendental inverse-OETF + the green solve.
@@ -133,7 +141,15 @@ fn gray_axis_full_range_round_trips_to_native_code() {
     "gray linear",
   );
   let mut out = [0u16; 3];
-  cl_444p_n_to_rgb_u16_row::<12, false>(&[3760], &[2048], &[2048], &mut out, 1, true, system);
+  cl_444p_n_to_rgb_u16_row::<12, false>(
+    &[le_wire_u16(3760)],
+    &[le_wire_u16(2048)],
+    &[le_wire_u16(2048)],
+    &mut out,
+    1,
+    true,
+    system,
+  );
   assert_eq!(
     out,
     [3760, 3760, 3760],
@@ -482,7 +498,11 @@ fn cl_system_resolves_bt2020_only() {
 #[test]
 fn kernels_narrow_and_alpha_are_consistent() {
   let system = ClSystem::resolve(Primaries::Bt2020, Transfer::Bt2020_12Bit).unwrap();
-  let (y, u, v) = ([2048u16], [2148u16], [1948u16]);
+  let (y, u, v) = (
+    [le_wire_u16(2048)],
+    [le_wire_u16(2148)],
+    [le_wire_u16(1948)],
+  );
 
   let mut rgb_u8 = [0u8; 3];
   let mut rgba_u8 = [0u8; 4];
@@ -528,7 +548,15 @@ fn toe_region_10bit_matches_colour_science_reference() {
   let system = ClSystem::resolve(Primaries::Bt2020, Transfer::Bt2020_10Bit).unwrap();
   assert!(!system.is_12_bit());
   let mut rgb_u16 = [0u16; 3];
-  cl_444p_n_to_rgb_u16_row::<10, false>(&[135], &[500], &[520], &mut rgb_u16, 1, false, system);
+  cl_444p_n_to_rgb_u16_row::<10, false>(
+    &[le_wire_u16(135)],
+    &[le_wire_u16(500)],
+    &[le_wire_u16(520)],
+    &mut rgb_u16,
+    1,
+    false,
+    system,
+  );
   assert_eq!(
     rgb_u16,
     [92, 82, 56],

@@ -13,6 +13,12 @@
 
 use super::*;
 
+/// Re-encode a logical u16 as LE wire storage so a `BE = false` kernel recovers
+/// it via `u16::from_le` on both endiannesses (the ictcp kernels read wire u16).
+fn le_wire_u16(v: u16) -> u16 {
+  u16::from_ne_bytes(v.to_le_bytes())
+}
+
 /// BT.2100-2 published forward matrices (`×4096` integer form, #313).
 const RGB_TO_LMS: [[f32; 3]; 3] = [
   [1688.0 / 4096.0, 2146.0 / 4096.0, 262.0 / 4096.0],
@@ -257,7 +263,11 @@ fn ictcp_444p12_to_rgb_u8_matches_reference() {
     ),
   ];
   for &([i, ct, cp], full, tf, want) in cases {
-    let (y, u, v) = ([i; 2], [ct; 2], [cp; 2]);
+    let (y, u, v) = (
+      [le_wire_u16(i); 2],
+      [le_wire_u16(ct); 2],
+      [le_wire_u16(cp); 2],
+    );
     let mut out = [0_u8; 6];
     ictcp_444p_n_to_rgb_row::<12, false>(&y, &u, &v, &mut out, 2, full, tf);
     for px in 0..2 {
@@ -307,7 +317,7 @@ fn ictcp_444p12_to_rgb_u16_matches_reference() {
     ),
   ];
   for &([i, ct, cp], full, tf, want) in cases {
-    let (y, u, v) = ([i], [ct], [cp]);
+    let (y, u, v) = ([le_wire_u16(i)], [le_wire_u16(ct)], [le_wire_u16(cp)]);
     let mut out = [0_u16; 3];
     ictcp_444p_n_to_rgb_u16_row::<12, false>(&y, &u, &v, &mut out, 1, full, tf);
     for c in 0..3 {
