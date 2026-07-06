@@ -12073,7 +12073,13 @@ fn grow_y2xx_depack_scratch(
 /// 4:2:2 geometry: the chroma plane is `w/2 × h` (horizontal-only subsample,
 /// vertical cadence `chroma_vsub = 1`), so a chroma row feeds EVERY colour Y row.
 /// The delegate builds its chroma grid against the same output geometry via the
-/// `area(w/2, h, out_w, out_h)` closure.
+/// `area_chroma_422(w/2, h, out_w, out_h, chroma_h_phase, 0.0)` closure.
+///
+/// `chroma_h_phase` is the horizontal chroma sampling phase folded into the
+/// chroma area weights (`ResamplePlan::area_chroma_422`): `0.25` for the centered
+/// 4:2:2 group (`chroma_422_center_sited_h`), `0.0` for co-sited / unspecified. At
+/// phase `0.0` the folded plan is byte-identical to the plain `area` plan, so the
+/// co-sited output is untouched.
 ///
 /// Native-depth clamp + luma-only lazy chroma both carry through the reused join
 /// (the #222 fixes): the join clamps luma `src.min((1 << BITS) - 1) >> (BITS - 8)`
@@ -12113,6 +12119,7 @@ fn y2xx_process_native<const BITS: u32, const BE: bool>(
   rgb_scratch: &mut Vec<u8>,
   rgb_scratch_u16: &mut Vec<u16>,
   packed: &[u16],
+  chroma_h_phase: f64,
   matrix: crate::ColorMatrix,
   full_range: bool,
   idx: usize,
@@ -12227,9 +12234,114 @@ fn y2xx_process_native<const BITS: u32, const BE: bool>(
     h,
     1,
     cw,
-    || crate::resample::ResamplePlan::area(cw, h, plan.out_w(), plan.out_h()),
+    || {
+      crate::resample::ResamplePlan::area_chroma_422(
+        cw,
+        h,
+        plan.out_w(),
+        plan.out_h(),
+        chroma_h_phase,
+        0.0,
+      )
+    },
     use_simd,
   )
+}
+
+/// Fallible pre-feed reserve for the packed Y2xx centered-siting de-interleave
+/// scratch: grows the full-width Y buffer (`width`) and the half-width U / V
+/// buffers (`width / 2` each) so the later infallible de-interleave + 4:4:4
+/// decode reuse already-sized buffers. The `u16` sibling of the 8-bit packed
+/// [`packed_yuv_8bit`]'s `reserve_packed_center_chroma`. Split from the
+/// de-interleave so it runs before any output row is written — an allocator
+/// refusal must leave the output frame untouched, never partially mutated — and
+/// reuses the native tier's de-pack scratch (`width` Y + `width / 2` U / V), so a
+/// centered colour row and an area native row never both run in one `process`
+/// call. A grow refusal is the typed, recoverable
+/// [`ResampleError::AllocationFailed`]; `height` feeds the payload.
+///
+/// [`ResampleError::AllocationFailed`]: crate::resample::ResampleError::AllocationFailed
+#[cfg(all(feature = "y2xx", feature = "yuv-planar"))]
+fn reserve_y2xx_center_planes(
+  y_full: &mut Vec<u16>,
+  u_half: &mut Vec<u16>,
+  v_half: &mut Vec<u16>,
+  width: usize,
+  height: usize,
+) -> Result<(), MixedSinkerError> {
+  let grow = |scratch: &mut Vec<u16>, len: usize| -> Result<(), MixedSinkerError> {
+    if scratch.len() < len {
+      scratch
+        .try_reserve_exact(len - scratch.len())
+        .map_err(|_| {
+          MixedSinkerError::Resample(crate::resample::ResampleError::AllocationFailed(
+            crate::resample::PlanGeometry::new(width, height, width, height),
+          ))
+        })?;
+      scratch.resize(len, 0);
+    }
+    Ok(())
+  };
+  grow(y_full, width)?;
+  let cw = width / 2;
+  grow(u_half, cw)?;
+  grow(v_half, cw)?;
+  Ok(())
+}
+
+/// Reconstructs full-width chroma for a packed Y2xx centered-siting colour row.
+/// De-interleaves the packed `[Y0 U Y1 V]` words into a full-width Y plane and
+/// half-width U / V planes, shifting each MSB-aligned sample down to the low
+/// `BITS` (`>> (16 - BITS)`) while keeping the source's wire byte order — so the
+/// planes match the LSB-aligned low-packed layout the [`reconstruct_chroma`]
+/// upsample and the high-bit 4:4:4 decode expect, both of which re-decode the
+/// endianness (`be`) themselves. Then phase-0.5 upsamples U / V into `chroma_full`,
+/// returning the `(u_full, v_full)` slices the 4:4:4 decode reads (the de-packed
+/// `y_full` is left in the caller's scratch, read as `&y_full[..w]`). Every
+/// fallible grow (chroma scratch + de-pack planes) precedes the infallible
+/// de-interleave, so an allocator refusal leaves the output frame untouched (the
+/// crate's preflight-ordering atomicity contract). Reuses the native tier's
+/// de-pack scratch, so a centered colour row and an area native row never both run
+/// in one `process` call.
+#[cfg(all(feature = "y2xx", feature = "yuv-planar"))]
+#[allow(clippy::too_many_arguments)]
+fn y2xx_center_reconstruct<'c, const BITS: u32>(
+  packed: &[u16],
+  y_full: &mut Vec<u16>,
+  u_half: &mut Vec<u16>,
+  v_half: &mut Vec<u16>,
+  chroma_full: &'c mut Vec<u16>,
+  w: usize,
+  h: usize,
+  be: bool,
+) -> Result<(&'c [u16], &'c [u16]), MixedSinkerError> {
+  let cw = w / 2;
+  subsampled_4_2_0_high_bit::reserve_420_chroma_full_u16(chroma_full, w, h)?;
+  reserve_y2xx_center_planes(y_full, u_half, v_half, w, h)?;
+  // Shift the active high `BITS` down to the low `BITS`, then re-encode in the
+  // source wire byte order so the reconstruct + 4:4:4 decode (which apply `be`)
+  // see LSB-aligned low-packed samples. At `BITS = 16` this is a no-op round-trip.
+  let repack = |wire: u16| -> u16 {
+    let logical = (if be {
+      u16::from_be(wire)
+    } else {
+      u16::from_le(wire)
+    }) >> (16 - BITS);
+    if be { logical.to_be() } else { logical.to_le() }
+  };
+  for (i, group) in packed.chunks_exact(4).take(cw).enumerate() {
+    y_full[2 * i] = repack(group[0]);
+    y_full[2 * i + 1] = repack(group[2]);
+    u_half[i] = repack(group[1]);
+    v_half[i] = repack(group[3]);
+  }
+  Ok(reconstruct_chroma(
+    ChromaU16::<BITS> { big_endian: be },
+    chroma_full,
+    &u_half[..cw],
+    &v_half[..cw],
+    w,
+  ))
 }
 
 // Test-only allocation failpoint for the wrapper-owned Y / U / V de-pack scratch

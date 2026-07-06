@@ -44,14 +44,24 @@ use super::{
 };
 // `NativeRouteChanged` is raised only by the native fast tier's route-flip
 // guard, and `y2xx_process_native` exists only when the reused high-bit planar
-// join is compiled in. Gated to the native tier's feature intersection.
+// join is compiled in. The horizontal chroma-siting machinery
+// (`chroma_422_center_sited_h` + the centered full-width reconstruct through
+// `y2xx_center_reconstruct` + the 4:4:4 decode) likewise needs the planar
+// reconstruction stage. Gated to the native tier's feature intersection.
 #[cfg(all(feature = "y2xx", feature = "yuv-planar"))]
-use super::{NativeRouteChanged, y2xx_process_native};
-// The RFC #238 insertion-point selector decides the native-vs-row-stage
-// splice; consulted only inside the native tier's `cfg`, so its import
-// shares that intersection.
+use super::{
+  ChromaSitingChanged, NativeRouteChanged, chroma_422_center_sited_h,
+  planar_8bit::YUV422P_CENTERED_H_PHASE, resample_preflight_check_only, y2xx_center_reconstruct,
+  y2xx_process_native,
+};
+// The insertion-point selector decides the native-vs-row-stage splice; consulted
+// only inside the native tier's `cfg`, so its import shares that intersection.
 #[cfg(all(feature = "y2xx", feature = "yuv-planar"))]
 use crate::resample::{AveragingDomain, InsertionContext, InsertionPoint, select_insertion_point};
+// The centered horizontal siting reconstructs full-width chroma then decodes via
+// the planar 4:4:4 kernels; co-sited keeps the fused packed decode below.
+#[cfg(all(feature = "y2xx", feature = "yuv-planar"))]
+use crate::row::{yuv444p10_to_rgb_row_endian, yuv444p10_to_rgb_u16_row_endian};
 use crate::{
   PixelSink,
   row::{
@@ -202,6 +212,9 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Y210<BE>, R> {
     #[cfg(all(feature = "y2xx", feature = "yuv-planar"))]
     {
       self.frozen_native_route = None;
+      // Clear the per-frame frozen 4:2:2 chroma siting so the next frame may pick
+      // either phase; a mid-frame flip stays rejected.
+      self.frozen_chroma_centered = None;
     }
     self.resample_outputs = None;
     Ok(())
@@ -239,6 +252,11 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Y210<BE>, R> {
       ));
     }
 
+    // Chroma siting drives the horizontal chroma phase; `Copy`, so read it out
+    // before the field split-borrow below.
+    #[cfg(all(feature = "y2xx", feature = "yuv-planar"))]
+    let chroma_location = self.chroma_location;
+
     let Self {
       rgb,
       rgb_u16,
@@ -270,6 +288,10 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Y210<BE>, R> {
       y2xx_v_half,
       #[cfg(all(feature = "y2xx", feature = "yuv-planar"))]
       frozen_native_route,
+      #[cfg(all(feature = "y2xx", feature = "yuv-planar"))]
+      frozen_chroma_centered,
+      #[cfg(all(feature = "y2xx", feature = "yuv-planar"))]
+      chroma_full_u16,
       ..
     } = self;
     let packed = row.packed();
@@ -292,8 +314,146 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Y210<BE>, R> {
     if let Some(plan) = plan.as_ref() {
       let matrix = row.matrix();
       let full_range = row.full_range();
+      // Horizontal chroma siting for the packed high-bit Y2xx, mirroring the
+      // planar Yuv422pN and semi-planar P2xx twins on the packed de-interleave.
+      // The centered group (`Center` / `Top` / `Bottom`, `chroma_422_center_sited_h`)
+      // samples chroma at `+0.25` chroma-sample; the co-sited / unspecified group
+      // is phase 0 (byte-identical to the pre-siting resample). The native fast
+      // tier folds the phase into the `area_chroma_422` chroma weights; the filter
+      // and row-stage tiers reconstruct full-width chroma (de-interleave +
+      // phase-0.5 upsample) and decode 4:4:4 via the `yuv444pN` full-chroma
+      // kernels — the co-sited arms keep the fused `y210_*` half-chroma decode.
+      #[cfg(all(feature = "y2xx", feature = "yuv-planar"))]
+      let center_sited = chroma_422_center_sited_h(chroma_location);
+      #[cfg(all(feature = "y2xx", feature = "yuv-planar"))]
+      let chroma_h_phase = if center_sited {
+        YUV422P_CENTERED_H_PHASE
+      } else {
+        0.0
+      };
+      // Only the colour tiers reconstruct full-width chroma for the centered
+      // decode; a luma-only centered row bins native Y unchanged (siting is a
+      // chroma-only property).
+      #[cfg(all(feature = "y2xx", feature = "yuv-planar"))]
+      let want_color =
+        rgb.is_some() || rgba.is_some() || hsv.is_some() || rgb_u16.is_some() || rgba_u16.is_some();
+      // Whether this call carries any output a tier ACCEPTS — the EXACT set the
+      // tier preflight tests. The route (and the siting phase) freezes only on an
+      // output-bearing row a tier accepts; a no-output call consumes no stream
+      // state, so it must not freeze.
+      #[cfg(all(feature = "y2xx", feature = "yuv-planar"))]
+      let need_output = luma.is_some()
+        || luma_u16.is_some()
+        || rgb.is_some()
+        || rgba.is_some()
+        || rgb_u16.is_some()
+        || rgba_u16.is_some()
+        || hsv.is_some();
+      // Freeze the effective 4:2:2 chroma siting on the first output-bearing row.
+      // A later row observing a different phase — in sequence or not — would bin a
+      // mixture of co-sited and centered chroma, so it is rejected HERE before any
+      // reconstruction or dispatch; the matching SET rides each tier's accept path
+      // below (never on a reject, so a corrected retry is not falsely rejected).
+      #[cfg(all(feature = "y2xx", feature = "yuv-planar"))]
+      if need_output
+        && let Some(frozen) = *frozen_chroma_centered
+        && frozen != center_sited
+      {
+        return Err(MixedSinkerError::ChromaSitingChanged(
+          ChromaSitingChanged::new(idx),
+        ));
+      }
       if plan.kind().is_filter() {
-        return packed_yuv422_triple_filter_resample::<BITS>(
+        // Centered filter reconstructs full-width chroma (de-interleave +
+        // phase-0.5 upsample) and decodes 4:4:4, but ONLY after the resample
+        // preflight (frozen-output + sequence), so an out-of-sequence / rejected
+        // row allocates no chroma scratch. A luma-only centered row never calls
+        // the RGB converter, so it stays on the co-sited arm (which only bins
+        // luma). Co-sited keeps the fused `y210_*` decode.
+        #[cfg(all(feature = "y2xx", feature = "yuv-planar"))]
+        {
+          // Reject a multi-kernel (BICUBLIN) filter plan BEFORE the centered
+          // reserve below, mirroring the delegate's own first act (idempotent).
+          plan.ensure_single_kernel_filter()?;
+          if center_sited && want_color {
+            let expected = if luma.is_some() || luma_u16.is_some() {
+              luma_filter_stream_u16.as_ref().map_or(0, |s| s.next_y())
+            } else if rgb.is_some() || rgba.is_some() || hsv.is_some() {
+              rgb_filter_stream.as_ref().map_or(0, |s| s.next_y())
+            } else {
+              rgb_filter_stream_u16.as_ref().map_or(0, |s| s.next_y())
+            };
+            if let core::ops::ControlFlow::Break(()) = resample_preflight_check_only(
+              resample_outputs,
+              luma,
+              luma_u16,
+              rgb,
+              rgba,
+              rgb_u16,
+              rgba_u16,
+              &None,
+              &None,
+              &None,
+              &None,
+              &None,
+              hsv,
+              &None,
+              Some(expected),
+              idx,
+            )? {
+              return Ok(());
+            }
+            let (u_full, v_full) = y2xx_center_reconstruct::<BITS>(
+              packed,
+              y2xx_y_full,
+              y2xx_u_half,
+              y2xx_v_half,
+              chroma_full_u16,
+              w,
+              h,
+              BE,
+            )?;
+            let y_full = &y2xx_y_full[..w];
+            let r = packed_yuv422_triple_filter_resample::<BITS>(
+              luma_filter_stream_u16,
+              rgb_filter_stream,
+              rgb_filter_stream_u16,
+              resample_outputs,
+              rgb,
+              rgba,
+              rgb_u16,
+              rgba_u16,
+              luma,
+              luma_u16,
+              hsv,
+              luma_scratch_u16,
+              rgb_scratch,
+              rgb_scratch_u16,
+              w,
+              plan,
+              idx,
+              use_simd,
+              matrix,
+              full_range,
+              |scratch| y210_to_luma_u16_row_endian(packed, scratch, w, use_simd, BE),
+              |scratch| {
+                yuv444p10_to_rgb_row_endian(
+                  y_full, u_full, v_full, scratch, w, matrix, full_range, use_simd, BE,
+                )
+              },
+              |scratch| {
+                yuv444p10_to_rgb_u16_row_endian(
+                  y_full, u_full, v_full, scratch, w, matrix, full_range, use_simd, BE,
+                )
+              },
+            );
+            if r.is_ok() && need_output && frozen_chroma_centered.is_none() {
+              *frozen_chroma_centered = Some(center_sited);
+            }
+            return r;
+          }
+        }
+        let r = packed_yuv422_triple_filter_resample::<BITS>(
           luma_filter_stream_u16,
           rgb_filter_stream,
           rgb_filter_stream_u16,
@@ -320,19 +480,12 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Y210<BE>, R> {
             y210_to_rgb_u16_row_endian(packed, scratch, w, matrix, full_range, use_simd, BE)
           },
         );
+        #[cfg(all(feature = "y2xx", feature = "yuv-planar"))]
+        if r.is_ok() && need_output && frozen_chroma_centered.is_none() {
+          *frozen_chroma_centered = Some(center_sited);
+        }
+        return r;
       }
-      // Whether this call carries any output a tier ACCEPTS — the EXACT set the
-      // tier preflight tests. The route freezes only on an output-bearing row a
-      // tier accepts; a no-output call consumes no stream state, so it must not
-      // freeze.
-      #[cfg(all(feature = "y2xx", feature = "yuv-planar"))]
-      let need_output = luma.is_some()
-        || luma_u16.is_some()
-        || rgb.is_some()
-        || rgba.is_some()
-        || rgb_u16.is_some()
-        || rgba_u16.is_some()
-        || hsv.is_some();
       // The reused high-bit non-4:2:0 planar join now emits BOTH the u8 `luma`
       // and the native-depth `luma_u16` (the clamped binned Y), so the native
       // tier serves every output set Y2xx exposes; route to native purely on
@@ -368,9 +521,27 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Y210<BE>, R> {
       }
       #[cfg(all(feature = "y2xx", feature = "yuv-planar"))]
       if take_native {
-        // Dispatch first; freeze the route to native ONLY after the call
-        // returns Ok on an output-bearing row.
-        y2xx_process_native::<BITS, BE>(
+        // A reused sink's cached join is only `reset` between frames, so a frame
+        // whose `chroma_location` moved to a different phase must REBUILD it. Drop
+        // the stale-phase join ONLY on the in-sequence first row of a fresh frame
+        // (`idx == 0`, `next_y() == 0`) so a mid-frame / out-of-sequence row
+        // rejects against the INTACT join and a corrected retry rebuilds cleanly;
+        // a luma-only join carries no chroma phase and is never dropped. Move it
+        // OUT (the delegate builds the replacement into the field, untouched until
+        // every pre-feed allocation succeeds) and restore the intact prior-phase
+        // join on a rejected rebuild so the row mutates no join state.
+        let stale_native = idx == 0
+          && native_planar_u16.as_ref().is_some_and(|join| {
+            join.chroma_phase_centered() == Some(!center_sited) && join.next_y() == 0
+          });
+        let prev_native = if stale_native {
+          native_planar_u16.take()
+        } else {
+          None
+        };
+        // Dispatch first; freeze the route + siting ONLY after the call returns Ok
+        // on an output-bearing row.
+        let native_result = y2xx_process_native::<BITS, BE>(
           plan,
           native_planar_u16,
           y2xx_y_full,
@@ -387,21 +558,119 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Y210<BE>, R> {
           rgb_scratch,
           rgb_scratch_u16,
           packed,
+          chroma_h_phase,
           matrix,
           full_range,
           idx,
           w,
           h,
           use_simd,
-        )?;
+        );
+        // Restore the taken stale-phase join if the delegate's rebuild was
+        // rejected at any pre-feed step: it leaves the field `None` on such a
+        // failure, so restoring the intact prior-phase join leaves the rejected
+        // row mutating no join state. A non-stale row took nothing.
+        if stale_native && native_result.is_err() {
+          *native_planar_u16 = prev_native;
+        }
+        native_result?;
         if frozen_native_route.is_none() && need_output {
           *frozen_native_route = Some(true);
+        }
+        if frozen_chroma_centered.is_none() && need_output {
+          *frozen_chroma_centered = Some(center_sited);
+        }
+        return Ok(());
+      }
+      // Centered row-stage colour reconstructs full-width chroma (de-interleave +
+      // phase-0.5 upsample) and decodes 4:4:4 — but ONLY after the resample
+      // preflight (frozen-output + sequence), so an out-of-sequence / rejected row
+      // allocates no chroma scratch. A luma-only centered row stays on the
+      // co-sited arm (which only bins luma).
+      #[cfg(all(feature = "y2xx", feature = "yuv-planar"))]
+      if center_sited && want_color {
+        let expected = if luma.is_some() || luma_u16.is_some() {
+          luma_stream_u16.as_ref().map_or(0, |s| s.next_y())
+        } else if rgb.is_some() || rgba.is_some() || hsv.is_some() {
+          rgb_stream.as_ref().map_or(0, |s| s.next_y())
+        } else {
+          rgb_stream_u16.as_ref().map_or(0, |s| s.next_y())
+        };
+        if let core::ops::ControlFlow::Break(()) = resample_preflight_check_only(
+          resample_outputs,
+          luma,
+          luma_u16,
+          rgb,
+          rgba,
+          rgb_u16,
+          rgba_u16,
+          &None,
+          &None,
+          &None,
+          &None,
+          &None,
+          hsv,
+          &None,
+          Some(expected),
+          idx,
+        )? {
+          return Ok(());
+        }
+        let (u_full, v_full) = y2xx_center_reconstruct::<BITS>(
+          packed,
+          y2xx_y_full,
+          y2xx_u_half,
+          y2xx_v_half,
+          chroma_full_u16,
+          w,
+          h,
+          BE,
+        )?;
+        let y_full = &y2xx_y_full[..w];
+        packed_yuv422_triple_resample::<BITS>(
+          luma_stream_u16,
+          rgb_stream,
+          rgb_stream_u16,
+          resample_outputs,
+          rgb,
+          rgba,
+          rgb_u16,
+          rgba_u16,
+          luma,
+          luma_u16,
+          hsv,
+          luma_scratch_u16,
+          rgb_scratch,
+          rgb_scratch_u16,
+          w,
+          plan,
+          idx,
+          use_simd,
+          matrix,
+          full_range,
+          |scratch| y210_to_luma_u16_row_endian(packed, scratch, w, use_simd, BE),
+          |scratch| {
+            yuv444p10_to_rgb_row_endian(
+              y_full, u_full, v_full, scratch, w, matrix, full_range, use_simd, BE,
+            )
+          },
+          |scratch| {
+            yuv444p10_to_rgb_u16_row_endian(
+              y_full, u_full, v_full, scratch, w, matrix, full_range, use_simd, BE,
+            )
+          },
+        )?;
+        if frozen_native_route.is_none() && need_output {
+          *frozen_native_route = Some(false);
+        }
+        if frozen_chroma_centered.is_none() && need_output {
+          *frozen_chroma_centered = Some(center_sited);
         }
         return Ok(());
       }
       // Row-stage area tail (the route under `with_native(false)`, and the only
       // route under a `y2xx`-solo build where the planar join is absent). Same
-      // CHECK-before / SET-after split.
+      // CHECK-before / SET-after split. Co-sited keeps the fused `y210_*` decode.
       packed_yuv422_triple_resample::<BITS>(
         luma_stream_u16,
         rgb_stream,
@@ -428,8 +697,13 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Y210<BE>, R> {
         |scratch| y210_to_rgb_u16_row_endian(packed, scratch, w, matrix, full_range, use_simd, BE),
       )?;
       #[cfg(all(feature = "y2xx", feature = "yuv-planar"))]
-      if frozen_native_route.is_none() && need_output {
-        *frozen_native_route = Some(false);
+      {
+        if frozen_native_route.is_none() && need_output {
+          *frozen_native_route = Some(false);
+        }
+        if frozen_chroma_centered.is_none() && need_output {
+          *frozen_chroma_centered = Some(center_sited);
+        }
       }
       return Ok(());
     }
