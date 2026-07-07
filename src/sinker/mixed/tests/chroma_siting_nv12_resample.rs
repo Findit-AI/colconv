@@ -704,7 +704,6 @@ macro_rules! nv_resample_siting_tests {
           for loc in [
             ChromaLocation::Left,
             ChromaLocation::TopLeft,
-            ChromaLocation::BottomLeft,
             ChromaLocation::Unknown(7),
           ] {
             let got = run(&y, &u, &v, 8, 8, 4, 4, loc, native, true);
@@ -795,12 +794,15 @@ macro_rules! nv_resample_siting_tests {
         // Now that RFC #238 S4-C folds the NV vertical `Bottom` v=1 phase through
         // the resample exactly as the Yuv420p twin (S4-B), Bottom rejoins the
         // loop: NV-Bottom == Yuv420p-Bottom is a strong cross-format cross-check.
+        // `BottomLeft` (co-sited h + v=1) rides the SAME shared reconstruction, so
+        // it joins too — pinning NV BottomLeft against the validated Yuv420p one.
         for (sw, sh, ow, oh) in [(8, 8, 4, 4), (8, 8, 5, 3), (12, 8, 4, 4), (16, 8, 6, 5)] {
           let (y, u, v) = ramp(sw, sh);
           for loc in [
             ChromaLocation::Center,
             ChromaLocation::Top,
             ChromaLocation::Bottom,
+            ChromaLocation::BottomLeft,
           ] {
             for native in [true, false] {
               let nv = run(&y, &u, &v, sw, sh, ow, oh, loc, native, true);
@@ -846,6 +848,42 @@ macro_rules! nv_resample_siting_tests {
           assert_eq!(nv, rgb420, "filter centered {sw}x{sh}->{ow}x{oh}");
           let cosited = filter_rgb(&y, &u, &v, sw, sh, ow, oh, ChromaLocation::Left);
           assert_ne!(nv, cosited, "filter centered must differ from co-sited");
+        }
+      }
+
+      #[test]
+      #[cfg_attr(
+        miri,
+        ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+      )]
+      fn bottomleft_filter_equals_bottomleft_yuv420p() {
+        // The filter tier's BottomLeft reconstruction (co-sited h + v=1 vertical
+        // blend) is the SAME as the planar twin's, so the Triangle-filtered NV
+        // BottomLeft RGB equals the Yuv420p one, and genuinely differs from Bottom
+        // (the horizontal phase) on a ramp that varies BOTH axes.
+        for (sw, sh, ow, oh) in [(8, 8, 4, 4), (8, 8, 5, 3)] {
+          let (y, u, v) = ramp(sw, sh);
+          let cw = sw / 2;
+          let mut rgb420 = vec![0u8; ow * oh * 3];
+          {
+            let mut sink = MixedSinker::<Yuv420p, FilteredResampler<Triangle>>::with_resampler(
+              sw,
+              sh,
+              FilteredResampler::new(ow, oh, Triangle),
+            )
+            .unwrap()
+            .with_chroma_location(ChromaLocation::BottomLeft)
+            .with_rgb(&mut rgb420)
+            .unwrap();
+            let f = Yuv420pFrame::new(
+              &y, &u, &v, sw as u32, sh as u32, sw as u32, cw as u32, cw as u32,
+            );
+            yuv420p_to(&f, FR, M, &mut sink).unwrap();
+          }
+          let nv = filter_rgb(&y, &u, &v, sw, sh, ow, oh, ChromaLocation::BottomLeft);
+          assert_eq!(nv, rgb420, "filter bottom-left {sw}x{sh}->{ow}x{oh}");
+          let bottom = filter_rgb(&y, &u, &v, sw, sh, ow, oh, ChromaLocation::Bottom);
+          assert_ne!(nv, bottom, "filter bottom-left must differ from bottom (h phase)");
         }
       }
 
@@ -1434,12 +1472,18 @@ macro_rules! nv_resample_siting_tests {
         let uv = interleave(&u, &v, 4, 4, $swap);
         // Both HORIZONTAL flips (Center⇄Left) plus the RFC #238 S4-C VERTICAL flip
         // Center⇄Bottom (same horizontal center, differing v=1 fold — caught only
-        // by the vertical-phase freeze). Each must reject the in-sequence row 1.
+        // by the vertical-phase freeze). BottomLeft adds BottomLeft⇄Left (vertical
+        // fold flip on a co-sited h) and BottomLeft⇄Bottom (horizontal flip on a
+        // shared v=1). Each must reject the in-sequence row 1.
         for (loc1, loc2) in [
           (ChromaLocation::Center, ChromaLocation::Left),
           (ChromaLocation::Left, ChromaLocation::Center),
           (ChromaLocation::Center, ChromaLocation::Bottom),
           (ChromaLocation::Bottom, ChromaLocation::Center),
+          (ChromaLocation::Left, ChromaLocation::BottomLeft),
+          (ChromaLocation::BottomLeft, ChromaLocation::Left),
+          (ChromaLocation::BottomLeft, ChromaLocation::Bottom),
+          (ChromaLocation::Bottom, ChromaLocation::BottomLeft),
         ] {
           // Native fast tier.
           let mut rgb = vec![0u8; 4 * 4 * 3];

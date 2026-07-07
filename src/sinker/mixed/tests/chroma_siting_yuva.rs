@@ -162,6 +162,41 @@ mod p8 {
     (u444, v444)
   }
 
+  /// The full-resolution U / V a **`BottomLeft`** (`h = 0`, `v = 1`) 4:2:0 decode
+  /// reconstructs: [`ref_full_chroma_bottom`]'s even-row vertical box blend, but
+  /// fed to the CO-SITED horizontal 2× replicate instead of the centered kernel.
+  fn ref_full_chroma_bottomleft(u420: &[u8], v420: &[u8]) -> (Vec<u8>, Vec<u8>) {
+    let w = W as usize;
+    let h = H as usize;
+    let cw = w / 2;
+    let mut u444 = std::vec![0u8; w * h];
+    let mut v444 = std::vec![0u8; w * h];
+    let vblend = |plane: &[u8], cr: usize, prev: usize| -> Vec<u8> {
+      (0..cw)
+        .map(|c| ((u32::from(plane[prev * cw + c]) + u32::from(plane[cr * cw + c]) + 1) >> 1) as u8)
+        .collect()
+    };
+    for r in 0..h {
+      let cr = r / 2;
+      let (uh, vh) = if r & 1 == 0 {
+        let prev = cr.saturating_sub(1);
+        (vblend(u420, cr, prev), vblend(v420, cr, prev))
+      } else {
+        (
+          u420[cr * cw..cr * cw + cw].to_vec(),
+          v420[cr * cw..cr * cw + cw].to_vec(),
+        )
+      };
+      for j in 0..cw {
+        u444[r * w + 2 * j] = uh[j];
+        u444[r * w + 2 * j + 1] = uh[j];
+        v444[r * w + 2 * j] = vh[j];
+        v444[r * w + 2 * j + 1] = vh[j];
+      }
+    }
+    (u444, v444)
+  }
+
   fn frame<'a>(y: &'a [u8], u: &'a [u8], v: &'a [u8], a: &'a [u8]) -> Yuva420pFrame<'a> {
     Yuva420pFrame::try_new(y, u, v, a, W, H, W, W / 2, W / 2, W).unwrap()
   }
@@ -199,12 +234,13 @@ mod p8 {
   )]
   fn default_and_cosited_sitings_are_byte_identical() {
     let baseline = convert_rgba(ChromaLocation::Unspecified, true);
+    // `BottomLeft` is EXCLUDED: co-sited horizontally but bottom-sited vertically
+    // (`v = 1`), so it folds the even-row vertical blend (its own tests below).
     for loc in [
       ChromaLocation::Unspecified,
       ChromaLocation::Unknown(99),
       ChromaLocation::Left,
       ChromaLocation::TopLeft,
-      ChromaLocation::BottomLeft,
     ] {
       assert_eq!(
         convert_rgba(loc, true),
@@ -415,6 +451,46 @@ mod p8 {
       convert_rgba(ChromaLocation::Bottom, false),
       rgba_ref,
       "bottom YUVA RGBA (scalar) must equal v-fold-upsample-then-4:4:4"
+    );
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn bottomleft_rgba_matches_cosited_vfold_upsample_then_444_with_real_alpha() {
+    // BottomLeft (h=0 co-sited + v=1): RGBA equals a 4:4:4 YUVA decode over the
+    // co-sited-replicate + vertical-blend reconstruction with the SAME source α,
+    // on both tiers; and it genuinely differs from Bottom (co-sited h) and from
+    // the co-sited default (the v=1 fold).
+    let (y, u, v, a) = ramp_planes();
+    let (u444, v444) = ref_full_chroma_bottomleft(&u, &v);
+    let ref_src = Yuva444pFrame::try_new(&y, &u444, &v444, &a, W, H, W, W, W, W).unwrap();
+    let mut rgba_ref = std::vec![0u8; (W * H * 4) as usize];
+    let mut ref_sink = MixedSinker::<Yuva444p>::new(W as usize, H as usize)
+      .with_rgba(&mut rgba_ref)
+      .unwrap();
+    yuva444p_to(&ref_src, false, ColorMatrix::Bt601, &mut ref_sink).unwrap();
+    assert_eq!(
+      convert_rgba(ChromaLocation::BottomLeft, true),
+      rgba_ref,
+      "bottom-left YUVA RGBA (SIMD) must equal cosited-vfold-then-4:4:4 (real source alpha)"
+    );
+    assert_eq!(
+      convert_rgba(ChromaLocation::BottomLeft, false),
+      rgba_ref,
+      "bottom-left YUVA RGBA (scalar) must equal cosited-vfold-then-4:4:4"
+    );
+    assert_ne!(
+      convert_rgba(ChromaLocation::BottomLeft, true),
+      convert_rgba(ChromaLocation::Bottom, true),
+      "BottomLeft (h=0) must differ from Bottom (h=0.5)"
+    );
+    assert_ne!(
+      convert_rgba(ChromaLocation::BottomLeft, true),
+      convert_rgba(ChromaLocation::Left, true),
+      "BottomLeft (v=1) must differ from the co-sited default"
     );
   }
 
@@ -681,6 +757,44 @@ macro_rules! hibit_yuva420_chroma_tests {
         (u444, v444)
       }
 
+      /// The full-resolution U / V a **`BottomLeft`** (`h = 0`, `v = 1`) high-bit
+      /// 4:2:0 decode reconstructs: the even-row vertical box blend of
+      /// [`ref_full_chroma_bottom`], but the CO-SITED horizontal 2× replicate
+      /// instead of the centered kernel.
+      fn ref_full_chroma_bottomleft(u420: &[u16], v420: &[u16]) -> (Vec<u16>, Vec<u16>) {
+        let w = W as usize;
+        let h = H as usize;
+        let cw = w / 2;
+        let mut u444 = std::vec![0u16; w * h];
+        let mut v444 = std::vec![0u16; w * h];
+        let vblend = |plane: &[u16], cr: usize, prev: usize| -> Vec<u16> {
+          (0..cw)
+            .map(|c| {
+              ((u32::from(plane[prev * cw + c]) + u32::from(plane[cr * cw + c]) + 1) >> 1) as u16
+            })
+            .collect()
+        };
+        for r in 0..h {
+          let cr = r / 2;
+          let (uh, vh) = if r & 1 == 0 {
+            let prev = cr.saturating_sub(1);
+            (vblend(u420, cr, prev), vblend(v420, cr, prev))
+          } else {
+            (
+              u420[cr * cw..cr * cw + cw].to_vec(),
+              v420[cr * cw..cr * cw + cw].to_vec(),
+            )
+          };
+          for j in 0..cw {
+            u444[r * w + 2 * j] = uh[j];
+            u444[r * w + 2 * j + 1] = uh[j];
+            v444[r * w + 2 * j] = vh[j];
+            v444[r * w + 2 * j + 1] = vh[j];
+          }
+        }
+        (u444, v444)
+      }
+
       fn frame<'a>(
         y: &'a [u16],
         u: &'a [u16],
@@ -728,7 +842,6 @@ macro_rules! hibit_yuva420_chroma_tests {
           ChromaLocation::Unknown(99),
           ChromaLocation::Left,
           ChromaLocation::TopLeft,
-          ChromaLocation::BottomLeft,
         ] {
           assert_eq!(
             convert_rgba(loc, true),
@@ -987,6 +1100,44 @@ macro_rules! hibit_yuva420_chroma_tests {
           rgba_ref,
           "bottom high-bit YUVA RGBA (scalar) must equal v-fold-upsample-then-4:4:4"
         );
+      }
+
+      #[test]
+      #[cfg_attr(
+        miri,
+        ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+      )]
+      fn bottomleft_rgba_matches_cosited_vfold_upsample_then_444_with_real_alpha() {
+        // BottomLeft (h=0 co-sited + v=1) high-bit: RGBA equals a `Yuva444pN`
+        // decode over the co-sited-replicate + vertical-blend reconstruction with
+        // the SAME source α, on both tiers; and differs from Bottom (co-sited h)
+        // and from the co-sited default (the v=1 fold).
+        let (y, u, v, a) = ramp_planes();
+        let (u444, v444) = ref_full_chroma_bottomleft(&u, &v);
+        let ref_src = $RefFrame::try_new(&y, &u444, &v444, &a, W, H, W, W, W, W).unwrap();
+        let mut rgba_ref = std::vec![0u8; (W * H * 4) as usize];
+        let mut ref_sink = MixedSinker::<$Ref>::new(W as usize, H as usize)
+          .with_rgba(&mut rgba_ref)
+          .unwrap();
+        $ref_walker(&ref_src, false, ColorMatrix::Bt601, &mut ref_sink).unwrap();
+        assert_eq!(
+          convert_rgba(ChromaLocation::BottomLeft, true),
+          rgba_ref,
+          "bottom-left high-bit YUVA RGBA (SIMD) must equal cosited-vfold-then-4:4:4"
+        );
+        assert_eq!(
+          convert_rgba(ChromaLocation::BottomLeft, false),
+          rgba_ref,
+          "bottom-left high-bit YUVA RGBA (scalar) must equal cosited-vfold-then-4:4:4"
+        );
+        assert_ne!(
+          convert_rgba(ChromaLocation::BottomLeft, true),
+          convert_rgba(ChromaLocation::Bottom, true),
+          "BottomLeft (h=0) must differ from Bottom (h=0.5)"
+        );
+        // (The v=1 fold's non-vacuity + exact value are pinned across all depths
+        // by the oracle match above and the resample suite's vramp tests; this
+        // direct ramp's per-row step is sub-8-bit-RGB-quantization at 16-bit.)
       }
 
       #[test]

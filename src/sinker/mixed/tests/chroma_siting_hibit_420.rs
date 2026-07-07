@@ -126,6 +126,50 @@ fn ref_full_chroma_bottom_u16(u420: &[u16], v420: &[u16]) -> (Vec<u16>, Vec<u16>
   (u444, v444)
 }
 
+/// The full-resolution U / V a **`BottomLeft`** (`h = 0`, `v = 1`) high-bit 4:2:0
+/// decode reconstructs: [`ref_full_chroma_bottom_u16`]'s even-row vertical box
+/// blend, but fed to the CO-SITED horizontal 2× replicate instead of the centered
+/// kernel. The direct-decode ground truth for the co-sited-h + bottom-v siting.
+fn ref_full_chroma_bottomleft_u16(u420: &[u16], v420: &[u16]) -> (Vec<u16>, Vec<u16>) {
+  let w = W as usize;
+  let h = H as usize;
+  let cw = w / 2;
+  let mut u444 = std::vec![0u16; w * h];
+  let mut v444 = std::vec![0u16; w * h];
+  let vblend = |plane: &[u16], cr: usize, prev: usize| -> Vec<u16> {
+    (0..cw)
+      .map(|c| {
+        let a = plane[prev * cw + c] as u32;
+        let b = plane[cr * cw + c] as u32;
+        ((a + b + 1) >> 1) as u16
+      })
+      .collect::<Vec<u16>>()
+  };
+  let replicate = |half: &[u16]| -> Vec<u16> {
+    let mut out = std::vec![0u16; w];
+    for j in 0..cw {
+      out[2 * j] = half[j];
+      out[2 * j + 1] = half[j];
+    }
+    out
+  };
+  for r in 0..h {
+    let cr = r / 2;
+    let (uhalf, vhalf) = if r & 1 == 0 {
+      let prev = cr.saturating_sub(1);
+      (vblend(u420, cr, prev), vblend(v420, cr, prev))
+    } else {
+      (
+        u420[cr * cw..cr * cw + cw].to_vec(),
+        v420[cr * cw..cr * cw + cw].to_vec(),
+      )
+    };
+    u444[r * w..r * w + w].copy_from_slice(&replicate(&uhalf));
+    v444[r * w..r * w + w].copy_from_slice(&replicate(&vhalf));
+  }
+  (u444, v444)
+}
+
 // ---- u16 kernel oracle (endianness-explicit) -------------------------------
 
 #[test]
@@ -377,6 +421,127 @@ fn bottom_even_upsample_u16_kernel_masks_dirty_upper_bits() {
   check::<12>();
 }
 
+// ---- u16 bottom-LEFT (h = 0, v = 1) kernel oracle --------------------------
+
+#[test]
+fn cosited_upsample_u16_kernel_matches_hand_computed_and_be_matches_le() {
+  // Co-sited horizontal reconstruction is a plain 2× replicate (masked to BITS).
+  let c = [10u16, 400, 900, 300];
+  let enc = |s: &[u16], be: bool| -> Vec<u16> {
+    s.iter()
+      .map(|&x| if be { x.to_be() } else { x.to_le() })
+      .collect()
+  };
+  let mut out_le = [0u16; 8];
+  crate::row::scalar::chroma_upsample_2to1_cosited_h_u16::<10>(
+    &enc(&c, false),
+    &mut out_le,
+    8,
+    false,
+  );
+  assert_eq!(
+    out_le.map(u16::from_le),
+    [10, 10, 400, 400, 900, 900, 300, 300]
+  );
+  let mut out_be = [0u16; 8];
+  crate::row::scalar::chroma_upsample_2to1_cosited_h_u16::<10>(
+    &enc(&c, true),
+    &mut out_be,
+    8,
+    true,
+  );
+  let dec_be: Vec<u16> = out_be.iter().map(|&x| u16::from_be(x)).collect();
+  assert_eq!(
+    dec_be,
+    out_le.map(u16::from_le).to_vec(),
+    "BE co-sited kernel must equal LE for the same logical samples"
+  );
+}
+
+#[test]
+fn bottomleft_even_upsample_u16_kernel_matches_hand_computed() {
+  // prev = [0, 0, 100, 100], cur = [40, 40, 60, 60]; e = (prev + cur + 1) >> 1 =
+  // [20, 20, 80, 80], then the CO-SITED 2× replicate.
+  let prev = [0u16, 0, 100, 100].map(u16::to_le);
+  let cur = [40u16, 40, 60, 60].map(u16::to_le);
+  let mut out = [0u16; 8];
+  crate::row::scalar::chroma_upsample_420_bottomleft_even_h_u16::<10>(
+    &prev, &cur, &mut out, 8, false,
+  );
+  assert_eq!(out.map(u16::from_le), [20, 20, 20, 20, 80, 80, 80, 80]);
+}
+
+#[test]
+fn bottomleft_even_upsample_u16_kernel_equals_cosited_when_rows_match() {
+  let cur = [10u16, 400, 900, 300];
+  let mut bl = [0u16; 8];
+  let mut cosited = [0u16; 8];
+  crate::row::scalar::chroma_upsample_420_bottomleft_even_h_u16::<10>(
+    &cur, &cur, &mut bl, 8, false,
+  );
+  crate::row::scalar::chroma_upsample_2to1_cosited_h_u16::<10>(&cur, &mut cosited, 8, false);
+  assert_eq!(
+    bl, cosited,
+    "prev == cur must collapse the vertical blend to the co-sited replicate"
+  );
+}
+
+#[test]
+fn bottomleft_even_upsample_u16_kernel_be_matches_le_and_masks_dirty_bits() {
+  fn check<const BITS: u32>() {
+    let mask = ((1u32 << BITS) - 1) as u16;
+    let upper = !mask;
+    let prev = [10u16 & mask, 300 & mask, 200 & mask, 50 & mask];
+    let cur = [80u16 & mask, 40 & mask, 260 & mask, 120 & mask];
+    for be in [false, true] {
+      let enc = |s: &[u16]| -> Vec<u16> {
+        s.iter()
+          .map(|&x| if be { x.to_be() } else { x.to_le() })
+          .collect()
+      };
+      let dirty = |s: &[u16]| -> Vec<u16> {
+        s.iter()
+          .map(|&x| {
+            let d = x | upper;
+            if be { d.to_be() } else { d.to_le() }
+          })
+          .collect()
+      };
+      let mut clean = [0u16; 8];
+      let mut dirtied = [0u16; 8];
+      crate::row::scalar::chroma_upsample_420_bottomleft_even_h_u16::<BITS>(
+        &enc(&prev),
+        &enc(&cur),
+        &mut clean,
+        8,
+        be,
+      );
+      crate::row::scalar::chroma_upsample_420_bottomleft_even_h_u16::<BITS>(
+        &dirty(&prev),
+        &dirty(&cur),
+        &mut dirtied,
+        8,
+        be,
+      );
+      assert_eq!(
+        clean, dirtied,
+        "BITS={BITS} be={be}: dirty upper bits must be masked before the blend"
+      );
+      let dec_max = clean
+        .iter()
+        .map(|&x| u32::from(if be { u16::from_be(x) } else { u16::from_le(x) }))
+        .max()
+        .unwrap();
+      assert!(
+        dec_max <= mask as u32,
+        "BITS={BITS} be={be}: blended output must stay within the bit depth"
+      );
+    }
+  }
+  check::<10>();
+  check::<12>();
+}
+
 /// Vertical chroma ramp: flat mid-gray luma with chroma CONSTANT across columns
 /// but stepping strongly per ROW, so the `Bottom` vertical blend is observable in
 /// isolation (a horizontal-only siting leaves it untouched). Values clamp to
@@ -445,7 +610,6 @@ macro_rules! hibit_420_chroma_tests {
           ChromaLocation::Unknown(99),
           ChromaLocation::Left,
           ChromaLocation::TopLeft,
-          ChromaLocation::BottomLeft,
         ] {
           assert_eq!(
             convert_rgb(loc, true),
@@ -717,6 +881,70 @@ macro_rules! hibit_420_chroma_tests {
           convert_rgb_with(ChromaLocation::Bottom, true, &yp, &up, &vp),
           convert_rgb_with(ChromaLocation::Bottom, false, &yp, &up, &vp),
           "bottom path must be bit-identical across the SIMD and scalar tiers"
+        );
+      }
+
+      #[test]
+      #[cfg_attr(
+        miri,
+        ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+      )]
+      fn bottomleft_rgb_and_u16_match_cosited_vblend_reference() {
+        let (yp, up, vp) = vramp_planes_n(MAXV);
+        let (u444, v444) = ref_full_chroma_bottomleft_u16(&up, &vp);
+
+        let ref_src = $RefFrame::new(&yp, &u444, &v444, W, H, W, W, W);
+        let mut rgb_ref = std::vec![0u8; (W * H * 3) as usize];
+        let mut ref_sink = MixedSinker::<$Ref>::new(W as usize, H as usize)
+          .with_rgb(&mut rgb_ref)
+          .unwrap();
+        $ref_walker(&ref_src, false, ColorMatrix::Bt601, &mut ref_sink).unwrap();
+        assert_eq!(
+          convert_rgb_with(ChromaLocation::BottomLeft, true, &yp, &up, &vp),
+          rgb_ref,
+          "bottom-left high-bit 4:2:0 RGB must equal co-sited-replicate + vblend then 4:4:4"
+        );
+
+        let src = $Frame::new(&yp, &up, &vp, W, H, W, W / 2, W / 2);
+        let mut rgb16 = std::vec![0u16; (W * H * 3) as usize];
+        let mut sink = MixedSinker::<$Marker>::new(W as usize, H as usize)
+          .with_rgb_u16(&mut rgb16)
+          .unwrap()
+          .with_chroma_location(ChromaLocation::BottomLeft);
+        $walker(&src, false, ColorMatrix::Bt601, &mut sink).unwrap();
+        let ref_src = $RefFrame::new(&yp, &u444, &v444, W, H, W, W, W);
+        let mut rgb16_ref = std::vec![0u16; (W * H * 3) as usize];
+        let mut ref_sink = MixedSinker::<$Ref>::new(W as usize, H as usize)
+          .with_rgb_u16(&mut rgb16_ref)
+          .unwrap();
+        $ref_walker(&ref_src, false, ColorMatrix::Bt601, &mut ref_sink).unwrap();
+        assert_eq!(rgb16, rgb16_ref, "bottom-left RGB u16 must equal cosited-vblend-then-4:4:4");
+      }
+
+      #[test]
+      #[cfg_attr(
+        miri,
+        ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+      )]
+      fn bottomleft_folds_vertically_simd_matches_scalar_and_differs_from_bottom() {
+        let (yp, up, vp) = vramp_planes_n(MAXV);
+        // v=1 fold: differs from the co-sited default on a vertical ramp.
+        assert_ne!(
+          convert_rgb_with(ChromaLocation::BottomLeft, true, &yp, &up, &vp),
+          convert_rgb_with(ChromaLocation::Left, true, &yp, &up, &vp),
+          "BottomLeft must fold the vertical phase (differ from co-sited)"
+        );
+        assert_eq!(
+          convert_rgb_with(ChromaLocation::BottomLeft, true, &yp, &up, &vp),
+          convert_rgb_with(ChromaLocation::BottomLeft, false, &yp, &up, &vp),
+          "bottom-left path must be bit-identical across SIMD and scalar"
+        );
+        // Co-sited-h difference from Bottom shows on a horizontal ramp.
+        let (yp, up, vp) = ramp_planes_n(MAXV);
+        assert_ne!(
+          convert_rgb_with(ChromaLocation::BottomLeft, true, &yp, &up, &vp),
+          convert_rgb_with(ChromaLocation::Bottom, true, &yp, &up, &vp),
+          "BottomLeft (h=0) must differ from Bottom (h=0.5) on a horizontal ramp"
         );
       }
 

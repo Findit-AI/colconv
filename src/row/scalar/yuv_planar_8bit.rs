@@ -409,6 +409,109 @@ pub(crate) fn chroma_upsample_420_bottom_even_h(
   }
 }
 
+/// Co-sited (`h = 0`) horizontal 4:2:0 chroma upsample — colconv's default
+/// **nearest-neighbor** reconstruction expressed as a full-width chroma row. Each
+/// half-width chroma sample `c[j]` covers its two luma columns `2j` and `2j+1`
+/// unchanged (the `AVCHROMA_LOC_LEFT` / `TopLeft` / `BottomLeft` horizontal
+/// phase), so reconstruction is a plain 2× replicate:
+///
+/// ```text
+///   c_full[2j] = c_full[2j + 1] = c[j]
+/// ```
+///
+/// The full-width co-sited twin of the centered [`chroma_upsample_2to1_center_h`]:
+/// where the centered kernel interpolates the `+0.5`-sample phase, this one keeps
+/// the co-sited sample as-is. In the scalar domain feeding the result to the
+/// 4:4:4 decode is bit-identical to the fused co-sited [`yuv_420_to_rgb_row`]
+/// nearest-neighbor path (both duplicate `c[j]` across the column pair), so a
+/// siting whose sole non-trivial fold is `BottomLeft`'s `v = 1` vertical phase
+/// (its horizontal axis stays co-sited) reconstructs full-width chroma through the
+/// SAME 4:4:4 pipeline as the centered sitings.
+///
+/// # Panics (debug builds)
+///
+/// - `width` must be even (4:2:0 pairs pixel columns).
+/// - `c_half.len() >= width / 2`, `c_full.len() >= width`.
+// Gated like [`chroma_upsample_2to1_center_h`]: reachable only through the
+// bottom-left-sited `Yuv420p` identity path, which stages the full-width chroma
+// in a `Vec` scratch (so heap allocation is available).
+#[cfg(any(feature = "std", feature = "alloc"))]
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn chroma_upsample_2to1_cosited_h(c_half: &[u8], c_full: &mut [u8], width: usize) {
+  debug_assert_eq!(
+    width & 1,
+    0,
+    "2:1 horizontal chroma subsampling requires even width"
+  );
+  debug_assert!(c_half.len() >= width / 2, "c_half row too short");
+  debug_assert!(c_full.len() >= width, "c_full row too short");
+
+  let half = width / 2;
+  for j in 0..half {
+    let c = c_half[j];
+    c_full[2 * j] = c;
+    c_full[2 * j + 1] = c;
+  }
+}
+
+/// Vertically-blended twin of [`chroma_upsample_2to1_cosited_h`] for the
+/// **bottom-left-sited** vertical phase of an *even* output luma row (#302): the
+/// FFmpeg `AVCHROMA_LOC_BOTTOMLEFT` (`BottomLeft`) position `h = 0`, `v = 1`.
+/// Like [`chroma_upsample_420_bottom_even_h`] the even luma row `2i` sits halfway
+/// between chroma rows `i-1` and `i`, so its reconstructed chroma is the
+/// **vertical box average** of the previous and current half-width chroma rows
+///
+/// ```text
+///   e[j] = (prev[j] + cur[j] + 1) >> 1      (top edge: prev clamped to cur)
+/// ```
+///
+/// but fed to the **co-sited** (`h = 0`) horizontal phase — a plain 2× replicate,
+/// as [`chroma_upsample_2to1_cosited_h`] — rather than the centered `1/4`–`3/4`
+/// weights, because `BottomLeft` keeps its co-sited nearest-neighbor horizontal
+/// reconstruction:
+///
+/// ```text
+///   c_full[2j] = c_full[2j + 1] = e[j]
+/// ```
+///
+/// The vertical blend and the co-sited replicate are fused into one pass, so no
+/// half-width vertical-blend scratch is needed — only the caller's one-row chroma
+/// lookback (`prev_half`). The **odd** luma row `2i+1` is co-sited with chroma row
+/// `i` (`v = 1`), so it needs no vertical blend and reuses
+/// [`chroma_upsample_2to1_cosited_h`] on `cur_half` directly. The result is a
+/// full-width chroma row the caller feeds to the existing 4:4:4 decode, so the
+/// bottom-left-sited path reuses the fully-SIMD 4:4:4 kernels and stays
+/// bit-identical per tier.
+///
+/// # Panics (debug builds)
+///
+/// - `width` must be even (4:2:0 pairs pixel columns).
+/// - `prev_half.len() >= width / 2`, `cur_half.len() >= width / 2`,
+///   `c_full.len() >= width`.
+// Gated like [`chroma_upsample_420_bottom_even_h`]: reachable only through the
+// bottom-left-sited `Yuv420p` identity path, which stages the full-width chroma
+// in a `Vec` scratch (so heap allocation is available).
+#[cfg(any(feature = "std", feature = "alloc"))]
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn chroma_upsample_420_bottomleft_even_h(
+  prev_half: &[u8],
+  cur_half: &[u8],
+  c_full: &mut [u8],
+  width: usize,
+) {
+  debug_assert_eq!(width & 1, 0, "YUV 4:2:0 requires even width");
+  debug_assert!(prev_half.len() >= width / 2, "prev_half row too short");
+  debug_assert!(cur_half.len() >= width / 2, "cur_half row too short");
+  debug_assert!(c_full.len() >= width, "c_full row too short");
+
+  let half = width / 2;
+  for j in 0..half {
+    let e = (((prev_half[j] as u32) + (cur_half[j] as u32) + 1) >> 1) as u8;
+    c_full[2 * j] = e;
+    c_full[2 * j + 1] = e;
+  }
+}
+
 /// `u16` twin of [`chroma_upsample_2to1_center_h`] for the **high-bit** planar
 /// 4:2:0 / 4:2:2 formats (`Yuv420p9` … `Yuv420p16` / `Yuv422p9` … `Yuv422p16`,
 /// #302). Same MPEG-1 / JPEG
@@ -572,6 +675,129 @@ pub(crate) fn chroma_upsample_420_bottom_even_h_u16<const BITS: u32>(
     let right = vblend(if j + 1 < half { j + 1 } else { j });
     c_full[2 * j] = store((left + 3 * mid + 2) >> 2);
     c_full[2 * j + 1] = store((3 * mid + right + 2) >> 2);
+  }
+}
+
+/// `u16` twin of [`chroma_upsample_2to1_cosited_h`] for the **high-bit** planar
+/// 4:2:0 formats (`Yuv420p9` … `Yuv420p16`): the co-sited (`h = 0`) horizontal
+/// upsample — a plain 2× replicate — on `u16` chroma, so `BottomLeft` reconstructs
+/// full-width chroma through the SAME `yuv444p{9,…,16}_to_*_row_endian` kernels as
+/// the centered high-bit path. Each sample is normalized wire → host-native and
+/// masked to the low `BITS` (`& ((1 << BITS) - 1)`; `u16::MAX` / a no-op at
+/// `BITS = 16`) then re-encoded to the SAME wire order, EXACTLY as
+/// [`chroma_upsample_2to1_center_h_u16`], so the full-width chroma is clean
+/// wire-order and the decode stays host-endianness-independent:
+///
+/// ```text
+///   c_full[2j] = c_full[2j + 1] = c[j]
+/// ```
+///
+/// # Panics (debug builds)
+///
+/// - `width` must be even (4:2:0 pairs pixel columns).
+/// - `c_half.len() >= width / 2`, `c_full.len() >= width`.
+#[cfg(any(feature = "std", feature = "alloc"))]
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn chroma_upsample_2to1_cosited_h_u16<const BITS: u32>(
+  c_half: &[u16],
+  c_full: &mut [u16],
+  width: usize,
+  big_endian: bool,
+) {
+  debug_assert_eq!(
+    width & 1,
+    0,
+    "2:1 horizontal chroma subsampling requires even width"
+  );
+  debug_assert!(c_half.len() >= width / 2, "c_half row too short");
+  debug_assert!(c_full.len() >= width, "c_full row too short");
+
+  let mask = ((1u32 << BITS) - 1) as u16;
+  let load = |raw: u16| -> u16 {
+    let logical = if big_endian {
+      u16::from_be(raw)
+    } else {
+      u16::from_le(raw)
+    };
+    logical & mask
+  };
+  let store = |logical: u16| -> u16 {
+    if big_endian {
+      logical.to_be()
+    } else {
+      logical.to_le()
+    }
+  };
+
+  let half = width / 2;
+  for j in 0..half {
+    let c = store(load(c_half[j]));
+    c_full[2 * j] = c;
+    c_full[2 * j + 1] = c;
+  }
+}
+
+/// `u16` twin of [`chroma_upsample_420_bottomleft_even_h`] for the **high-bit**
+/// planar 4:2:0 formats (`Yuv420p9` … `Yuv420p16`): the EVEN output luma row's
+/// bottom-left-sited (`h = 0`, `v = 1`) vertical box-blend of the previous
+/// (`prev_half`) and current (`cur_half`) half-width chroma rows, fused with the
+/// co-sited (`h = 0`) horizontal 2× replicate, on `u16` chroma.
+///
+/// ```text
+///   e[j]       = (prev[j] + cur[j] + 1) >> 1        (vertical box blend)
+///   c_full[2j] = c_full[2j + 1] = e[j]              (co-sited replicate)
+/// ```
+///
+/// Both `prev_half` / `cur_half` and `c_full` carry samples in the source's
+/// **wire byte order** (`big_endian`); the function is generic over the source bit
+/// depth `BITS` (`9`…`16`). Each input is normalized wire → host-native and masked
+/// to the low `BITS` BEFORE the blend, EXACTLY as
+/// [`chroma_upsample_420_bottom_even_h_u16`], so dirty upper bits in a
+/// malformed-but-accepted low-packed frame are discarded and never leak through
+/// the blend. The blend runs in the logical domain (`a + b + 1 ≤ 2^17`, no `u32`
+/// overflow, result in `[0, (1 << BITS) - 1]`) and each output is re-encoded to
+/// the SAME wire order. The **odd** luma row `2i+1` is co-sited with chroma row
+/// `i` (`v = 1`), so it needs no vertical blend and reuses
+/// [`chroma_upsample_2to1_cosited_h_u16`] on `cur_half` directly.
+///
+/// # Panics (debug builds)
+///
+/// - `width` must be even (4:2:0 pairs pixel columns).
+/// - `prev_half.len() >= width / 2`, `cur_half.len() >= width / 2`,
+///   `c_full.len() >= width`.
+#[cfg(any(feature = "std", feature = "alloc"))]
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn chroma_upsample_420_bottomleft_even_h_u16<const BITS: u32>(
+  prev_half: &[u16],
+  cur_half: &[u16],
+  c_full: &mut [u16],
+  width: usize,
+  big_endian: bool,
+) {
+  debug_assert_eq!(width & 1, 0, "YUV 4:2:0 requires even width");
+  debug_assert!(prev_half.len() >= width / 2, "prev_half row too short");
+  debug_assert!(cur_half.len() >= width / 2, "cur_half row too short");
+  debug_assert!(c_full.len() >= width, "c_full row too short");
+
+  let mask = ((1u32 << BITS) - 1) as u16;
+  let load = |raw: u16| -> u32 {
+    let logical = if big_endian {
+      u16::from_be(raw)
+    } else {
+      u16::from_le(raw)
+    };
+    (logical & mask) as u32
+  };
+  let store = |logical: u32| -> u16 {
+    let v = logical as u16;
+    if big_endian { v.to_be() } else { v.to_le() }
+  };
+
+  let half = width / 2;
+  for j in 0..half {
+    let e = store((load(prev_half[j]) + load(cur_half[j]) + 1) >> 1);
+    c_full[2 * j] = e;
+    c_full[2 * j + 1] = e;
   }
 }
 

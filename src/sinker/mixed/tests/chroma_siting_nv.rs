@@ -138,15 +138,16 @@ macro_rules! nv_chroma_siting_tests {
       fn default_and_cosited_sitings_are_byte_identical() {
         // The pre-#302 baseline: a sink that never sets a chroma location.
         let baseline = convert_rgb(ChromaLocation::Unspecified, true);
-        // Unspecified / Unknown and every horizontally co-sited value keep the
-        // exact fused nearest-neighbor decode — bit-for-bit equal even though
-        // the chroma plane is a non-trivial ramp.
+        // Unspecified / Unknown and every FULLY co-sited value keep the exact
+        // fused nearest-neighbor decode — bit-for-bit equal even though the
+        // chroma plane is a non-trivial ramp. `BottomLeft` is EXCLUDED: co-sited
+        // horizontally but bottom-sited vertically (`v = 1`), so it folds the
+        // even-row vertical blend (covered by its own test below).
         for loc in [
           ChromaLocation::Unspecified,
           ChromaLocation::Unknown(99),
           ChromaLocation::Left,
           ChromaLocation::TopLeft,
-          ChromaLocation::BottomLeft,
         ] {
           assert_eq!(
             convert_rgb(loc, true),
@@ -252,6 +253,49 @@ macro_rules! nv_chroma_siting_tests {
           convert_rgb(ChromaLocation::Bottom, true),
           center,
           "Bottom's vertical box blend must differ from Center on a vertically-varying chroma ramp"
+        );
+      }
+
+      #[test]
+      #[cfg_attr(
+        miri,
+        ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+      )]
+      fn bottomleft_folds_vertical_and_matches_yuv420p() {
+        // BottomLeft (h=0 co-sited + v=1) must (a) differ from Bottom (h=0.5) —
+        // the horizontal phase — and from TopLeft (v=0.5 replicate) — the
+        // vertical fold; (b) equal the SAME BottomLeft decode of the planar
+        // Yuv420p twin (the strongest catch for a U/V swap in the de-interleave,
+        // and pins the exact value against the validated Yuv420p BottomLeft); and
+        // (c) be bit-identical across SIMD and scalar.
+        let bl = convert_rgb(ChromaLocation::BottomLeft, true);
+        assert_ne!(
+          bl,
+          convert_rgb(ChromaLocation::Bottom, true),
+          "BottomLeft (h=0) must differ from Bottom (h=0.5)"
+        );
+        assert_ne!(
+          bl,
+          convert_rgb(ChromaLocation::TopLeft, true),
+          "BottomLeft (v=1) must differ from TopLeft (vertical-replicate)"
+        );
+        assert_eq!(
+          bl,
+          convert_rgb(ChromaLocation::BottomLeft, false),
+          "BottomLeft path must be bit-identical across the SIMD and scalar tiers"
+        );
+
+        let (yp, up, vp) = ramp_planes();
+        let src420 = Yuv420pFrame::new(&yp, &up, &vp, W, H, W, W / 2, W / 2);
+        let mut rgb420 = std::vec![0u8; (W * H * 3) as usize];
+        let mut sink420 = MixedSinker::<Yuv420p>::new(W as usize, H as usize)
+          .with_rgb(&mut rgb420)
+          .unwrap()
+          .with_chroma_location(ChromaLocation::BottomLeft);
+        yuv420p_to(&src420, false, ColorMatrix::Bt601, &mut sink420).unwrap();
+        assert_eq!(
+          bl, rgb420,
+          "BottomLeft semi-planar must equal BottomLeft Yuv420p of the same planes"
         );
       }
 

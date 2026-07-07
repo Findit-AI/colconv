@@ -172,37 +172,45 @@ pub(super) const fn chroma_420_center_sited_h(loc: crate::ChromaLocation) -> boo
   )
 }
 
-/// Whether `loc` is the FFmpeg `AVCHROMA_LOC_BOTTOM` (`Bottom`) siting — chroma
-/// co-sited with the **bottom** luma row of each vertical pair (`v = 1`) AND
-/// horizontally centered (`h = 0.5`); the full
+/// Whether `loc` places 4:2:0 chroma at the **bottom** vertical phase (`v = 1`)
+/// — the FFmpeg `AVCHROMA_LOC_BOTTOM` (`Bottom`, `h = 0.5`) and
+/// `AVCHROMA_LOC_BOTTOMLEFT` (`BottomLeft`, `h = 0`) sitings, whose chroma is
+/// co-sited with the **bottom** luma row of each vertical pair; the full
 /// [`ChromaLocation`](crate::ChromaLocation) → sample-phase map is in
 /// [`chroma_420_center_sited_h`]'s table. At `v = 1` the chroma sample sits on
 /// the lower luma row, so:
 ///
 /// - the **even** luma row `2i` lies halfway between chroma rows `i-1` and `i`,
-///   and its reconstructed chroma is the vertical box average of those two
-///   rows, fused with the `h = 0.5` horizontal phase by
-///   [`chroma_upsample_420_bottom_even_h`](crate::row::scalar::chroma_upsample_420_bottom_even_h);
+///   and its reconstructed chroma is the vertical box average of those two rows,
+///   fused with the siting's horizontal phase —
+///   [`chroma_upsample_420_bottom_even_h`](crate::row::scalar::chroma_upsample_420_bottom_even_h)
+///   for `Bottom`'s `h = 0.5` centered fold,
+///   [`chroma_upsample_420_bottomleft_even_h`](crate::row::scalar::chroma_upsample_420_bottomleft_even_h)
+///   for `BottomLeft`'s `h = 0` co-sited (nearest-neighbor) fold;
 /// - the **odd** luma row `2i+1` is co-sited with chroma row `i`, so it needs no
-///   vertical blend and keeps the plain horizontal centered upsample.
+///   vertical blend and keeps the siting's plain horizontal upsample.
 ///
-/// `Bottom` is the one siting whose **vertical** phase the streaming sink can
+/// The `v = 1` phase is the one vertical siting a top-to-bottom stream can
 /// reconstruct with a **backward** one-row chroma lookback: the even row's
 /// `c[i-1]` is the *previous* chroma row (already streamed), so the blend is
-/// causal, and because `Bottom` is also horizontally centered it rides the same
-/// full-width staging the `h = 0.5` identity path already uses. The `v = 0`
-/// (`Top` / `TopLeft`) and `v = 0.5` (`Center` / `Left`) phases instead need the
-/// *next* chroma row for the odd output row — which the row-at-a-time `process`
-/// cannot see without a forward delay line — and `BottomLeft` (`h = 0`, `v = 1`)
-/// would need a horizontal co-sited full-width staging the identity path does
-/// not have; those are tracked as a follow-up and keep their current decode
+/// causal. The horizontal axis is independent — `Bottom` rides the centered
+/// full-width staging the `h = 0.5` identity path already uses, `BottomLeft`
+/// rides the co-sited (nearest-neighbor) full-width staging — so both fold the
+/// same vertical box average and this predicate matches both (the 4:2:0 twin of
+/// the wider [`chroma_440_bottom_sited_v`] match). The `v = 0` (`Top` /
+/// `TopLeft`) and `v = 0.5` (`Center` / `Left`) phases instead need the *next*
+/// chroma row for the odd output row — which the row-at-a-time `process` cannot
+/// see without a forward delay line — so they keep their vertical-co-sited decode
 /// (`Center` / `Top` still apply their horizontal phase via
 /// [`chroma_420_center_sited_h`]). `Left` (the `yuv420p` default, `v = 0.5`) and
 /// every unspecified siting keep the byte-identical vertical-replicate decode.
 #[cfg(feature = "yuv-planar")]
 #[inline]
 pub(super) const fn chroma_420_bottom_sited_v(loc: crate::ChromaLocation) -> bool {
-  matches!(loc, crate::ChromaLocation::Bottom)
+  matches!(
+    loc,
+    crate::ChromaLocation::Bottom | crate::ChromaLocation::BottomLeft
+  )
 }
 
 /// Whether `loc` places 4:4:0 chroma at the **bottom** vertical phase (`v = 1`)

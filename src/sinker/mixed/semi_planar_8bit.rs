@@ -499,16 +499,17 @@ fn nv_deinterleave_chroma_half(
 /// De-interleaves the NV packed chroma half-row into the already-reserved
 /// half-width U / V scratch ([`nv_deinterleave_chroma_half`]), then reconstructs
 /// full-width chroma into `chroma_full` via the siting-aware
-/// [`upsample_420_chroma_sited`] — the centered horizontal `1/4`–`3/4` upsample,
-/// plus (for `bottom_v`, the RFC #238 S4-C `Bottom` vertical phase) the `v = 1`
+/// [`upsample_420_chroma_sited`] — the `center_h` horizontal upsample (centered
+/// `1/4`–`3/4` when true, co-sited nearest-neighbor when false), plus (for
+/// `bottom_v`, the RFC #238 `Bottom` / `BottomLeft` vertical phase) the `v = 1`
 /// box blend of the current chroma row with the previous one through the
 /// `chroma_prev` lookback. Returns the full-width `(u_full, v_full)` the 4:4:4
 /// decode kernels consume. The lookback stores the DE-INTERLEAVED chroma, so a
-/// semi-planar `Bottom` even row box-blends the de-interleaved prev + cur rows —
-/// identical math to the planar `Yuv420p` twin, just after the de-interleave.
-/// When `bottom_v == false` (`Center` / `Top`, and every 4:2:2 caller) it is
-/// byte-identical to the pre-S4-C horizontal-only upsample: the sited helper
-/// delegates to the plain centered upsample and stages nothing.
+/// semi-planar `Bottom` / `BottomLeft` even row box-blends the de-interleaved
+/// prev + cur rows — identical math to the planar `Yuv420p` twin, just after the
+/// de-interleave. When `bottom_v == false` (`Center` / `Top`, and every 4:2:2
+/// caller) it is byte-identical to the pre-vertical horizontal-only upsample: the
+/// sited helper delegates to the plain horizontal upsample and stages nothing.
 ///
 /// `stage` follows the [`upsample_420_chroma_sited`] contract — the direct
 /// decode passes `true` (its post-reconstruction work is infallible), the
@@ -529,6 +530,7 @@ fn nv_center_upsample_chroma<'s>(
   uv: &[u8],
   idx: usize,
   bottom_v: bool,
+  center_h: bool,
   stage: bool,
   width: usize,
   swap_uv: bool,
@@ -543,6 +545,7 @@ fn nv_center_upsample_chroma<'s>(
     &v_half[..cw],
     idx,
     bottom_v,
+    center_h,
     stage,
     width,
   )
@@ -847,7 +850,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv12, R> {
           // Reject a multi-kernel (BICUBLIN) filter plan BEFORE the centered
           // reserve below, mirroring the delegate's own first act (idempotent).
           plan.ensure_single_kernel_filter()?;
-          if center_sited && want_color {
+          if (center_sited || bottom_v) && want_color {
             let need_luma = luma.is_some() || luma_u16.is_some();
             let expected = if need_luma {
               luma_filter_stream.as_ref().map_or(0, |s| s.next_y())
@@ -891,6 +894,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv12, R> {
               row.uv_half(),
               idx,
               bottom_v,
+              center_sited,
               false,
               w,
               false,
@@ -1087,7 +1091,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv12, R> {
       // the RGB converter, so it stays on the co-sited arm (which only bins luma).
       // `planar_dual_resample` re-runs the idempotent preflight.
       #[cfg(feature = "yuv-planar")]
-      if center_sited && want_color {
+      if (center_sited || bottom_v) && want_color {
         let need_luma = luma.is_some() || luma_u16.is_some();
         let expected = if need_luma {
           luma_stream.as_ref().map_or(0, |s| s.next_y())
@@ -1131,6 +1135,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv12, R> {
           row.uv_half(),
           idx,
           bottom_v,
+          center_sited,
           false,
           w,
           false,
@@ -1267,7 +1272,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv12, R> {
     // The later `nv_center_upsample_chroma` / `rgb_row_buf_or_scratch` calls
     // then reuse the already-sized buffers.
     #[cfg(feature = "yuv-planar")]
-    if center_sited && (want_rgb || want_rgba || want_hsv) {
+    if (center_sited || bottom_v) && (want_rgb || want_rgba || want_hsv) {
       reserve_420_chroma_full(chroma_full, w, h)?;
       reserve_nv_chroma_half(semi_planar_u_half, semi_planar_v_half, w, h)?;
     }
@@ -1337,11 +1342,12 @@ impl<R> PixelSink for MixedSinker<'_, Nv12, R> {
     if want_hsv_direct {
       let hsv = hsv.as_mut().expect("want_hsv_direct implies hsv attached");
       let (h, s, v) = hsv.hsv();
-      // Centered siting (#302): de-interleave + phase-0.5 upsample chroma to
-      // full width, then run the 4:4:4 HSV kernel (scratch reserved above).
-      // `center_sited` is only ever true under `yuv-planar`.
+      // Sited siting (#302): de-interleave + full-width upsample chroma
+      // (centered phase-0.5 or co-sited nearest-neighbor + `BottomLeft`'s `v = 1`
+      // fold), then run the 4:4:4 HSV kernel (scratch reserved above).
+      // `center_sited` / `bottom_v` are only ever true under `yuv-planar`.
       #[cfg(feature = "yuv-planar")]
-      if center_sited {
+      if center_sited || bottom_v {
         let (u_full, v_full) = nv_center_upsample_chroma(
           chroma_full,
           chroma_prev,
@@ -1351,6 +1357,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv12, R> {
           row.uv_half(),
           idx,
           bottom_v,
+          center_sited,
           true,
           w,
           false,
@@ -1386,10 +1393,11 @@ impl<R> PixelSink for MixedSinker<'_, Nv12, R> {
     if want_rgba && !need_rgb_kernel {
       let rgba_buf = rgba.as_deref_mut().unwrap();
       let rgba_row = rgba_plane_row_slice(rgba_buf, one_plane_start, one_plane_end, w, h)?;
-      // Centered siting (#302): full-width phase-0.5 chroma + the 4:4:4 RGBA
-      // kernel; the default co-sited path keeps the fused `nv12_to_rgba_row`.
+      // Sited siting (#302): full-width chroma (centered phase-0.5 or co-sited
+      // nearest-neighbor + `BottomLeft`'s `v = 1` fold) + the 4:4:4 RGBA kernel;
+      // the default co-sited path keeps the fused `nv12_to_rgba_row`.
       #[cfg(feature = "yuv-planar")]
-      if center_sited {
+      if center_sited || bottom_v {
         let (u_full, v_full) = nv_center_upsample_chroma(
           chroma_full,
           chroma_prev,
@@ -1399,6 +1407,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv12, R> {
           row.uv_half(),
           idx,
           bottom_v,
+          center_sited,
           true,
           w,
           false,
@@ -1442,11 +1451,12 @@ impl<R> PixelSink for MixedSinker<'_, Nv12, R> {
 
     // Fused NV12 → RGB: UV deinterleave + chroma upsample both happen
     // in registers inside the row primitive, no intermediate memory.
-    // Centered siting (#302) instead de-interleaves + upsamples chroma to full
-    // width (phase-0.5) and runs the 4:4:4 kernel; HSV / RGBA follow-ups below
-    // derive off the produced RGB row either way.
+    // Sited siting (#302) instead de-interleaves + upsamples chroma to full
+    // width (centered phase-0.5 or co-sited nearest-neighbor + `BottomLeft`'s
+    // `v = 1` fold) and runs the 4:4:4 kernel; HSV / RGBA follow-ups below derive
+    // off the produced RGB row either way.
     #[cfg(feature = "yuv-planar")]
-    let centered = if center_sited {
+    let centered = if center_sited || bottom_v {
       let (u_full, v_full) = nv_center_upsample_chroma(
         chroma_full,
         chroma_prev,
@@ -1456,6 +1466,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv12, R> {
         row.uv_half(),
         idx,
         bottom_v,
+        center_sited,
         true,
         w,
         false,
@@ -1804,6 +1815,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv16, R> {
               row.uv(),
               idx,
               false,
+              center_sited,
               false,
               w,
               false,
@@ -2009,6 +2021,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv16, R> {
           row.uv(),
           idx,
           false,
+          center_sited,
           false,
           w,
           false,
@@ -2169,6 +2182,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv16, R> {
           row.uv(),
           idx,
           false,
+          center_sited,
           false,
           w,
           false,
@@ -2217,6 +2231,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv16, R> {
           row.uv(),
           idx,
           false,
+          center_sited,
           false,
           w,
           false,
@@ -2273,6 +2288,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv16, R> {
         row.uv(),
         idx,
         false,
+        center_sited,
         false,
         w,
         false,
@@ -2601,7 +2617,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv21, R> {
         #[cfg(feature = "yuv-planar")]
         {
           plan.ensure_single_kernel_filter()?;
-          if center_sited && want_color {
+          if (center_sited || bottom_v) && want_color {
             let need_luma = luma.is_some() || luma_u16.is_some();
             let expected = if need_luma {
               luma_filter_stream.as_ref().map_or(0, |s| s.next_y())
@@ -2645,6 +2661,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv21, R> {
               row.vu_half(),
               idx,
               bottom_v,
+              center_sited,
               false,
               w,
               true,
@@ -2835,7 +2852,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv21, R> {
       // the RGB converter, so it stays on the co-sited arm (which only bins luma).
       // `planar_dual_resample` re-runs the idempotent preflight.
       #[cfg(feature = "yuv-planar")]
-      if center_sited && want_color {
+      if (center_sited || bottom_v) && want_color {
         let need_luma = luma.is_some() || luma_u16.is_some();
         let expected = if need_luma {
           luma_stream.as_ref().map_or(0, |s| s.next_y())
@@ -2879,6 +2896,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv21, R> {
           row.vu_half(),
           idx,
           bottom_v,
+          center_sited,
           false,
           w,
           true,
@@ -3007,7 +3025,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv21, R> {
     // de-interleave scratch; the colour decode grows the RGB row buffer exactly
     // when `want_hsv && want_rgba && !want_rgb`.
     #[cfg(feature = "yuv-planar")]
-    if center_sited && (want_rgb || want_rgba || want_hsv) {
+    if (center_sited || bottom_v) && (want_rgb || want_rgba || want_hsv) {
       reserve_420_chroma_full(chroma_full, w, h)?;
       reserve_nv_chroma_half(semi_planar_u_half, semi_planar_v_half, w, h)?;
     }
@@ -3073,10 +3091,11 @@ impl<R> PixelSink for MixedSinker<'_, Nv21, R> {
     if want_hsv_direct {
       let hsv = hsv.as_mut().expect("want_hsv_direct implies hsv attached");
       let (h, s, v) = hsv.hsv();
-      // Centered siting (#302): de-interleave (VU) + phase-0.5 upsample chroma
-      // to full width, then the 4:4:4 HSV kernel. `swap_uv = true` for NV21.
+      // Sited siting (#302): de-interleave (VU) + full-width upsample chroma
+      // (centered phase-0.5 or co-sited nearest-neighbor + `BottomLeft`'s `v = 1`
+      // fold), then the 4:4:4 HSV kernel. `swap_uv = true` for NV21.
       #[cfg(feature = "yuv-planar")]
-      if center_sited {
+      if center_sited || bottom_v {
         let (u_full, v_full) = nv_center_upsample_chroma(
           chroma_full,
           chroma_prev,
@@ -3086,6 +3105,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv21, R> {
           row.vu_half(),
           idx,
           bottom_v,
+          center_sited,
           true,
           w,
           true,
@@ -3121,10 +3141,11 @@ impl<R> PixelSink for MixedSinker<'_, Nv21, R> {
     if want_rgba && !need_rgb_kernel {
       let rgba_buf = rgba.as_deref_mut().unwrap();
       let rgba_row = rgba_plane_row_slice(rgba_buf, one_plane_start, one_plane_end, w, h)?;
-      // Centered siting (#302): full-width phase-0.5 chroma + the 4:4:4 RGBA
-      // kernel; the default co-sited path keeps the fused `nv21_to_rgba_row`.
+      // Sited siting (#302): full-width chroma (centered phase-0.5 or co-sited
+      // nearest-neighbor + `BottomLeft`'s `v = 1` fold) + the 4:4:4 RGBA kernel;
+      // the default co-sited path keeps the fused `nv21_to_rgba_row`.
       #[cfg(feature = "yuv-planar")]
-      if center_sited {
+      if center_sited || bottom_v {
         let (u_full, v_full) = nv_center_upsample_chroma(
           chroma_full,
           chroma_prev,
@@ -3134,6 +3155,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv21, R> {
           row.vu_half(),
           idx,
           bottom_v,
+          center_sited,
           true,
           w,
           true,
@@ -3177,11 +3199,12 @@ impl<R> PixelSink for MixedSinker<'_, Nv21, R> {
 
     // Fused NV21 → RGB: VU deinterleave + chroma upsample both happen
     // in registers inside the row primitive, no intermediate memory.
-    // Centered siting (#302) instead de-interleaves (VU) + upsamples chroma to
-    // full width (phase-0.5) and runs the 4:4:4 kernel; the HSV / RGBA
-    // follow-ups below derive off the produced RGB row either way.
+    // Sited siting (#302) instead de-interleaves (VU) + upsamples chroma to full
+    // width (centered phase-0.5 or co-sited nearest-neighbor + `BottomLeft`'s
+    // `v = 1` fold) and runs the 4:4:4 kernel; the HSV / RGBA follow-ups below
+    // derive off the produced RGB row either way.
     #[cfg(feature = "yuv-planar")]
-    let centered = if center_sited {
+    let centered = if center_sited || bottom_v {
       let (u_full, v_full) = nv_center_upsample_chroma(
         chroma_full,
         chroma_prev,
@@ -3191,6 +3214,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv21, R> {
         row.vu_half(),
         idx,
         bottom_v,
+        center_sited,
         true,
         w,
         true,

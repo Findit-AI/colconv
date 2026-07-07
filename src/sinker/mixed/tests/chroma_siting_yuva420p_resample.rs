@@ -356,7 +356,6 @@ fn cosited_group_is_byte_identical_across_tiers() {
     for loc in [
       ChromaLocation::Left,
       ChromaLocation::TopLeft,
-      ChromaLocation::BottomLeft,
       ChromaLocation::Unknown(7),
     ] {
       let got = run(&y, &u, &v, &a, 8, 8, 4, 4, loc, native, true);
@@ -386,12 +385,13 @@ fn centered_chroma_matches_yuv420p_centered_across_tiers() {
     for native in [true, false] {
       // α is orthogonal to chroma siting on every axis, so the Yuva420p decode
       // must match the no-alpha Yuv420p decode for the horizontal centered group
-      // (Center / Top) AND the vertical Bottom fold (RFC #238 S4-D) — both now
-      // route through the resample identically (α-drop).
+      // (Center / Top), the vertical Bottom fold (RFC #238 S4-D) AND the co-sited-H
+      // + v=1 BottomLeft fold — all route through the resample identically (α-drop).
       for loc in [
         ChromaLocation::Center,
         ChromaLocation::Top,
         ChromaLocation::Bottom,
+        ChromaLocation::BottomLeft,
       ] {
         let ya = run(&y, &u, &v, &a, sw, sh, ow, oh, loc, native, true);
         let yv = run_yuv420p(&y, &u, &v, sw, sh, ow, oh, loc, native, true);
@@ -740,6 +740,10 @@ fn in_sequence_mid_frame_phase_change_rejected_across_tiers() {
     (ChromaLocation::Left, ChromaLocation::Center),
     (ChromaLocation::Center, ChromaLocation::Bottom),
     (ChromaLocation::Bottom, ChromaLocation::Center),
+    (ChromaLocation::Left, ChromaLocation::BottomLeft),
+    (ChromaLocation::BottomLeft, ChromaLocation::Left),
+    (ChromaLocation::BottomLeft, ChromaLocation::Bottom),
+    (ChromaLocation::Bottom, ChromaLocation::BottomLeft),
   ] {
     // Native fast tier.
     let mut rgb = vec![0u8; 4 * 4 * 3];
