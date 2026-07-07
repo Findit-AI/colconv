@@ -356,6 +356,8 @@ mod nv20;
 // against P210, so the resample suite needs BOTH families.
 #[cfg(feature = "yuv-planar")]
 mod ictcp;
+#[cfg(feature = "yuv-planar")]
+mod iptc2;
 #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
 mod resample_nv20;
 #[cfg(all(feature = "y2xx", feature = "yuv-planar"))]
