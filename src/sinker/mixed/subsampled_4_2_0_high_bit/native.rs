@@ -222,9 +222,12 @@ impl NativeYuv420U16 {
       // Vertical chroma weighting runs in the LUMA domain so an odd trailing
       // luma row weights its chroma row by half; the plan's stored dims are the
       // per-plane denominators (scaled on the H axis for the centered fold, and
-      // on the V axis for the RFC #238 S6d `Bottom` fold).
+      // on the V axis for the RFC #238 S6d `Bottom` fold). `chroma_centered` keys
+      // on the HORIZONTAL phase alone so co-sited-H + `v = 1` `BottomLeft` (a
+      // vertical but no horizontal phase) is NOT misread as centered against the
+      // sink's `center_sited`.
       let cplan = build_chroma_plan()?;
-      chroma_centered = cplan.has_chroma_phase();
+      chroma_centered = cplan.has_chroma_h_phase();
       chroma_bottom = cplan.has_chroma_v_phase();
       Some(NativeChromaU16 {
         u: AreaStream::new(cplan.h(), cplan.v(), cplan.src_w(), cplan.src_h(), 1)?,

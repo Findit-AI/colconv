@@ -515,16 +515,17 @@ impl<R> PixelSink for MixedSinker<'_, Yuva420p, R> {
             // Same CHECK-before / SET-after split: freeze to row-stage only
             // when the call accepts an output-bearing row.
             InsertionPoint::EncodedOutput => {
-              if center_sited && want_color {
-                // Centered row-stage: reconstruct full-width chroma and decode
-                // 4:4:4 — but ONLY after the resample preflight (frozen-output +
-                // sequence), so an out-of-sequence / rejected row is caught before
-                // the chroma reservation (#180). `packed_yuva444_resample` re-runs
-                // the idempotent preflight. Gated by `want_color` — a luma-only
-                // centered row bins the native Y and never reconstructs chroma, so
-                // it stays on the co-sited arm below. The α plane is
-                // full-resolution and siting-independent: it flows into the 4:4:4
-                // converter UNCHANGED (never chroma-upsampled).
+              if (center_sited || bottom_v) && want_color {
+                // Sited row-stage: reconstruct full-width chroma (centered
+                // `Center` / `Top` / `Bottom`, or co-sited-H + `v = 1`
+                // `BottomLeft`) and decode 4:4:4 — but ONLY after the resample
+                // preflight (frozen-output + sequence), so an out-of-sequence /
+                // rejected row is caught before the chroma reservation (#180).
+                // `packed_yuva444_resample` re-runs the idempotent preflight.
+                // Gated by `want_color` — a luma-only sited row bins the native Y
+                // and never reconstructs chroma, so it stays on the co-sited arm
+                // below. The α plane is full-resolution and siting-independent: it
+                // flows into the 4:4:4 converter UNCHANGED (never chroma-upsampled).
                 let expected = rgba_stream.as_ref().map_or(0, |s| s.next_y());
                 if let core::ops::ControlFlow::Break(()) = super::resample_preflight_check_only(
                   resample_outputs,
@@ -547,9 +548,10 @@ impl<R> PixelSink for MixedSinker<'_, Yuva420p, R> {
                   return Ok(());
                 }
                 reserve_420_chroma_full(chroma_full, w, h)?;
-                // RFC #238 S4-D: the `Bottom` even output row box-blends its
-                // chroma with the previous chroma row, so reserve the lookback
-                // up front — AFTER the preflight, BEFORE the commit (#180).
+                // RFC #238 S4-D: the `Bottom` / `BottomLeft` even output row
+                // box-blends its chroma with the previous chroma row, so reserve
+                // the lookback up front — AFTER the preflight, BEFORE the commit
+                // (#180).
                 if bottom_v {
                   reserve_420_chroma_prev(chroma_prev, w, h)?;
                 }
@@ -561,6 +563,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuva420p, R> {
                   v_half,
                   idx,
                   bottom_v,
+                  center_sited,
                   false,
                   w,
                 );
@@ -701,12 +704,13 @@ impl<R> PixelSink for MixedSinker<'_, Yuva420p, R> {
           // rejected as `UnsupportedFilter` (the #180 reject-before-allocation
           // invariant). Idempotent — the delegate re-runs it.
           plan.ensure_single_kernel_filter()?;
-          let r = if center_sited && want_color {
-            // Centered filter: reconstruct full-width chroma and decode 4:4:4 —
-            // but ONLY after the filter preflight (frozen-output + sequence), so
-            // an out-of-sequence / rejected row is caught before the chroma
-            // reservation (#180). `packed_yuva444_filter_resample` re-runs the
-            // idempotent preflight. The α plane is full-resolution and
+          let r = if (center_sited || bottom_v) && want_color {
+            // Sited filter: reconstruct full-width chroma (centered `Center` /
+            // `Top` / `Bottom`, or co-sited-H + `v = 1` `BottomLeft`) and decode
+            // 4:4:4 — but ONLY after the filter preflight (frozen-output +
+            // sequence), so an out-of-sequence / rejected row is caught before the
+            // chroma reservation (#180). `packed_yuva444_filter_resample` re-runs
+            // the idempotent preflight. The α plane is full-resolution and
             // siting-independent — it flows into the 4:4:4 converter UNCHANGED.
             let expected = rgba_filter_stream.as_ref().map_or(0, |s| s.next_y());
             if let core::ops::ControlFlow::Break(()) = super::resample_preflight_check_only(
@@ -743,6 +747,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuva420p, R> {
               v_half,
               idx,
               bottom_v,
+              center_sited,
               false,
               w,
             );
@@ -904,7 +909,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuva420p, R> {
     //  3. the u8 RGB row buffer, reached exactly when a colour decode needs an
     //     RGB row but no caller RGB buffer is borrowable.
     // The later `upsample_420_chroma_sited` reuses the already-sized buffers.
-    if center_sited && want_color {
+    if (center_sited || bottom_v) && want_color {
       reserve_420_chroma_full(chroma_full, w, h)?;
     }
     if bottom_v {
@@ -929,16 +934,18 @@ impl<R> PixelSink for MixedSinker<'_, Yuva420p, R> {
       None
     };
 
-    // Centered full-width chroma (phase-0.5), reconstructed ONCE per row from the
-    // wire half-width U / V and reused by every colour decode below. For `Bottom`
-    // (`v = 1`, RFC #238 S4-D) the even output row additionally box-blends with the
-    // previous chroma row (the `chroma_prev` lookback), and this call stages that
-    // lookback for the next pair (`stage = true`: the direct decode's remaining
-    // work is effectively infallible, so advancing here is safe). Infallible — both
-    // scratches were reserved above. The default left/unspecified siting leaves it
-    // `None`, so the fused 4:2:0 kernels upsample chroma in-register and the output
-    // stays byte-identical.
-    let centered = if center_sited && want_color {
+    // Sited full-width chroma, reconstructed ONCE per row from the wire half-width
+    // U / V and reused by every colour decode below — centered phase-0.5
+    // (`Center` / `Top` / `Bottom`) or co-sited nearest-neighbor (`BottomLeft`).
+    // For `Bottom` / `BottomLeft` (`v = 1`, RFC #238 S4-D) the even output row
+    // additionally box-blends with the previous chroma row (the `chroma_prev`
+    // lookback), and this call stages that lookback for the next pair
+    // (`stage = true`: the direct decode's remaining work is effectively
+    // infallible, so advancing here is safe). Infallible — both scratches were
+    // reserved above. The default left/unspecified siting leaves it `None`, so the
+    // fused 4:2:0 kernels upsample chroma in-register and the output stays
+    // byte-identical.
+    let centered = if (center_sited || bottom_v) && want_color {
       Some(upsample_420_chroma_sited(
         chroma_full,
         chroma_prev,
@@ -947,6 +954,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuva420p, R> {
         row.v_half(),
         idx,
         bottom_v,
+        center_sited,
         true,
         w,
       ))
@@ -2001,7 +2009,7 @@ fn yuva420p_high_bit_process<const BITS: u32, const BE: bool, F: crate::SourceFo
   // one-row chroma lookback (`chroma_prev_u16`), on EVERY Bottom OUTPUT row; and
   // the u8 RGB row scratch (below). The later `upsample_420_chroma_sited_u16`
   // reuses the already-sized buffers.
-  let need_centered_chroma = center_sited && want_color;
+  let need_centered_chroma = (center_sited || bottom_v) && want_color;
   if need_centered_chroma {
     reserve_420_chroma_full_u16(chroma_full_u16, w, h)?;
   }
@@ -2051,6 +2059,7 @@ fn yuva420p_high_bit_process<const BITS: u32, const BE: bool, F: crate::SourceFo
       v_half_row,
       idx,
       bottom_v,
+      center_sited,
       true,
       w,
       BE,
@@ -2519,7 +2528,7 @@ fn yuva420p_high_bit_resample<const BITS: u32, const BE: bool>(
   // tail, which surfaces the typed `UnsupportedFilter`.
   let r = match plan.kind() {
     crate::resample::SpanKind::Area => {
-      if center_sited && want_color {
+      if (center_sited || bottom_v) && want_color {
         // Centered area: reconstruct full-width chroma and bin the 4:4:4-decoded
         // RGBA — but ONLY after the resample preflight (frozen-output +
         // sequence), so an out-of-sequence / rejected row is caught before the
@@ -2569,6 +2578,7 @@ fn yuva420p_high_bit_resample<const BITS: u32, const BE: bool>(
               v_half_row,
               idx,
               bottom_v,
+              center_sited,
               false,
               w,
               BE,
@@ -2708,7 +2718,7 @@ fn yuva420p_high_bit_resample<const BITS: u32, const BE: bool>(
       // `UnsupportedFilter` (#180 reject-before-allocation). Idempotent — the
       // delegate re-runs it.
       plan.ensure_single_kernel_filter()?;
-      if center_sited && want_color {
+      if (center_sited || bottom_v) && want_color {
         // Centered filter: reconstruct full-width chroma and filter the
         // 4:4:4-decoded RGBA — but ONLY after the filter preflight (frozen-output
         // + sequence), so an out-of-sequence / rejected row is caught before the
@@ -2756,6 +2766,7 @@ fn yuva420p_high_bit_resample<const BITS: u32, const BE: bool>(
               v_half_row,
               idx,
               bottom_v,
+              center_sited,
               false,
               w,
               BE,

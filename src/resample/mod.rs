@@ -1414,6 +1414,21 @@ impl ResamplePlan {
     self.v_phase != 0.0
   }
 
+  /// Whether this plan carries a non-zero **horizontal** chroma phase (RFC #238
+  /// centered-H siting). The native / HSV-only joins record this as their
+  /// `chroma_centered` cache key so a reused sink whose horizontal siting moved
+  /// rebuilds the join; it must track the horizontal axis ALONE, because the
+  /// `BottomLeft` siting carries `h = 0` yet `v ≠ 0`, so [`Self::has_chroma_phase`]
+  /// (which fires on either axis) would misread its co-sited horizontal as
+  /// centered. `true` for the centered-H group (`Center` / `Top` / `Bottom`),
+  /// `false` for every co-sited-H siting including `BottomLeft`. (Comparison
+  /// against `0.0` is exact and exempt from `clippy::float_cmp`.)
+  #[cfg(feature = "yuv-planar")]
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub(crate) const fn has_chroma_h_phase(&self) -> bool {
+    self.h_phase != 0.0
+  }
+
   /// [`ResampleError::UnsupportedFilter`] carrying this plan's geometry —
   /// returned by an area-only format's resample tail when handed a
   /// [`SpanKind::Filter`] plan, so the empty area spans never reach an

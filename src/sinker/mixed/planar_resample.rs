@@ -146,7 +146,12 @@ impl HsvDirectPlanarYuv {
       ResampleError::Overflow(PlanGeometry::new(w, h, plan.out_w(), plan.out_h()))
     })?;
     let chroma_plan = build_chroma_plan()?;
-    let chroma_centered = chroma_plan.has_chroma_phase();
+    // Keys on the HORIZONTAL phase alone so a co-sited-H + `v = 1` siting
+    // (`BottomLeft`) is not misread as centered against a reader's `center_sited`
+    // — the vertical axis is tracked separately by `chroma_bottom`. Identical to
+    // `has_chroma_phase()` for every siting whose only phase is horizontal (the
+    // 4:2:2 readers) or whose reader checks `chroma_bottom` alone (4:4:0).
+    let chroma_centered = chroma_plan.has_chroma_h_phase();
     let chroma_bottom = chroma_plan.has_chroma_v_phase();
     Ok(Self {
       y: AreaStream::new(plan.h(), plan.v(), w, h, 1)?,

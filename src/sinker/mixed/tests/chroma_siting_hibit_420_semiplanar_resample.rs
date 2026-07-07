@@ -530,7 +530,6 @@ macro_rules! hibit_420_semiplanar_resample_siting {
             for loc in [
               ChromaLocation::Left,
               ChromaLocation::TopLeft,
-              ChromaLocation::BottomLeft,
               ChromaLocation::Unknown(7),
             ] {
               assert_eq!(
@@ -1247,6 +1246,151 @@ macro_rules! hibit_420_semiplanar_resample_siting {
           direct_bottom(&y, &u, &v, 8, 8, true),
           "identity resample bottom == direct decode"
         );
+      }
+
+      // ---- bottom-LEFT-sited (co-sited h + v = 1) ---------------------------
+
+      #[test]
+      #[cfg_attr(miri, ignore = "SIMD row kernels use intrinsics unsupported by Miri")]
+      fn bottomleft_equals_planar_yuv420p_across_tiers() {
+        // The de-interleave / U-V-swap / mis-sited catch: a semi-planar `P0xx`
+        // BottomLeft decode must equal the (oracle-verified) planar `Yuv420pN`
+        // BottomLeft decode of the SAME logical planes, on native + row-stage.
+        for (sw, sh, ow, oh) in GEOMS {
+          let (y, u, v) = vramp(sw, sh);
+          for native in [true, false] {
+            assert_eq!(
+              run(
+                &y,
+                &u,
+                &v,
+                sw,
+                sh,
+                ow,
+                oh,
+                ChromaLocation::BottomLeft,
+                native,
+                true
+              ),
+              run_yuv420p(
+                &y,
+                &u,
+                &v,
+                sw,
+                sh,
+                ow,
+                oh,
+                ChromaLocation::BottomLeft,
+                native,
+                true
+              ),
+              "bottom-left semi-planar == planar Yuv420p (native={native}, {sw}x{sh}->{ow}x{oh})"
+            );
+          }
+          assert_eq!(
+            run_filter(&y, &u, &v, sw, sh, ow, oh, ChromaLocation::BottomLeft, true),
+            run_filter(
+              &y,
+              &u,
+              &v,
+              sw,
+              sh,
+              ow,
+              oh,
+              ChromaLocation::BottomLeft,
+              false
+            ),
+            "bottom-left semi-planar filter SIMD vs scalar must agree ({sw}x{sh}->{ow}x{oh})"
+          );
+        }
+      }
+
+      #[test]
+      #[cfg_attr(miri, ignore = "SIMD row kernels use intrinsics unsupported by Miri")]
+      fn bottomleft_be_and_simd_agree_and_fold_the_phase() {
+        let (y, u, v) = vramp(8, 8);
+        for native in [true, false] {
+          let le = run(
+            &y,
+            &u,
+            &v,
+            8,
+            8,
+            4,
+            4,
+            ChromaLocation::BottomLeft,
+            native,
+            true,
+          );
+          assert_eq!(
+            run_be(&y, &u, &v, 8, 8, 4, 4, ChromaLocation::BottomLeft, native),
+            le,
+            "BE bottom-left must equal LE (native={native})"
+          );
+          assert_eq!(
+            run(
+              &y,
+              &u,
+              &v,
+              8,
+              8,
+              4,
+              4,
+              ChromaLocation::BottomLeft,
+              native,
+              false
+            ),
+            le,
+            "bottom-left SIMD vs scalar must agree (native={native})"
+          );
+          assert_ne!(
+            le,
+            run(&y, &u, &v, 8, 8, 4, 4, ChromaLocation::Left, native, true),
+            "bottom-left must differ from co-sited on a vertical ramp (native={native})"
+          );
+        }
+        // Co-sited-h difference shows only on a horizontally-varying ramp.
+        let (y, u, v) = ramp(8, 8);
+        assert_ne!(
+          run(
+            &y,
+            &u,
+            &v,
+            8,
+            8,
+            4,
+            4,
+            ChromaLocation::BottomLeft,
+            true,
+            true
+          ),
+          run(&y, &u, &v, 8, 8, 4, 4, ChromaLocation::Bottom, true, true),
+          "bottom-left (h=0) must differ from bottom (h=0.5) on a horizontal ramp"
+        );
+      }
+
+      #[test]
+      #[cfg_attr(miri, ignore = "SIMD row kernels use intrinsics unsupported by Miri")]
+      fn bottomleft_equals_cosited_on_flat_chroma() {
+        let (y, u, v) = flat(8, 8);
+        for native in [true, false] {
+          assert_eq!(
+            run(&y, &u, &v, 8, 8, 4, 4, ChromaLocation::Left, native, true),
+            run(
+              &y,
+              &u,
+              &v,
+              8,
+              8,
+              4,
+              4,
+              ChromaLocation::BottomLeft,
+              native,
+              true
+            ),
+            "bottom-left must equal co-sited on flat chroma (native={native})"
+          );
+        }
       }
 
       #[test]

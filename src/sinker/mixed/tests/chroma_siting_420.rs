@@ -121,15 +121,16 @@ fn default_and_cosited_sitings_are_byte_identical() {
   // The pre-#302 baseline: a sink that never sets a chroma location.
   let baseline = convert_rgb(ChromaLocation::Unspecified, true);
 
-  // Unspecified, Unknown, and every horizontally co-sited value keep the
-  // exact nearest-neighbor decode — bit-for-bit equal to the baseline even
-  // though the chroma plane is a non-trivial ramp.
+  // Unspecified, Unknown, and every fully co-sited value keep the exact
+  // nearest-neighbor decode — bit-for-bit equal to the baseline even though the
+  // chroma plane is a non-trivial ramp. `BottomLeft` is EXCLUDED: it is co-sited
+  // horizontally (`h = 0`) but bottom-sited vertically (`v = 1`), so it folds the
+  // even-row vertical box blend and is covered by its own tests below.
   for loc in [
     ChromaLocation::Unspecified,
     ChromaLocation::Unknown(99),
     ChromaLocation::Left,
     ChromaLocation::TopLeft,
-    ChromaLocation::BottomLeft,
   ] {
     assert_eq!(
       convert_rgb(loc, true),
@@ -1423,5 +1424,279 @@ fn bottom_no_output_row_large_geometry_does_not_overflow() {
   assert_eq!(
     prev_len, 0,
     "a no-output large-geometry row must allocate nothing (lookback included)"
+  );
+}
+
+// ---- bottom-LEFT-sited phase (co-sited h = 0 + bottom v = 1) ----------------
+
+/// Independent reference for the co-sited (`h = 0`) horizontal upsample — a plain
+/// 2× nearest-neighbor replicate. Written separately from the production kernel so
+/// it is a real oracle.
+fn ref_upsample_cosited_h(c_half: &[u8], width: usize) -> Vec<u8> {
+  let half = width / 2;
+  let mut out = std::vec![0u8; width];
+  for j in 0..half {
+    out[2 * j] = c_half[j];
+    out[2 * j + 1] = c_half[j];
+  }
+  out
+}
+
+/// Independent reference for the bottom-left-sited (`h = 0`, `v = 1`) full
+/// reconstruction: the [`ref_full_chroma_bottom`] vertical box blend, but fed to
+/// the CO-SITED horizontal replicate ([`ref_upsample_cosited_h`]) instead of the
+/// centered `1/4`–`3/4` weights. Written separately from the production kernels so
+/// it is a true oracle.
+fn ref_full_chroma_bottomleft(u420: &[u8], v420: &[u8]) -> (Vec<u8>, Vec<u8>) {
+  let w = W as usize;
+  let h = H as usize;
+  let cw = w / 2;
+  let mut u444 = std::vec![0u8; w * h];
+  let mut v444 = std::vec![0u8; w * h];
+  let vblend = |plane: &[u8], cr: usize, prev: usize| -> Vec<u8> {
+    (0..cw)
+      .map(|c| {
+        let a = plane[prev * cw + c] as u32;
+        let b = plane[cr * cw + c] as u32;
+        ((a + b + 1) >> 1) as u8
+      })
+      .collect::<Vec<u8>>()
+  };
+  for r in 0..h {
+    let cr = r / 2;
+    let (uhalf, vhalf) = if r & 1 == 0 {
+      let prev = cr.saturating_sub(1);
+      (vblend(u420, cr, prev), vblend(v420, cr, prev))
+    } else {
+      (
+        u420[cr * cw..cr * cw + cw].to_vec(),
+        v420[cr * cw..cr * cw + cw].to_vec(),
+      )
+    };
+    let urow = ref_upsample_cosited_h(&uhalf, w);
+    let vrow = ref_upsample_cosited_h(&vhalf, w);
+    u444[r * w..r * w + w].copy_from_slice(&urow);
+    v444[r * w..r * w + w].copy_from_slice(&vrow);
+  }
+  (u444, v444)
+}
+
+#[test]
+fn cosited_upsample_kernel_matches_hand_computed() {
+  // Co-sited horizontal reconstruction is a plain 2× replicate.
+  let c_half = [10u8, 20, 30, 40];
+  let mut out = [0u8; 8];
+  crate::row::scalar::chroma_upsample_2to1_cosited_h(&c_half, &mut out, 8);
+  assert_eq!(out, [10, 10, 20, 20, 30, 30, 40, 40]);
+}
+
+#[test]
+fn bottomleft_even_kernel_matches_hand_computed() {
+  // prev = [0, 0, 100, 100], cur = [40, 40, 60, 60]; vertical box blend
+  // e = (prev + cur + 1) >> 1 = [20, 20, 80, 80], then the co-sited 2× replicate.
+  let prev = [0u8, 0, 100, 100];
+  let cur = [40u8, 40, 60, 60];
+  let mut out = [0u8; 8];
+  crate::row::scalar::chroma_upsample_420_bottomleft_even_h(&prev, &cur, &mut out, 8);
+  assert_eq!(out, [20, 20, 20, 20, 80, 80, 80, 80]);
+}
+
+#[test]
+fn bottomleft_even_kernel_equals_cosited_when_rows_match() {
+  // When prev == cur the vertical box blend is a no-op, so the bottom-left-even
+  // kernel must reproduce the plain co-sited replicate exactly.
+  let cur = [10u8, 40, 90, 30];
+  let mut bl = [0u8; 8];
+  let mut cosited = [0u8; 8];
+  crate::row::scalar::chroma_upsample_420_bottomleft_even_h(&cur, &cur, &mut bl, 8);
+  crate::row::scalar::chroma_upsample_2to1_cosited_h(&cur, &mut cosited, 8);
+  assert_eq!(
+    bl, cosited,
+    "prev == cur must collapse the vertical blend to the co-sited replicate"
+  );
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn bottomleft_rgb_matches_cosited_vblend_then_444_reference() {
+  let (yp, up, vp) = vramp_yuv420p();
+
+  // Reference: co-sited-horizontal + vertical-box-blend (even rows) to full
+  // resolution, then the ordinary 4:4:4 decode.
+  let (u444, v444) = ref_full_chroma_bottomleft(&up, &vp);
+  let ref_src = Yuv444pFrame::new(&yp, &u444, &v444, W, H, W, W, W);
+  let mut rgb_ref = std::vec![0u8; (W * H * 3) as usize];
+  let mut ref_sink = MixedSinker::<Yuv444p>::new(W as usize, H as usize)
+    .with_rgb(&mut rgb_ref)
+    .unwrap();
+  yuv444p_to(&ref_src, false, ColorMatrix::Bt601, &mut ref_sink).unwrap();
+
+  assert_eq!(
+    convert_rgb_with(ChromaLocation::BottomLeft, true, &yp, &up, &vp),
+    rgb_ref,
+    "bottom-left 4:2:0 RGB must equal co-sited-replicate + vertical-blend then 4:4:4"
+  );
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn bottomleft_differs_from_bottom_horizontally() {
+  // On a purely-HORIZONTAL chroma ramp, BottomLeft (co-sited h) must differ from
+  // Bottom (centered h) — the vertical fold is identical, only the horizontal
+  // phase differs.
+  let (yp, up, vp) = ramp_yuv420p();
+  assert_ne!(
+    convert_rgb_with(ChromaLocation::BottomLeft, true, &yp, &up, &vp),
+    convert_rgb_with(ChromaLocation::Bottom, true, &yp, &up, &vp),
+    "BottomLeft (h=0) must differ from Bottom (h=0.5) on a horizontal chroma ramp"
+  );
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn bottomleft_differs_from_topleft_vertically() {
+  // On a purely-VERTICAL chroma ramp, BottomLeft (v=1) must differ from TopLeft
+  // (co-sited h too, but vertical-replicate) — same horizontal phase, only the
+  // vertical fold differs — and from the vertical-replicate default.
+  let (yp, up, vp) = vramp_yuv420p();
+  let bl = convert_rgb_with(ChromaLocation::BottomLeft, true, &yp, &up, &vp);
+  assert_ne!(
+    bl,
+    convert_rgb_with(ChromaLocation::TopLeft, true, &yp, &up, &vp),
+    "BottomLeft (v=1) must differ from TopLeft (vertical-replicate) on a vertical ramp"
+  );
+  assert_ne!(
+    bl,
+    convert_rgb_with(ChromaLocation::Left, true, &yp, &up, &vp),
+    "BottomLeft must differ from the vertical-replicate default"
+  );
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn bottomleft_rgba_and_hsv_match_cosited_vblend_then_444_reference() {
+  let (yp, up, vp) = vramp_yuv420p();
+  let (u444, v444) = ref_full_chroma_bottomleft(&up, &vp);
+
+  // RGBA-only path.
+  {
+    let src = Yuv420pFrame::new(&yp, &up, &vp, W, H, W, W / 2, W / 2);
+    let mut rgba = std::vec![0u8; (W * H * 4) as usize];
+    let mut sink = MixedSinker::<Yuv420p>::new(W as usize, H as usize)
+      .with_rgba(&mut rgba)
+      .unwrap()
+      .with_chroma_location(ChromaLocation::BottomLeft);
+    yuv420p_to(&src, false, ColorMatrix::Bt601, &mut sink).unwrap();
+
+    let ref_src = Yuv444pFrame::new(&yp, &u444, &v444, W, H, W, W, W);
+    let mut rgba_ref = std::vec![0u8; (W * H * 4) as usize];
+    let mut ref_sink = MixedSinker::<Yuv444p>::new(W as usize, H as usize)
+      .with_rgba(&mut rgba_ref)
+      .unwrap();
+    yuv444p_to(&ref_src, false, ColorMatrix::Bt601, &mut ref_sink).unwrap();
+    assert_eq!(
+      rgba, rgba_ref,
+      "bottom-left RGBA must equal cosited-vblend-then-4:4:4"
+    );
+  }
+
+  // HSV-direct path (no RGB / RGBA attached).
+  {
+    let src = Yuv420pFrame::new(&yp, &up, &vp, W, H, W, W / 2, W / 2);
+    let (mut h, mut s, mut v) = (
+      std::vec![0u8; (W * H) as usize],
+      std::vec![0u8; (W * H) as usize],
+      std::vec![0u8; (W * H) as usize],
+    );
+    let mut sink = MixedSinker::<Yuv420p>::new(W as usize, H as usize)
+      .with_hsv(&mut h, &mut s, &mut v)
+      .unwrap()
+      .with_chroma_location(ChromaLocation::BottomLeft);
+    yuv420p_to(&src, false, ColorMatrix::Bt601, &mut sink).unwrap();
+
+    let ref_src = Yuv444pFrame::new(&yp, &u444, &v444, W, H, W, W, W);
+    let (mut hr, mut sr, mut vr) = (
+      std::vec![0u8; (W * H) as usize],
+      std::vec![0u8; (W * H) as usize],
+      std::vec![0u8; (W * H) as usize],
+    );
+    let mut ref_sink = MixedSinker::<Yuv444p>::new(W as usize, H as usize)
+      .with_hsv(&mut hr, &mut sr, &mut vr)
+      .unwrap();
+    yuv444p_to(&ref_src, false, ColorMatrix::Bt601, &mut ref_sink).unwrap();
+    assert_eq!(
+      (h, s, v),
+      (hr, sr, vr),
+      "bottom-left HSV must equal cosited-vblend-then-4:4:4"
+    );
+  }
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn bottomleft_path_simd_matches_scalar() {
+  let (yp, up, vp) = vramp_yuv420p();
+  assert_eq!(
+    convert_rgb_with(ChromaLocation::BottomLeft, true, &yp, &up, &vp),
+    convert_rgb_with(ChromaLocation::BottomLeft, false, &yp, &up, &vp),
+    "bottom-left path must be bit-identical across the SIMD and scalar tiers"
+  );
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn bottomleft_equals_cosited_on_flat_chroma() {
+  // On spatially FLAT chroma the vertical blend is a no-op and the co-sited
+  // horizontal phase is the default nearest-neighbor decode, so BottomLeft
+  // collapses to the byte-identical co-sited decode.
+  let w = W as usize;
+  let h = H as usize;
+  let yp = std::vec![128u8; w * h];
+  let up = std::vec![90u8; (w / 2) * (h / 2)];
+  let vp = std::vec![150u8; (w / 2) * (h / 2)];
+  assert_eq!(
+    convert_rgb_with(ChromaLocation::BottomLeft, true, &yp, &up, &vp),
+    convert_rgb_with(ChromaLocation::Left, true, &yp, &up, &vp),
+    "flat-chroma BottomLeft must collapse to the co-sited decode"
+  );
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn bottomleft_grows_chroma_prev_lookback() {
+  let (yp, up, vp) = vramp_yuv420p();
+  let src = Yuv420pFrame::new(&yp, &up, &vp, W, H, W, W / 2, W / 2);
+  let mut rgb = std::vec![0u8; (W * H * 3) as usize];
+  let mut sink = MixedSinker::<Yuv420p>::new(W as usize, H as usize)
+    .with_rgb(&mut rgb)
+    .unwrap()
+    .with_chroma_location(ChromaLocation::BottomLeft);
+  yuv420p_to(&src, false, ColorMatrix::Bt601, &mut sink).unwrap();
+  let prev_len = sink.chroma_prev.len();
+  drop(sink);
+  assert_eq!(
+    prev_len, W as usize,
+    "bottom-left-sited path stages a width-byte (half-width U+V) chroma lookback"
   );
 }

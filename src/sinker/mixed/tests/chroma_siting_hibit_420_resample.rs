@@ -448,7 +448,6 @@ macro_rules! hibit_420_resample_siting {
             for loc in [
               ChromaLocation::Left,
               ChromaLocation::TopLeft,
-              ChromaLocation::BottomLeft,
               ChromaLocation::Unknown(7),
             ] {
               assert_eq!(
@@ -905,6 +904,315 @@ macro_rules! hibit_420_resample_siting {
           $w420(&f, FR, M, &mut sink).unwrap();
         }
         (rgb, rgb16)
+      }
+
+      /// The EXACT bottom-LEFT-sited (`h = 0`, `v = 1`) chroma oracle for the
+      /// native tier: the CO-SITED horizontal box (a plain `cw`-wide area, NOT the
+      /// centered `1/4`–`3/4` reconstruction of [`bin_chroma_bottom_u16`]) composed
+      /// with the same vertical `v = 1` triangle (×2), box-averaged to `ow x oh`
+      /// with a SINGLE round-half-up — the code-domain twin the folded
+      /// `area_chroma_420(h = 0, v = 1)` realizes (EVEN `sh`).
+      fn bin_chroma_bottomleft_u16(
+        c: &[u16],
+        cw: usize,
+        ch: usize,
+        ow: usize,
+        oh: usize,
+      ) -> Vec<u16> {
+        let sh = 2 * ch;
+        let mut r2 = vec![0u64; cw * sh];
+        for r in 0..sh {
+          let cr = r / 2;
+          let prev = cr.saturating_sub(1);
+          for j in 0..cw {
+            r2[r * cw + j] = if r & 1 == 0 {
+              u64::from(c[prev * cw + j]) + u64::from(c[cr * cw + j]) // even: {1, 1}
+            } else {
+              2 * u64::from(c[cr * cw + j]) // odd: {2}
+            };
+          }
+        }
+        let hw = area_weights(cw, ow);
+        let vw = area_weights(sh, oh);
+        let denom = (2 * cw * sh) as u64; // ×2 V × the box normalization (H co-sited)
+        let mut out = vec![0u16; ow * oh];
+        for (oy, (vs, vwin)) in vw.iter().enumerate() {
+          for (ox, (hs, hwin)) in hw.iter().enumerate() {
+            let mut s = 0u64;
+            for (dy, &vwt) in vwin.iter().enumerate() {
+              let mut hsum = 0u64;
+              for (dx, &hwt) in hwin.iter().enumerate() {
+                hsum += hwt * r2[(vs + dy) * cw + hs + dx];
+              }
+              s += vwt * hsum;
+            }
+            out[oy * ow + ox] = rdhu(s, denom) as u16;
+          }
+        }
+        out
+      }
+
+      /// The bottom-left-sited NATIVE oracle: bin Y co-sited and U / V through the
+      /// exact bottom-left fold to `ow x oh`, then convert ONCE via an identity
+      /// `Yuv444pN` sink.
+      #[allow(clippy::too_many_arguments)]
+      fn bottomleft_native_oracle(
+        y: &[u16],
+        u: &[u16],
+        v: &[u16],
+        sw: usize,
+        sh: usize,
+        ow: usize,
+        oh: usize,
+        simd: bool,
+      ) -> (Vec<u8>, Vec<u16>) {
+        let (cw, ch) = (sw / 2, sh / 2);
+        let yb = bin_cosited_u16(y, sw, sh, ow, oh);
+        let ub = bin_chroma_bottomleft_u16(u, cw, ch, ow, oh);
+        let vb = bin_chroma_bottomleft_u16(v, cw, ch, ow, oh);
+        let mut rgb = vec![0u8; ow * oh * 3];
+        let mut rgb16 = vec![0u16; ow * oh * 3];
+        {
+          let mut sink = MixedSinker::<$M444>::new(ow, oh)
+            .with_simd(simd)
+            .with_rgb(&mut rgb)
+            .unwrap()
+            .with_rgb_u16(&mut rgb16)
+            .unwrap();
+          let f = $F444::new(
+            &yb, &ub, &vb, ow as u32, oh as u32, ow as u32, ow as u32, ow as u32,
+          );
+          $w444(&f, FR, M, &mut sink).unwrap();
+        }
+        (rgb, rgb16)
+      }
+
+      /// Reconstruct `Yuv420pN` chroma to full resolution for the bottom-left
+      /// decode: [`recon_full_bottom_u16`]'s vertical box blend, but the co-sited
+      /// horizontal 2× replicate instead of the centered kernel.
+      fn recon_full_bottomleft_u16(
+        u: &[u16],
+        v: &[u16],
+        sw: usize,
+        sh: usize,
+      ) -> (Vec<u16>, Vec<u16>) {
+        let cw = sw / 2;
+        let vblend = |plane: &[u16], cr: usize, prev: usize| -> Vec<u16> {
+          (0..cw)
+            .map(|c| {
+              let a = u32::from(plane[prev * cw + c]);
+              let b = u32::from(plane[cr * cw + c]);
+              ((a + b + 1) >> 1) as u16
+            })
+            .collect::<Vec<u16>>()
+        };
+        let replicate = |half: &[u16]| -> Vec<u16> {
+          let mut out = vec![0u16; 2 * cw];
+          for j in 0..cw {
+            out[2 * j] = half[j];
+            out[2 * j + 1] = half[j];
+          }
+          out
+        };
+        let mut uf = vec![0u16; sw * sh];
+        let mut vf = vec![0u16; sw * sh];
+        for r in 0..sh {
+          let cr = r / 2;
+          let (uh, vh) = if r & 1 == 0 {
+            let prev = cr.saturating_sub(1);
+            (vblend(u, cr, prev), vblend(v, cr, prev))
+          } else {
+            (
+              u[cr * cw..cr * cw + cw].to_vec(),
+              v[cr * cw..cr * cw + cw].to_vec(),
+            )
+          };
+          uf[r * sw..r * sw + sw].copy_from_slice(&replicate(&uh));
+          vf[r * sw..r * sw + sw].copy_from_slice(&replicate(&vh));
+        }
+        (uf, vf)
+      }
+
+      /// The bottom-left-sited RGB-domain oracle: reconstruct U / V to full width
+      /// (co-sited + vertical blend) then run through the given resampler — what
+      /// the row-stage / filter arms do for `BottomLeft`. `filter = true` uses the
+      /// Triangle tier.
+      #[allow(clippy::too_many_arguments)]
+      fn bottomleft_rgb_domain_oracle(
+        y: &[u16],
+        u: &[u16],
+        v: &[u16],
+        sw: usize,
+        sh: usize,
+        ow: usize,
+        oh: usize,
+        simd: bool,
+        filter: bool,
+      ) -> (Vec<u8>, Vec<u16>) {
+        let (uf, vf) = recon_full_bottomleft_u16(u, v, sw, sh);
+        let mut rgb = vec![0u8; ow * oh * 3];
+        let mut rgb16 = vec![0u16; ow * oh * 3];
+        let f = $F444::new(
+          y, &uf, &vf, sw as u32, sh as u32, sw as u32, sw as u32, sw as u32,
+        );
+        if filter {
+          let mut sink = MixedSinker::<$M444, FilteredResampler<Triangle>>::with_resampler(
+            sw,
+            sh,
+            FilteredResampler::new(ow, oh, Triangle),
+          )
+          .unwrap()
+          .with_simd(simd)
+          .with_rgb(&mut rgb)
+          .unwrap()
+          .with_rgb_u16(&mut rgb16)
+          .unwrap();
+          $w444(&f, FR, M, &mut sink).unwrap();
+        } else {
+          let mut sink =
+            MixedSinker::<$M444, AreaResampler>::with_resampler(sw, sh, AreaResampler::to(ow, oh))
+              .unwrap()
+              .with_native(false)
+              .with_simd(simd)
+              .with_rgb(&mut rgb)
+              .unwrap()
+              .with_rgb_u16(&mut rgb16)
+              .unwrap();
+          $w444(&f, FR, M, &mut sink).unwrap();
+        }
+        (rgb, rgb16)
+      }
+
+      #[test]
+      #[cfg_attr(miri, ignore = "SIMD row kernels use intrinsics unsupported by Miri")]
+      fn bottomleft_native_equals_code_domain_oracle() {
+        for (sw, sh, ow, oh) in GEOMS {
+          let (y, u, v) = vramp(sw, sh);
+          let o = bottomleft_native_oracle(&y, &u, &v, sw, sh, ow, oh, true);
+          assert_eq!(
+            run(
+              &y,
+              &u,
+              &v,
+              sw,
+              sh,
+              ow,
+              oh,
+              ChromaLocation::BottomLeft,
+              true,
+              true
+            ),
+            o,
+            "bottom-left native must equal the co-sited V-fold code-domain oracle \
+             ({sw}x{sh}->{ow}x{oh})"
+          );
+        }
+      }
+
+      #[test]
+      #[cfg_attr(miri, ignore = "SIMD row kernels use intrinsics unsupported by Miri")]
+      fn bottomleft_row_stage_and_filter_equal_rgb_reconstruct_then_bin() {
+        for (sw, sh, ow, oh) in GEOMS {
+          let (y, u, v) = vramp(sw, sh);
+          assert_eq!(
+            run(
+              &y,
+              &u,
+              &v,
+              sw,
+              sh,
+              ow,
+              oh,
+              ChromaLocation::BottomLeft,
+              false,
+              true
+            ),
+            bottomleft_rgb_domain_oracle(&y, &u, &v, sw, sh, ow, oh, true, false),
+            "bottom-left row-stage == RGB reconstruct-then-bin ({sw}x{sh}->{ow}x{oh})"
+          );
+          assert_eq!(
+            run_filter(&y, &u, &v, sw, sh, ow, oh, ChromaLocation::BottomLeft, true),
+            bottomleft_rgb_domain_oracle(&y, &u, &v, sw, sh, ow, oh, true, true),
+            "bottom-left filter == RGB reconstruct-then-Triangle ({sw}x{sh}->{ow}x{oh})"
+          );
+        }
+      }
+
+      #[test]
+      #[cfg_attr(miri, ignore = "SIMD row kernels use intrinsics unsupported by Miri")]
+      fn bottomleft_be_and_simd_agree_and_fold_the_phase() {
+        let (y, u, v) = vramp(8, 8);
+        for native in [true, false] {
+          let le = run(
+            &y,
+            &u,
+            &v,
+            8,
+            8,
+            4,
+            4,
+            ChromaLocation::BottomLeft,
+            native,
+            true,
+          );
+          assert_eq!(
+            run_be(&y, &u, &v, 8, 8, 4, 4, ChromaLocation::BottomLeft, native),
+            le,
+            "BE bottom-left must equal LE (native={native})"
+          );
+          assert_eq!(
+            run(
+              &y,
+              &u,
+              &v,
+              8,
+              8,
+              4,
+              4,
+              ChromaLocation::BottomLeft,
+              native,
+              false
+            ),
+            le,
+            "bottom-left SIMD vs scalar must agree (native={native})"
+          );
+          assert_ne!(
+            le,
+            run(&y, &u, &v, 8, 8, 4, 4, ChromaLocation::Left, native, true),
+            "bottom-left must differ from co-sited on a vertical ramp (native={native})"
+          );
+        }
+        assert_eq!(
+          run_filter(&y, &u, &v, 8, 8, 4, 4, ChromaLocation::BottomLeft, true),
+          run_filter(&y, &u, &v, 8, 8, 4, 4, ChromaLocation::BottomLeft, false),
+          "bottom-left filter SIMD vs scalar must agree"
+        );
+      }
+
+      #[test]
+      #[cfg_attr(miri, ignore = "SIMD row kernels use intrinsics unsupported by Miri")]
+      fn bottomleft_differs_from_bottom_on_a_horizontal_ramp() {
+        // Bottom (h=0.5) vs BottomLeft (h=0): identical vertical fold, differing
+        // horizontal phase — visible only on a horizontally-varying ramp.
+        let (y, u, v) = ramp(8, 8);
+        for native in [true, false] {
+          assert_ne!(
+            run(
+              &y,
+              &u,
+              &v,
+              8,
+              8,
+              4,
+              4,
+              ChromaLocation::BottomLeft,
+              native,
+              true
+            ),
+            run(&y, &u, &v, 8, 8, 4, 4, ChromaLocation::Bottom, native, true),
+            "bottom-left must differ from bottom on a horizontal ramp (native={native})"
+          );
+        }
       }
 
       #[test]

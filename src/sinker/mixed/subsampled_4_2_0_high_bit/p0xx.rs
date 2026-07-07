@@ -429,6 +429,38 @@ pub(crate) fn upsample_420_chroma_center_h_p0xx<'s, const BITS: u32>(
   &chroma_full[..2 * width]
 }
 
+/// Co-sited (`h = 0`) full-width interleaved chroma reconstruction for the
+/// high-bit-packed semi-planar 4:2:0 P-formats — the co-sited twin of
+/// [`upsample_420_chroma_center_h_p0xx`] used by `BottomLeft`, filling
+/// `chroma_full` via
+/// [`chroma_upsample_2to1_cosited_h_p0xx`](crate::row::scalar::chroma_upsample_2to1_cosited_h_p0xx)
+/// (a plain 2× replicate, high-bit-packed `LOW_PACKED = false`). Feeds the same
+/// P-format 4:4:4 decode kernels, so a `BottomLeft` decode reconstructs its
+/// `v = 1` fold ([`upsample_420_chroma_sited_p0xx`]) atop a consistent co-sited
+/// horizontal staging.
+///
+/// **Infallible**: the caller must have run [`reserve_420_chroma_full_u16`] up
+/// front, so `chroma_full` is `>= 2 * width` here.
+#[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
+pub(crate) fn upsample_420_chroma_cosited_h_p0xx<'s, const BITS: u32>(
+  chroma_full: &'s mut [u16],
+  uv_half: &[u16],
+  width: usize,
+  big_endian: bool,
+) -> &'s [u16] {
+  debug_assert!(
+    chroma_full.len() >= 2 * width,
+    "chroma_full must be reserved via reserve_420_chroma_full_u16 first"
+  );
+  crate::row::scalar::chroma_upsample_2to1_cosited_h_p0xx::<BITS, false>(
+    uv_half,
+    &mut chroma_full[..2 * width],
+    width,
+    big_endian,
+  );
+  &chroma_full[..2 * width]
+}
+
 /// Low-bit-packed (`LOW_PACKED = true`) sibling of
 /// [`upsample_420_chroma_center_h_p0xx`] for NV20 (the sole low-bit-packed
 /// semi-planar 4:2:2 format). Identical staging, but the fused de-pack /
@@ -535,6 +567,7 @@ pub(crate) fn upsample_420_chroma_sited_p0xx<'s, const BITS: u32>(
   uv_half: &[u16],
   idx: usize,
   bottom_v: bool,
+  center_h: bool,
   stage: bool,
   width: usize,
   big_endian: bool,
@@ -547,7 +580,8 @@ pub(crate) fn upsample_420_chroma_sited_p0xx<'s, const BITS: u32>(
   // The bottom-sited EVEN row box-blends only when the lookback PROVABLY holds
   // the wanted predecessor `chroma_row - 1`; otherwise it clamps to the current
   // row (never stale). Every other case (non-bottom siting, the bottom-sited odd
-  // row, or an unvalidated even row) is the plain centered upsample.
+  // row, or an unvalidated even row) is the plain horizontal upsample — centered
+  // or co-sited per `center_h`.
   let do_vblend =
     bottom_v && idx & 1 == 0 && chroma_row > 0 && *chroma_prev_row == Some(chroma_row - 1);
 
@@ -556,16 +590,28 @@ pub(crate) fn upsample_420_chroma_sited_p0xx<'s, const BITS: u32>(
       chroma_prev.len() >= width,
       "chroma_prev must be reserved via reserve_420_chroma_prev_u16 first"
     );
-    crate::row::scalar::chroma_upsample_420_bottom_even_h_p0xx::<BITS>(
-      &chroma_prev[..width],
-      uv_half,
-      &mut chroma_full[..2 * width],
-      width,
-      big_endian,
-    );
+    if center_h {
+      crate::row::scalar::chroma_upsample_420_bottom_even_h_p0xx::<BITS>(
+        &chroma_prev[..width],
+        uv_half,
+        &mut chroma_full[..2 * width],
+        width,
+        big_endian,
+      );
+    } else {
+      crate::row::scalar::chroma_upsample_420_bottomleft_even_h_p0xx::<BITS>(
+        &chroma_prev[..width],
+        uv_half,
+        &mut chroma_full[..2 * width],
+        width,
+        big_endian,
+      );
+    }
     &chroma_full[..2 * width]
-  } else {
+  } else if center_h {
     upsample_420_chroma_center_h_p0xx::<BITS>(chroma_full, uv_half, width, big_endian)
+  } else {
+    upsample_420_chroma_cosited_h_p0xx::<BITS>(chroma_full, uv_half, width, big_endian)
   };
 
   // Refresh the lookback with the current interleaved chroma row + its validity
@@ -872,7 +918,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P010<BE>, R> {
           // Reject a multi-kernel (BICUBLIN) filter plan BEFORE the centered
           // reserve below, mirroring the delegate's own first act (idempotent).
           plan.ensure_single_kernel_filter()?;
-          if center_sited && want_color {
+          if (center_sited || bottom_v) && want_color {
             let expected = if luma.is_some() {
               luma_filter_stream_u16.as_ref().map_or(0, |s| s.next_y())
             } else if rgb.is_some() || rgba.is_some() || hsv.is_some() {
@@ -917,6 +963,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P010<BE>, R> {
               uv_half,
               idx,
               bottom_v,
+              center_sited,
               false,
               w,
               BE,
@@ -1133,7 +1180,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P010<BE>, R> {
       // arm (which only bins luma).
       // `packed_yuv422_triple_resample` re-runs the idempotent preflight.
       #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
-      if center_sited && want_color {
+      if (center_sited || bottom_v) && want_color {
         let expected = if luma.is_some() {
           luma_stream_u16.as_ref().map_or(0, |s| s.next_y())
         } else if rgb.is_some() || rgba.is_some() || hsv.is_some() {
@@ -1178,6 +1225,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P010<BE>, R> {
           uv_half,
           idx,
           bottom_v,
+          center_sited,
           false,
           w,
           BE,
@@ -1340,7 +1388,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P010<BE>, R> {
     // luma-only row consumes no centered chroma, so it neither reserves nor
     // upsamples it (the reserve makes the later upsample infallible).
     #[cfg(feature = "yuv-planar")]
-    let need_centered_chroma = center_sited && want_color;
+    let need_centered_chroma = (center_sited || bottom_v) && want_color;
     #[cfg(feature = "yuv-planar")]
     if need_centered_chroma {
       reserve_420_chroma_full_u16(chroma_full_u16, w, h)?;
@@ -1398,6 +1446,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P010<BE>, R> {
         row.uv_half(),
         idx,
         bottom_v,
+        center_sited,
         true,
         w,
         BE,
@@ -1890,7 +1939,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P012<BE>, R> {
           // Reject a multi-kernel (BICUBLIN) filter plan BEFORE the centered
           // reserve below, mirroring the delegate's own first act (idempotent).
           plan.ensure_single_kernel_filter()?;
-          if center_sited && want_color {
+          if (center_sited || bottom_v) && want_color {
             let expected = if luma.is_some() {
               luma_filter_stream_u16.as_ref().map_or(0, |s| s.next_y())
             } else if rgb.is_some() || rgba.is_some() || hsv.is_some() {
@@ -1935,6 +1984,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P012<BE>, R> {
               uv_half,
               idx,
               bottom_v,
+              center_sited,
               false,
               w,
               BE,
@@ -2151,7 +2201,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P012<BE>, R> {
       // arm (which only bins luma).
       // `packed_yuv422_triple_resample` re-runs the idempotent preflight.
       #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
-      if center_sited && want_color {
+      if (center_sited || bottom_v) && want_color {
         let expected = if luma.is_some() {
           luma_stream_u16.as_ref().map_or(0, |s| s.next_y())
         } else if rgb.is_some() || rgba.is_some() || hsv.is_some() {
@@ -2196,6 +2246,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P012<BE>, R> {
           uv_half,
           idx,
           bottom_v,
+          center_sited,
           false,
           w,
           BE,
@@ -2358,7 +2409,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P012<BE>, R> {
     // luma-only row consumes no centered chroma, so it neither reserves nor
     // upsamples it (the reserve makes the later upsample infallible).
     #[cfg(feature = "yuv-planar")]
-    let need_centered_chroma = center_sited && want_color;
+    let need_centered_chroma = (center_sited || bottom_v) && want_color;
     #[cfg(feature = "yuv-planar")]
     if need_centered_chroma {
       reserve_420_chroma_full_u16(chroma_full_u16, w, h)?;
@@ -2416,6 +2467,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P012<BE>, R> {
         row.uv_half(),
         idx,
         bottom_v,
+        center_sited,
         true,
         w,
         BE,
@@ -2904,7 +2956,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P016<BE>, R> {
           // Reject a multi-kernel (BICUBLIN) filter plan BEFORE the centered
           // reserve below, mirroring the delegate's own first act (idempotent).
           plan.ensure_single_kernel_filter()?;
-          if center_sited && want_color {
+          if (center_sited || bottom_v) && want_color {
             let expected = if luma.is_some() {
               luma_filter_stream_u16.as_ref().map_or(0, |s| s.next_y())
             } else if rgb.is_some() || rgba.is_some() || hsv.is_some() {
@@ -2949,6 +3001,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P016<BE>, R> {
               uv_half,
               idx,
               bottom_v,
+              center_sited,
               false,
               w,
               BE,
@@ -3165,7 +3218,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P016<BE>, R> {
       // arm (which only bins luma).
       // `packed_yuv422_triple_resample` re-runs the idempotent preflight.
       #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
-      if center_sited && want_color {
+      if (center_sited || bottom_v) && want_color {
         let expected = if luma.is_some() {
           luma_stream_u16.as_ref().map_or(0, |s| s.next_y())
         } else if rgb.is_some() || rgba.is_some() || hsv.is_some() {
@@ -3210,6 +3263,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P016<BE>, R> {
           uv_half,
           idx,
           bottom_v,
+          center_sited,
           false,
           w,
           BE,
@@ -3372,7 +3426,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P016<BE>, R> {
     // luma-only row consumes no centered chroma, so it neither reserves nor
     // upsamples it (the reserve makes the later upsample infallible).
     #[cfg(feature = "yuv-planar")]
-    let need_centered_chroma = center_sited && want_color;
+    let need_centered_chroma = (center_sited || bottom_v) && want_color;
     #[cfg(feature = "yuv-planar")]
     if need_centered_chroma {
       reserve_420_chroma_full_u16(chroma_full_u16, w, h)?;
@@ -3430,6 +3484,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P016<BE>, R> {
         row.uv_half(),
         idx,
         bottom_v,
+        center_sited,
         true,
         w,
         BE,

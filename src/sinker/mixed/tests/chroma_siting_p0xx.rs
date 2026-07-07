@@ -283,7 +283,6 @@ macro_rules! p0xx_chroma_tests {
           ChromaLocation::Unknown(99),
           ChromaLocation::Left,
           ChromaLocation::TopLeft,
-          ChromaLocation::BottomLeft,
         ] {
           assert_eq!(
             convert_rgb(loc, true),
@@ -514,6 +513,32 @@ macro_rules! p0xx_chroma_tests {
           convert_rgb(ChromaLocation::Center, true),
           convert_rgb(ChromaLocation::Center, false),
           "centered path must be bit-identical across the SIMD and scalar tiers"
+        );
+      }
+
+      #[test]
+      #[cfg_attr(
+        miri,
+        ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+      )]
+      fn bottomleft_differs_from_bottom_and_simd_matches_scalar() {
+        // BottomLeft (h=0 co-sited + v=1) keeps the co-sited horizontal phase, so it
+        // differs from Bottom (h=0.5) on the ramp's strong horizontal variation, and
+        // is SIMD == scalar. Its vertical `v=1` fold and its exact value are pinned
+        // across all depths against the planar Yuv420pN BottomLeft by the resample
+        // suite's cross-format check + vramp tests (a vertical ramp strong enough to
+        // survive 8-bit RGB quantization even at 16-bit source depth — this direct
+        // ramp's per-row step is not, exactly as the `Bottom` direct decode).
+        let bl = convert_rgb(ChromaLocation::BottomLeft, true);
+        assert_ne!(
+          bl,
+          convert_rgb(ChromaLocation::Bottom, true),
+          "BottomLeft (h=0) must differ from Bottom (h=0.5)"
+        );
+        assert_eq!(
+          bl,
+          convert_rgb(ChromaLocation::BottomLeft, false),
+          "bottom-left path must be bit-identical across the SIMD and scalar tiers"
         );
       }
 

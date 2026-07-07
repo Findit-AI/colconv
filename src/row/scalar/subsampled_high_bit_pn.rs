@@ -226,6 +226,133 @@ pub(crate) fn chroma_upsample_420_bottom_even_h_p0xx<const BITS: u32>(
   }
 }
 
+/// Co-sited (`h = 0`) horizontal 2:1 chroma reconstruction for the interleaved
+/// high-bit semi-planar 4:2:0 P-format family — the co-sited (nearest-neighbor)
+/// twin of [`chroma_upsample_2to1_center_h_p0xx`] used by `BottomLeft`. Each
+/// interleaved `(U, V)` chroma sample covers its two luma columns unchanged, so
+/// reconstruction is a plain 2× replicate; the de-pack / re-pack / re-interleave
+/// seam is identical to the centered sibling (so a mispacked neighbour's dirty
+/// bits are discarded), just with no horizontal interpolation:
+///
+/// ```text
+///   uv_full[2·(2j)..] = uv_full[2·(2j+1)..] = (U[j], V[j])
+/// ```
+///
+/// The P-format sibling of the planar
+/// [`chroma_upsample_2to1_cosited_h_u16`](super::yuv_planar_8bit::chroma_upsample_2to1_cosited_h_u16).
+///
+/// # Panics (debug builds)
+///
+/// - `width` must be even (4:2:0 pairs pixel columns).
+/// - `uv_half.len() >= width`, `uv_full.len() >= 2 * width`.
+#[cfg(all(any(feature = "std", feature = "alloc"), feature = "yuv-planar"))]
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn chroma_upsample_2to1_cosited_h_p0xx<const BITS: u32, const LOW_PACKED: bool>(
+  uv_half: &[u16],
+  uv_full: &mut [u16],
+  width: usize,
+  big_endian: bool,
+) {
+  debug_assert_eq!(width & 1, 0, "P-format 4:2:0 requires even width");
+  debug_assert!(uv_half.len() >= width, "uv_half row too short");
+  debug_assert!(uv_full.len() >= 2 * width, "uv_full row too short");
+
+  let shift = 16 - BITS;
+  let load = |c: usize, comp: usize| -> u32 {
+    let raw = uv_half[2 * c + comp];
+    let host = if big_endian {
+      u16::from_be(raw)
+    } else {
+      u16::from_le(raw)
+    };
+    depack_pn::<BITS, LOW_PACKED>(host) as u32
+  };
+  let store = |logical: u32| -> u16 {
+    let v = if LOW_PACKED {
+      logical as u16
+    } else {
+      (logical as u16) << shift
+    };
+    if big_endian { v.to_be() } else { v.to_le() }
+  };
+
+  let half = width / 2;
+  for j in 0..half {
+    let u = store(load(j, 0));
+    let v = store(load(j, 1));
+    uv_full[2 * (2 * j)] = u;
+    uv_full[2 * (2 * j) + 1] = v;
+    uv_full[2 * (2 * j + 1)] = u;
+    uv_full[2 * (2 * j + 1) + 1] = v;
+  }
+}
+
+/// Bottom-LEFT-sited (`AVCHROMA_LOC_BOTTOMLEFT`, `h = 0`, `v = 1`) vertical + 2:1
+/// chroma reconstruction for the high-bit-packed semi-planar 4:2:0 P-format
+/// family — the interleaved MSB-aligned twin of the planar
+/// [`chroma_upsample_420_bottomleft_even_h_u16`](super::yuv_planar_8bit::chroma_upsample_420_bottomleft_even_h_u16),
+/// and the co-sited-`h` sibling of [`chroma_upsample_420_bottom_even_h_p0xx`]:
+/// same de-pack / re-pack / re-interleave seam and vertical box blend of the EVEN
+/// output luma row, but fed to the co-sited (`h = 0`) horizontal 2× replicate
+/// rather than the centered `1/4`–`3/4` weights.
+///
+/// ```text
+///   e[c]       = (prev[c] + cur[c] + 1) >> 1        (vertical box blend)
+///   uv_full[2·(2j)..] = uv_full[2·(2j+1)..] = (e_U[j], e_V[j])
+/// ```
+///
+/// applied INDEPENDENTLY to `U` / `V`, in the logical (de-packed) domain, then
+/// re-packed `<< (16 - BITS)` (a no-op at `BITS = 16`). The **odd** luma row
+/// `2i+1` is co-sited with chroma row `i` (`v = 1`), so it needs no vertical blend
+/// and reuses [`chroma_upsample_2to1_cosited_h_p0xx`] on `cur_uv_half` directly.
+///
+/// # Panics (debug builds)
+///
+/// - `width` must be even (4:2:0 pairs pixel columns).
+/// - `prev_uv_half.len() >= width`, `cur_uv_half.len() >= width`,
+///   `uv_full.len() >= 2 * width`.
+#[cfg(all(any(feature = "std", feature = "alloc"), feature = "yuv-planar"))]
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn chroma_upsample_420_bottomleft_even_h_p0xx<const BITS: u32>(
+  prev_uv_half: &[u16],
+  cur_uv_half: &[u16],
+  uv_full: &mut [u16],
+  width: usize,
+  big_endian: bool,
+) {
+  debug_assert_eq!(width & 1, 0, "P-format 4:2:0 requires even width");
+  debug_assert!(prev_uv_half.len() >= width, "prev_uv_half row too short");
+  debug_assert!(cur_uv_half.len() >= width, "cur_uv_half row too short");
+  debug_assert!(uv_full.len() >= 2 * width, "uv_full row too short");
+
+  let shift = 16 - BITS;
+  let load = |row: &[u16], c: usize, comp: usize| -> u32 {
+    let raw = row[2 * c + comp];
+    (if big_endian {
+      u16::from_be(raw)
+    } else {
+      u16::from_le(raw)
+    } >> shift) as u32
+  };
+  let store = |logical: u32| -> u16 {
+    let v = (logical as u16) << shift;
+    if big_endian { v.to_be() } else { v.to_le() }
+  };
+  let vblend = |c: usize, comp: usize| -> u32 {
+    (load(prev_uv_half, c, comp) + load(cur_uv_half, c, comp) + 1) >> 1
+  };
+
+  let half = width / 2;
+  for j in 0..half {
+    let u = store(vblend(j, 0));
+    let v = store(vblend(j, 1));
+    uv_full[2 * (2 * j)] = u;
+    uv_full[2 * (2 * j) + 1] = v;
+    uv_full[2 * (2 * j + 1)] = u;
+    uv_full[2 * (2 * j + 1) + 1] = v;
+  }
+}
+
 // ---- P010 (semi-planar 10-bit, high-bit-packed) → RGB ------------------
 
 /// Converts one row of P010 (semi‑planar 4:2:0 with UV interleaved,

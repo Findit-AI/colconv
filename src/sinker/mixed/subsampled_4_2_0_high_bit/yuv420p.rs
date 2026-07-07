@@ -108,6 +108,35 @@ pub(crate) fn upsample_420_chroma_center_h_u16<'s, const BITS: u32>(
   (u_full, v_full)
 }
 
+/// Co-sited (`h = 0`) full-width HIGH-BIT 4:2:0 chroma reconstruction — the
+/// co-sited twin of [`upsample_420_chroma_center_h_u16`] used by the `BottomLeft`
+/// siting, whose horizontal axis is nearest-neighbor rather than the `h = 0.5`
+/// centered phase. Each half is filled by
+/// [`chroma_upsample_2to1_cosited_h_u16`](crate::row::scalar::chroma_upsample_2to1_cosited_h_u16)
+/// (a plain 2× replicate, masking each sample to the low `BITS` in wire byte
+/// order), then fed to the same high-bit 4:4:4 decode kernels — so a `BottomLeft`
+/// decode reconstructs its `v = 1` fold ([`upsample_420_chroma_sited_u16`]) atop a
+/// consistent full-width horizontal staging and reuses those SIMD backends.
+///
+/// **Infallible**: the caller must have run [`reserve_420_chroma_full_u16`] up
+/// front, so `chroma_full` is `>= 2 * width` here.
+pub(crate) fn upsample_420_chroma_cosited_h_u16<'s, const BITS: u32>(
+  chroma_full: &'s mut [u16],
+  u_half: &[u16],
+  v_half: &[u16],
+  width: usize,
+  big_endian: bool,
+) -> (&'s [u16], &'s [u16]) {
+  debug_assert!(
+    chroma_full.len() >= 2 * width,
+    "chroma_full must be reserved via reserve_420_chroma_full_u16 first"
+  );
+  let (u_full, v_full) = chroma_full[..2 * width].split_at_mut(width);
+  crate::row::scalar::chroma_upsample_2to1_cosited_h_u16::<BITS>(u_half, u_full, width, big_endian);
+  crate::row::scalar::chroma_upsample_2to1_cosited_h_u16::<BITS>(v_half, v_full, width, big_endian);
+  (u_full, v_full)
+}
+
 /// **Fallible preflight** for the bottom-sited (`AVCHROMA_LOC_BOTTOM`)
 /// vertical-phase HIGH-BIT 4:2:0 chroma lookback (RFC #238 S6d) — the `u16` twin
 /// of [`reserve_420_chroma_prev`](super::super::reserve_420_chroma_prev). Grows
@@ -224,6 +253,7 @@ pub(crate) fn upsample_420_chroma_sited_u16<'s, const BITS: u32>(
   v_half: &[u16],
   idx: usize,
   bottom_v: bool,
+  center_h: bool,
   stage: bool,
   width: usize,
   big_endian: bool,
@@ -237,7 +267,8 @@ pub(crate) fn upsample_420_chroma_sited_u16<'s, const BITS: u32>(
   // The bottom-sited EVEN row box-blends only when the lookback PROVABLY holds
   // the wanted predecessor `chroma_row - 1`; otherwise it clamps to the current
   // row (never stale). Every other case (non-bottom siting, the bottom-sited odd
-  // row, or an unvalidated even row) is the plain centered upsample.
+  // row, or an unvalidated even row) is the plain horizontal upsample — centered
+  // or co-sited per `center_h`.
   let do_vblend =
     bottom_v && idx & 1 == 0 && chroma_row > 0 && *chroma_prev_row == Some(chroma_row - 1);
 
@@ -248,15 +279,26 @@ pub(crate) fn upsample_420_chroma_sited_u16<'s, const BITS: u32>(
     );
     let (u_full, v_full) = chroma_full[..2 * width].split_at_mut(width);
     let (u_prev, v_prev) = chroma_prev[..width].split_at(half);
-    crate::row::scalar::chroma_upsample_420_bottom_even_h_u16::<BITS>(
-      u_prev, u_half, u_full, width, big_endian,
-    );
-    crate::row::scalar::chroma_upsample_420_bottom_even_h_u16::<BITS>(
-      v_prev, v_half, v_full, width, big_endian,
-    );
+    if center_h {
+      crate::row::scalar::chroma_upsample_420_bottom_even_h_u16::<BITS>(
+        u_prev, u_half, u_full, width, big_endian,
+      );
+      crate::row::scalar::chroma_upsample_420_bottom_even_h_u16::<BITS>(
+        v_prev, v_half, v_full, width, big_endian,
+      );
+    } else {
+      crate::row::scalar::chroma_upsample_420_bottomleft_even_h_u16::<BITS>(
+        u_prev, u_half, u_full, width, big_endian,
+      );
+      crate::row::scalar::chroma_upsample_420_bottomleft_even_h_u16::<BITS>(
+        v_prev, v_half, v_full, width, big_endian,
+      );
+    }
     (&*u_full, &*v_full)
-  } else {
+  } else if center_h {
     upsample_420_chroma_center_h_u16::<BITS>(chroma_full, u_half, v_half, width, big_endian)
+  } else {
+    upsample_420_chroma_cosited_h_u16::<BITS>(chroma_full, u_half, v_half, width, big_endian)
   };
 
   // Refresh the lookback with the current chroma row + its validity tag (after
@@ -528,7 +570,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p9<BE>, R> {
         // first (the #180 reject-before-allocation invariant). Idempotent — the
         // delegate re-runs it.
         plan.ensure_single_kernel_filter()?;
-        if center_sited && want_color {
+        if (center_sited || bottom_v) && want_color {
           // Centered filter: reconstruct full-width `u16` chroma, but ONLY after
           // the resample preflight (frozen-output + sequence), so an
           // out-of-sequence / rejected row is caught before the chroma
@@ -579,6 +621,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p9<BE>, R> {
             v_half,
             idx,
             bottom_v,
+            center_sited,
             false,
             w,
             BE,
@@ -786,7 +829,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p9<BE>, R> {
           // freeze the route to row-stage only when the call accepts an
           // output-bearing row (a no-output call returns Ok with `need_output`
           // false; an out-of-sequence / frozen row returns Err via `?`).
-          if center_sited && want_color {
+          if (center_sited || bottom_v) && want_color {
             // Centered row-stage: reconstruct full-width `u16` chroma AFTER the
             // resample preflight (frozen-output + sequence), so an
             // out-of-sequence / rejected row is caught before the chroma
@@ -836,6 +879,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p9<BE>, R> {
               v_half,
               idx,
               bottom_v,
+              center_sited,
               false,
               w,
               BE,
@@ -994,7 +1038,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p9<BE>, R> {
     // Any colour output (u8 or u16 RGB / RGBA / HSV) consumes the centered
     // chroma; a luma-only row never does, so it neither reserves nor upsamples
     // it (and the reserve below is what makes the later upsample infallible).
-    let need_centered_chroma = center_sited && want_color;
+    let need_centered_chroma = (center_sited || bottom_v) && want_color;
     if need_centered_chroma {
       reserve_420_chroma_full_u16(chroma_full_u16, w, h)?;
     }
@@ -1057,6 +1101,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p9<BE>, R> {
         row.v_half(),
         idx,
         bottom_v,
+        center_sited,
         true,
         w,
         BE,
@@ -1569,7 +1614,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p10<BE>, R> {
         // first (the #180 reject-before-allocation invariant). Idempotent — the
         // delegate re-runs it.
         plan.ensure_single_kernel_filter()?;
-        if center_sited && want_color {
+        if (center_sited || bottom_v) && want_color {
           // Centered filter: reconstruct full-width `u16` chroma, but ONLY after
           // the resample preflight (frozen-output + sequence), so an
           // out-of-sequence / rejected row is caught before the chroma
@@ -1620,6 +1665,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p10<BE>, R> {
             v_half,
             idx,
             bottom_v,
+            center_sited,
             false,
             w,
             BE,
@@ -1827,7 +1873,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p10<BE>, R> {
           // freeze the route to row-stage only when the call accepts an
           // output-bearing row (a no-output call returns Ok with `need_output`
           // false; an out-of-sequence / frozen row returns Err via `?`).
-          if center_sited && want_color {
+          if (center_sited || bottom_v) && want_color {
             // Centered row-stage: reconstruct full-width `u16` chroma AFTER the
             // resample preflight (frozen-output + sequence), so an
             // out-of-sequence / rejected row is caught before the chroma
@@ -1877,6 +1923,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p10<BE>, R> {
               v_half,
               idx,
               bottom_v,
+              center_sited,
               false,
               w,
               BE,
@@ -2035,7 +2082,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p10<BE>, R> {
     // Any colour output (u8 or u16 RGB / RGBA / HSV) consumes the centered
     // chroma; a luma-only row never does, so it neither reserves nor upsamples
     // it (and the reserve below is what makes the later upsample infallible).
-    let need_centered_chroma = center_sited && want_color;
+    let need_centered_chroma = (center_sited || bottom_v) && want_color;
     if need_centered_chroma {
       reserve_420_chroma_full_u16(chroma_full_u16, w, h)?;
     }
@@ -2098,6 +2145,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p10<BE>, R> {
         row.v_half(),
         idx,
         bottom_v,
+        center_sited,
         true,
         w,
         BE,
@@ -2589,7 +2637,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p12<BE>, R> {
         // first (the #180 reject-before-allocation invariant). Idempotent — the
         // delegate re-runs it.
         plan.ensure_single_kernel_filter()?;
-        if center_sited && want_color {
+        if (center_sited || bottom_v) && want_color {
           // Centered filter: reconstruct full-width `u16` chroma, but ONLY after
           // the resample preflight (frozen-output + sequence), so an
           // out-of-sequence / rejected row is caught before the chroma
@@ -2640,6 +2688,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p12<BE>, R> {
             v_half,
             idx,
             bottom_v,
+            center_sited,
             false,
             w,
             BE,
@@ -2847,7 +2896,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p12<BE>, R> {
           // freeze the route to row-stage only when the call accepts an
           // output-bearing row (a no-output call returns Ok with `need_output`
           // false; an out-of-sequence / frozen row returns Err via `?`).
-          if center_sited && want_color {
+          if (center_sited || bottom_v) && want_color {
             // Centered row-stage: reconstruct full-width `u16` chroma AFTER the
             // resample preflight (frozen-output + sequence), so an
             // out-of-sequence / rejected row is caught before the chroma
@@ -2897,6 +2946,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p12<BE>, R> {
               v_half,
               idx,
               bottom_v,
+              center_sited,
               false,
               w,
               BE,
@@ -3055,7 +3105,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p12<BE>, R> {
     // Any colour output (u8 or u16 RGB / RGBA / HSV) consumes the centered
     // chroma; a luma-only row never does, so it neither reserves nor upsamples
     // it (and the reserve below is what makes the later upsample infallible).
-    let need_centered_chroma = center_sited && want_color;
+    let need_centered_chroma = (center_sited || bottom_v) && want_color;
     if need_centered_chroma {
       reserve_420_chroma_full_u16(chroma_full_u16, w, h)?;
     }
@@ -3118,6 +3168,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p12<BE>, R> {
         row.v_half(),
         idx,
         bottom_v,
+        center_sited,
         true,
         w,
         BE,
@@ -3593,7 +3644,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p14<BE>, R> {
         // first (the #180 reject-before-allocation invariant). Idempotent — the
         // delegate re-runs it.
         plan.ensure_single_kernel_filter()?;
-        if center_sited && want_color {
+        if (center_sited || bottom_v) && want_color {
           // Centered filter: reconstruct full-width `u16` chroma, but ONLY after
           // the resample preflight (frozen-output + sequence), so an
           // out-of-sequence / rejected row is caught before the chroma
@@ -3644,6 +3695,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p14<BE>, R> {
             v_half,
             idx,
             bottom_v,
+            center_sited,
             false,
             w,
             BE,
@@ -3851,7 +3903,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p14<BE>, R> {
           // freeze the route to row-stage only when the call accepts an
           // output-bearing row (a no-output call returns Ok with `need_output`
           // false; an out-of-sequence / frozen row returns Err via `?`).
-          if center_sited && want_color {
+          if (center_sited || bottom_v) && want_color {
             // Centered row-stage: reconstruct full-width `u16` chroma AFTER the
             // resample preflight (frozen-output + sequence), so an
             // out-of-sequence / rejected row is caught before the chroma
@@ -3901,6 +3953,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p14<BE>, R> {
               v_half,
               idx,
               bottom_v,
+              center_sited,
               false,
               w,
               BE,
@@ -4059,7 +4112,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p14<BE>, R> {
     // Any colour output (u8 or u16 RGB / RGBA / HSV) consumes the centered
     // chroma; a luma-only row never does, so it neither reserves nor upsamples
     // it (and the reserve below is what makes the later upsample infallible).
-    let need_centered_chroma = center_sited && want_color;
+    let need_centered_chroma = (center_sited || bottom_v) && want_color;
     if need_centered_chroma {
       reserve_420_chroma_full_u16(chroma_full_u16, w, h)?;
     }
@@ -4122,6 +4175,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p14<BE>, R> {
         row.v_half(),
         idx,
         bottom_v,
+        center_sited,
         true,
         w,
         BE,
@@ -4597,7 +4651,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p16<BE>, R> {
         // first (the #180 reject-before-allocation invariant). Idempotent — the
         // delegate re-runs it.
         plan.ensure_single_kernel_filter()?;
-        if center_sited && want_color {
+        if (center_sited || bottom_v) && want_color {
           // Centered filter: reconstruct full-width `u16` chroma, but ONLY after
           // the resample preflight (frozen-output + sequence), so an
           // out-of-sequence / rejected row is caught before the chroma
@@ -4648,6 +4702,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p16<BE>, R> {
             v_half,
             idx,
             bottom_v,
+            center_sited,
             false,
             w,
             BE,
@@ -4855,7 +4910,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p16<BE>, R> {
           // freeze the route to row-stage only when the call accepts an
           // output-bearing row (a no-output call returns Ok with `need_output`
           // false; an out-of-sequence / frozen row returns Err via `?`).
-          if center_sited && want_color {
+          if (center_sited || bottom_v) && want_color {
             // Centered row-stage: reconstruct full-width `u16` chroma AFTER the
             // resample preflight (frozen-output + sequence), so an
             // out-of-sequence / rejected row is caught before the chroma
@@ -4905,6 +4960,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p16<BE>, R> {
               v_half,
               idx,
               bottom_v,
+              center_sited,
               false,
               w,
               BE,
@@ -5063,7 +5119,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p16<BE>, R> {
     // Any colour output (u8 or u16 RGB / RGBA / HSV) consumes the centered
     // chroma; a luma-only row never does, so it neither reserves nor upsamples
     // it (and the reserve below is what makes the later upsample infallible).
-    let need_centered_chroma = center_sited && want_color;
+    let need_centered_chroma = (center_sited || bottom_v) && want_color;
     if need_centered_chroma {
       reserve_420_chroma_full_u16(chroma_full_u16, w, h)?;
     }
@@ -5126,6 +5182,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p16<BE>, R> {
         row.v_half(),
         idx,
         bottom_v,
+        center_sited,
         true,
         w,
         BE,
