@@ -643,3 +643,146 @@ pub fn yuv444p12_to_rgba_u16_row_chroma_derived_cl_endian(
     y, u, v, rgba_out, width, matrix, full_range, transfer, use_simd, big_endian,
   );
 }
+
+// ---- IptC2 (H.273 MatrixCoefficients = 15) routing ----------------------
+//
+// The Dolby Vision Profile 5 base colour space, the non-affine sibling of the
+// ICtCp / ChromaDerivedCl splices and the head of the non-affine dispatcher
+// chain: when the matrix is `ColorMatrix::IptC2` **and** the source carries a
+// PQ transfer (the only transfer IPT-C2 is defined for), the row decodes
+// through the dedicated scalar non-affine kernel ([`scalar::iptc2`]);
+// otherwise it delegates byte-identically to the `*_chroma_derived_cl_endian`
+// dispatcher — the next link, which splices its own (mutually exclusive)
+// matrix and finally the affine `*_endian` path. IPT-C2 is scalar-only (the
+// transcendental PQ EOTF/OETF does not vectorize), so `use_simd` is honoured
+// only on the delegated fallback. Gated on the same transcendental tier
+// (`std`/`alloc`) `scalar::iptc2` requires; `primaries` is threaded through
+// unused here so the delegated CL link can still resolve.
+#[cfg(any(feature = "std", feature = "alloc"))]
+use scalar::iptc2::{self, IptC2Transfer};
+
+/// [`yuv444p12_to_rgb_row_chroma_derived_cl_endian`] with the
+/// `ColorMatrix::IptC2` non-affine decode spliced in for a PQ `transfer`. See
+/// the module routing note.
+#[cfg(any(feature = "std", feature = "alloc"))]
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn yuv444p12_to_rgb_row_iptc2_endian(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  primaries: Primaries,
+  full_range: bool,
+  transfer: Transfer,
+  use_simd: bool,
+  big_endian: bool,
+) {
+  if matches!(matrix, ColorMatrix::IptC2) && IptC2Transfer::for_transfer(transfer).is_some() {
+    if big_endian {
+      iptc2::iptc2_444p_n_to_rgb_row::<12, true>(y, u, v, rgb_out, width, full_range);
+    } else {
+      iptc2::iptc2_444p_n_to_rgb_row::<12, false>(y, u, v, rgb_out, width, full_range);
+    }
+    return;
+  }
+  yuv444p12_to_rgb_row_chroma_derived_cl_endian(
+    y, u, v, rgb_out, width, matrix, primaries, full_range, transfer, use_simd, big_endian,
+  );
+}
+
+/// [`yuv444p12_to_rgba_row_chroma_derived_cl_endian`] with the
+/// `ColorMatrix::IptC2` non-affine decode (opaque alpha) for a PQ `transfer`.
+#[cfg(any(feature = "std", feature = "alloc"))]
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn yuv444p12_to_rgba_row_iptc2_endian(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  rgba_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  primaries: Primaries,
+  full_range: bool,
+  transfer: Transfer,
+  use_simd: bool,
+  big_endian: bool,
+) {
+  if matches!(matrix, ColorMatrix::IptC2) && IptC2Transfer::for_transfer(transfer).is_some() {
+    if big_endian {
+      iptc2::iptc2_444p_n_to_rgba_row::<12, true>(y, u, v, rgba_out, width, full_range);
+    } else {
+      iptc2::iptc2_444p_n_to_rgba_row::<12, false>(y, u, v, rgba_out, width, full_range);
+    }
+    return;
+  }
+  yuv444p12_to_rgba_row_chroma_derived_cl_endian(
+    y, u, v, rgba_out, width, matrix, primaries, full_range, transfer, use_simd, big_endian,
+  );
+}
+
+/// [`yuv444p12_to_rgb_u16_row_chroma_derived_cl_endian`] with the
+/// `ColorMatrix::IptC2` non-affine decode for a PQ `transfer`.
+#[cfg(any(feature = "std", feature = "alloc"))]
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn yuv444p12_to_rgb_u16_row_iptc2_endian(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  rgb_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  primaries: Primaries,
+  full_range: bool,
+  transfer: Transfer,
+  use_simd: bool,
+  big_endian: bool,
+) {
+  if matches!(matrix, ColorMatrix::IptC2) && IptC2Transfer::for_transfer(transfer).is_some() {
+    if big_endian {
+      iptc2::iptc2_444p_n_to_rgb_u16_row::<12, true>(y, u, v, rgb_out, width, full_range);
+    } else {
+      iptc2::iptc2_444p_n_to_rgb_u16_row::<12, false>(y, u, v, rgb_out, width, full_range);
+    }
+    return;
+  }
+  yuv444p12_to_rgb_u16_row_chroma_derived_cl_endian(
+    y, u, v, rgb_out, width, matrix, primaries, full_range, transfer, use_simd, big_endian,
+  );
+}
+
+/// [`yuv444p12_to_rgba_u16_row_chroma_derived_cl_endian`] with the
+/// `ColorMatrix::IptC2` non-affine decode (opaque alpha `(1 << 12) - 1`) for a
+/// PQ `transfer`.
+#[cfg(any(feature = "std", feature = "alloc"))]
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn yuv444p12_to_rgba_u16_row_iptc2_endian(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  rgba_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  primaries: Primaries,
+  full_range: bool,
+  transfer: Transfer,
+  use_simd: bool,
+  big_endian: bool,
+) {
+  if matches!(matrix, ColorMatrix::IptC2) && IptC2Transfer::for_transfer(transfer).is_some() {
+    if big_endian {
+      iptc2::iptc2_444p_n_to_rgba_u16_row::<12, true>(y, u, v, rgba_out, width, full_range);
+    } else {
+      iptc2::iptc2_444p_n_to_rgba_u16_row::<12, false>(y, u, v, rgba_out, width, full_range);
+    }
+    return;
+  }
+  yuv444p12_to_rgba_u16_row_chroma_derived_cl_endian(
+    y, u, v, rgba_out, width, matrix, primaries, full_range, transfer, use_simd, big_endian,
+  );
+}

@@ -112,6 +112,12 @@ mod hsv;
 // the representative wiring targets the `yuv-planar` 4:4:4 family (#303).
 #[cfg(all(feature = "yuv-planar", any(feature = "std", feature = "alloc")))]
 pub(crate) mod ictcp;
+// IPT-C2 (H.273 MatrixCoefficients = 15, the Dolby Vision Profile 5 base
+// colour space) non-affine decode. Gated like `ictcp`: the transcendental PQ
+// EOTF/OETF need `std` or `alloc` (libm); the representative wiring targets the
+// `yuv-planar` 4:4:4 family (#303).
+#[cfg(all(feature = "yuv-planar", any(feature = "std", feature = "alloc")))]
+pub(crate) mod iptc2;
 #[cfg(feature = "rgb-legacy")]
 pub(crate) mod legacy_rgb;
 #[cfg(feature = "mono")]
