@@ -130,6 +130,8 @@ mod chroma_siting_nv16_resample;
 mod chroma_siting_p0xx;
 #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
 mod chroma_siting_p2xx;
+#[cfg(all(feature = "v210", feature = "yuv-planar", feature = "rgb"))]
+mod chroma_siting_v210_resample;
 #[cfg(all(feature = "y2xx", feature = "yuv-planar", feature = "rgb"))]
 mod chroma_siting_y2xx_resample;
 #[cfg(feature = "yuva")]
