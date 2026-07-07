@@ -12451,6 +12451,12 @@ fn grow_v210_depack_scratch(
 /// `luma_u16`, attaching it routes through this native tier (no row-stage
 /// fallback), keeping the rgb colour semantics native.
 ///
+/// `chroma_h_phase` is the horizontal chroma sampling phase folded into the
+/// chroma area weights (`ResamplePlan::area_chroma_422`): `0.25` for the centered
+/// 4:2:2 group (`chroma_422_center_sited_h`), `0.0` for co-sited / unspecified. At
+/// phase `0.0` the folded plan is byte-identical to the plain `area` plan, so the
+/// co-sited output is untouched.
+///
 /// Atomicity mirrors [`y2xx_process_native`]: the join's COMPLETE pre-feed
 /// preflight runs FIRST — `Ok(false)` no-op short-circuit, first-row
 /// out-of-sequence, frozen-output — BEFORE any fallible scratch grow, so a
@@ -12478,6 +12484,7 @@ fn v210_process_native<const BE: bool>(
   rgb_scratch: &mut Vec<u8>,
   rgb_scratch_u16: &mut Vec<u16>,
   packed: &[u8],
+  chroma_h_phase: f64,
   matrix: crate::ColorMatrix,
   full_range: bool,
   idx: usize,
@@ -12632,9 +12639,156 @@ fn v210_process_native<const BE: bool>(
     h,
     1,
     cw,
-    || crate::resample::ResamplePlan::area(cw, h, plan.out_w(), plan.out_h()),
+    || {
+      crate::resample::ResamplePlan::area_chroma_422(
+        cw,
+        h,
+        plan.out_w(),
+        plan.out_h(),
+        chroma_h_phase,
+        0.0,
+      )
+    },
     use_simd,
   )
+}
+
+/// Fallible pre-feed reserve for the packed V210 centered-siting de-pack scratch:
+/// grows the full-width Y buffer (`width`) and the half-width U / V buffers
+/// (`width / 2` each) so the later infallible de-pack + 4:4:4 decode reuse
+/// already-sized buffers. The V210 twin of [`reserve_y2xx_center_planes`]. Split
+/// from the de-pack so it runs before any output row is written — an allocator
+/// refusal must leave the output frame untouched, never partially mutated — and
+/// reuses the native tier's de-pack scratch (`width` Y + `width / 2` U / V), so a
+/// centered colour row and an area native row never both run in one `process`
+/// call. A grow refusal is the typed, recoverable
+/// [`ResampleError::AllocationFailed`]; `height` feeds the payload.
+///
+/// [`ResampleError::AllocationFailed`]: crate::resample::ResampleError::AllocationFailed
+#[cfg(all(feature = "v210", feature = "yuv-planar"))]
+fn reserve_v210_center_planes(
+  y_full: &mut Vec<u16>,
+  u_half: &mut Vec<u16>,
+  v_half: &mut Vec<u16>,
+  width: usize,
+  height: usize,
+) -> Result<(), MixedSinkerError> {
+  let grow = |scratch: &mut Vec<u16>, len: usize| -> Result<(), MixedSinkerError> {
+    if scratch.len() < len {
+      scratch
+        .try_reserve_exact(len - scratch.len())
+        .map_err(|_| {
+          MixedSinkerError::Resample(crate::resample::ResampleError::AllocationFailed(
+            crate::resample::PlanGeometry::new(width, height, width, height),
+          ))
+        })?;
+      scratch.resize(len, 0);
+    }
+    Ok(())
+  };
+  grow(y_full, width)?;
+  let cw = width / 2;
+  grow(u_half, cw)?;
+  grow(v_half, cw)?;
+  Ok(())
+}
+
+/// Reconstructs full-width chroma for a packed V210 centered-siting colour row.
+/// De-packs the V210 word packing (four 32-bit lanes per 16-byte word, each
+/// carrying three low-10-bit samples in the `unpack_v210_word` order) into a
+/// full-width Y plane and half-width U / V planes, re-encoding each already
+/// logical 10-bit sample into the source's wire byte order (`be`) — so the planes
+/// match the LSB-aligned low-packed layout the [`reconstruct_chroma`] upsample and
+/// the 10-bit 4:4:4 decode expect, both of which re-decode the endianness (`be`)
+/// themselves. Then phase-0.5 upsamples U / V into `chroma_full`, returning the
+/// `(u_full, v_full)` slices the 4:4:4 decode reads (the de-packed `y_full` is
+/// left in the caller's scratch, read as `&y_full[..w]`). Every fallible grow
+/// (chroma scratch + de-pack planes) precedes the infallible de-pack, so an
+/// allocator refusal leaves the output frame untouched (the crate's
+/// preflight-ordering atomicity contract). Reuses the native tier's de-pack
+/// scratch, so a centered colour row and an area native row never both run in one
+/// `process` call. The V210 twin of [`y2xx_center_reconstruct`] — the same
+/// reconstruct-and-decode, differing only in the word de-pack (the native tier's
+/// bit-extract in place of the YUYV MSB-align).
+#[cfg(all(feature = "v210", feature = "yuv-planar"))]
+#[allow(clippy::too_many_arguments)]
+fn v210_center_reconstruct<'c>(
+  packed: &[u8],
+  y_full: &mut Vec<u16>,
+  u_half: &mut Vec<u16>,
+  v_half: &mut Vec<u16>,
+  chroma_full: &'c mut Vec<u16>,
+  w: usize,
+  h: usize,
+  be: bool,
+) -> Result<(&'c [u16], &'c [u16]), MixedSinkerError> {
+  const BITS: u32 = 10;
+  let cw = w / 2;
+  subsampled_4_2_0_high_bit::reserve_420_chroma_full_u16(chroma_full, w, h)?;
+  reserve_v210_center_planes(y_full, u_half, v_half, w, h)?;
+  // Each bit-extracted 10-bit sample is already logical; re-encode it in the
+  // source wire byte order so the reconstruct + 4:4:4 decode (which apply `be`)
+  // see the LSB-aligned low-packed samples.
+  let encode = |logical: u16| -> u16 { if be { logical.to_be() } else { logical.to_le() } };
+  let load = |word: &[u8], lane: usize| -> u32 {
+    let bytes = [
+      word[lane * 4],
+      word[lane * 4 + 1],
+      word[lane * 4 + 2],
+      word[lane * 4 + 3],
+    ];
+    if be {
+      u32::from_be_bytes(bytes)
+    } else {
+      u32::from_le_bytes(bytes)
+    }
+  };
+  for (wi, word) in packed.chunks_exact(16).enumerate() {
+    let px = wi * 6;
+    let w0 = load(word, 0);
+    let w1 = load(word, 1);
+    let w2 = load(word, 2);
+    let w3 = load(word, 3);
+    // The six Y samples across the four lanes (`unpack_v210_word` order).
+    let ys = [
+      ((w0 >> 10) & 0x3FF) as u16, // Y0
+      (w1 & 0x3FF) as u16,         // Y1
+      ((w1 >> 20) & 0x3FF) as u16, // Y2
+      ((w2 >> 10) & 0x3FF) as u16, // Y3
+      (w3 & 0x3FF) as u16,         // Y4
+      ((w3 >> 20) & 0x3FF) as u16, // Y5
+    ];
+    for (k, &y) in ys.iter().enumerate() {
+      if px + k < w {
+        y_full[px + k] = encode(y);
+      }
+    }
+    let cu = px / 2;
+    // Cb0 / Cb1 / Cb2 and Cr0 / Cr1 / Cr2 — one chroma pair per 2-pixel pair.
+    let us = [
+      (w0 & 0x3FF) as u16,         // Cb0
+      ((w1 >> 10) & 0x3FF) as u16, // Cb1
+      ((w2 >> 20) & 0x3FF) as u16, // Cb2
+    ];
+    let vs = [
+      ((w0 >> 20) & 0x3FF) as u16, // Cr0
+      (w2 & 0x3FF) as u16,         // Cr1
+      ((w3 >> 10) & 0x3FF) as u16, // Cr2
+    ];
+    for k in 0..3 {
+      if cu + k < cw {
+        u_half[cu + k] = encode(us[k]);
+        v_half[cu + k] = encode(vs[k]);
+      }
+    }
+  }
+  Ok(reconstruct_chroma(
+    ChromaU16::<BITS> { big_endian: be },
+    chroma_full,
+    &u_half[..cw],
+    &v_half[..cw],
+    w,
+  ))
 }
 
 /// The de-pack writes host-native LOGICAL u16 into the wrapper scratch BEFORE
