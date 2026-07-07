@@ -151,6 +151,12 @@ pub(crate) mod planar_gbr_msb;
 mod rgb_expand;
 #[cfg(feature = "yuv-semi-planar")]
 mod semi_planar_8bit;
+// SMPTE ST 2085 (H.273 MatrixCoefficients = 11, "Y'D'zD'x", the PQ-only
+// non-affine X'Y'Z' colour-difference model) non-affine decode. Gated like
+// `iptc2`: the transcendental PQ EOTF/OETF need `std` or `alloc` (libm); the
+// representative wiring targets the `yuv-planar` 4:4:4 family (#303).
+#[cfg(all(feature = "yuv-planar", any(feature = "std", feature = "alloc")))]
+pub(crate) mod smpte2085;
 // `subsampled_high_bit_pn` provides the scalar reference kernels for
 // both the 4:2:0 (P010 / P012 / P016) and 4:4:4 (P410 / P412 / P416)
 // families. All are semi-planar P-formats, so a single

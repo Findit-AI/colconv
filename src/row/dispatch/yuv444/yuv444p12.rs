@@ -14,7 +14,7 @@ use crate::row::simd128_available;
 use crate::row::{avx2_available, avx512_available, sse41_available};
 use crate::{
   ColorMatrix,
-  row::{rgba_row_bytes, rgba_row_elems, scalar},
+  row::{rgb_row_bytes, rgb_row_elems, rgba_row_bytes, rgba_row_elems, scalar},
 };
 
 use super::{yuv_444p_n_to_rgb_row, yuv_444p_n_to_rgb_u16_row};
@@ -783,6 +783,174 @@ pub fn yuv444p12_to_rgba_u16_row_iptc2_endian(
     return;
   }
   yuv444p12_to_rgba_u16_row_chroma_derived_cl_endian(
+    y, u, v, rgba_out, width, matrix, primaries, full_range, transfer, use_simd, big_endian,
+  );
+}
+
+// ---- Smpte2085 (H.273 MatrixCoefficients = 11) routing ------------------
+//
+// The SMPTE ST 2085 "Y'D'zD'x" X'Y'Z' colour-difference model, the non-affine
+// sibling of the IptC2 / ICtCp / ChromaDerivedCl splices and the new head of
+// the non-affine dispatcher chain: when the matrix is `ColorMatrix::Smpte2085`
+// **and** the source carries a PQ transfer (the only transfer SMPTE 2085 is
+// defined for), the row decodes through the dedicated scalar non-affine kernel
+// ([`scalar::smpte2085`]); otherwise it delegates byte-identically to the
+// `*_iptc2_endian` dispatcher — the next link, which splices its own (mutually
+// exclusive) matrix and finally the CL / ICtCp / affine path. SMPTE 2085 is
+// scalar-only (the transcendental PQ EOTF/OETF does not vectorize), so
+// `use_simd` is honoured only on the delegated fallback. Gated on the same
+// transcendental tier (`std`/`alloc`) `scalar::smpte2085` requires; `primaries`
+// is threaded through unused here so the delegated CL link can still resolve.
+#[cfg(any(feature = "std", feature = "alloc"))]
+use scalar::smpte2085::{self, Smpte2085Transfer};
+
+/// [`yuv444p12_to_rgb_row_iptc2_endian`] with the `ColorMatrix::Smpte2085`
+/// non-affine decode spliced in for a PQ `transfer`. See the module routing
+/// note.
+#[cfg(any(feature = "std", feature = "alloc"))]
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn yuv444p12_to_rgb_row_smpte2085_endian(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  rgb_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  primaries: Primaries,
+  full_range: bool,
+  transfer: Transfer,
+  use_simd: bool,
+  big_endian: bool,
+) {
+  if matches!(matrix, ColorMatrix::Smpte2085) && Smpte2085Transfer::for_transfer(transfer).is_some()
+  {
+    let rgb_min = rgb_row_bytes(width);
+    assert!(y.len() >= width, "y row too short");
+    assert!(u.len() >= width, "u row too short");
+    assert!(v.len() >= width, "v row too short");
+    assert!(rgb_out.len() >= rgb_min, "rgb_out row too short");
+    if big_endian {
+      smpte2085::smpte2085_444p_n_to_rgb_row::<12, true>(y, u, v, rgb_out, width, full_range);
+    } else {
+      smpte2085::smpte2085_444p_n_to_rgb_row::<12, false>(y, u, v, rgb_out, width, full_range);
+    }
+    return;
+  }
+  yuv444p12_to_rgb_row_iptc2_endian(
+    y, u, v, rgb_out, width, matrix, primaries, full_range, transfer, use_simd, big_endian,
+  );
+}
+
+/// [`yuv444p12_to_rgba_row_iptc2_endian`] with the `ColorMatrix::Smpte2085`
+/// non-affine decode (opaque alpha) for a PQ `transfer`.
+#[cfg(any(feature = "std", feature = "alloc"))]
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn yuv444p12_to_rgba_row_smpte2085_endian(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  rgba_out: &mut [u8],
+  width: usize,
+  matrix: ColorMatrix,
+  primaries: Primaries,
+  full_range: bool,
+  transfer: Transfer,
+  use_simd: bool,
+  big_endian: bool,
+) {
+  if matches!(matrix, ColorMatrix::Smpte2085) && Smpte2085Transfer::for_transfer(transfer).is_some()
+  {
+    let rgba_min = rgba_row_bytes(width);
+    assert!(y.len() >= width, "y row too short");
+    assert!(u.len() >= width, "u row too short");
+    assert!(v.len() >= width, "v row too short");
+    assert!(rgba_out.len() >= rgba_min, "rgba_out row too short");
+    if big_endian {
+      smpte2085::smpte2085_444p_n_to_rgba_row::<12, true>(y, u, v, rgba_out, width, full_range);
+    } else {
+      smpte2085::smpte2085_444p_n_to_rgba_row::<12, false>(y, u, v, rgba_out, width, full_range);
+    }
+    return;
+  }
+  yuv444p12_to_rgba_row_iptc2_endian(
+    y, u, v, rgba_out, width, matrix, primaries, full_range, transfer, use_simd, big_endian,
+  );
+}
+
+/// [`yuv444p12_to_rgb_u16_row_iptc2_endian`] with the `ColorMatrix::Smpte2085`
+/// non-affine decode for a PQ `transfer`.
+#[cfg(any(feature = "std", feature = "alloc"))]
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn yuv444p12_to_rgb_u16_row_smpte2085_endian(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  rgb_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  primaries: Primaries,
+  full_range: bool,
+  transfer: Transfer,
+  use_simd: bool,
+  big_endian: bool,
+) {
+  if matches!(matrix, ColorMatrix::Smpte2085) && Smpte2085Transfer::for_transfer(transfer).is_some()
+  {
+    let rgb_min = rgb_row_elems(width);
+    assert!(y.len() >= width, "y row too short");
+    assert!(u.len() >= width, "u row too short");
+    assert!(v.len() >= width, "v row too short");
+    assert!(rgb_out.len() >= rgb_min, "rgb_out row too short");
+    if big_endian {
+      smpte2085::smpte2085_444p_n_to_rgb_u16_row::<12, true>(y, u, v, rgb_out, width, full_range);
+    } else {
+      smpte2085::smpte2085_444p_n_to_rgb_u16_row::<12, false>(y, u, v, rgb_out, width, full_range);
+    }
+    return;
+  }
+  yuv444p12_to_rgb_u16_row_iptc2_endian(
+    y, u, v, rgb_out, width, matrix, primaries, full_range, transfer, use_simd, big_endian,
+  );
+}
+
+/// [`yuv444p12_to_rgba_u16_row_iptc2_endian`] with the `ColorMatrix::Smpte2085`
+/// non-affine decode (opaque alpha `(1 << 12) - 1`) for a PQ `transfer`.
+#[cfg(any(feature = "std", feature = "alloc"))]
+#[cfg_attr(not(tarpaulin), inline(always))]
+#[allow(clippy::too_many_arguments)]
+pub fn yuv444p12_to_rgba_u16_row_smpte2085_endian(
+  y: &[u16],
+  u: &[u16],
+  v: &[u16],
+  rgba_out: &mut [u16],
+  width: usize,
+  matrix: ColorMatrix,
+  primaries: Primaries,
+  full_range: bool,
+  transfer: Transfer,
+  use_simd: bool,
+  big_endian: bool,
+) {
+  if matches!(matrix, ColorMatrix::Smpte2085) && Smpte2085Transfer::for_transfer(transfer).is_some()
+  {
+    let rgba_min = rgba_row_elems(width);
+    assert!(y.len() >= width, "y row too short");
+    assert!(u.len() >= width, "u row too short");
+    assert!(v.len() >= width, "v row too short");
+    assert!(rgba_out.len() >= rgba_min, "rgba_out row too short");
+    if big_endian {
+      smpte2085::smpte2085_444p_n_to_rgba_u16_row::<12, true>(y, u, v, rgba_out, width, full_range);
+    } else {
+      smpte2085::smpte2085_444p_n_to_rgba_u16_row::<12, false>(
+        y, u, v, rgba_out, width, full_range,
+      );
+    }
+    return;
+  }
+  yuv444p12_to_rgba_u16_row_iptc2_endian(
     y, u, v, rgba_out, width, matrix, primaries, full_range, transfer, use_simd, big_endian,
   );
 }

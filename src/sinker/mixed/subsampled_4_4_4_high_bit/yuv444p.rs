@@ -1079,10 +1079,16 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv444p12<BE>, R> {
     // `cl_active` (distinct matrices).
     let iptc2_active = matches!(row.matrix(), crate::ColorMatrix::IptC2)
       && crate::row::scalar::iptc2::IptC2Transfer::for_transfer(transfer).is_some();
+    // Whether this row decodes as SMPTE ST 2085 (H.273 MatrixCoefficients = 11,
+    // "Y'D'zD'x", the PQ-only non-affine X'Y'Z' colour-difference model, #303):
+    // the `Smpte2085` matrix with a resolvable PQ transfer. Mutually exclusive
+    // with `ictcp_active` / `cl_active` / `iptc2_active` (distinct matrices).
+    let smpte2085_active = matches!(row.matrix(), crate::ColorMatrix::Smpte2085)
+      && crate::row::scalar::smpte2085::Smpte2085Transfer::for_transfer(transfer).is_some();
     // Any of the non-affine decodes needs the convert-once-then-derive path
     // (its RGB cannot be reconstructed from a single Q15 matrix), so they share
     // the HSV-routing and atomicity-preflight predicates below.
-    let non_affine_active = ictcp_active || cl_active || iptc2_active;
+    let non_affine_active = ictcp_active || cl_active || iptc2_active || smpte2085_active;
 
     if row.y().len() != w {
       return Err(MixedSinkerError::RowShapeMismatch(RowShapeMismatch::new(
@@ -1164,6 +1170,8 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv444p12<BE>, R> {
           "ChromaDerivedCl"
         } else if iptc2_active {
           "IptC2"
+        } else if smpte2085_active {
+          "Smpte2085"
         } else {
           "Ictcp"
         };
@@ -1369,7 +1377,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv444p12<BE>, R> {
       let rgba_u16_buf = rgba_u16.as_deref_mut().unwrap();
       let rgba_u16_row =
         rgba_u16_plane_row_slice(rgba_u16_buf, one_plane_start, one_plane_end, w, h)?;
-      yuv444p12_to_rgba_u16_row_iptc2_endian(
+      yuv444p12_to_rgba_u16_row_smpte2085_endian(
         row.y(),
         row.u(),
         row.v(),
@@ -1392,7 +1400,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv444p12<BE>, R> {
           )))?;
       let rgb_plane_start = one_plane_start * 3;
       let rgb_u16_row = &mut rgb_u16_buf[rgb_plane_start..rgb_plane_end];
-      yuv444p12_to_rgb_u16_row_iptc2_endian(
+      yuv444p12_to_rgb_u16_row_smpte2085_endian(
         row.y(),
         row.u(),
         row.v(),
@@ -1444,7 +1452,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv444p12<BE>, R> {
     if want_rgba && !need_rgb_kernel {
       let rgba_buf = rgba.as_deref_mut().unwrap();
       let rgba_row = rgba_plane_row_slice(rgba_buf, one_plane_start, one_plane_end, w, h)?;
-      yuv444p12_to_rgba_row_iptc2_endian(
+      yuv444p12_to_rgba_row_smpte2085_endian(
         row.y(),
         row.u(),
         row.v(),
@@ -1473,7 +1481,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv444p12<BE>, R> {
       h,
     )?;
 
-    yuv444p12_to_rgb_row_iptc2_endian(
+    yuv444p12_to_rgb_row_smpte2085_endian(
       row.y(),
       row.u(),
       row.v(),

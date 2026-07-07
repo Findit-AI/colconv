@@ -845,7 +845,7 @@ pub struct UnsupportedMatrixResample {
   /// Source row whose `process` call hit the unsupported combination.
   row: usize,
   /// Human-readable name of the offending non-affine matrix
-  /// (`"ChromaDerivedCl"` / `"Ictcp"` / `"IptC2"`).
+  /// (`"ChromaDerivedCl"` / `"Ictcp"` / `"IptC2"` / `"Smpte2085"`).
   matrix: &'static str,
 }
 
@@ -1250,14 +1250,16 @@ pub enum MixedSinkerError {
   /// plan, which the resample tier cannot decode.
   ///
   /// The constant-luminance [`ColorMatrix::ChromaDerivedCl`] (BT.2020
-  /// `YcCbcCrc`), [`ColorMatrix::Ictcp`] (BT.2100), and [`ColorMatrix::IptC2`]
-  /// (IPT-C2 / Dolby Vision Profile 5) decodes are non-affine: they
+  /// `YcCbcCrc`), [`ColorMatrix::Ictcp`] (BT.2100), [`ColorMatrix::IptC2`]
+  /// (IPT-C2 / Dolby Vision Profile 5), and [`ColorMatrix::Smpte2085`]
+  /// (SMPTE ST 2085 "Y'D'zD'x" X'Y'Z') decodes are non-affine: they
   /// reconstruct RGB through a per-channel non-linear transfer, not a single
   /// Q15 matrix, and are wired only on the **identity** (no-resample) path. The
   /// resample tier averages in the encoded-code / native-code domain and
   /// decodes through the *affine* `yuv444p*_to_rgb*` kernels, which would
   /// silently produce wrong, route-dependent colour for these matrices (the
-  /// averaged result is not the constant-luminance / ICtCp / IPT-C2 decode).
+  /// averaged result is not the constant-luminance / ICtCp / IPT-C2 / SMPTE
+  /// 2085 decode).
   /// Rather than emit corrupt output, the offending `process` call fails before
   /// any stream consumes the row. Decode these matrices on an identity sink (no
   /// resample plan), or downscale after the colour convert. Full non-affine
@@ -1265,13 +1267,14 @@ pub enum MixedSinkerError {
   ///
   /// Only raised when the matrix actually **resolves** to its non-affine
   /// decode (BT.2020 primaries for `ChromaDerivedCl`, a PQ/HLG transfer for
-  /// `Ictcp`, a PQ transfer for `IptC2`); an unresolved tag already falls back
-  /// to the affine path on the identity route, so it resamples affinely without
-  /// error, unchanged.
+  /// `Ictcp`, a PQ transfer for `IptC2` / `Smpte2085`); an unresolved tag
+  /// already falls back to the affine path on the identity route, so it
+  /// resamples affinely without error, unchanged.
   ///
   /// [`ColorMatrix::ChromaDerivedCl`]: crate::ColorMatrix::ChromaDerivedCl
   /// [`ColorMatrix::Ictcp`]: crate::ColorMatrix::Ictcp
   /// [`ColorMatrix::IptC2`]: crate::ColorMatrix::IptC2
+  /// [`ColorMatrix::Smpte2085`]: crate::ColorMatrix::Smpte2085
   #[error(
     "MixedSinker cannot resample the non-affine {} matrix at source row {}; \
      decode on an identity sink or downscale after the colour convert",
