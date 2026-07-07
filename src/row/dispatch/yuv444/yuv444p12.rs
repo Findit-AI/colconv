@@ -14,8 +14,12 @@ use crate::row::simd128_available;
 use crate::row::{avx2_available, avx512_available, sse41_available};
 use crate::{
   ColorMatrix,
-  row::{rgb_row_bytes, rgb_row_elems, rgba_row_bytes, rgba_row_elems, scalar},
+  row::{rgba_row_bytes, rgba_row_elems, scalar},
 };
+// Used only by the `any(std, alloc)`-gated non-affine Smpte2085 row wrappers
+// (the base RGB dispatcher preflights inside the kernel, not here).
+#[cfg(any(feature = "std", feature = "alloc"))]
+use crate::row::{rgb_row_bytes, rgb_row_elems};
 
 use super::{yuv_444p_n_to_rgb_row, yuv_444p_n_to_rgb_u16_row};
 
