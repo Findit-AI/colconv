@@ -802,6 +802,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p9<BE>, R> {
                 plan.out_h(),
                 chroma_h_phase,
                 chroma_v_phase,
+                false,
               )
             },
             use_simd,
@@ -1846,6 +1847,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p10<BE>, R> {
                 plan.out_h(),
                 chroma_h_phase,
                 chroma_v_phase,
+                false,
               )
             },
             use_simd,
@@ -2869,6 +2871,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p12<BE>, R> {
                 plan.out_h(),
                 chroma_h_phase,
                 chroma_v_phase,
+                false,
               )
             },
             use_simd,
@@ -3876,6 +3879,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p14<BE>, R> {
                 plan.out_h(),
                 chroma_h_phase,
                 chroma_v_phase,
+                false,
               )
             },
             use_simd,
@@ -4883,6 +4887,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p16<BE>, R> {
                 plan.out_h(),
                 chroma_h_phase,
                 chroma_v_phase,
+                false,
               )
             },
             use_simd,

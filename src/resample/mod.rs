@@ -773,6 +773,112 @@ impl AxisSpans {
     })
   }
 
+  /// Vertical chroma spans for the RFC #238 **Top** 4:2:0 siting — the
+  /// folded triangle⊗box weights on the V axis, the `v = 0` (co-sited with the
+  /// TOP luma row of each pair) analog of [`Self::area_chroma_phased_v`] and its
+  /// exact vertical MIRROR. A Top chroma sample sits on the EVEN luma row it
+  /// covers, so reconstructing full height is the co-sited-on-even triangle:
+  /// even luma row `2i → c[i]` (the sample lies exactly on it), odd luma row
+  /// `2i + 1 → (c[i] + c[i+1]) / 2` (midway between the sample above and the one
+  /// below), with bottom-edge replication (`c[chroma_h] → c[chroma_h - 1]`).
+  /// Where the Bottom triangle reaches only BACKWARD (`c[i-1]`), this one reaches
+  /// only FORWARD — a Top sample never spreads to `i - 1` — so the sole clamp is
+  /// the bottom edge. The fold, scaling (`t ∈ {1, 2}`, each output span sums to
+  /// `2·luma_h`), and single-rounding fusion match
+  /// [`Self::area_chroma_phased_v`] verbatim; only the reach direction flips.
+  ///
+  /// `luma_h` may be ODD (`chroma_h = ⌈luma_h/2⌉`): the last luma row is then
+  /// EVEN (co-sited, no forward reach), so no odd row references `c[chroma_h]`
+  /// and the bottom clamp is inert. For EVEN `luma_h` the last row is odd and
+  /// DOES reach the bottom edge, where `c[i+1]` folds back onto `c[i]`.
+  #[cfg(feature = "yuv-planar")]
+  fn area_chroma_phased_v_top(luma_h: usize, out: usize) -> Result<Self, AxisError> {
+    // Each folded span sums to `2·luma_h`; bound it so the `u64`-accumulated
+    // weights cast back to `usize` losslessly below.
+    luma_h.checked_mul(2).ok_or(AxisError::Overflow)?;
+    let box_spans = Self::area(luma_h, out)?;
+    // Last live chroma cell (`chroma_h - 1`), the bottom-edge clamp target: an
+    // odd luma row whose forward neighbour `c[i+1]` would land here or past it
+    // folds that half back onto `c[i]`.
+    let chroma_h = luma_h.div_ceil(2);
+    let last_valid = chroma_h - 1;
+    // First / last chroma cell a full luma row folds to. Even `r = 2i` sits on
+    // `{i}`; odd `r = 2i+1` spreads to `{i, i+1}` (`{i}` clamped at the bottom
+    // edge). Both START at `i = r/2`; only an odd row below the bottom edge
+    // steps forward one. Consecutive luma rows share a chroma cell, so a box
+    // span's chroma reach is contiguous.
+    let first_chroma = |r: usize| -> usize { r / 2 };
+    let last_chroma = |r: usize| -> usize {
+      if r.is_multiple_of(2) {
+        r / 2
+      } else {
+        (r / 2 + 1).min(last_valid)
+      }
+    };
+    let offsets_len = out.checked_add(1).ok_or(AxisError::Overflow)?;
+    let mut starts = Vec::new();
+    starts
+      .try_reserve_exact(out)
+      .map_err(|_| AxisError::Alloc)?;
+    let mut offsets = Vec::new();
+    offsets
+      .try_reserve_exact(offsets_len)
+      .map_err(|_| AxisError::Alloc)?;
+    // Pass 1: each output's chroma span `[i_first, i_last]`, the total tap
+    // count, and the widest span (the reused scatter accumulator's size).
+    let mut total = 0usize;
+    let mut max_span = 0usize;
+    for o in 0..out {
+      let (rstart, wbins) = box_spans.span(o);
+      let i_f = first_chroma(rstart);
+      let i_l = last_chroma(rstart + wbins.len() - 1);
+      starts.push(i_f);
+      let span = i_l - i_f + 1;
+      max_span = max_span.max(span);
+      total = total.checked_add(span).ok_or(AxisError::Overflow)?;
+    }
+    let mut weights = Vec::new();
+    weights
+      .try_reserve_exact(total)
+      .map_err(|_| AxisError::Alloc)?;
+    let mut local: Vec<u64> = Vec::new();
+    local
+      .try_reserve_exact(max_span)
+      .map_err(|_| AxisError::Alloc)?;
+    offsets.push(0);
+    // Pass 2: scatter each box overlap through the ×2 forward triangle into the
+    // local chroma-cell accumulator, then flush the contiguous run.
+    for (o, &i_f) in starts.iter().enumerate() {
+      let (rstart, wbins) = box_spans.span(o);
+      let i_l = last_chroma(rstart + wbins.len() - 1);
+      local.clear();
+      local.resize(i_l - i_f + 1, 0);
+      for (k, &wb) in wbins.iter().enumerate() {
+        let r = rstart + k;
+        let wb = wb as u64;
+        let i = r / 2;
+        if r.is_multiple_of(2) {
+          local[i - i_f] += 2 * wb; // co-sited on c[i]
+        } else if i + 1 > last_valid {
+          local[i - i_f] += 2 * wb; // bottom edge: c[i+1] clamps to c[i]
+        } else {
+          local[i - i_f] += wb; // 1/2 → c[i]
+          local[i + 1 - i_f] += wb; // 1/2 → c[i+1]
+        }
+      }
+      for &wv in &local {
+        weights.push(wv as usize);
+      }
+      offsets.push(weights.len());
+    }
+    debug_assert_eq!(weights.len(), total);
+    Ok(Self {
+      starts,
+      offsets,
+      weights,
+    })
+  }
+
   /// Number of output samples on this axis.
   // Consumed by the area streaming engine, which is gated to the
   // families that route through it.
@@ -1082,15 +1188,18 @@ impl ResamplePlan {
   /// change (the `4·` only tightens the maximum representable width, which
   /// stays absurd).
   ///
-  /// The vertical axis mirrors the horizontal: at `v_phase == 0` it is the
-  /// co-sited [`AxisSpans::area_halved`] luma→chroma pairing (`src_h` stays
-  /// `luma_h`), byte-identical to before vertical siting existed; for 4:2:0
-  /// **Bottom** siting (`v_phase ≠ 0`) it is the folded `v = 1` triangle
-  /// ([`AxisSpans::area_chroma_phased_v`]), whose spans sum to `2·luma_h`, so
-  /// the stored `src_h` becomes that scaled V denominator. The two folds are
-  /// independent — a centered-H + Bottom-V plan scales both dimensions, and
-  /// the [`AreaStream`] `src_w·src_h` denominator and exactness guards bound
-  /// the combined weights unchanged.
+  /// The vertical axis mirrors the horizontal and carries THREE modes. At
+  /// `v_phase == 0 && !v_top` it is the co-sited [`AxisSpans::area_halved`]
+  /// luma→chroma pairing (`src_h` stays `luma_h`), byte-identical to before
+  /// vertical siting existed. For 4:2:0 **Bottom** siting (`v_phase ≠ 0`) it is
+  /// the BACKWARD-reaching folded `v = 1` triangle
+  /// ([`AxisSpans::area_chroma_phased_v`]); for 4:2:0 **Top** siting (`v_top`,
+  /// carried alongside `v_phase == 0`) it is the FORWARD-reaching `v = 0`
+  /// triangle ([`AxisSpans::area_chroma_phased_v_top`]). Both folds' spans sum
+  /// to `2·luma_h`, so the stored `src_h` becomes that scaled V denominator. The
+  /// two axes are independent — a centered-H + Bottom/Top-V plan scales both
+  /// dimensions, and the [`AreaStream`] `src_w·src_h` denominator and exactness
+  /// guards bound the combined weights unchanged.
   #[cfg(feature = "yuv-planar")]
   pub(crate) fn area_chroma_420(
     chroma_w: usize,
@@ -1099,6 +1208,7 @@ impl ResamplePlan {
     out_h: usize,
     h_phase: f64,
     v_phase: f64,
+    v_top: bool,
   ) -> Result<Self, ResampleError> {
     let fail_overflow =
       || ResampleError::Overflow(PlanGeometry::new(chroma_w, luma_h, out_w, out_h));
@@ -1110,12 +1220,20 @@ impl ResamplePlan {
     };
     // Vertical axis first (matching the pre-siting build order so an
     // allocator refusal on the paired axis still surfaces before the
-    // horizontal one): the co-sited luma→chroma pairing, or — for 4:2:0
-    // Bottom siting — the folded `v = 1` triangle whose spans sum to
-    // `2·luma_h`, making that the scaled V denominator. At `v_phase == 0`
-    // the spans and the `luma_h` denominator are byte-identical to the plain
-    // pairing every co-sited caller built before vertical siting existed.
-    let (v, denom_h) = if v_phase == 0.0 {
+    // horizontal one): the co-sited luma→chroma pairing, or — for 4:2:0 Bottom
+    // (`v = 1`, backward) / Top (`v = 0`, forward) siting — the folded triangle
+    // whose spans sum to `2·luma_h`, making that the scaled V denominator. At
+    // `v_phase == 0 && !v_top` the spans and the `luma_h` denominator are
+    // byte-identical to the plain pairing every co-sited caller built before
+    // vertical siting existed. `v_top` and a non-zero `v_phase` are mutually
+    // exclusive sitings (Top is `v = 0`, Bottom is `v = 1`).
+    let (v, denom_h) = if v_top {
+      let denom_h = luma_h.checked_mul(2).ok_or_else(fail_overflow)?;
+      (
+        AxisSpans::area_chroma_phased_v_top(luma_h, out_h).map_err(fail)?,
+        denom_h,
+      )
+    } else if v_phase == 0.0 {
       (AxisSpans::area_halved(luma_h, out_h).map_err(fail)?, luma_h)
     } else {
       let denom_h = luma_h.checked_mul(2).ok_or_else(fail_overflow)?;

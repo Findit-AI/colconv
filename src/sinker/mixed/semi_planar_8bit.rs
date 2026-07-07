@@ -265,6 +265,7 @@ fn semi_planar_process_native(
         plan.out_h(),
         chroma_h_phase,
         chroma_v_phase,
+        false,
       )
     },
     use_simd,

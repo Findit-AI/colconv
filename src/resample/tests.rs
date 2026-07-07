@@ -530,7 +530,7 @@ fn area_chroma_420_reports_allocation_failure_as_such() {
   // a real multi-exabyte allocation that hosts refuse but miri aborts
   // on. usize::MAX/8 starts entries overflow capacity while every
   // arithmetic check still passes.
-  let err = ResamplePlan::area_chroma_420(4, 8, 2, usize::MAX / 8, 0.0, 0.0).unwrap_err();
+  let err = ResamplePlan::area_chroma_420(4, 8, 2, usize::MAX / 8, 0.0, 0.0, false).unwrap_err();
   assert!(err.is_allocation_failed(), "got {err:?}");
 }
 
@@ -613,7 +613,7 @@ fn stream_two_row_window_matches_blend_then_bin_oracle() {
   //   out0 = round((3*10 + 3*10 + 2*15) / 8) = round(90/8)  = 11
   //   out1 = round((15 + 3*20 + 3*30 + 40) / 8) = round(205/8) = 26
   //   out2 = round((2*40 + 3*60 + 3*80) / 8) = round(500/8) = 63
-  let plan = ResamplePlan::area_chroma_420(1, 8, 1, 3, 0.0, 1.0).expect("valid Bottom plan");
+  let plan = ResamplePlan::area_chroma_420(1, 8, 1, 3, 0.0, 1.0, false).expect("valid Bottom plan");
   assert_eq!(
     plan.src_h(),
     16,
@@ -645,7 +645,7 @@ fn stream_two_row_window_matches_blend_then_bin_oracle() {
   // Wider genuinely-2-overlapping Bottom plans (multi-column / multi-channel,
   // and an H downscale) all reproduce the direct span-sum reference exactly.
   for &(cw, luma_h, ow, oh, channels) in &[(2usize, 8, 2, 3, 2), (4, 12, 3, 5, 3)] {
-    let plan = ResamplePlan::area_chroma_420(cw, luma_h, ow, oh, 0.0, 1.0).expect("valid");
+    let plan = ResamplePlan::area_chroma_420(cw, luma_h, ow, oh, 0.0, 1.0, false).expect("valid");
     let chroma_h = luma_h.div_ceil(2);
     let mut src = std::vec![0u8; cw * chroma_h * channels];
     lcg_fill(&mut src, 0x51 ^ luma_h as u32);
@@ -674,7 +674,8 @@ fn stream_two_row_window_matches_blend_then_bin_oracle() {
   // every output finalizes under the doubly-scaled denominator without
   // tripping an overflow guard.
   let (cw, luma_h, ow, oh, channels) = (4usize, 12, 3, 5, 2);
-  let plan = ResamplePlan::area_chroma_420(cw, luma_h, ow, oh, 0.5, 1.0).expect("combined plan");
+  let plan =
+    ResamplePlan::area_chroma_420(cw, luma_h, ow, oh, 0.5, 1.0, false).expect("combined plan");
   assert_eq!(
     (plan.src_w(), plan.src_h()),
     (8 * cw, 2 * luma_h),
@@ -701,12 +702,155 @@ fn stream_two_row_window_matches_blend_then_bin_oracle() {
 
 #[cfg(feature = "yuv-planar")]
 #[test]
+fn area_chroma_phased_v_top_folds_the_forward_triangle() {
+  // 4:2:0 Top siting on the V axis: box over the FULL luma grid folded through
+  // the x2 `v = 0` FORWARD triangle — even luma row 2i sits on c[i] (weight 2),
+  // odd 2i+1 averages c[i] and c[i+1] (weights 1, 1), bottom edge clamps
+  // c[chroma_h] -> c[chroma_h-1]. Every output span sums to 2*luma_h. This is
+  // the exact vertical MIRROR of `area_chroma_phased_v` (Bottom).
+
+  // EVEN luma_h = 8 -> 3 outputs (fractional, spans straddle chroma pairs).
+  // Box area(8,3) = {0:[3,3,2], 2:[1,3,3,1], 5:[2,3,3]} folds forward to:
+  //   out0 luma{0,1,2}: r0(even i0)->c0*2, r1(odd i0)->c0,c1, r2(even i1)->c1*2
+  //        => [9, 7] @ c0.
+  //   out1 luma{2,3,4,5}                                   => [5, 10, 1] @ c1.
+  //   out2 luma{5,6,7}: r5(odd i2)->c2,c3, r6(even i3)->c3*2,
+  //        r7(odd i3, bottom clamp)->c3*2                  => [2, 14] @ c2.
+  let even = AxisSpans::area_chroma_phased_v_top(8, 3).expect("valid");
+  assert_eq!(even.out_len(), 3);
+  assert_eq!(even.span(0), (0, &[9usize, 7][..]));
+  assert_eq!(even.span(1), (1, &[5usize, 10, 1][..]));
+  assert_eq!(even.span(2), (2, &[2usize, 14][..]));
+  for o in 0..3 {
+    assert_eq!(even.span(o).1.iter().sum::<usize>(), 2 * 8, "span {o} sum");
+  }
+
+  // ODD luma_h = 5 (chroma_h = 3) -> 2 outputs: the trailing luma row is EVEN
+  // (row 4 -> co-sited c2), so no odd row reaches the bottom edge and the clamp
+  // is inert. Box area(5,2) = {0:[2,2,1], 2:[1,2,2]} folds to out0 = [6, 4] @ c0
+  // and out1 = [4, 6] @ c1.
+  let odd = AxisSpans::area_chroma_phased_v_top(5, 2).expect("valid");
+  assert_eq!(odd.out_len(), 2);
+  assert_eq!(odd.span(0), (0, &[6usize, 4][..]));
+  assert_eq!(odd.span(1), (1, &[4usize, 6][..]));
+  for o in 0..2 {
+    assert_eq!(odd.span(o).1.iter().sum::<usize>(), 2 * 5, "span {o} sum");
+  }
+
+  // Top is NOT Bottom: the same geometry folds to different weights.
+  let bottom = AxisSpans::area_chroma_phased_v(8, 3).expect("valid");
+  assert_ne!(even.span(0), bottom.span(0), "Top out0 != Bottom out0");
+}
+
+#[cfg(feature = "yuv-planar")]
+#[test]
+fn top_forward_stream_matches_reconstruct_then_bin_oracle() {
+  // A FRACTIONAL vertical downscale under Top siting makes adjacent output
+  // V-spans overlap so the AreaStream 2-row window (which absorbs the FORWARD
+  // reach with NO sink-side delay) must reproduce "reconstruct luma-resolution
+  // chroma from the forward triangle, then box-average".
+  //
+  // Hand oracle: reconstruct (even 2i = c[i], odd 2i+1 = (c[i]+c[i+1]+1)>>1,
+  // c[chroma_h] = c[chroma_h-1]), then box-average luma_h = 8 -> 3 via area(8,3).
+  // Chroma chosen so every blend is EXACT (even sums), collapsing the oracle's
+  // two roundings onto the fold's single rounding.
+  //   chroma = [10, 20, 40, 80]                    (chroma_h = 4, one column)
+  //   recon  = [10, 15, 20, 30, 40, 60, 80, 80]    (forward blend, all exact)
+  //   out0 = round((3*10 + 3*15 + 2*20) / 8) = round(115/8) = 14
+  //   out1 = round((20 + 3*30 + 3*40 + 60) / 8) = round(290/8) = 36
+  //   out2 = round((2*60 + 3*80 + 3*80) / 8) = round(600/8) = 75
+  let plan = ResamplePlan::area_chroma_420(1, 8, 1, 3, 0.0, 0.0, true).expect("valid Top plan");
+  assert_eq!(
+    plan.src_h(),
+    16,
+    "Top V spans sum to 2*luma_h -> scaled denom"
+  );
+  assert!(
+    !plan.has_chroma_v_phase(),
+    "Top is v = 0, not Bottom's v = 1"
+  );
+  let chroma = [10u8, 20, 40, 80];
+  let mut stream =
+    AreaStream::new(plan.h(), plan.v(), plan.src_w(), plan.src_h(), 1).expect("realistic geometry");
+  let mut out = [0u8; 3];
+  let mut emitted = std::vec::Vec::new();
+  for (y, &c) in chroma.iter().enumerate() {
+    stream
+      .feed_row(y, &[c], true, |oy, finalized| {
+        emitted.push(oy);
+        out[oy] = finalized[0];
+      })
+      .expect("chroma rows arrive in order");
+  }
+  assert_eq!(emitted, std::vec![0, 1, 2], "each output finalizes once");
+  assert_eq!(out, [14, 36, 75], "forward reconstruct-then-bin oracle");
+  assert_eq!(out.to_vec(), direct_area_2d(&plan, &chroma, 1));
+
+  // Top differs from Bottom on the SAME geometry (the earlier Bottom oracle gave
+  // [11, 26, 63]).
+  let bottom = ResamplePlan::area_chroma_420(1, 8, 1, 3, 0.0, 1.0, false).expect("Bottom");
+  assert_ne!(
+    direct_area_2d(&plan, &chroma, 1),
+    direct_area_2d(&bottom, &chroma, 1),
+    "Top vertical output must differ from Bottom"
+  );
+
+  // Wider genuinely-overlapping Top plans (multi-column / multi-channel, H
+  // downscale) all reproduce the direct span-sum reference exactly.
+  for &(cw, luma_h, ow, oh, channels) in &[(2usize, 8, 2, 3, 2), (4, 12, 3, 5, 3)] {
+    let plan =
+      ResamplePlan::area_chroma_420(cw, luma_h, ow, oh, 0.0, 0.0, true).expect("valid Top plan");
+    let chroma_h = luma_h.div_ceil(2);
+    let mut src = std::vec![0u8; cw * chroma_h * channels];
+    lcg_fill(&mut src, 0x37 ^ luma_h as u32);
+    let mut streamed = std::vec![0u8; ow * oh * channels];
+    let mut stream =
+      AreaStream::new(plan.h(), plan.v(), plan.src_w(), plan.src_h(), channels).expect("geometry");
+    for y in 0..chroma_h {
+      let row = &src[y * cw * channels..(y + 1) * cw * channels];
+      stream
+        .feed_row(y, row, true, |oy, fin| {
+          streamed[oy * ow * channels..(oy + 1) * ow * channels].copy_from_slice(fin);
+        })
+        .expect("rows in order");
+    }
+    assert_eq!(
+      streamed,
+      direct_area_2d(&plan, &src, channels),
+      "{cw}x{chroma_h}->{ow}x{oh} c{channels} Top stream vs direct span-sum"
+    );
+  }
+}
+
+#[cfg(feature = "yuv-planar")]
+#[test]
+fn top_forward_window_depth_matches_bottom() {
+  // A Top downscale opens at most two rows (one forward reach), same as Bottom,
+  // so the bounded 2-row window streams it. An EXACT 2:1 Top downscale shares
+  // only the boundary row (window 1).
+  let frac = ResamplePlan::area_chroma_420(2, 8, 2, 3, 0.0, 0.0, true).expect("Top frac");
+  assert_eq!(
+    frac.v().window_depth(),
+    2,
+    "a fractional Top downscale opens two rows"
+  );
+  let exact = ResamplePlan::area_chroma_420(2, 8, 2, 4, 0.0, 0.0, true).expect("Top exact");
+  assert_eq!(
+    exact.v().window_depth(),
+    1,
+    "an exact 2:1 Top downscale opens one row"
+  );
+}
+
+#[cfg(feature = "yuv-planar")]
+#[test]
 fn co_sited_area_stream_allocates_no_lookahead() {
   // A co-sited (v_phase 0) plan's adjacent output V-spans share only their
   // boundary row, so the stream opens exactly one row at a time and must NOT
   // allocate the look-ahead accumulator — the pre-Bottom resource envelope is
   // preserved (a large co-sited resample that fit before must still fit).
-  let cosited = ResamplePlan::area_chroma_420(2, 8, 2, 4, 0.0, 0.0).expect("valid co-sited plan");
+  let cosited =
+    ResamplePlan::area_chroma_420(2, 8, 2, 4, 0.0, 0.0, false).expect("valid co-sited plan");
   assert_eq!(
     cosited.v().window_depth(),
     1,
@@ -725,7 +869,8 @@ fn co_sited_area_stream_allocates_no_lookahead() {
     "a co-sited stream must not allocate the look-ahead accumulator"
   );
   // A `v = 1` Bottom downscale opens two rows, so it DOES allocate acc_next.
-  let bottom = ResamplePlan::area_chroma_420(2, 8, 2, 3, 0.0, 1.0).expect("valid Bottom plan");
+  let bottom =
+    ResamplePlan::area_chroma_420(2, 8, 2, 3, 0.0, 1.0, false).expect("valid Bottom plan");
   assert_eq!(
     bottom.v().window_depth(),
     2,
@@ -748,7 +893,7 @@ fn phased_v_exceeding_two_open_rows_is_rejected() {
   // `UpscaleUnsupported` rather than silently drop the third open row's
   // contributions (the pre-fix debug_assert accepted `start == y`, and release
   // builds corrupted).
-  let plan = ResamplePlan::area_chroma_420(2, 3, 2, 7, 0.0, 1.0).expect("plan builds");
+  let plan = ResamplePlan::area_chroma_420(2, 3, 2, 7, 0.0, 1.0, false).expect("plan builds");
   assert!(
     plan.v().window_depth() > 2,
     "the 3->7 Bottom shape opens more than two rows at once"

@@ -213,6 +213,47 @@ pub(super) const fn chroma_420_bottom_sited_v(loc: crate::ChromaLocation) -> boo
   )
 }
 
+/// Whether `loc` places 4:2:0 chroma at the **top** vertical phase (`v = 0`) —
+/// the FFmpeg `AVCHROMA_LOC_TOP` (`Top`, `h = 0.5`) and `AVCHROMA_LOC_TOPLEFT`
+/// (`TopLeft`, `h = 0`) sitings, whose chroma is co-sited with the **top** luma
+/// row of each vertical pair; the full
+/// [`ChromaLocation`](crate::ChromaLocation) → sample-phase map is in
+/// [`chroma_420_center_sited_h`]'s table. At `v = 0` the chroma sample sits on
+/// the upper luma row, so:
+///
+/// - the **even** luma row `2i` is co-sited with chroma row `i`, so it needs no
+///   vertical blend and keeps the siting's plain horizontal upsample;
+/// - the **odd** luma row `2i+1` lies halfway between chroma rows `i` and `i+1`,
+///   and its reconstructed chroma is the vertical box average of those two rows,
+///   fused with the siting's horizontal phase.
+///
+/// `Top` is the vertical MIRROR of [`chroma_420_bottom_sited_v`]'s `Bottom`
+/// (`v = 1`): where Bottom's even row reaches BACKWARD to the already-streamed
+/// `c[i-1]`, Top's odd row reaches FORWARD to `c[i+1]` — the *next* chroma row,
+/// which a top-to-bottom row-at-a-time stream has not been fed when the odd row
+/// arrives. The 4:2:0 sink therefore reconstructs `Top` with a **forward
+/// one-row output delay** (the mirror of Bottom's backward `chroma_prev`
+/// lookback): the odd output row is held until the next chroma row arrives, then
+/// box-blended and emitted — the same `(c[i] + c[i+1] + 1) >> 1` fold Bottom's
+/// even row applies to `(c[i-1], c[i])`, reusing its fused-`h` kernels verbatim.
+/// The horizontal axis is independent — `Top` rides the centered full-width
+/// staging, `TopLeft` the co-sited staging — so both fold the same vertical box
+/// average and this predicate matches both. The native / HSV-only binning tiers
+/// instead fold the `v = 0` FORWARD triangle into `area_chroma_420`'s vertical
+/// weights ([`AxisSpans::area_chroma_phased_v_top`](crate::resample)), needing
+/// no delay because the [`AreaStream`](crate::resample) window absorbs the
+/// forward reach. `Center` (`h = 0.5, v = 0.5`) / `Left` (the `yuv420p` default,
+/// `v = 0.5`) and every unspecified siting keep the byte-identical
+/// vertical-replicate decode.
+#[cfg(feature = "yuv-planar")]
+#[inline]
+pub(super) const fn chroma_420_top_sited_v(loc: crate::ChromaLocation) -> bool {
+  matches!(
+    loc,
+    crate::ChromaLocation::Top | crate::ChromaLocation::TopLeft
+  )
+}
+
 /// Whether `loc` places 4:4:0 chroma at the **bottom** vertical phase (`v = 1`)
 /// — the one vertical siting a top-to-bottom stream can reconstruct with a
 /// backward one-row chroma lookback (the even luma row's predecessor chroma row
@@ -2850,6 +2891,25 @@ pub struct MixedSinker<'a, F: SourceFormat, R = NoopResampler> {
   /// `None` and passes `v_phase = 0`. Cleared each `begin_frame`.
   #[cfg(feature = "yuv-planar")]
   frozen_chroma_bottom_v: Option<bool>,
+  /// Forward one-row output-delay state for the 4:2:0 **Top** (`v = 0`) identity
+  /// decode (RFC #238) — the mirror of the backward [`Self::chroma_prev`]
+  /// lookback `Bottom` uses. A `Top` chroma sample sits on the TOP luma row of
+  /// each pair, so an ODD output luma row `2i+1` needs the *next* chroma row
+  /// `c[i+1]`, which the row-at-a-time stream has not been fed when `2i+1`
+  /// arrives. Its colour output is therefore HELD here until the following even
+  /// row `2i+2` (carrying `c[i+1]`) arrives, then box-blended and emitted.
+  /// `Some((row, matrix, full_range))` records the deferred odd row's index and
+  /// its decode parameters; `None` when nothing is pending. Reset to `None` each
+  /// `begin_frame` so a held row never leaks across frames. Gated to
+  /// `yuv-planar`, like [`Self::chroma_prev`].
+  #[cfg(feature = "yuv-planar")]
+  chroma_top_pending: Option<(usize, crate::ColorMatrix, bool)>,
+  /// Buffered Y row for the deferred [`Self::chroma_top_pending`] odd output row
+  /// — a copy of that row's `width` `u8` luma, retained because the walker's row
+  /// borrow is invalidated after `process` returns. Lazily grown to `width` `u8`
+  /// on the first deferred `Top` row; empty otherwise. Gated to `yuv-planar`.
+  #[cfg(feature = "yuv-planar")]
+  chroma_top_y: Vec<u8>,
   /// Lazily grown to `3 * width` bytes when HSV is requested without a
   /// user RGB buffer. Empty otherwise.
   ///
@@ -4008,6 +4068,10 @@ impl<F: SourceFormat, R> MixedSinker<'_, F, R> {
       frozen_chroma_centered: None,
       #[cfg(feature = "yuv-planar")]
       frozen_chroma_bottom_v: None,
+      #[cfg(feature = "yuv-planar")]
+      chroma_top_pending: None,
+      #[cfg(feature = "yuv-planar")]
+      chroma_top_y: Vec::new(),
       #[cfg(any(
         feature = "bayer",
         feature = "gbr",

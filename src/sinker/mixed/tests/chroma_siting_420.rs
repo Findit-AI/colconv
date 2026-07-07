@@ -121,16 +121,16 @@ fn default_and_cosited_sitings_are_byte_identical() {
   // The pre-#302 baseline: a sink that never sets a chroma location.
   let baseline = convert_rgb(ChromaLocation::Unspecified, true);
 
-  // Unspecified, Unknown, and every fully co-sited value keep the exact
-  // nearest-neighbor decode — bit-for-bit equal to the baseline even though the
-  // chroma plane is a non-trivial ramp. `BottomLeft` is EXCLUDED: it is co-sited
-  // horizontally (`h = 0`) but bottom-sited vertically (`v = 1`), so it folds the
-  // even-row vertical box blend and is covered by its own tests below.
+  // Unspecified, Unknown, and the fully co-sited default (`Left`, `v = 0.5`)
+  // keep the exact nearest-neighbor decode — bit-for-bit equal to the baseline
+  // even though the chroma plane is a non-trivial ramp. `BottomLeft` (`v = 1`)
+  // and `TopLeft` (`v = 0`) are EXCLUDED: both are co-sited horizontally
+  // (`h = 0`) but VERTICALLY sited, so they fold a vertical box blend (backward
+  // for BottomLeft, forward for TopLeft) and are covered by their own tests.
   for loc in [
     ChromaLocation::Unspecified,
     ChromaLocation::Unknown(99),
     ChromaLocation::Left,
-    ChromaLocation::TopLeft,
   ] {
     assert_eq!(
       convert_rgb(loc, true),
@@ -217,17 +217,22 @@ fn center_grows_chroma_scratch_to_full_width() {
   miri,
   ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
 )]
-fn top_routes_like_center_bottom_adds_vertical() {
-  // Top shares Center's horizontal (centered) phase and its vertical phase is
-  // not yet consumed (the odd output row needs the *next* chroma row, deferred),
-  // so Top == Center. Bottom (v=1) additionally vertically box-blends the even
-  // output row with the previous chroma row, so on a fixture whose chroma varies
-  // across rows it must DIFFER from Center.
+fn top_forward_vblend_differs_from_center_and_bottom() {
+  // Top shares Center's horizontal (centered) phase and now consumes its
+  // vertical phase through the FORWARD one-row delay: the ODD output row is the
+  // box average of its chroma row and the NEXT one. On a fixture whose chroma
+  // varies across rows Top therefore DIFFERS from Center (horizontal-only) AND
+  // from Bottom (which box-blends the EVEN row with the PREVIOUS chroma row).
   let center = convert_rgb(ChromaLocation::Center, true);
-  assert_eq!(
+  assert_ne!(
     convert_rgb(ChromaLocation::Top, true),
     center,
-    "Top keeps Center's horizontal phase (vertical deferred)"
+    "Top's forward vertical box blend must differ from Center on a vertically-varying ramp"
+  );
+  assert_ne!(
+    convert_rgb(ChromaLocation::Top, true),
+    convert_rgb(ChromaLocation::Bottom, true),
+    "Top (forward, odd rows) must differ from Bottom (backward, even rows)"
   );
   assert_ne!(
     convert_rgb(ChromaLocation::Bottom, true),
@@ -795,12 +800,253 @@ fn bottom_differs_from_center_and_default_vertically() {
     convert_rgb_with(ChromaLocation::Left, true, &yp, &up, &vp),
     "Bottom must differ from the vertical-replicate default"
   );
-  // Top keeps Center's decode (vertical deferred), so it must NOT vertically
-  // blend — distinct from Bottom on this ramp.
+  // Top box-blends the ODD row FORWARD (with the next chroma row) where Bottom
+  // blends the EVEN row backward, so the two differ on this ramp.
   assert_ne!(
     bottom,
     convert_rgb_with(ChromaLocation::Top, true, &yp, &up, &vp),
-    "Top (vertical deferred) must differ from Bottom's vertical blend"
+    "Top (forward, odd rows) must differ from Bottom's backward even-row blend"
+  );
+}
+
+// ---- top-sited VERTICAL phase (RFC #238 forward one-row delay) --------------
+
+/// Independent reference for the top-sited (`v = 0`) full reconstruction: per
+/// luma row `r`, the EVEN rows take chroma row `r/2` directly (co-sited with the
+/// top luma row); the ODD rows take the vertical box average of chroma rows
+/// `r/2` and `r/2 + 1` (the FORWARD neighbour, clamped to `ch - 1` at the bottom
+/// edge — so the trailing odd row collapses back to co-sited). Each half-row is
+/// then horizontally upsampled — centered (`Top`, `h = 0.5`) or replicated
+/// (`TopLeft`, `h = 0`). Written separately from the production kernels so it is
+/// a true oracle for the forward one-row-delay reconstruction.
+fn ref_full_chroma_top(u420: &[u8], v420: &[u8], centered: bool) -> (Vec<u8>, Vec<u8>) {
+  let w = W as usize;
+  let h = H as usize;
+  let cw = w / 2;
+  let ch = h / 2;
+  let up_h = |half: &[u8]| -> Vec<u8> {
+    if centered {
+      ref_upsample_center_h(half, w)
+    } else {
+      ref_upsample_cosited_h(half, w)
+    }
+  };
+  let vblend = |plane: &[u8], cr: usize, next: usize| -> Vec<u8> {
+    (0..cw)
+      .map(|c| {
+        let a = plane[cr * cw + c] as u32;
+        let b = plane[next * cw + c] as u32;
+        ((a + b + 1) >> 1) as u8
+      })
+      .collect::<Vec<u8>>()
+  };
+  let mut u444 = std::vec![0u8; w * h];
+  let mut v444 = std::vec![0u8; w * h];
+  for r in 0..h {
+    let cr = r / 2;
+    let (uhalf, vhalf) = if r & 1 == 0 {
+      (
+        u420[cr * cw..cr * cw + cw].to_vec(),
+        v420[cr * cw..cr * cw + cw].to_vec(),
+      )
+    } else {
+      let next = (cr + 1).min(ch - 1);
+      (vblend(u420, cr, next), vblend(v420, cr, next))
+    };
+    u444[r * w..r * w + w].copy_from_slice(&up_h(&uhalf));
+    v444[r * w..r * w + w].copy_from_slice(&up_h(&vhalf));
+  }
+  (u444, v444)
+}
+
+/// End-to-end RGB reference for a top-sited siting: forward-reconstruct full
+/// chroma, then the ordinary 4:4:4 decode.
+fn top_ref_rgb(centered: bool, yp: &[u8], up: &[u8], vp: &[u8]) -> Vec<u8> {
+  let (u444, v444) = ref_full_chroma_top(up, vp, centered);
+  let ref_src = Yuv444pFrame::new(yp, &u444, &v444, W, H, W, W, W);
+  let mut rgb_ref = std::vec![0u8; (W * H * 3) as usize];
+  let mut ref_sink = MixedSinker::<Yuv444p>::new(W as usize, H as usize)
+    .with_rgb(&mut rgb_ref)
+    .unwrap();
+  yuv444p_to(&ref_src, false, ColorMatrix::Bt601, &mut ref_sink).unwrap();
+  rgb_ref
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn top_rgb_matches_forward_reconstruct_reference() {
+  // The core Top correctness proof: the streaming forward one-row-delay decode
+  // must reproduce "reconstruct full chroma forward, then 4:4:4" bit-for-bit,
+  // INCLUDING the trailing-odd-row bottom-edge clamp. Both SIMD tiers match.
+  let (yp, up, vp) = vramp_yuv420p();
+  let rgb_ref = top_ref_rgb(true, &yp, &up, &vp);
+  assert_eq!(
+    convert_rgb_with(ChromaLocation::Top, true, &yp, &up, &vp),
+    rgb_ref,
+    "top-sited 4:2:0 RGB (SIMD) must equal forward-blend + centered-upsample then 4:4:4"
+  );
+  assert_eq!(
+    convert_rgb_with(ChromaLocation::Top, false, &yp, &up, &vp),
+    rgb_ref,
+    "top-sited 4:2:0 RGB (scalar) must match the same reference"
+  );
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn topleft_rgb_matches_cosited_forward_reference() {
+  // TopLeft is the co-sited-horizontal (`h = 0`) twin of Top: same forward
+  // vertical blend, plain 2x horizontal replicate instead of the centered phase.
+  let (yp, up, vp) = vramp_yuv420p();
+  let rgb_ref = top_ref_rgb(false, &yp, &up, &vp);
+  assert_eq!(
+    convert_rgb_with(ChromaLocation::TopLeft, true, &yp, &up, &vp),
+    rgb_ref,
+    "topleft-sited RGB (SIMD) must equal forward-blend + co-sited-replicate then 4:4:4"
+  );
+  assert_eq!(
+    convert_rgb_with(ChromaLocation::TopLeft, false, &yp, &up, &vp),
+    rgb_ref,
+    "topleft-sited RGB (scalar) must match the same reference"
+  );
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn top_differs_from_topleft_horizontally() {
+  // On a purely-HORIZONTAL chroma ramp the shared forward vertical blend is a
+  // no-op, so only the horizontal phase separates Top (`h = 0.5` centered) from
+  // TopLeft (`h = 0` co-sited) — they must differ.
+  let (yp, up, vp) = ramp_yuv420p();
+  assert_ne!(
+    convert_rgb_with(ChromaLocation::Top, true, &yp, &up, &vp),
+    convert_rgb_with(ChromaLocation::TopLeft, true, &yp, &up, &vp),
+    "Top (h=0.5) must differ from TopLeft (h=0) on a horizontal chroma ramp"
+  );
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn top_rgba_and_hsv_match_forward_reference() {
+  // Exercise the RGBA-only and HSV-direct branches of the delayed colour decode:
+  // both must reproduce the forward-reconstruct-then-4:4:4 reference.
+  let (yp, up, vp) = vramp_yuv420p();
+  let (u444, v444) = ref_full_chroma_top(&up, &vp, true);
+  let ref_src = Yuv444pFrame::new(&yp, &u444, &v444, W, H, W, W, W);
+
+  // RGBA-only.
+  {
+    let mut rgba_ref = std::vec![0u8; (W * H * 4) as usize];
+    let mut rs = MixedSinker::<Yuv444p>::new(W as usize, H as usize)
+      .with_rgba(&mut rgba_ref)
+      .unwrap();
+    yuv444p_to(&ref_src, false, ColorMatrix::Bt601, &mut rs).unwrap();
+
+    let src = Yuv420pFrame::new(&yp, &up, &vp, W, H, W, W / 2, W / 2);
+    let mut rgba = std::vec![0u8; (W * H * 4) as usize];
+    let mut sink = MixedSinker::<Yuv420p>::new(W as usize, H as usize)
+      .with_rgba(&mut rgba)
+      .unwrap()
+      .with_chroma_location(ChromaLocation::Top);
+    yuv420p_to(&src, false, ColorMatrix::Bt601, &mut sink).unwrap();
+    assert_eq!(rgba, rgba_ref, "Top RGBA must match the forward reference");
+  }
+
+  // HSV-direct (no RGB / RGBA attached).
+  {
+    let (mut hh, mut ss, mut vv) = (
+      std::vec![0u8; (W * H) as usize],
+      std::vec![0u8; (W * H) as usize],
+      std::vec![0u8; (W * H) as usize],
+    );
+    let mut rs = MixedSinker::<Yuv444p>::new(W as usize, H as usize)
+      .with_hsv(&mut hh, &mut ss, &mut vv)
+      .unwrap();
+    yuv444p_to(&ref_src, false, ColorMatrix::Bt601, &mut rs).unwrap();
+
+    let src = Yuv420pFrame::new(&yp, &up, &vp, W, H, W, W / 2, W / 2);
+    let (mut h2, mut s2, mut v2) = (
+      std::vec![0u8; (W * H) as usize],
+      std::vec![0u8; (W * H) as usize],
+      std::vec![0u8; (W * H) as usize],
+    );
+    let mut sink = MixedSinker::<Yuv420p>::new(W as usize, H as usize)
+      .with_hsv(&mut h2, &mut s2, &mut v2)
+      .unwrap()
+      .with_chroma_location(ChromaLocation::Top);
+    yuv420p_to(&src, false, ColorMatrix::Bt601, &mut sink).unwrap();
+    assert_eq!(
+      (h2, s2, v2),
+      (hh, ss, vv),
+      "Top HSV-direct must match the forward reference"
+    );
+  }
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn top_maintains_forward_delay_buffers() {
+  // A top-sited colour decode grows BOTH the one-row chroma lookback (`c[i]` for
+  // the odd flush) and the forward-delay Y buffer (the held odd row's luma).
+  let (yp, up, vp) = vramp_yuv420p();
+  let src = Yuv420pFrame::new(&yp, &up, &vp, W, H, W, W / 2, W / 2);
+  let mut rgb = std::vec![0u8; (W * H * 3) as usize];
+  let mut sink = MixedSinker::<Yuv420p>::new(W as usize, H as usize)
+    .with_rgb(&mut rgb)
+    .unwrap()
+    .with_chroma_location(ChromaLocation::Top);
+  yuv420p_to(&src, false, ColorMatrix::Bt601, &mut sink).unwrap();
+  assert_eq!(
+    sink.chroma_prev.len(),
+    W as usize,
+    "Top maintains the width-byte (half U + half V) chroma lookback"
+  );
+  assert_eq!(
+    sink.chroma_top_y.len(),
+    W as usize,
+    "Top allocates the forward-delay Y buffer"
+  );
+  drop(sink);
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn top_survives_frame_reuse() {
+  // Two frames through the SAME sink: the second frame's decode must NOT be
+  // polluted by the first frame's held odd row or lookback (both reset in
+  // begin_frame), so it equals a fresh forward-reconstruct reference.
+  let (yp, up, vp) = vramp_yuv420p();
+  let rgb_ref = top_ref_rgb(true, &yp, &up, &vp);
+  let src = Yuv420pFrame::new(&yp, &up, &vp, W, H, W, W / 2, W / 2);
+  let mut rgb = std::vec![0u8; (W * H * 3) as usize];
+  let mut sink = MixedSinker::<Yuv420p>::new(W as usize, H as usize)
+    .with_rgb(&mut rgb)
+    .unwrap()
+    .with_chroma_location(ChromaLocation::Top);
+  yuv420p_to(&src, false, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuv420p_to(&src, false, ColorMatrix::Bt601, &mut sink).unwrap();
+  drop(sink);
+  assert_eq!(
+    rgb, rgb_ref,
+    "second frame must match a fresh Top reconstruct"
   );
 }
 
@@ -906,10 +1152,10 @@ fn bottom_grows_chroma_prev_lookback() {
   ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
 )]
 fn non_bottom_sitings_do_not_grow_chroma_prev() {
-  // Center / Top / Left never touch the vertical lookback.
+  // Center / Left / Unspecified never touch the vertical lookback (the `Top`
+  // forward blend now DOES maintain it, so it is covered by its own tests).
   for loc in [
     ChromaLocation::Center,
-    ChromaLocation::Top,
     ChromaLocation::Left,
     ChromaLocation::Unspecified,
   ] {
@@ -1564,15 +1810,16 @@ fn bottomleft_differs_from_bottom_horizontally() {
   ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
 )]
 fn bottomleft_differs_from_topleft_vertically() {
-  // On a purely-VERTICAL chroma ramp, BottomLeft (v=1) must differ from TopLeft
-  // (co-sited h too, but vertical-replicate) — same horizontal phase, only the
-  // vertical fold differs — and from the vertical-replicate default.
+  // On a purely-VERTICAL chroma ramp, BottomLeft (`v = 1`, backward even-row
+  // blend) must differ from TopLeft (`v = 0`, forward odd-row blend) — same
+  // co-sited horizontal phase, only the vertical fold DIRECTION differs — and
+  // from the vertical-replicate default.
   let (yp, up, vp) = vramp_yuv420p();
   let bl = convert_rgb_with(ChromaLocation::BottomLeft, true, &yp, &up, &vp);
   assert_ne!(
     bl,
     convert_rgb_with(ChromaLocation::TopLeft, true, &yp, &up, &vp),
-    "BottomLeft (v=1) must differ from TopLeft (vertical-replicate) on a vertical ramp"
+    "BottomLeft (v=1 backward) must differ from TopLeft (v=0 forward) on a vertical ramp"
   );
   assert_ne!(
     bl,
