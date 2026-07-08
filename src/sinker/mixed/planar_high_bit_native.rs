@@ -234,6 +234,13 @@ pub(crate) struct NativePlanarYuvU16 {
   /// rebuild a reused join whose vertical siting moved. `false` for a luma-only
   /// join and every co-sited layout.
   chroma_bottom: bool,
+  /// The vertical (`Top`, `v = 0`) FORWARD companion of [`Self::chroma_bottom`]
+  /// (RFC #238 — the high-bit 4:4:0 native tier). Set when the cached chroma plan
+  /// folds the `v = 0` forward triangle. Co-sited and `Top` both leave
+  /// `chroma_centered` / `chroma_bottom` `false`, so the caller compares THIS
+  /// flag to rebuild a reused join whose vertical siting moved to / from Top.
+  /// `false` for a luma-only join and every non-Top layout.
+  chroma_top: bool,
 }
 
 /// Chroma-grid streams, source de-interleave scratch, and staging of
@@ -285,6 +292,10 @@ impl NativePlanarYuvU16 {
     // horizontal phase, so `chroma_centered` stays `false` for it and the
     // vertical axis is recorded separately here.
     let mut chroma_bottom = false;
+    // RFC #238 Top companion — set when the chroma plan folds the `v = 0`
+    // FORWARD phase (the high-bit 4:4:0 native tier). Co-sited and `Top` share
+    // `chroma_bottom = false`, so the Top axis is recorded separately.
+    let mut chroma_top = false;
     let chroma = if need_color {
       #[cfg(all(test, feature = "std", feature = "yuv-planar"))]
       if FORCE_PLANAR_HB_NATIVE_CHROMA_FAILURE.with(|f| f.take()) {
@@ -298,6 +309,7 @@ impl NativePlanarYuvU16 {
       let chroma_plan = build_chroma_plan()?;
       chroma_centered = chroma_plan.has_chroma_phase();
       chroma_bottom = chroma_plan.has_chroma_v_phase();
+      chroma_top = chroma_plan.has_chroma_v_top();
       Some(NativePlanarChromaU16 {
         u: AreaStream::new(
           chroma_plan.h(),
@@ -332,6 +344,7 @@ impl NativePlanarYuvU16 {
       next_emit: 0,
       chroma_centered,
       chroma_bottom,
+      chroma_top,
     })
   }
 
@@ -366,6 +379,15 @@ impl NativePlanarYuvU16 {
   /// (the 4:4:0 companion of [`Self::chroma_phase_centered`]).
   pub(crate) fn chroma_bottom(&self) -> Option<bool> {
     self.chroma.as_ref().map(|_| self.chroma_bottom)
+  }
+
+  /// The cached chroma plan's vertical (`Top`, `v = 0`) FORWARD phase flag
+  /// (RFC #238), `Some` only when a chroma half is present. Co-sited and `Top`
+  /// share [`Self::chroma_bottom`] `Some(false)`, so the native call site
+  /// compares THIS flag too to rebuild a reused join whose vertical siting moved
+  /// to / from Top.
+  pub(crate) fn chroma_top(&self) -> Option<bool> {
+    self.chroma.as_ref().map(|_| self.chroma_top)
   }
 
   /// Sequencing preflight across all three plane streams — checked before any
@@ -757,6 +779,7 @@ pub(crate) fn yuv_planar16_process_native<const BITS: u32, const BE: bool>(
     // ignores them.
     chroma_centered: _,
     chroma_bottom: _,
+    chroma_top: _,
   } = &mut **join;
   y.feed_row(idx, &y_src[..w], use_simd, |oy, out_row| {
     let slot = oy & 1;

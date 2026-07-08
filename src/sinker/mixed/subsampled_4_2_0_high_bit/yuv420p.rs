@@ -335,7 +335,7 @@ macro_rules! by_bits {
 /// Wire-endian u16-INPUT → **u8** RGB 4:4:4 conversion, dispatched on `BITS`.
 #[cfg(feature = "yuv-planar")]
 #[allow(clippy::too_many_arguments)]
-fn emit_rgb_u8_wire<const BITS: u32>(
+pub(crate) fn emit_rgb_u8_wire<const BITS: u32>(
   y: &[u16],
   u: &[u16],
   v: &[u16],
@@ -379,7 +379,7 @@ fn emit_rgba_u8_wire<const BITS: u32>(
 /// Wire-endian u16-INPUT → **native-depth u16** RGB 4:4:4 conversion.
 #[cfg(feature = "yuv-planar")]
 #[allow(clippy::too_many_arguments)]
-fn emit_rgb_u16_wire<const BITS: u32>(
+pub(crate) fn emit_rgb_u16_wire<const BITS: u32>(
   y: &[u16],
   u: &[u16],
   v: &[u16],
@@ -452,7 +452,7 @@ fn emit_hsv_u8_wire<const BITS: u32>(
 /// flush are infallible (the #180 reserve-before-write contract). Idempotent
 /// once sized.
 #[cfg(feature = "yuv-planar")]
-fn reserve_420_chroma_top_y_u16(
+pub(crate) fn reserve_420_chroma_top_y_u16(
   buf: &mut std::vec::Vec<u16>,
   width: usize,
   height: usize,
@@ -480,7 +480,7 @@ fn reserve_420_chroma_top_y_u16(
 /// already be grown by the caller's atomicity preflight.
 #[cfg(feature = "yuv-planar")]
 #[allow(clippy::too_many_arguments)]
-fn yuv444p_top_identity_color_row<const BITS: u32, const BE: bool>(
+pub(crate) fn yuv444p_top_identity_color_row<const BITS: u32, const BE: bool>(
   rgb: &mut Option<&mut [u8]>,
   rgba: &mut Option<&mut [u8]>,
   rgb_u16: &mut Option<&mut [u16]>,

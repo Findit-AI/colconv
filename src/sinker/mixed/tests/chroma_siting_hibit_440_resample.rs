@@ -179,6 +179,82 @@ fn recon_full_bottom_u16(u: &[u16], v: &[u16], sw: usize, sh: usize) -> (Vec<u16
   (uf, vf)
 }
 
+/// The FORWARD (`Top`, `v = 0`) code-domain twin of [`bin_chroma_bottom_u16`]:
+/// EVEN luma row `2i` is co-sited on `c[i]` (weight `{2}`), ODD row `2i+1` folds
+/// `c[i]` and `c[i+1]` (weight `{1, 1}`, bottom-edge clamp), a SINGLE round-half-up
+/// over `2·sw·sh`. EVEN `sh` only (`ch = sh / 2`).
+fn bin_chroma_top_u16(c: &[u16], sw: usize, ch: usize, ow: usize, oh: usize) -> Vec<u16> {
+  let sh = 2 * ch;
+  let mut r2 = vec![0u64; sw * sh];
+  for r in 0..sh {
+    let cr = r / 2;
+    let next = (cr + 1).min(ch - 1);
+    for j in 0..sw {
+      r2[r * sw + j] = if r & 1 == 0 {
+        2 * u64::from(c[cr * sw + j]) // even: co-sited {2}
+      } else {
+        u64::from(c[cr * sw + j]) + u64::from(c[next * sw + j]) // odd: forward {1, 1}
+      };
+    }
+  }
+  let hw = area_weights(sw, ow);
+  let vw = area_weights(sh, oh);
+  let denom = (2 * sw * sh) as u64;
+  let mut out = vec![0u16; ow * oh];
+  for (oy, (vs, vwin)) in vw.iter().enumerate() {
+    for (ox, (hs, hwin)) in hw.iter().enumerate() {
+      let mut s = 0u64;
+      for (dy, &vwt) in vwin.iter().enumerate() {
+        let mut hsum = 0u64;
+        for (dx, &hwt) in hwin.iter().enumerate() {
+          hsum += hwt * r2[(vs + dy) * sw + hs + dx];
+        }
+        s += vwt * hsum;
+      }
+      out[oy * ow + ox] = rdhu(s, denom) as u16;
+    }
+  }
+  out
+}
+
+/// Reconstruct `Yuv440pN` chroma to full height (`sw x sh`, `u16`) for the
+/// top-sited (`v = 0`) decode — the FORWARD mirror of [`recon_full_bottom_u16`]:
+/// even rows take chroma row `i` straight, odd rows forward box-blend `c[i]` and
+/// `c[i+1]` (bottom-edge clamp) via the production scalar kernel
+/// [`chroma_upsample_440_bottom_v_u16`](crate::row::scalar::chroma_upsample_440_bottom_v_u16)
+/// (a symmetric box average, so applied to the forward pair). NO horizontal
+/// reconstruction (full-width chroma).
+fn recon_full_top_u16(u: &[u16], v: &[u16], sw: usize, sh: usize) -> (Vec<u16>, Vec<u16>) {
+  let ch = sh.div_ceil(2);
+  let vblend = |plane: &[u16], a: usize, b: usize| -> Vec<u16> {
+    let mut out = vec![0u16; sw];
+    crate::row::scalar::chroma_upsample_440_bottom_v_u16(
+      &plane[a * sw..a * sw + sw],
+      &plane[b * sw..b * sw + sw],
+      &mut out,
+      sw,
+    );
+    out
+  };
+  let mut uf = vec![0u16; sw * sh];
+  let mut vf = vec![0u16; sw * sh];
+  for r in 0..sh {
+    let cr = r / 2;
+    let (uh, vh) = if r & 1 == 0 {
+      (
+        u[cr * sw..cr * sw + sw].to_vec(),
+        v[cr * sw..cr * sw + sw].to_vec(),
+      )
+    } else {
+      let next = (cr + 1).min(ch - 1);
+      (vblend(u, cr, next), vblend(v, cr, next))
+    };
+    uf[r * sw..r * sw + sw].copy_from_slice(&uh);
+    vf[r * sw..r * sw + sw].copy_from_slice(&vh);
+  }
+  (uf, vf)
+}
+
 /// Re-encode a host-native `u16` slice as host-independent BE-wire storage.
 fn as_be(host: &[u16]) -> Vec<u16> {
   host.iter().map(|v| v.to_be()).collect()
@@ -559,9 +635,11 @@ macro_rules! hibit_440_resample_siting {
       #[test]
       #[cfg_attr(miri, ignore = "SIMD row kernels use intrinsics unsupported by Miri")]
       fn cosited_group_is_byte_identical_across_tiers() {
-        // Every co-sited / horizontal siting must produce the byte-identical
-        // pre-siting resample (v_phase 0 → the phased-V plan is never built), on
-        // BOTH tiers. 4:4:0 has no horizontal phase, so Center / Top are co-sited.
+        // Every co-sited / vertically-central siting must produce the byte-identical
+        // pre-siting resample (v_phase 0 && !v_top → neither phased-V plan is built),
+        // on BOTH tiers. 4:4:0 has no horizontal phase, so `Center` (v=0.5) stays
+        // co-sited; `Top` / `TopLeft` (v=0) now fold the forward triangle and left
+        // this group.
         for (sw, sh, ow, oh) in GEOMS {
           let (y, u, v) = ramp(sw, sh);
           for native in [true, false] {
@@ -579,9 +657,7 @@ macro_rules! hibit_440_resample_siting {
             );
             for loc in [
               ChromaLocation::Left,
-              ChromaLocation::TopLeft,
               ChromaLocation::Center,
-              ChromaLocation::Top,
               ChromaLocation::Unknown(7),
             ] {
               assert_eq!(
@@ -985,6 +1061,221 @@ macro_rules! hibit_440_resample_siting {
           fresh,
           "row-stage Bottom sink reused across frames must not carry stale chroma"
         );
+      }
+
+      // ======== Top-sited (v = 0) FORWARD one-row delay ====================
+
+      /// The top-sited NATIVE oracle: bin Y co-sited and U / V through the exact
+      /// forward V-fold oracle to `ow x oh`, then convert ONCE via a `Yuv444pN` sink.
+      #[allow(clippy::too_many_arguments)]
+      fn top_native_oracle(
+        y: &[u16],
+        u: &[u16],
+        v: &[u16],
+        sw: usize,
+        sh: usize,
+        ow: usize,
+        oh: usize,
+        simd: bool,
+      ) -> (Vec<u8>, Vec<u16>) {
+        let ch = sh / 2;
+        let yb = bin_cosited_u16(y, sw, sh, ow, oh);
+        let ub = bin_chroma_top_u16(u, sw, ch, ow, oh);
+        let vb = bin_chroma_top_u16(v, sw, ch, ow, oh);
+        let mut rgb = vec![0u8; ow * oh * 3];
+        let mut rgb16 = vec![0u16; ow * oh * 3];
+        {
+          let mut sink = MixedSinker::<$M444>::new(ow, oh)
+            .with_simd(simd)
+            .with_rgb(&mut rgb)
+            .unwrap()
+            .with_rgb_u16(&mut rgb16)
+            .unwrap();
+          let f = $F444::new(
+            &yb, &ub, &vb, ow as u32, oh as u32, ow as u32, ow as u32, ow as u32,
+          );
+          $w444(&f, FR, M, &mut sink).unwrap();
+        }
+        (rgb, rgb16)
+      }
+
+      /// The top-sited RGB-domain oracle: reconstruct U / V to full height with the
+      /// forward top blend then run that `Yuv444pN` frame through the given resampler
+      /// (convert-each-row-then-bin). `filter = true` uses the Triangle tier.
+      #[allow(clippy::too_many_arguments)]
+      fn top_rgb_domain_oracle(
+        y: &[u16],
+        u: &[u16],
+        v: &[u16],
+        sw: usize,
+        sh: usize,
+        ow: usize,
+        oh: usize,
+        simd: bool,
+        filter: bool,
+      ) -> (Vec<u8>, Vec<u16>) {
+        let (uf, vf) = recon_full_top_u16(u, v, sw, sh);
+        let mut rgb = vec![0u8; ow * oh * 3];
+        let mut rgb16 = vec![0u16; ow * oh * 3];
+        let f = $F444::new(
+          y, &uf, &vf, sw as u32, sh as u32, sw as u32, sw as u32, sw as u32,
+        );
+        if filter {
+          let mut sink = MixedSinker::<$M444, FilteredResampler<Triangle>>::with_resampler(
+            sw,
+            sh,
+            FilteredResampler::new(ow, oh, Triangle),
+          )
+          .unwrap()
+          .with_simd(simd)
+          .with_rgb(&mut rgb)
+          .unwrap()
+          .with_rgb_u16(&mut rgb16)
+          .unwrap();
+          $w444(&f, FR, M, &mut sink).unwrap();
+        } else {
+          let mut sink =
+            MixedSinker::<$M444, AreaResampler>::with_resampler(sw, sh, AreaResampler::to(ow, oh))
+              .unwrap()
+              .with_native(false)
+              .with_simd(simd)
+              .with_rgb(&mut rgb)
+              .unwrap()
+              .with_rgb_u16(&mut rgb16)
+              .unwrap();
+          $w444(&f, FR, M, &mut sink).unwrap();
+        }
+        (rgb, rgb16)
+      }
+
+      #[test]
+      #[cfg_attr(miri, ignore = "SIMD row kernels use intrinsics unsupported by Miri")]
+      fn top_native_equals_code_domain_oracle() {
+        for (sw, sh, ow, oh) in GEOMS {
+          let (y, u, v) = ramp(sw, sh);
+          assert_eq!(
+            run(&y, &u, &v, sw, sh, ow, oh, ChromaLocation::Top, true, true),
+            top_native_oracle(&y, &u, &v, sw, sh, ow, oh, true),
+            "native top == code-domain oracle ({sw}x{sh}->{ow}x{oh})"
+          );
+          // `TopLeft` (v=0, no horizontal phase) decodes identically.
+          assert_eq!(
+            run(
+              &y,
+              &u,
+              &v,
+              sw,
+              sh,
+              ow,
+              oh,
+              ChromaLocation::TopLeft,
+              true,
+              true
+            ),
+            run(&y, &u, &v, sw, sh, ow, oh, ChromaLocation::Top, true, true),
+            "TopLeft == Top ({sw}x{sh}->{ow}x{oh})"
+          );
+        }
+      }
+
+      #[test]
+      #[cfg_attr(miri, ignore = "SIMD row kernels use intrinsics unsupported by Miri")]
+      fn top_row_stage_equals_rgb_reconstruct_then_bin() {
+        for (sw, sh, ow, oh) in GEOMS {
+          let (y, u, v) = ramp(sw, sh);
+          assert_eq!(
+            run(&y, &u, &v, sw, sh, ow, oh, ChromaLocation::Top, false, true).0,
+            top_rgb_domain_oracle(&y, &u, &v, sw, sh, ow, oh, true, false).0,
+            "row-stage top == reconstruct-then-bin ({sw}x{sh}->{ow}x{oh})"
+          );
+        }
+      }
+
+      #[test]
+      #[cfg_attr(miri, ignore = "SIMD row kernels use intrinsics unsupported by Miri")]
+      fn top_filter_equals_rgb_reconstruct_then_filter() {
+        for (sw, sh, ow, oh) in GEOMS {
+          let (y, u, v) = ramp(sw, sh);
+          assert_eq!(
+            run_filter(&y, &u, &v, sw, sh, ow, oh, ChromaLocation::Top, true).0,
+            top_rgb_domain_oracle(&y, &u, &v, sw, sh, ow, oh, true, true).0,
+            "filter top == reconstruct-then-filter ({sw}x{sh}->{ow}x{oh})"
+          );
+        }
+      }
+
+      #[test]
+      #[cfg_attr(miri, ignore = "SIMD row kernels use intrinsics unsupported by Miri")]
+      fn top_simd_matches_scalar() {
+        let (y, u, v) = vramp(8, 8);
+        for native in [true, false] {
+          assert_eq!(
+            run(&y, &u, &v, 8, 8, 4, 4, ChromaLocation::Top, native, true),
+            run(&y, &u, &v, 8, 8, 4, 4, ChromaLocation::Top, native, false),
+            "top SIMD vs scalar must agree (native={native})"
+          );
+        }
+        assert_eq!(
+          run_filter(&y, &u, &v, 8, 8, 4, 4, ChromaLocation::Top, true),
+          run_filter(&y, &u, &v, 8, 8, 4, 4, ChromaLocation::Top, false),
+          "top filter SIMD vs scalar must agree"
+        );
+      }
+
+      #[test]
+      #[cfg_attr(miri, ignore = "SIMD row kernels use intrinsics unsupported by Miri")]
+      fn top_be_matches_le() {
+        let (y, u, v) = vramp(8, 8);
+        for native in [true, false] {
+          assert_eq!(
+            run_be(&y, &u, &v, 8, 8, 4, 4, ChromaLocation::Top, native),
+            run(&y, &u, &v, 8, 8, 4, 4, ChromaLocation::Top, native, true),
+            "BE top decode must equal LE (native={native})"
+          );
+        }
+      }
+
+      #[test]
+      #[cfg_attr(miri, ignore = "SIMD row kernels use intrinsics unsupported by Miri")]
+      fn top_differs_from_cosited_and_bottom_on_a_vertical_chroma_ramp() {
+        let (y, u, v) = vramp(8, 8);
+        for native in [true, false] {
+          let cos = run(&y, &u, &v, 8, 8, 4, 4, ChromaLocation::Center, native, true);
+          let bot = run(&y, &u, &v, 8, 8, 4, 4, ChromaLocation::Bottom, native, true);
+          let top = run(&y, &u, &v, 8, 8, 4, 4, ChromaLocation::Top, native, true);
+          assert_ne!(top, cos, "top must differ from co-sited (native={native})");
+          assert_ne!(top, bot, "top must differ from bottom (native={native})");
+        }
+      }
+
+      #[test]
+      #[cfg_attr(miri, ignore = "SIMD row kernels use intrinsics unsupported by Miri")]
+      fn top_equals_cosited_on_flat_chroma() {
+        let (y, u, v) = flat(8, 8);
+        for native in [true, false] {
+          assert_eq!(
+            run(&y, &u, &v, 8, 8, 4, 4, ChromaLocation::Left, native, true),
+            run(&y, &u, &v, 8, 8, 4, 4, ChromaLocation::Top, native, true),
+            "top must equal co-sited on flat chroma (native={native})"
+          );
+        }
+      }
+
+      #[test]
+      #[cfg_attr(miri, ignore = "SIMD row kernels use intrinsics unsupported by Miri")]
+      fn top_identity_resample_matches_direct_decode_all_outputs() {
+        // Identity dims: the row-stage resample reconstructs full-width chroma with
+        // the SAME forward top kernel as the direct (non-resample) decode, so routing
+        // Top through the resample preserves EVERY output byte-for-byte. TopLeft too
+        // (identical v=0 fold).
+        let (y, u, v) = vramp(8, 8);
+        for loc in [ChromaLocation::Top, ChromaLocation::TopLeft] {
+          assert_eq!(
+            identity_resample_full(&y, &u, &v, 8, 8, loc, true),
+            direct_bottom_full(&y, &u, &v, 8, 8, loc, true),
+            "identity resample {loc:?} == direct decode (all outputs)"
+          );
+        }
       }
     }
   };

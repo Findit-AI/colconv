@@ -42,6 +42,17 @@ pub(crate) use p0xx::{
 };
 #[cfg(feature = "yuv-planar")]
 pub(crate) use yuv420p::reserve_420_chroma_full_u16;
+// RFC #238 Top (`v = 0`) forward one-row delay: the high-bit 4:4:0 `Yuv440pN`
+// reconstruction tiers reuse the wire 4:4:4 identity colour decode
+// ([`yuv420p::yuv444p_top_identity_color_row`]), the u8 / u16 wire colour kernels
+// its area / filter reconstruct helpers feed ([`yuv420p::emit_rgb_u8_wire`] /
+// [`yuv420p::emit_rgb_u16_wire`]), and the held-Y buffer reserve
+// ([`yuv420p::reserve_420_chroma_top_y_u16`]) rather than duplicating them. The
+// 4:2:0 module owns them in-module, so this re-export exists for the 4:4:0 twin.
+#[cfg(feature = "yuv-planar")]
+pub(crate) use yuv420p::{
+  emit_rgb_u8_wire, emit_rgb_u16_wire, reserve_420_chroma_top_y_u16, yuv444p_top_identity_color_row,
+};
 // `upsample_420_chroma_center_h_u16`'s only remaining external consumer is the
 // YUVA 4:2:2 centered path: the planar `Yuv422p` twin now routes through the
 // shared L2 `reconstruct_chroma` stage (RFC #238 PR-F2), so gate the re-export
