@@ -3003,6 +3003,19 @@ impl NativeYuv420 {
     self.chroma_bottom
   }
 
+  /// Whether the cached chroma plan folded the RFC #238 `Top` vertical phase
+  /// (`v = 0`, the FORWARD triangle) — see
+  /// [`chroma_top`](Self#structfield.chroma_top). `Center` and `Top` share
+  /// `chroma_centered = true` and both keep `chroma_bottom = false`, so the
+  /// semi-planar 4:2:0 (`Nv12` / `Nv21`) point-of-use siting invalidation
+  /// compares this too (its joins live in a sibling module and cannot touch the
+  /// private field directly) to rebuild the join on a Top vertical-phase change.
+  #[cfg(feature = "yuv-semi-planar")]
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub(super) const fn chroma_top(&self) -> bool {
+    self.chroma_top
+  }
+
   /// Next source row this join expects (0 at a fresh frame). Read by the
   /// semi-planar 4:2:0 point-of-use siting invalidation to fire the
   /// phase-rebuild drop ONLY at a fresh-frame boundary (`next_y() == 0`), never
