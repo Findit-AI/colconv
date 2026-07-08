@@ -1050,6 +1050,112 @@ fn top_survives_frame_reuse() {
   );
 }
 
+/// Builds a `Yuv420p` row `r` of the [`vramp_yuv420p`] frame (chroma row
+/// `r / 2`, the walker's vertical replication) for direct `process` feeding.
+fn top_delay_row<'a>(yp: &'a [u8], up: &'a [u8], vp: &'a [u8], r: usize) -> Yuv420pRow<'a> {
+  let w = W as usize;
+  let cw = w / 2;
+  let cr = r / 2;
+  Yuv420pRow::new(
+    &yp[r * w..r * w + w],
+    &up[cr * cw..cr * cw + cw],
+    &vp[cr * cw..cr * cw + cw],
+    r,
+    ColorMatrix::Bt601,
+    false,
+  )
+}
+
+/// Drives the direct (identity) forward-delay Top path through a mid-frame
+/// siting flip and asserts the per-frame freeze rejects it retry-atomically.
+/// `held_loc` (a `top_v` siting) freezes on row 0 and DEFERS row 1 (odd →
+/// `chroma_top_pending`); flipping to `flipped_loc` (a non-`top_v` siting)
+/// before the even row 2 must be rejected with `ChromaSitingChanged` WITHOUT
+/// emitting or clearing the held odd row; flipping back to `held_loc` and
+/// retrying the SAME even row 2 then flushes it byte-for-byte like a clean
+/// in-order decode — proving the reject mutated no delay state (#180) and no
+/// stale-row corruption leaked.
+fn top_flip_rejected_and_retryable(held_loc: ChromaLocation, flipped_loc: ChromaLocation) {
+  let (yp, up, vp) = vramp_yuv420p();
+  let w = W as usize;
+
+  // Reference: a clean in-order decode of rows 0..3 at the held siting (no flip).
+  let mut rgb_ref = std::vec![0u8; w * H as usize * 3];
+  {
+    let mut ref_sink = MixedSinker::<Yuv420p>::new(w, H as usize)
+      .with_rgb(&mut rgb_ref)
+      .unwrap()
+      .with_chroma_location(held_loc);
+    crate::PixelSink::begin_frame(&mut ref_sink, W, H).unwrap();
+    for r in 0..3 {
+      crate::PixelSink::process(&mut ref_sink, top_delay_row(&yp, &up, &vp, r)).unwrap();
+    }
+  }
+
+  // Subject: rows 0, 1 (deferred) at the held siting, then flip before row 2.
+  let mut rgb = std::vec![0u8; w * H as usize * 3];
+  let mut sink = MixedSinker::<Yuv420p>::new(w, H as usize)
+    .with_rgb(&mut rgb)
+    .unwrap()
+    .with_chroma_location(held_loc);
+  crate::PixelSink::begin_frame(&mut sink, W, H).unwrap();
+  crate::PixelSink::process(&mut sink, top_delay_row(&yp, &up, &vp, 0)).unwrap();
+  crate::PixelSink::process(&mut sink, top_delay_row(&yp, &up, &vp, 1)).unwrap();
+  assert!(
+    sink.chroma_top_pending.is_some(),
+    "{held_loc:?}: the odd row must be held pending its even-row flush"
+  );
+  let held_y = sink.chroma_top_y.clone();
+
+  sink.set_chroma_location(flipped_loc);
+  let err = crate::PixelSink::process(&mut sink, top_delay_row(&yp, &up, &vp, 2)).unwrap_err();
+  assert!(
+    matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
+    "{held_loc:?} -> {flipped_loc:?}: mid-frame flip must be ChromaSitingChanged, got {err:?}"
+  );
+  // Retry-atomic (#180): the rejected flip left the held odd row untouched.
+  assert!(
+    sink.chroma_top_pending.is_some(),
+    "{held_loc:?} -> {flipped_loc:?}: a rejected flip must leave the held odd row pending"
+  );
+  assert_eq!(
+    sink.chroma_top_y, held_y,
+    "{held_loc:?} -> {flipped_loc:?}: a rejected flip must not touch the buffered odd-row luma"
+  );
+
+  // Flip back and retry the SAME even row: it flushes the held odd row and emits
+  // exactly as an unbroken decode would (no stale-row corruption).
+  sink.set_chroma_location(held_loc);
+  crate::PixelSink::process(&mut sink, top_delay_row(&yp, &up, &vp, 2)).unwrap();
+  drop(sink);
+  assert_eq!(
+    rgb, rgb_ref,
+    "{held_loc:?}: retry after a rejected flip must match a clean in-order decode"
+  );
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn top_mid_frame_flip_to_center_rejected_and_retryable() {
+  // `Top` (centered h, forward v) → `Center` (centered h, co-sited v): the flip
+  // differs ONLY on the vertical `top_v` axis of the identity-path freeze.
+  top_flip_rejected_and_retryable(ChromaLocation::Top, ChromaLocation::Center);
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn topleft_mid_frame_flip_to_left_rejected_and_retryable() {
+  // `TopLeft` (co-sited h, forward v) → `Left` (co-sited h, co-sited v): the flip
+  // differs ONLY on the vertical `top_v` axis of the identity-path freeze.
+  top_flip_rejected_and_retryable(ChromaLocation::TopLeft, ChromaLocation::Left);
+}
+
 #[test]
 #[cfg_attr(
   miri,

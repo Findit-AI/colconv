@@ -2373,10 +2373,10 @@ impl<R> PixelSink for MixedSinker<'_, Yuv420p, R> {
     // skips that math entirely. It also means such a row never reserves
     // `chroma_prev` (no spurious `AllocationFailed`) nor primes the lookback (so
     // it can never make a later colour even row box-blend through an invisible,
-    // never-output row). The identity path holds no stream / freeze state and
-    // every write below is output-gated, so this is a pure no-op that just makes
-    // the invariant explicit — mirroring the resample path's `need_output`
-    // short-circuit.
+    // never-output row). The identity path's siting freeze and Top forward-delay
+    // state are all output-gated below (a no-output row neither checks nor sets
+    // them), so this early return is a pure no-op that just makes the invariant
+    // explicit — mirroring the resample path's `need_output` short-circuit.
     let need_output = want_color || luma.is_some() || luma_u16.is_some();
     if !need_output {
       return Ok(());
@@ -2409,6 +2409,31 @@ impl<R> PixelSink for MixedSinker<'_, Yuv420p, R> {
     // row supplies the next chroma. Handled in its own branch below; the luma
     // planes are siting-independent and written in order regardless.
     let top_v = chroma_420_top_sited_v(chroma_location);
+
+    // RFC #238 Top: freeze the effective 4:2:0 chroma siting on the direct
+    // (identity) path too, mirroring the resample tiers' choke-point CHECK above
+    // and the 4:4:0 sibling. `set_chroma_location` is public, so without this a
+    // caller could hold an odd `Top` row (buffered in `chroma_top_pending` /
+    // `chroma_top_y`), flip to `Center` / `Left` — whose `top_v == false` skips
+    // the flush/defer branch below, so the held row is neither emitted nor
+    // cleared — then flip back to `Top` and flush that STALE row against the
+    // wrong chroma row (silent RGB / RGBA / HSV corruption). Reject any mid-frame
+    // flip TO or FROM `Top` / `TopLeft` (or any horizontal / bottom phase flip)
+    // with the typed `ChromaSitingChanged`. CHECK here — BEFORE the atomicity
+    // preflight and any output write or delay-state mutation — so a rejected flip
+    // leaves `chroma_top_pending` / `chroma_top_y` UNTOUCHED and the row is
+    // retry-atomic (#180); the matching SET rides the row's accept point below,
+    // after the fallible preflight. `need_output` is already established (the
+    // no-output guard returned above).
+    if let Some(frozen) = *frozen_chroma_centered
+      && (frozen != center_sited
+        || *frozen_chroma_bottom_v != Some(bottom_v)
+        || *frozen_chroma_top_v != Some(top_v))
+    {
+      return Err(MixedSinkerError::ChromaSitingChanged(
+        ChromaSitingChanged::new(idx),
+      ));
+    }
 
     // Atomicity preflight (#302, cf. the crate's #180 resample fix): reserve
     // EVERY fallible row scratch this `Yuv420p` row needs BEFORE any output
@@ -2486,6 +2511,18 @@ impl<R> PixelSink for MixedSinker<'_, Yuv420p, R> {
         idx,
         w,
       );
+    }
+
+    // RFC #238 Top: the row is now past its fallible preflight — every scratch is
+    // reserved, so the remaining writes and the Top forward-delay bookkeeping
+    // cannot fail. Commit the siting freeze here (mirroring the resample arms'
+    // accept-time SET and the 4:4:0 sibling), at the single point all output
+    // sub-paths pass through before diverging. Only the frame's first
+    // output-bearing row sets it; the CHECK above rejects any later phase flip.
+    if frozen_chroma_centered.is_none() {
+      *frozen_chroma_centered = Some(center_sited);
+      *frozen_chroma_bottom_v = Some(bottom_v);
+      *frozen_chroma_top_v = Some(top_v);
     }
 
     // Luma — YUV420p luma *is* the Y plane. Just copy.
