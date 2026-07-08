@@ -342,6 +342,77 @@ pub(crate) fn chroma_upsample_2to1_center_h(c_half: &[u8], c_full: &mut [u8], wi
   }
 }
 
+/// Horizontally upsamples a quarter-width chroma row (4:1:1 or 4:1:0) to full
+/// width for **center-sited** chroma — the MPEG-1 / JPEG horizontal phase
+/// (FFmpeg `AVCHROMA_LOC_CENTER` / `Top` / `Bottom`), the 1→4 analog of
+/// [`chroma_upsample_2to1_center_h`]. A centered 4:1:x chroma sample sits at the
+/// **center** of the four luma columns it covers — luma position `4j + 1.5` for
+/// chroma sample `c[j]` (covering columns `4j..4j+4`), a `+1.5` luma-sample
+/// horizontal offset relative to the left-co-sited phase the default
+/// [`yuv_411_to_rgb_row`] / [`yuv_410_to_rgb_row`] nearest paths assume.
+///
+/// Reconstruction is linear interpolation between adjacent chroma samples at
+/// that phase (sample spacing 4), computed in the **u8 sample domain** with
+/// round-to-nearest and edge clamping. The four output columns of group `j` land
+/// at distances `{2.5, 1.5}` (before the sample) and `{0.5, 1.5}` (after it) in
+/// luma units, giving the `×8`-scaled weights:
+///
+/// ```text
+///   col 4j   → (3·c[j-1] + 5·c[j] + 4) >> 3   (c[-1]        clamped to c[0])
+///   col 4j+1 → (1·c[j-1] + 7·c[j] + 4) >> 3   (c[-1]        clamped to c[0])
+///   col 4j+2 → (7·c[j] + 1·c[j+1] + 4) >> 3   (c[quarter]   clamped to c[quarter-1])
+///   col 4j+3 → (5·c[j] + 3·c[j+1] + 4) >> 3   (c[quarter]   clamped to c[quarter-1])
+/// ```
+///
+/// so the left-edge group collapses to `c[0]` and the right-edge group to
+/// `c[quarter-1]` exactly. The result is a full-width chroma row the caller feeds
+/// to the existing 4:4:4 decode ([`yuv_444_to_rgb_row`](super::yuv_444_to_rgb_row)
+/// and siblings), so the center-sited path reuses the fully-SIMD 4:4:4 kernels and
+/// stays bit-identical per tier; the left-co-sited / unspecified sitings keep the
+/// default nearest decode and never call this.
+///
+/// `width` need NOT be a multiple of 4 (planar `Yuv411p` permits a non-aligned
+/// width — the trailing `1..=3` luma columns share the last, partial chroma
+/// sample): `quarter = width.div_ceil(4)` samples are read and each output column
+/// is written only when it lies within `width`.
+///
+/// # Panics (debug builds)
+///
+/// - `c_quarter.len() >= width.div_ceil(4)`, `c_full.len() >= width`.
+// Gated like [`chroma_upsample_2to1_center_h`]: the centered-siting `Yuv411p` /
+// `Yuv410p` / `Uyyvyy411` sink paths stage the full-width chroma in a `Vec`
+// scratch, so the upsample is reachable only when the sink (and thus heap
+// allocation) is.
+#[cfg(any(feature = "std", feature = "alloc"))]
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn chroma_upsample_4to1_center_h(c_quarter: &[u8], c_full: &mut [u8], width: usize) {
+  let quarter = width.div_ceil(4);
+  debug_assert!(c_quarter.len() >= quarter, "c_quarter row too short");
+  debug_assert!(c_full.len() >= width, "c_full row too short");
+
+  for j in 0..quarter {
+    // `c[j-1]` clamps to `c[0]` at the left edge; `c[j+1]` clamps to the last
+    // sample at the right edge — boundary replication, so the edge groups
+    // collapse to `c[0]` / `c[quarter-1]` exactly.
+    let left = c_quarter[j.saturating_sub(1)] as u32;
+    let mid = c_quarter[j] as u32;
+    let right = c_quarter[if j + 1 < quarter { j + 1 } else { j }] as u32;
+    let base = 4 * j;
+    if base < width {
+      c_full[base] = ((3 * left + 5 * mid + 4) >> 3) as u8;
+    }
+    if base + 1 < width {
+      c_full[base + 1] = ((left + 7 * mid + 4) >> 3) as u8;
+    }
+    if base + 2 < width {
+      c_full[base + 2] = ((7 * mid + right + 4) >> 3) as u8;
+    }
+    if base + 3 < width {
+      c_full[base + 3] = ((5 * mid + 3 * right + 4) >> 3) as u8;
+    }
+  }
+}
+
 /// Vertically-blended twin of [`chroma_upsample_2to1_center_h`] for the
 /// **bottom-sited** vertical phase of an *even* output luma row (#302): the
 /// FFmpeg `AVCHROMA_LOC_BOTTOM` (`Bottom`) vertical position `v = 1`, where the

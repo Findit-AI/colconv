@@ -879,6 +879,157 @@ impl AxisSpans {
     })
   }
 
+  /// Horizontal chroma spans for the RFC #238 **centered** 4:1:x siting — the
+  /// `1→4` folded triangle⊗box weights, the factor-4 analog of
+  /// [`Self::area_chroma_phased_h_centered`]. A centered 4:1:x chroma sample
+  /// sits at `+1.5` luma between the four columns it covers (luma position
+  /// `4j + 1.5` for chroma sample `c[j]`), so reconstructing full width is the
+  /// #302 `1→4` triangle
+  /// ([`chroma_upsample_4to1_center_h`](crate::row::scalar::chroma_upsample_4to1_center_h)):
+  ///
+  /// ```text
+  ///   col 4j   → (3·c[j-1] + 5·c[j]) / 8   (c[-1]        clamped to c[0])
+  ///   col 4j+1 → (1·c[j-1] + 7·c[j]) / 8   (c[-1]        clamped to c[0])
+  ///   col 4j+2 → (7·c[j] + 1·c[j+1]) / 8   (c[chroma_w]  clamped to c[chroma_w-1])
+  ///   col 4j+3 → (5·c[j] + 3·c[j+1]) / 8   (c[chroma_w]  clamped to c[chroma_w-1])
+  /// ```
+  ///
+  /// This folds that reconstruction INTO the box bin so ONE phased weighted area
+  /// pass on the SUBSAMPLED chroma grid reproduces "reconstruct to full width,
+  /// then box-average" with a SINGLE rounding: `W[o,j] = Σ_X w_bin[o,X]·r[X,j]`,
+  /// where `w_bin` are the full-grid box overlaps ([`Self::area`] over
+  /// `luma_w → out`) and `r` is the triangle. The box grid is the ACTUAL luma
+  /// width (`luma_w`, not `4·chroma_w`) so a non-multiple-of-4 `Yuv411p` width —
+  /// whose trailing `1..=3` luma columns share the last, partial chroma sample —
+  /// bins over its real extent, exactly as the co-sited
+  /// [`Self::area_subsampled`] `luma_w → out` path does. The triangle is scaled
+  /// ×8 to stay integral (`r ∈ {1, 3, 4, 5, 7, 8}`), so each output span sums to
+  /// `8·luma_w` — the H half of the caller's `src_w·src_h` normalization
+  /// denominator.
+  ///
+  /// At the co-sited phase the caller keeps the unscaled [`Self::area_subsampled`]
+  /// nearest binning, so this builder is invoked only for the centered group.
+  /// `chroma_w ≥ 1` (a real 4:1:x frame), so `chroma_w - 1` below never
+  /// underflows.
+  #[cfg(feature = "yuv-planar")]
+  fn area_chroma_phased_h_centered_4(
+    luma_w: usize,
+    chroma_w: usize,
+    out: usize,
+  ) -> Result<Self, AxisError> {
+    // Each folded span sums to `8·luma_w`; bound it so the `u64`-accumulated
+    // weights cast back to `usize` losslessly below.
+    luma_w.checked_mul(8).ok_or(AxisError::Overflow)?;
+    let box_spans = Self::area(luma_w, out)?;
+    // First / last chroma cell the centered `1→4` triangle scatters full column
+    // `x` to. Columns `4j` and `4j+1` spread to `{j-1, j}` (`{0}` clamped at the
+    // left edge); columns `4j+2` and `4j+3` spread to `{j, j+1}` (`{chroma_w-1}`
+    // clamped at the right edge). Consecutive full columns share a chroma cell,
+    // so a box span's chroma reach is contiguous.
+    let first_chroma = |x: usize| -> usize {
+      let j = x / 4;
+      match x % 4 {
+        0 | 1 => j.saturating_sub(1),
+        _ => j,
+      }
+    };
+    let last_chroma = |x: usize| -> usize {
+      let j = x / 4;
+      match x % 4 {
+        0 | 1 => j,
+        _ => (j + 1).min(chroma_w - 1),
+      }
+    };
+    let offsets_len = out.checked_add(1).ok_or(AxisError::Overflow)?;
+    let mut starts = Vec::new();
+    starts
+      .try_reserve_exact(out)
+      .map_err(|_| AxisError::Alloc)?;
+    let mut offsets = Vec::new();
+    offsets
+      .try_reserve_exact(offsets_len)
+      .map_err(|_| AxisError::Alloc)?;
+    // Pass 1: each output's chroma span `[j_first, j_last]`, the total tap
+    // count, and the widest span (the reused scatter accumulator's size).
+    let mut total = 0usize;
+    let mut max_span = 0usize;
+    for o in 0..out {
+      let (xstart, wbins) = box_spans.span(o);
+      let jf = first_chroma(xstart);
+      let jl = last_chroma(xstart + wbins.len() - 1);
+      starts.push(jf);
+      let span = jl - jf + 1;
+      max_span = max_span.max(span);
+      total = total.checked_add(span).ok_or(AxisError::Overflow)?;
+    }
+    let mut weights = Vec::new();
+    weights
+      .try_reserve_exact(total)
+      .map_err(|_| AxisError::Alloc)?;
+    let mut local: Vec<u64> = Vec::new();
+    local
+      .try_reserve_exact(max_span)
+      .map_err(|_| AxisError::Alloc)?;
+    offsets.push(0);
+    // Pass 2: scatter each box overlap through the ×8 triangle into the local
+    // chroma-cell accumulator, then flush the contiguous run.
+    for (o, &jf) in starts.iter().enumerate() {
+      let (xstart, wbins) = box_spans.span(o);
+      let jl = last_chroma(xstart + wbins.len() - 1);
+      local.clear();
+      local.resize(jl - jf + 1, 0);
+      for (k, &wb) in wbins.iter().enumerate() {
+        let x = xstart + k;
+        let wb = wb as u64;
+        let j = x / 4;
+        match x % 4 {
+          0 => {
+            if j == 0 {
+              local[0] += 8 * wb; // left neighbor clamps to c[0]
+            } else {
+              local[j - 1 - jf] += 3 * wb; // 3/8 → c[j-1]
+              local[j - jf] += 5 * wb; // 5/8 → c[j]
+            }
+          }
+          1 => {
+            if j == 0 {
+              local[0] += 8 * wb; // left neighbor clamps to c[0]
+            } else {
+              local[j - 1 - jf] += wb; // 1/8 → c[j-1]
+              local[j - jf] += 7 * wb; // 7/8 → c[j]
+            }
+          }
+          2 => {
+            if j == chroma_w - 1 {
+              local[j - jf] += 8 * wb; // right neighbor clamps to c[chroma_w-1]
+            } else {
+              local[j - jf] += 7 * wb; // 7/8 → c[j]
+              local[j + 1 - jf] += wb; // 1/8 → c[j+1]
+            }
+          }
+          _ => {
+            if j == chroma_w - 1 {
+              local[j - jf] += 8 * wb; // right neighbor clamps to c[chroma_w-1]
+            } else {
+              local[j - jf] += 5 * wb; // 5/8 → c[j]
+              local[j + 1 - jf] += 3 * wb; // 3/8 → c[j+1]
+            }
+          }
+        }
+      }
+      for &wv in &local {
+        weights.push(wv as usize);
+      }
+      offsets.push(weights.len());
+    }
+    debug_assert_eq!(weights.len(), total);
+    Ok(Self {
+      starts,
+      offsets,
+      weights,
+    })
+  }
+
   /// Number of output samples on this axis.
   // Consumed by the area streaming engine, which is gated to the
   // families that route through it.
@@ -1354,35 +1505,60 @@ impl ResamplePlan {
     })
   }
 
-  /// Builds the 4:1:0 chroma plan for the row-stage HSV-only resample:
-  /// horizontal spans over the (uniform, exact — 4:1:0 width is a multiple
-  /// of 4) quarter-width chroma, vertical spans over the LUMA height with
-  /// quartered cells ([`AxisSpans::area_subsampled`] at factor 4) so a
-  /// partial trailing group of `1..=3` luma rows weights its chroma row by
-  /// its true coverage — the same luma-domain vertical weighting as 4:2:0
-  /// ([`Self::area_chroma_420`]), only quartered. The stored source dims
-  /// are `(chroma_w, luma_h)`.
+  /// Builds the 4:1:0 chroma plan for the row-stage HSV-only / native resample:
+  /// vertical spans over the LUMA height with quartered cells
+  /// ([`AxisSpans::area_subsampled`] at factor 4) so a partial trailing group of
+  /// `1..=3` luma rows weights its chroma row by its true coverage — the same
+  /// luma-domain vertical weighting as 4:2:0 ([`Self::area_chroma_420`]), only
+  /// quartered.
+  ///
+  /// `chroma_w` is the subsampled chroma width (`⌈luma_w / 4⌉`); `luma_w` is the
+  /// full luma width (`4·chroma_w` for the `Uyyvyy411`-packed caller whose width
+  /// is a multiple of 4, but `≥ luma_w` in general).
+  ///
+  /// `h_phase` carries the RFC #238 horizontal chroma siting (4:1:0 subsamples
+  /// chroma 4:1 horizontally, same as 4:1:1). At phase 0 (co-sited / unspecified)
+  /// the horizontal spans are the nearest [`AxisSpans::area_subsampled`] box over
+  /// the `luma_w`-wide grid (denominator `luma_w`) — **byte-identical** to before
+  /// siting existed. For the centered group (`h_phase ≠ 0`) they are the folded
+  /// `1→4` triangle⊗box weights ([`AxisSpans::area_chroma_phased_h_centered_4`]),
+  /// whose spans sum to `8·luma_w`, so the stored `src_w` becomes that scaled H
+  /// denominator and the existing [`AreaStream`] normalization (`src_w·src_h`)
+  /// and exactness guards bound the scaled weights unchanged. The vertical axis
+  /// carries no phase here (this PR sites 4:1:0 horizontally only). The stored
+  /// source dims are `(h-denominator, luma_h)`.
   #[cfg(feature = "yuv-planar")]
   pub(crate) fn area_chroma_410(
-    chroma_w: usize,
+    luma_w: usize,
     luma_h: usize,
     out_w: usize,
     out_h: usize,
     h_phase: f64,
     v_phase: f64,
   ) -> Result<Self, ResampleError> {
+    let fail_overflow = || ResampleError::Overflow(PlanGeometry::new(luma_w, luma_h, out_w, out_h));
     let fail = |e: AxisError| match e {
-      AxisError::Overflow => {
-        ResampleError::Overflow(PlanGeometry::new(chroma_w, luma_h, out_w, out_h))
-      }
+      AxisError::Overflow => fail_overflow(),
       AxisError::Alloc => {
-        ResampleError::AllocationFailed(PlanGeometry::new(chroma_w, luma_h, out_w, out_h))
+        ResampleError::AllocationFailed(PlanGeometry::new(luma_w, luma_h, out_w, out_h))
       }
     };
-    let h = AxisSpans::area(chroma_w, out_w).map_err(fail)?;
+    let chroma_w = luma_w.div_ceil(4);
+    let (h, denom_w) = if h_phase == 0.0 {
+      (
+        AxisSpans::area_subsampled(luma_w, out_w, 4).map_err(fail)?,
+        luma_w,
+      )
+    } else {
+      let denom_w = luma_w.checked_mul(8).ok_or_else(fail_overflow)?;
+      (
+        AxisSpans::area_chroma_phased_h_centered_4(luma_w, chroma_w, out_w).map_err(fail)?,
+        denom_w,
+      )
+    };
     let v = AxisSpans::area_subsampled(luma_h, out_h, 4).map_err(fail)?;
     Ok(Self {
-      src_w: chroma_w,
+      src_w: denom_w,
       src_h: luma_h,
       out_w,
       out_h,
@@ -1399,14 +1575,23 @@ impl ResamplePlan {
     })
   }
 
-  /// Builds the 4:1:1 chroma plan for the row-stage HSV-only resample:
-  /// horizontal spans over the LUMA width with quartered cells
-  /// ([`AxisSpans::area_subsampled`] at factor 4) so a partial trailing
-  /// group of `1..=3` luma columns weights its chroma sample by its true
-  /// coverage (4:1:1 width may be non-multiple-of-4 — the last chroma
-  /// sample is shared by the trailing `1..=3` luma columns), vertical spans
-  /// over the FULL frame height (4:1:1 chroma is full-height). The stored
-  /// source dims are `(luma_w, frame_h)`.
+  /// Builds the 4:1:1 chroma plan for the row-stage HSV-only / native resample:
+  /// vertical spans over the FULL frame height (4:1:1 chroma is full-height). The
+  /// stored source dims are `(h-denominator, frame_h)`.
+  ///
+  /// `h_phase` carries the RFC #238 horizontal chroma siting (4:1:1 subsamples
+  /// chroma 4:1 horizontally). At phase 0 (co-sited / unspecified) the horizontal
+  /// spans are the nearest [`AxisSpans::area_subsampled`] box over the
+  /// `luma_w`-wide grid with quartered cells (denominator `luma_w`) — so a
+  /// partial trailing group of `1..=3` luma columns weights its chroma sample by
+  /// its true coverage (4:1:1 width may be non-multiple-of-4, the last chroma
+  /// sample shared by the trailing `1..=3` columns) — **byte-identical** to
+  /// before siting existed. For the centered group (`h_phase ≠ 0`) they are the
+  /// folded `1→4` triangle⊗box weights
+  /// ([`AxisSpans::area_chroma_phased_h_centered_4`]), whose spans sum to
+  /// `8·luma_w`, so the stored `src_w` becomes that scaled H denominator and the
+  /// existing [`AreaStream`] normalization (`src_w·src_h`) and exactness guards
+  /// bound the scaled weights unchanged.
   #[cfg(feature = "yuv-planar")]
   pub(crate) fn area_chroma_411(
     luma_w: usize,
@@ -1416,18 +1601,30 @@ impl ResamplePlan {
     h_phase: f64,
     v_phase: f64,
   ) -> Result<Self, ResampleError> {
+    let fail_overflow =
+      || ResampleError::Overflow(PlanGeometry::new(luma_w, frame_h, out_w, out_h));
     let fail = |e: AxisError| match e {
-      AxisError::Overflow => {
-        ResampleError::Overflow(PlanGeometry::new(luma_w, frame_h, out_w, out_h))
-      }
+      AxisError::Overflow => fail_overflow(),
       AxisError::Alloc => {
         ResampleError::AllocationFailed(PlanGeometry::new(luma_w, frame_h, out_w, out_h))
       }
     };
-    let h = AxisSpans::area_subsampled(luma_w, out_w, 4).map_err(fail)?;
+    let chroma_w = luma_w.div_ceil(4);
+    let (h, denom_w) = if h_phase == 0.0 {
+      (
+        AxisSpans::area_subsampled(luma_w, out_w, 4).map_err(fail)?,
+        luma_w,
+      )
+    } else {
+      let denom_w = luma_w.checked_mul(8).ok_or_else(fail_overflow)?;
+      (
+        AxisSpans::area_chroma_phased_h_centered_4(luma_w, chroma_w, out_w).map_err(fail)?,
+        denom_w,
+      )
+    };
     let v = AxisSpans::area(frame_h, out_h).map_err(fail)?;
     Ok(Self {
-      src_w: luma_w,
+      src_w: denom_w,
       src_h: frame_h,
       out_w,
       out_h,

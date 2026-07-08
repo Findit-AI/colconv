@@ -60,6 +60,22 @@ impl ChromaCenterUpsampler for ChromaU8 {
   }
 }
 
+/// 8-bit planar centered chroma upsampler for the `1→4` subsampled layouts
+/// (4:1:1 / 4:1:0) — delegates to
+/// [`chroma_upsample_4to1_center_h`](crate::row::scalar::chroma_upsample_4to1_center_h).
+/// The quarter-width sibling of [`ChromaU8`]: the trait's `half` argument carries
+/// the quarter-width chroma plane, reconstructed to `width` full-width samples.
+pub(crate) struct Chroma411U8;
+
+impl ChromaCenterUpsampler for Chroma411U8 {
+  type Elem = u8;
+
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn upsample_center_h(&self, quarter: &[u8], full: &mut [u8], width: usize) {
+    crate::row::scalar::chroma_upsample_4to1_center_h(quarter, full, width);
+  }
+}
+
 /// High-bit (`9`…`16`-bit low-packed) planar centered chroma upsampler —
 /// delegates to
 /// [`chroma_upsample_2to1_center_h_u16`](crate::row::scalar::chroma_upsample_2to1_center_h_u16),
