@@ -892,6 +892,25 @@ impl<R> PixelSink for MixedSinker<'_, Uyyvyy411, R> {
     #[cfg(all(feature = "yuv-packed", feature = "yuv-planar"))]
     let center_sited = chroma_411_center_sited_h(chroma_location);
 
+    // RFC #238 #302: mirror the resample branch's per-frame siting freeze on the
+    // identity path. `chroma_location` is public and `Copy`, so a caller can flip
+    // the phase mid-frame; without this a single frame could mix centered (`1→4`)
+    // and co-sited nearest reconstruction. Freeze the effective phase on the first
+    // output-bearing row and reject a later differing phase BEFORE any centered
+    // reservation or output write, so a rejected row mutates nothing (#180). The
+    // matching SET rides the accept-time freeze after the reservations below.
+    #[cfg(all(feature = "yuv-packed", feature = "yuv-planar"))]
+    let need_output = luma.is_some() || luma_u16.is_some() || want_rgb || want_rgba || want_hsv;
+    #[cfg(all(feature = "yuv-packed", feature = "yuv-planar"))]
+    if need_output
+      && let Some(frozen) = *frozen_chroma_centered
+      && frozen != center_sited
+    {
+      return Err(MixedSinkerError::ChromaSitingChanged(
+        ChromaSitingChanged::new(idx),
+      ));
+    }
+
     // Atomicity preflight (#302 / #308, cf. the crate's #180 resample fix and the
     // planar / semi-planar siblings): reserve EVERY fallible row scratch this row
     // needs BEFORE any output row (luma / luma_u16 included) is written, so an
@@ -922,6 +941,15 @@ impl<R> PixelSink for MixedSinker<'_, Uyyvyy411, R> {
         w,
         h,
       )?;
+    }
+
+    // RFC #238 #302: every fallible per-row reservation above has succeeded, so
+    // freeze the accepted phase for the frame (mirrors the resample branch's
+    // accept-time SET). Never before the reservations, so a rejected or failed row
+    // leaves the freeze clear for a corrected retry.
+    #[cfg(all(feature = "yuv-packed", feature = "yuv-planar"))]
+    if need_output && frozen_chroma_centered.is_none() {
+      *frozen_chroma_centered = Some(center_sited);
     }
 
     // Luma u8 — extract Y bytes from packed plane via dedicated kernel.

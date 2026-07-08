@@ -618,6 +618,82 @@ fn rs_411_mid_frame_siting_flip_is_rejected() {
   }
 }
 
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn id_411_mid_frame_siting_flip_is_rejected() {
+  let (w, h) = (16usize, 8usize);
+  let cw = w.div_ceil(4);
+  let (yp, up, vp) = ramp_411(w, h);
+  let mut rgb = vec![0u8; w * h * 3];
+  let (mut hh, mut ss, mut vv) = (vec![0u8; w * h], vec![0u8; w * h], vec![0u8; w * h]);
+  let mut luma = vec![0u8; w * h];
+  {
+    let mut sink = MixedSinker::<Yuv411p>::new(w, h)
+      .with_chroma_location(ChromaLocation::Center)
+      .with_simd(true)
+      .with_rgb(&mut rgb)
+      .unwrap()
+      .with_hsv(&mut hh, &mut ss, &mut vv)
+      .unwrap()
+      .with_luma(&mut luma)
+      .unwrap();
+    PixelSink::begin_frame(&mut sink, w as u32, h as u32).unwrap();
+    // Rows 0,1 decode centered and freeze the phase for the frame.
+    for r in 0..2 {
+      let row = Yuv411pRow::new(
+        &yp[r * w..r * w + w],
+        &up[r * cw..r * cw + cw],
+        &vp[r * cw..r * cw + cw],
+        r,
+        M,
+        FR,
+      );
+      PixelSink::process(&mut sink, row).unwrap();
+    }
+    // A mid-frame flip to a co-sited phase is rejected before any reservation or
+    // output write on the identity path (not silently mixed with the frozen
+    // centered rows).
+    sink.set_chroma_location(ChromaLocation::Left);
+    let bad = Yuv411pRow::new(
+      &yp[2 * w..3 * w],
+      &up[2 * cw..3 * cw],
+      &vp[2 * cw..3 * cw],
+      2,
+      M,
+      FR,
+    );
+    let err = PixelSink::process(&mut sink, bad).unwrap_err();
+    assert!(
+      matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
+      "411 identity mid-frame flip must be ChromaSitingChanged, got {err:?}"
+    );
+    // The rejected row mutated nothing: flip back and the same row retries, and the
+    // frame completes at the frozen centered phase.
+    sink.set_chroma_location(ChromaLocation::Center);
+    for r in 2..h {
+      let row = Yuv411pRow::new(
+        &yp[r * w..r * w + w],
+        &up[r * cw..r * cw + cw],
+        &vp[r * cw..r * cw + cw],
+        r,
+        M,
+        FR,
+      );
+      PixelSink::process(&mut sink, row).unwrap();
+    }
+  }
+  let hsv: Vec<u8> = hh.iter().chain(&ss).chain(&vv).copied().collect();
+  // Byte-identical to a clean single-phase centered identity decode: the frame
+  // that survived the rejected flip carries no mixed centered / co-sited output.
+  let (want_rgb, want_hsv, want_luma) = id_411(w, h, ChromaLocation::Center, true);
+  assert_eq!(rgb, want_rgb, "411 identity rgb after rejected flip");
+  assert_eq!(hsv, want_hsv, "411 identity hsv after rejected flip");
+  assert_eq!(luma, want_luma, "411 identity luma after rejected flip");
+}
+
 // ---- 4:1:0 planar ----------------------------------------------------------
 
 /// A `Yuv410p` frame (chroma quarter-width AND quarter-height).
@@ -846,6 +922,76 @@ fn rs_410_mid_frame_siting_flip_is_rejected() {
   );
 }
 
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn id_410_mid_frame_siting_flip_is_rejected() {
+  let (w, h) = (16usize, 8usize);
+  let cw = w / 4;
+  let (yp, up, vp) = ramp_410(w, h);
+  let mut rgb = vec![0u8; w * h * 3];
+  let (mut hh, mut ss, mut vv) = (vec![0u8; w * h], vec![0u8; w * h], vec![0u8; w * h]);
+  let mut luma = vec![0u8; w * h];
+  {
+    let mut sink = MixedSinker::<Yuv410p>::new(w, h)
+      .with_chroma_location(ChromaLocation::Center)
+      .with_simd(true)
+      .with_rgb(&mut rgb)
+      .unwrap()
+      .with_hsv(&mut hh, &mut ss, &mut vv)
+      .unwrap()
+      .with_luma(&mut luma)
+      .unwrap();
+    PixelSink::begin_frame(&mut sink, w as u32, h as u32).unwrap();
+    // Rows 0,1 decode centered (chroma row 0) and freeze the phase for the frame.
+    for r in 0..2 {
+      let cr = r / 4;
+      let row = Yuv410pRow::new(
+        &yp[r * w..r * w + w],
+        &up[cr * cw..cr * cw + cw],
+        &vp[cr * cw..cr * cw + cw],
+        r,
+        M,
+        FR,
+      );
+      PixelSink::process(&mut sink, row).unwrap();
+    }
+    // A mid-frame flip to a co-sited phase is rejected before any reservation or
+    // output write on the identity path.
+    sink.set_chroma_location(ChromaLocation::Left);
+    let bad = Yuv410pRow::new(&yp[2 * w..3 * w], &up[0..cw], &vp[0..cw], 2, M, FR);
+    let err = PixelSink::process(&mut sink, bad).unwrap_err();
+    assert!(
+      matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
+      "410 identity mid-frame flip must be ChromaSitingChanged, got {err:?}"
+    );
+    // The rejected row mutated nothing: flip back and the same row retries, and the
+    // frame completes at the frozen centered phase.
+    sink.set_chroma_location(ChromaLocation::Center);
+    for r in 2..h {
+      let cr = r / 4;
+      let row = Yuv410pRow::new(
+        &yp[r * w..r * w + w],
+        &up[cr * cw..cr * cw + cw],
+        &vp[cr * cw..cr * cw + cw],
+        r,
+        M,
+        FR,
+      );
+      PixelSink::process(&mut sink, row).unwrap();
+    }
+  }
+  let hsv: Vec<u8> = hh.iter().chain(&ss).chain(&vv).copied().collect();
+  // Byte-identical to a clean single-phase centered identity decode: no mixed
+  // centered / co-sited output survives the rejected flip.
+  let (want_rgb, want_hsv, want_luma) = id_410(w, h, ChromaLocation::Center, true);
+  assert_eq!(rgb, want_rgb, "410 identity rgb after rejected flip");
+  assert_eq!(hsv, want_hsv, "410 identity hsv after rejected flip");
+  assert_eq!(luma, want_luma, "410 identity luma after rejected flip");
+}
+
 // ---- packed Uyyvyy411 ------------------------------------------------------
 
 fn uyyvyy411_from(y: &[u8], u: &[u8], v: &[u8], w: usize, h: usize) -> Vec<u8> {
@@ -1070,4 +1216,59 @@ fn packed_resample_mid_frame_flip_is_rejected() {
     matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
     "packed mid-frame flip must be ChromaSitingChanged, got {err:?}"
   );
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn id_packed_mid_frame_siting_flip_is_rejected() {
+  let (w, h) = (16usize, 8usize);
+  let stride = w * 3 / 2;
+  let (yp, up, vp) = ramp_411(w, h);
+  let packed = uyyvyy411_from(&yp, &up, &vp, w, h);
+  let mut rgb = vec![0u8; w * h * 3];
+  let (mut hh, mut ss, mut vv) = (vec![0u8; w * h], vec![0u8; w * h], vec![0u8; w * h]);
+  let mut luma = vec![0u8; w * h];
+  {
+    let mut sink = MixedSinker::<Uyyvyy411>::new(w, h)
+      .with_chroma_location(ChromaLocation::Center)
+      .with_simd(true)
+      .with_rgb(&mut rgb)
+      .unwrap()
+      .with_hsv(&mut hh, &mut ss, &mut vv)
+      .unwrap()
+      .with_luma(&mut luma)
+      .unwrap();
+    PixelSink::begin_frame(&mut sink, w as u32, h as u32).unwrap();
+    // Rows 0,1 decode centered and freeze the phase for the frame.
+    for r in 0..2 {
+      let row = Uyyvyy411Row::new(&packed[r * stride..r * stride + stride], r, M, FR);
+      PixelSink::process(&mut sink, row).unwrap();
+    }
+    // A mid-frame flip to a co-sited phase is rejected before any reservation or
+    // output write on the packed identity path.
+    sink.set_chroma_location(ChromaLocation::Left);
+    let bad = Uyyvyy411Row::new(&packed[2 * stride..3 * stride], 2, M, FR);
+    let err = PixelSink::process(&mut sink, bad).unwrap_err();
+    assert!(
+      matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
+      "packed identity mid-frame flip must be ChromaSitingChanged, got {err:?}"
+    );
+    // The rejected row mutated nothing: flip back and the same row retries, and the
+    // frame completes at the frozen centered phase.
+    sink.set_chroma_location(ChromaLocation::Center);
+    for r in 2..h {
+      let row = Uyyvyy411Row::new(&packed[r * stride..r * stride + stride], r, M, FR);
+      PixelSink::process(&mut sink, row).unwrap();
+    }
+  }
+  let hsv: Vec<u8> = hh.iter().chain(&ss).chain(&vv).copied().collect();
+  // Byte-identical to a clean single-phase centered identity decode: no mixed
+  // centered / co-sited output survives the rejected flip.
+  let (want_rgb, want_hsv, want_luma) = id_packed(w, h, ChromaLocation::Center, true);
+  assert_eq!(rgb, want_rgb, "packed identity rgb after rejected flip");
+  assert_eq!(hsv, want_hsv, "packed identity hsv after rejected flip");
+  assert_eq!(luma, want_luma, "packed identity luma after rejected flip");
 }

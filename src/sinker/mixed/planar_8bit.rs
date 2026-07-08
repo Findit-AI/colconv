@@ -5605,6 +5605,24 @@ impl<R> PixelSink for MixedSinker<'_, Yuv410p, R> {
     // unchanged.
     let center_sited = chroma_410_center_sited_h(chroma_location);
 
+    // RFC #238 #302: mirror the resample branch's per-frame siting freeze on the
+    // identity path. `chroma_location` is public and `Copy`, so a caller can flip
+    // the phase mid-frame; without this a single frame could mix centered (`1→4`)
+    // and co-sited nearest reconstruction. Freeze the effective phase on the first
+    // output-bearing row and reject a later differing phase BEFORE any centered
+    // reservation or output write, so a rejected row mutates nothing (#180). The
+    // matching SET rides the accept-time freeze after the reservations below.
+    let need_output =
+      luma.is_some() || luma_u16.is_some() || rgb.is_some() || rgba.is_some() || hsv.is_some();
+    if need_output
+      && let Some(frozen) = *frozen_chroma_centered
+      && frozen != center_sited
+    {
+      return Err(MixedSinkerError::ChromaSitingChanged(
+        ChromaSitingChanged::new(idx),
+      ));
+    }
+
     // Atomicity preflight (#302 / #308, cf. the crate's #180 resample fix and the
     // Yuv420p sibling): reserve EVERY fallible row scratch this row needs BEFORE
     // any output row (luma / luma_u16 included) is written, so an allocator
@@ -5626,6 +5644,14 @@ impl<R> PixelSink for MixedSinker<'_, Yuv410p, R> {
         w,
         h,
       )?;
+    }
+
+    // RFC #238 #302: every fallible per-row reservation above has succeeded, so
+    // freeze the accepted phase for the frame (mirrors the resample branch's
+    // accept-time SET). Never before the reservations, so a rejected or failed row
+    // leaves the freeze clear for a corrected retry.
+    if need_output && frozen_chroma_centered.is_none() {
+      *frozen_chroma_centered = Some(center_sited);
     }
 
     // Luma — Yuv410p luma *is* the Y plane. Just copy.
@@ -8862,6 +8888,24 @@ impl<R> PixelSink for MixedSinker<'_, Yuv411p, R> {
     // subsampled horizontally only — no vertical blend or chroma lookback.
     let center_sited = chroma_411_center_sited_h(chroma_location);
 
+    // RFC #238 #302: mirror the resample branch's per-frame siting freeze on the
+    // identity path. `chroma_location` is public and `Copy`, so a caller can flip
+    // the phase mid-frame; without this a single frame could mix centered (`1→4`)
+    // and co-sited nearest reconstruction. Freeze the effective phase on the first
+    // output-bearing row and reject a later differing phase BEFORE any centered
+    // reservation or output write, so a rejected row mutates nothing (#180). The
+    // matching SET rides the accept-time freeze after the reservations below.
+    let need_output =
+      luma.is_some() || luma_u16.is_some() || rgb.is_some() || rgba.is_some() || hsv.is_some();
+    if need_output
+      && let Some(frozen) = *frozen_chroma_centered
+      && frozen != center_sited
+    {
+      return Err(MixedSinkerError::ChromaSitingChanged(
+        ChromaSitingChanged::new(idx),
+      ));
+    }
+
     // Atomicity preflight (#302 / #308, cf. the crate's #180 resample fix and the
     // Yuv420p sibling): reserve EVERY fallible row scratch this row needs BEFORE
     // any output row (luma / luma_u16 included) is written, so an allocator
@@ -8888,6 +8932,14 @@ impl<R> PixelSink for MixedSinker<'_, Yuv411p, R> {
         w,
         h,
       )?;
+    }
+
+    // RFC #238 #302: every fallible per-row reservation above has succeeded, so
+    // freeze the accepted phase for the frame (mirrors the resample branch's
+    // accept-time SET). Never before the reservations, so a rejected or failed row
+    // leaves the freeze clear for a corrected retry.
+    if need_output && frozen_chroma_centered.is_none() {
+      *frozen_chroma_centered = Some(center_sited);
     }
 
     // Luma — Yuv411p luma *is* the Y plane. Just copy.
