@@ -277,12 +277,13 @@ macro_rules! p0xx_chroma_tests {
         ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
       )]
       fn default_and_cosited_sitings_are_byte_identical() {
+        // `TopLeft` (`v = 0`) now folds the forward vertical triangle (RFC #238
+        // Top), so it LEAVES the co-sited byte-identity group.
         let baseline = convert_rgb(ChromaLocation::Unspecified, true);
         for loc in [
           ChromaLocation::Unspecified,
           ChromaLocation::Unknown(99),
           ChromaLocation::Left,
-          ChromaLocation::TopLeft,
         ] {
           assert_eq!(
             convert_rgb(loc, true),
@@ -475,16 +476,56 @@ macro_rules! p0xx_chroma_tests {
         miri,
         ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
       )]
-      fn top_routes_like_center() {
-        // Top shares BOTH Center's horizontal center phase and its vertical
-        // co-siting (`v = 0`), so Top and Center decode byte-identically at every
-        // depth. (RFC #238 S6e: Bottom instead folds the `v = 1` vertical box
-        // blend — its divergence from Center is covered robustly across all depths
-        // by the resample suite's `vramp` bottom tests + the identity-resample ==
-        // direct-decode check, which use a vertical ramp strong enough to survive
-        // the 8-bit RGB quantization even at 16-bit source depth.)
-        let center = convert_rgb(ChromaLocation::Center, true);
-        assert_eq!(convert_rgb(ChromaLocation::Top, true), center);
+      fn top_forward_vblend_differs_from_center_and_bottom() {
+        // RFC #238 Top (`v = 0`) folds the FORWARD vertical triangle: an ODD output
+        // row box-blends its chroma row with the NEXT one (a one-row delay), so on a
+        // vertically-varying chroma ramp Top diverges from both the vertical-co-sited
+        // Center (`v` box) and the BACKWARD-folding Bottom (`v = 1`). A strong
+        // per-ROW chroma step keeps the divergence visible through 8-bit RGB
+        // quantization even at 16-bit source depth. The exact forward-delay values +
+        // cross-tier consistency are pinned by the resample suite (`vramp`) and the
+        // cross-format `p0xx_direct_top_matches_yuv420p_top` check.
+        let w = W as usize;
+        let h = H as usize;
+        let (cw, ch) = (w / 2, h / 2);
+        let step = (MAXV / 8).max(1);
+        let yp = std::vec![(MAXV / 2) as u16; w * h];
+        let mut up = std::vec![0u16; cw * ch];
+        let mut vp = std::vec![0u16; cw * ch];
+        for r in 0..ch {
+          for c in 0..cw {
+            up[r * cw + c] = (step + r as u32 * step).min(MAXV) as u16;
+            vp[r * cw + c] = MAXV.saturating_sub(r as u32 * step).max(step) as u16;
+          }
+        }
+        let decode = |loc: ChromaLocation, simd: bool| -> Vec<u8> {
+          let (y_wire, uv_wire) = pack_p0xx(&yp, &up, &vp, BITS);
+          let src = $Frame::new(&y_wire, &uv_wire, W, H, W, W);
+          let mut rgb = std::vec![0u8; w * h * 3];
+          let mut sink = MixedSinker::<$Marker>::new(w, h)
+            .with_rgb(&mut rgb)
+            .unwrap()
+            .with_chroma_location(loc)
+            .with_simd(simd);
+          $walker(&src, false, ColorMatrix::Bt601, &mut sink).unwrap();
+          rgb
+        };
+        let top = decode(ChromaLocation::Top, true);
+        assert_ne!(
+          top,
+          decode(ChromaLocation::Center, true),
+          "Top's forward vertical box blend must differ from Center on a vertical ramp"
+        );
+        assert_ne!(
+          top,
+          decode(ChromaLocation::Bottom, true),
+          "Top (forward, odd rows) must differ from Bottom (backward, even rows)"
+        );
+        assert_eq!(
+          top,
+          decode(ChromaLocation::Top, false),
+          "Top identity path must be bit-identical across the SIMD and scalar tiers"
+        );
       }
 
       #[test]
@@ -839,12 +880,13 @@ p0xx_chroma_tests!(
 )]
 fn p010_direct_path_mid_frame_siting_flip_is_rejected() {
   // The identity (no-resample) high-bit semi-planar 4:2:0 `P010` decode freezes the
-  // effective phase — BOTH the horizontal centered flag and the vertical `Bottom`
-  // flag — on its first output-bearing row. Flipping `Bottom` ⇆ co-sited mid-frame
-  // must reject the next in-sequence row with `ChromaSitingChanged`, WITHOUT growing
-  // the chroma scratch OR advancing the stateful `chroma_prev_u16` vertical lookback
-  // (its validity tag included). Flipping back and retrying then matches a clean
-  // single-phase decode byte-for-byte.
+  // effective phase — the horizontal centered flag and the vertical `Bottom` / `Top`
+  // flags — on its first output-bearing row. Flipping `Bottom` / `Top` ⇆ co-sited /
+  // `Center` mid-frame must reject the next in-sequence row with `ChromaSitingChanged`,
+  // WITHOUT growing the chroma scratch, advancing the stateful `chroma_prev_u16`
+  // vertical lookback (its validity tag included), OR touching a held `Top` odd row
+  // (RFC #238). Flipping back and retrying then matches a clean single-phase decode
+  // byte-for-byte.
   use super::super::MixedSinkerError;
   const BITS: u32 = 10;
   let maxv = (1u32 << BITS) - 1;
@@ -856,6 +898,9 @@ fn p010_direct_path_mid_frame_siting_flip_is_rejected() {
     (ChromaLocation::Bottom, ChromaLocation::Left),
     (ChromaLocation::Left, ChromaLocation::Bottom),
     (ChromaLocation::Bottom, ChromaLocation::Center),
+    (ChromaLocation::Top, ChromaLocation::Center),
+    (ChromaLocation::Center, ChromaLocation::Top),
+    (ChromaLocation::TopLeft, ChromaLocation::Left),
   ] {
     // Reference: a clean whole-frame decode at the held siting.
     let mut want = std::vec![0u8; w * h * 3];
@@ -890,6 +935,7 @@ fn p010_direct_path_mid_frame_siting_flip_is_rejected() {
     let scratch_len = sink.chroma_full_u16.len();
     let prev_len = sink.chroma_prev_u16.len();
     let prev_tag = sink.chroma_prev_row;
+    let pending_before = sink.chroma_top_pending;
 
     sink.set_chroma_location(loc2);
     let row2 = P010Row::new(
@@ -918,6 +964,10 @@ fn p010_direct_path_mid_frame_siting_flip_is_rejected() {
       sink.chroma_prev_row, prev_tag,
       "{loc1:?}->{loc2:?}: a rejected flip must not advance the lookback tag"
     );
+    assert_eq!(
+      sink.chroma_top_pending, pending_before,
+      "{loc1:?}->{loc2:?}: a rejected flip must not touch a held Top odd row"
+    );
 
     sink.set_chroma_location(loc1);
     for r in 2..h {
@@ -937,4 +987,170 @@ fn p010_direct_path_mid_frame_siting_flip_is_rejected() {
       "{loc1:?}: retry after a rejected flip must match a clean in-order decode"
     );
   }
+}
+
+#[test]
+fn p0xx_begin_frame_drops_held_top_row() {
+  // RFC #238 Top forward delay: a `P0xx` odd row is HELD (`chroma_top_pending`) to
+  // emit at the following even row. If a Top frame is interrupted after a held odd
+  // non-last row, `begin_frame` MUST drop that held state (and the frozen Top
+  // phase) so frame N's deferred colour row can never flush into frame N+1 — for
+  // EVERY P0xx impl (the Nv21 begin_frame-omission regression class). All three
+  // route through the shared `reset_high_bit_yuv_streams`.
+  macro_rules! check {
+    ($Marker:ty, $Row:ident, $bits:expr) => {{
+      let maxv = (1u32 << $bits) - 1;
+      let (yp, up, vp) = ramp_planes_logical(maxv);
+      let (y_wire, uv_wire) = pack_p0xx(&yp, &up, &vp, $bits);
+      let w = W as usize;
+      let mut rgb = std::vec![0u8; w * H as usize * 3];
+      let mut sink = MixedSinker::<$Marker>::new(w, H as usize)
+        .with_rgb(&mut rgb)
+        .unwrap()
+        .with_chroma_location(ChromaLocation::Top)
+        .with_simd(true);
+      crate::PixelSink::begin_frame(&mut sink, W, H).unwrap();
+      // Row 0 (even, co-sited, emitted) then row 1 (odd, HELD).
+      for r in 0..2 {
+        let cr = r / 2;
+        crate::PixelSink::process(
+          &mut sink,
+          $Row::new(
+            &y_wire[r * w..(r + 1) * w],
+            &uv_wire[cr * w..(cr + 1) * w],
+            r,
+            ColorMatrix::Bt601,
+            false,
+          ),
+        )
+        .unwrap();
+      }
+      assert!(
+        sink.chroma_top_pending.is_some(),
+        "an odd Top row must be held before the next even row (bits={})",
+        $bits
+      );
+      crate::PixelSink::begin_frame(&mut sink, W, H).unwrap();
+      assert!(
+        sink.chroma_top_pending.is_none(),
+        "begin_frame must drop the held Top odd row so it can't flush into frame N+1 (bits={})",
+        $bits
+      );
+      assert!(
+        sink.frozen_chroma_top_v.is_none(),
+        "begin_frame must clear the frozen Top phase so the next frame may re-pick siting (bits={})",
+        $bits
+      );
+    }};
+  }
+  check!(P010, P010Row, 10u32);
+  check!(P012, P012Row, 12u32);
+  check!(P016, P016Row, 16u32);
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn p0xx_direct_top_matches_yuv420p_hibit_top() {
+  // The identity FORWARD one-row-delay `Top` / `TopLeft` decode (RFC #238) must
+  // reproduce the validated high-bit planar `Yuv420pN` `Top` / `TopLeft` decode of
+  // the same de-interleaved logical planes byte-for-byte (P010 vs Yuv420p10, etc.)
+  // — the strongest catch for a U/V swap in the delayed semi-planar path. EVEN
+  // heights end on the trailing-odd co-sited clamp; ODD heights end on the final
+  // even-row flush of the held odd row — both exercised. Bt601 keeps this on the
+  // shared matrix-tag path.
+  macro_rules! xcheck {
+    ($P:ty, $PFrame:ty, $p_to:ident, $Y:ty, $YFrame:ty, $y_to:ident, $bits:expr) => {{
+      let maxv = (1u32 << $bits) - 1;
+      for (w, h) in [(16usize, 8usize), (16, 6), (16, 5), (8, 3)] {
+        let (cw, ch) = (w / 2, h.div_ceil(2));
+        // Two-axis chroma ramp + varying luma so the forward vertical fold and the
+        // co-sited even rows are both non-trivial. Logical (low-packed) values.
+        let yl: Vec<u16> = (0..w * h)
+          .map(|i| ((maxv / 8) + (i as u32 * 37) % (maxv - maxv / 8)) as u16)
+          .collect();
+        let step = (maxv / 16).max(1);
+        let mut ul = std::vec![0u16; cw * ch];
+        let mut vl = std::vec![0u16; cw * ch];
+        for r in 0..ch {
+          for c in 0..cw {
+            ul[r * cw + c] = (step + c as u32 * step + r as u32 * step * 2).min(maxv) as u16;
+            vl[r * cw + c] = maxv
+              .saturating_sub(c as u32 * step + r as u32 * step)
+              .max(step) as u16;
+          }
+        }
+        // P0xx wire: MSB-aligned Y + interleaved MSB-aligned UV (`ch` rows).
+        let y_wire: Vec<u16> = yl.iter().map(|&x| pack(x, $bits)).collect();
+        let mut uv_wire = std::vec![0u16; w * ch];
+        for r in 0..ch {
+          for c in 0..cw {
+            uv_wire[r * w + 2 * c] = pack(ul[r * cw + c], $bits);
+            uv_wire[r * w + 2 * c + 1] = pack(vl[r * cw + c], $bits);
+          }
+        }
+        for loc in [ChromaLocation::Top, ChromaLocation::TopLeft] {
+          // High-bit planar `Yuv420pN` reference (validated Top forward decode, #384).
+          let mut want = std::vec![0u8; w * h * 3];
+          {
+            let src = <$YFrame>::new(
+              &yl, &ul, &vl, w as u32, h as u32, w as u32, cw as u32, cw as u32,
+            );
+            let mut sink = MixedSinker::<$Y>::new(w, h)
+              .with_rgb(&mut want)
+              .unwrap()
+              .with_chroma_location(loc);
+            $y_to(&src, false, ColorMatrix::Bt601, &mut sink).unwrap();
+          }
+          for simd in [true, false] {
+            let mut got = std::vec![0u8; w * h * 3];
+            {
+              let src =
+                <$PFrame>::new(&y_wire, &uv_wire, w as u32, h as u32, w as u32, w as u32);
+              let mut sink = MixedSinker::<$P>::new(w, h)
+                .with_rgb(&mut got)
+                .unwrap()
+                .with_chroma_location(loc)
+                .with_simd(simd);
+              $p_to(&src, false, ColorMatrix::Bt601, &mut sink).unwrap();
+            }
+            assert_eq!(
+              got, want,
+              "P0xx {loc:?} identity {w}x{h} simd={simd} bits={} must equal Yuv420pN {loc:?}",
+              $bits
+            );
+          }
+        }
+      }
+    }};
+  }
+  xcheck!(
+    P010,
+    P010Frame<'_>,
+    p010_to,
+    Yuv420p10,
+    mediaframe::frame::Yuv420p10Frame<'_>,
+    yuv420p10_to,
+    10u32
+  );
+  xcheck!(
+    P012,
+    P012Frame<'_>,
+    p012_to,
+    Yuv420p12,
+    mediaframe::frame::Yuv420p12Frame<'_>,
+    yuv420p12_to,
+    12u32
+  );
+  xcheck!(
+    P016,
+    P016Frame<'_>,
+    p016_to,
+    Yuv420p16,
+    mediaframe::frame::Yuv420p16Frame<'_>,
+    yuv420p16_to,
+    16u32
+  );
 }
