@@ -142,12 +142,13 @@ macro_rules! nv_chroma_siting_tests {
         // fused nearest-neighbor decode — bit-for-bit equal even though the
         // chroma plane is a non-trivial ramp. `BottomLeft` is EXCLUDED: co-sited
         // horizontally but bottom-sited vertically (`v = 1`), so it folds the
-        // even-row vertical blend (covered by its own test below).
+        // even-row vertical blend (covered by its own test below). `TopLeft` is
+        // EXCLUDED for the mirror reason (RFC #238): co-sited horizontally but
+        // top-sited vertically (`v = 0`), so it folds the FORWARD odd-row blend.
         for loc in [
           ChromaLocation::Unspecified,
           ChromaLocation::Unknown(99),
           ChromaLocation::Left,
-          ChromaLocation::TopLeft,
         ] {
           assert_eq!(
             convert_rgb(loc, true),
@@ -236,18 +237,24 @@ macro_rules! nv_chroma_siting_tests {
         miri,
         ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
       )]
-      fn top_routes_like_center_bottom_adds_vertical() {
-        // Top shares Center's horizontal (centered) phase and keeps the vertical
-        // pairing co-sited, so Top == Center. RFC #238 S4-C: Bottom (v=1)
-        // additionally vertically box-blends the even output row's chroma with the
-        // previous chroma row, so on `ramp_planes`' vertically-varying chroma it
-        // differs from Center. (Its exact value is pinned by the resample identity
-        // == direct-decode cross-check in `chroma_siting_nv12_resample`.)
+      fn top_forward_vblend_differs_from_center_and_bottom() {
+        // Top shares Center's horizontal (centered) phase and now consumes its
+        // vertical `v = 0` FORWARD fold (RFC #238): the ODD output row box-blends
+        // its chroma with the NEXT chroma row. On `ramp_planes`' vertically-varying
+        // chroma Top therefore DIFFERS from Center (horizontal-only) AND from
+        // Bottom (the BACKWARD even-row blend). Its exact value is pinned by the
+        // resample identity == direct-decode cross-check in
+        // `chroma_siting_nv12_resample`.
         let center = convert_rgb(ChromaLocation::Center, true);
-        assert_eq!(
+        assert_ne!(
           convert_rgb(ChromaLocation::Top, true),
           center,
-          "Top keeps Center's horizontal phase (vertical co-sited)"
+          "Top's forward vertical box blend must differ from Center on a vertically-varying ramp"
+        );
+        assert_ne!(
+          convert_rgb(ChromaLocation::Top, true),
+          convert_rgb(ChromaLocation::Bottom, true),
+          "Top (forward, odd rows) must differ from Bottom (backward, even rows)"
         );
         assert_ne!(
           convert_rgb(ChromaLocation::Bottom, true),
@@ -619,12 +626,14 @@ nv_chroma_siting_tests!(nv21, Nv21, Nv21Frame, nv21_to, interleave_nv21);
 )]
 fn nv12_direct_path_mid_frame_siting_flip_is_rejected() {
   // The identity (no-resample) semi-planar 4:2:0 `Nv12` decode freezes the effective
-  // phase — BOTH the horizontal centered flag and the vertical `Bottom` flag — on
-  // its first output-bearing row, mirroring the planar `Yuv420p` twin. Flipping
-  // `Bottom` ⇆ co-sited mid-frame must reject the next in-sequence row with
-  // `ChromaSitingChanged`, WITHOUT growing the chroma scratch OR advancing the
-  // stateful `chroma_prev` vertical lookback (its validity tag included). Flipping
-  // back and retrying then matches a clean single-phase decode byte-for-byte.
+  // phase — the horizontal centered flag and the vertical `Bottom` / `Top` flags —
+  // on its first output-bearing row, mirroring the planar `Yuv420p` twin. Flipping
+  // `Bottom` / `Top` ⇆ co-sited / `Center` mid-frame must reject the next
+  // in-sequence row with `ChromaSitingChanged`, WITHOUT growing the chroma scratch
+  // OR advancing the stateful `chroma_prev` vertical lookback (its validity tag
+  // included). For a held `Top` odd row the flip is rejected BEFORE the held row is
+  // touched (RFC #238). Flipping back and retrying then matches a clean
+  // single-phase decode byte-for-byte.
   use super::super::MixedSinkerError;
   let (y, u, v) = ramp_planes();
   let uv = interleave_nv12(&u, &v);
@@ -634,6 +643,9 @@ fn nv12_direct_path_mid_frame_siting_flip_is_rejected() {
     (ChromaLocation::Bottom, ChromaLocation::Left),
     (ChromaLocation::Left, ChromaLocation::Bottom),
     (ChromaLocation::Bottom, ChromaLocation::Center),
+    (ChromaLocation::Top, ChromaLocation::Center),
+    (ChromaLocation::Center, ChromaLocation::Top),
+    (ChromaLocation::TopLeft, ChromaLocation::Left),
   ] {
     // Reference: a clean whole-frame decode at the held siting.
     let mut want = std::vec![0u8; w * h * 3];
@@ -715,4 +727,159 @@ fn nv12_direct_path_mid_frame_siting_flip_is_rejected() {
       "{loc1:?}: retry after a rejected flip must match a clean in-order decode"
     );
   }
+}
+
+#[test]
+fn nv21_begin_frame_drops_held_top_row() {
+  // RFC #238 Top forward delay: an `Nv21` odd row is HELD (`chroma_top_pending`)
+  // to be emitted at the following even row. If a Top frame is interrupted after
+  // a held odd non-last row, `begin_frame` MUST drop that held state (and the
+  // frozen Top phase) so frame N's deferred colour row can never flush into frame
+  // N+1. Regression for the Nv21 `begin_frame` that (unlike Nv12) omitted the Top
+  // resets.
+  let (y, u, v) = ramp_planes();
+  let vu = interleave_nv21(&u, &v);
+  let w = W as usize;
+  let mut rgb = std::vec![0u8; w * H as usize * 3];
+  let mut sink = MixedSinker::<Nv21>::new(w, H as usize)
+    .with_rgb(&mut rgb)
+    .unwrap()
+    .with_chroma_location(ChromaLocation::Top)
+    .with_simd(true);
+  crate::PixelSink::begin_frame(&mut sink, W, H).unwrap();
+  // Row 0 (even, co-sited, emitted) then row 1 (odd, HELD).
+  for r in 0..2 {
+    let cr = r / 2;
+    crate::PixelSink::process(
+      &mut sink,
+      Nv21Row::new(
+        &y[r * w..(r + 1) * w],
+        &vu[cr * w..(cr + 1) * w],
+        r,
+        ColorMatrix::Bt601,
+        false,
+      ),
+    )
+    .unwrap();
+  }
+  assert!(
+    sink.chroma_top_pending.is_some(),
+    "an odd Top row must be held before the next even row"
+  );
+
+  crate::PixelSink::begin_frame(&mut sink, W, H).unwrap();
+  assert!(
+    sink.chroma_top_pending.is_none(),
+    "begin_frame must drop the held Top odd row so it can't flush into the next frame"
+  );
+  assert!(
+    sink.frozen_chroma_top_v.is_none(),
+    "begin_frame must clear the frozen Top phase so the next frame may re-pick siting"
+  );
+}
+
+/// Size-parametric ramp planes (Y + half-width U / V) for the identity `Top`
+/// cross-format test — a two-axis chroma ramp so the FORWARD vertical fold is
+/// observable, and a varying luma so the co-sited even rows are non-trivial too.
+#[cfg(test)]
+fn ramp_planes_hw(w: usize, h: usize) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
+  let cw = w / 2;
+  let ch = h.div_ceil(2);
+  let y: Vec<u8> = (0..w * h).map(|i| (40 + (i * 7) % 180) as u8).collect();
+  let mut u = std::vec![0u8; cw * ch];
+  let mut v = std::vec![0u8; cw * ch];
+  for r in 0..ch {
+    for c in 0..cw {
+      u[r * cw + c] = (16 + c * 20 + r * 17).min(240) as u8;
+      v[r * cw + c] = (240 - c * 18 - r * 11).max(16) as u8;
+    }
+  }
+  (y, u, v)
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn nv_direct_top_matches_yuv420p_top() {
+  // The identity FORWARD one-row-delay `Top` / `TopLeft` decode (RFC #238) must
+  // reproduce the validated planar `Yuv420p` `Top` / `TopLeft` decode of the same
+  // de-interleaved planes byte-for-byte — de-interleaving Nv12 (`U V …`) and Nv21
+  // (`V U …`) both back to the same planar U / V (the strongest catch for a U/V
+  // swap in the delayed path). EVEN heights end on the trailing-odd co-sited
+  // clamp; ODD heights end on the final even-row flush of the held odd row — both
+  // exercised. Bt601 keeps this on the shared matrix-tag path.
+  for (w, h) in [(16usize, 8usize), (16, 6), (16, 5), (8, 3), (8, 7)] {
+    let (y, u, v) = ramp_planes_hw(w, h);
+    let cw = w / 2;
+    let uv12 = interleave_hw(&u, &v, w, h, false);
+    let uv21 = interleave_hw(&u, &v, w, h, true);
+    for loc in [ChromaLocation::Top, ChromaLocation::TopLeft] {
+      // Planar Yuv420p reference (validated Top forward decode).
+      let mut want = std::vec![0u8; w * h * 3];
+      {
+        let src = Yuv420pFrame::new(
+          &y, &u, &v, w as u32, h as u32, w as u32, cw as u32, cw as u32,
+        );
+        let mut sink = MixedSinker::<Yuv420p>::new(w, h)
+          .with_rgb(&mut want)
+          .unwrap()
+          .with_chroma_location(loc);
+        yuv420p_to(&src, false, ColorMatrix::Bt601, &mut sink).unwrap();
+      }
+      for simd in [true, false] {
+        let mut nv12 = std::vec![0u8; w * h * 3];
+        {
+          let src = Nv12Frame::new(&y, &uv12, w as u32, h as u32, w as u32, w as u32);
+          let mut sink = MixedSinker::<Nv12>::new(w, h)
+            .with_rgb(&mut nv12)
+            .unwrap()
+            .with_chroma_location(loc)
+            .with_simd(simd);
+          nv12_to(&src, false, ColorMatrix::Bt601, &mut sink).unwrap();
+        }
+        assert_eq!(
+          nv12, want,
+          "Nv12 {loc:?} identity {w}x{h} simd={simd} must equal Yuv420p {loc:?}"
+        );
+        let mut nv21 = std::vec![0u8; w * h * 3];
+        {
+          let src = Nv21Frame::new(&y, &uv21, w as u32, h as u32, w as u32, w as u32);
+          let mut sink = MixedSinker::<Nv21>::new(w, h)
+            .with_rgb(&mut nv21)
+            .unwrap()
+            .with_chroma_location(loc)
+            .with_simd(simd);
+          nv21_to(&src, false, ColorMatrix::Bt601, &mut sink).unwrap();
+        }
+        assert_eq!(
+          nv21, want,
+          "Nv21 {loc:?} identity {w}x{h} simd={simd} must equal Yuv420p {loc:?}"
+        );
+      }
+    }
+  }
+}
+
+/// Size-parametric interleave: `swap = false` packs Nv12 (`U` at the even byte),
+/// `true` packs Nv21 (`V` at the even byte). `w` bytes per chroma row,
+/// `h.div_ceil(2)` rows.
+#[cfg(test)]
+fn interleave_hw(u: &[u8], v: &[u8], w: usize, h: usize, swap: bool) -> Vec<u8> {
+  let cw = w / 2;
+  let ch = h.div_ceil(2);
+  let mut uv = std::vec![0u8; w * ch];
+  for r in 0..ch {
+    for c in 0..cw {
+      let (even, odd) = if swap {
+        (v[r * cw + c], u[r * cw + c])
+      } else {
+        (u[r * cw + c], v[r * cw + c])
+      };
+      uv[r * w + 2 * c] = even;
+      uv[r * w + 2 * c + 1] = odd;
+    }
+  }
+  uv
 }

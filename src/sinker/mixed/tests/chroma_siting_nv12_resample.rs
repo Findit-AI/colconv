@@ -686,7 +686,9 @@ macro_rules! nv_resample_siting_tests {
       fn cosited_group_is_byte_identical_across_tiers() {
         // Every co-sited / unspecified siting must produce the byte-identical
         // pre-siting resample (phase 0 → the folded plan is never built), on BOTH
-        // tiers. `Unspecified` is the baseline.
+        // tiers. `Unspecified` is the baseline. `TopLeft` is EXCLUDED (RFC #238):
+        // co-sited horizontally but top-sited vertically (`v = 0`), so it folds the
+        // FORWARD odd-row blend and leaves the co-sited byte-identity group.
         let (y, u, v) = ramp(8, 8);
         for native in [true, false] {
           let base = run(
@@ -703,7 +705,6 @@ macro_rules! nv_resample_siting_tests {
           );
           for loc in [
             ChromaLocation::Left,
-            ChromaLocation::TopLeft,
             ChromaLocation::Unknown(7),
           ] {
             let got = run(&y, &u, &v, 8, 8, 4, 4, loc, native, true);
@@ -726,12 +727,13 @@ macro_rules! nv_resample_siting_tests {
       fn centered_native_equals_code_domain_oracle() {
         // Clean 2:1 and fractional ratios (EVEN source height so the vertical
         // luma-domain pairing equals the co-sited chroma box), for the
-        // vertically-co-sited centered sitings (Center / Top). RFC #238 S4-C
-        // Bottom folds the vertical phase and is pinned to its own oracle below.
+        // vertically-co-sited centered siting (Center). RFC #238 S4-C Bottom (and
+        // the Top FORWARD fold) fold the vertical phase and are pinned to their own
+        // oracles / the Yuv420p cross-format cross-check below.
         for (sw, sh, ow, oh) in [(8, 8, 4, 4), (8, 8, 5, 3), (12, 8, 4, 4), (16, 8, 6, 5)] {
           let (y, u, v) = ramp(sw, sh);
           let o = native_oracle(&y, &u, &v, sw, sh, ow, oh, true);
-          for loc in [ChromaLocation::Center, ChromaLocation::Top] {
+          for loc in [ChromaLocation::Center] {
             let n = run(&y, &u, &v, sw, sh, ow, oh, loc, true, true);
             assert_eq!(n.0, o.0, "rgb {loc:?} {sw}x{sh}->{ow}x{oh}");
             assert_eq!(n.1, o.1, "rgba {loc:?} {sw}x{sh}->{ow}x{oh}");
@@ -765,12 +767,13 @@ macro_rules! nv_resample_siting_tests {
         ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
       )]
       fn centered_encoded_output_equals_rgb_reconstruct_then_bin() {
-        // Center / Top only — RFC #238 S4-C Bottom folds the vertical phase and
-        // is pinned to its own reconstruct-then-bin oracle below.
+        // Center only — RFC #238 S4-C Bottom (and the Top FORWARD fold) fold the
+        // vertical phase and are pinned to their own reconstruct-then-bin oracles /
+        // the Yuv420p cross-format cross-check below.
         for (sw, sh, ow, oh) in [(8, 8, 4, 4), (8, 8, 5, 3), (12, 8, 6, 4)] {
           let (y, u, v) = ramp(sw, sh);
           let oracle = encoded_oracle_rgb(&y, &u, &v, sw, sh, ow, oh, true);
-          for loc in [ChromaLocation::Center, ChromaLocation::Top] {
+          for loc in [ChromaLocation::Center] {
             let got = run(&y, &u, &v, sw, sh, ow, oh, loc, false, true);
             assert_eq!(got.0, oracle, "rgb {loc:?} {sw}x{sh}->{ow}x{oh}");
           }
@@ -796,16 +799,18 @@ macro_rules! nv_resample_siting_tests {
         // loop: NV-Bottom == Yuv420p-Bottom is a strong cross-format cross-check.
         // `BottomLeft` (co-sited h + v=1) rides the SAME shared reconstruction, so
         // it joins too — pinning NV BottomLeft against the validated Yuv420p one.
-        // `Top` / `TopLeft` (the FORWARD `v = 0` fold) are EXCLUDED: RFC #238
-        // activated them in the resample tiers for `Yuv420p` ONLY (the NV twins
-        // land in their own PR), so NV keeps the co-sited-V decode while Yuv420p
-        // folds — they legitimately diverge until the NV activation lands.
+        // `Top` (centered h + v=0) / `TopLeft` (co-sited h + v=0) ride the SAME
+        // shared FORWARD one-row delay now activated for NV (RFC #238), so they too
+        // must match the validated Yuv420p Top / TopLeft on BOTH area tiers — the
+        // strongest cross-tier (native == row-stage) + cross-format Top proof.
         for (sw, sh, ow, oh) in [(8, 8, 4, 4), (8, 8, 5, 3), (12, 8, 4, 4), (16, 8, 6, 5)] {
           let (y, u, v) = ramp(sw, sh);
           for loc in [
             ChromaLocation::Center,
             ChromaLocation::Bottom,
             ChromaLocation::BottomLeft,
+            ChromaLocation::Top,
+            ChromaLocation::TopLeft,
           ] {
             for native in [true, false] {
               let nv = run(&y, &u, &v, sw, sh, ow, oh, loc, native, true);
@@ -887,6 +892,47 @@ macro_rules! nv_resample_siting_tests {
           assert_eq!(nv, rgb420, "filter bottom-left {sw}x{sh}->{ow}x{oh}");
           let bottom = filter_rgb(&y, &u, &v, sw, sh, ow, oh, ChromaLocation::Bottom);
           assert_ne!(nv, bottom, "filter bottom-left must differ from bottom (h phase)");
+        }
+      }
+
+      #[test]
+      #[cfg_attr(
+        miri,
+        ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+      )]
+      fn top_filter_equals_top_yuv420p() {
+        // The filter tier's `Top` / `TopLeft` FORWARD one-row-delay reconstruction
+        // is the SAME as the planar twin's, so the Triangle-filtered NV RGB equals
+        // the validated Yuv420p one (RFC #238) and genuinely differs from Center
+        // (horizontal-only) and Bottom (the backward fold) on a two-axis ramp.
+        for (sw, sh, ow, oh) in [(8, 8, 4, 4), (8, 8, 5, 3)] {
+          let (y, u, v) = ramp(sw, sh);
+          let cw = sw / 2;
+          for loc in [ChromaLocation::Top, ChromaLocation::TopLeft] {
+            let mut rgb420 = vec![0u8; ow * oh * 3];
+            {
+              let mut sink = MixedSinker::<Yuv420p, FilteredResampler<Triangle>>::with_resampler(
+                sw,
+                sh,
+                FilteredResampler::new(ow, oh, Triangle),
+              )
+              .unwrap()
+              .with_chroma_location(loc)
+              .with_rgb(&mut rgb420)
+              .unwrap();
+              let f = Yuv420pFrame::new(
+                &y, &u, &v, sw as u32, sh as u32, sw as u32, cw as u32, cw as u32,
+              );
+              yuv420p_to(&f, FR, M, &mut sink).unwrap();
+            }
+            let nv = filter_rgb(&y, &u, &v, sw, sh, ow, oh, loc);
+            assert_eq!(nv, rgb420, "filter {loc:?} {sw}x{sh}->{ow}x{oh}");
+          }
+          let top = filter_rgb(&y, &u, &v, sw, sh, ow, oh, ChromaLocation::Top);
+          let center = filter_rgb(&y, &u, &v, sw, sh, ow, oh, ChromaLocation::Center);
+          let bottom = filter_rgb(&y, &u, &v, sw, sh, ow, oh, ChromaLocation::Bottom);
+          assert_ne!(top, center, "filter Top (forward v) must differ from Center");
+          assert_ne!(top, bottom, "filter Top (forward) must differ from Bottom (backward)");
         }
       }
 
@@ -1477,7 +1523,11 @@ macro_rules! nv_resample_siting_tests {
         // Center⇄Bottom (same horizontal center, differing v=1 fold — caught only
         // by the vertical-phase freeze). BottomLeft adds BottomLeft⇄Left (vertical
         // fold flip on a co-sited h) and BottomLeft⇄Bottom (horizontal flip on a
-        // shared v=1). Each must reject the in-sequence row 1.
+        // shared v=1). The RFC #238 Top fold adds Center⇄Top (shared h center,
+        // differing v=0 FORWARD fold — caught only by the Top-phase freeze),
+        // TopLeft⇄Left (v=0 fold flip on a co-sited h), and Top⇄Bottom (opposite
+        // vertical reaches on a shared h center). Each must reject the in-sequence
+        // row 1.
         for (loc1, loc2) in [
           (ChromaLocation::Center, ChromaLocation::Left),
           (ChromaLocation::Left, ChromaLocation::Center),
@@ -1487,6 +1537,12 @@ macro_rules! nv_resample_siting_tests {
           (ChromaLocation::BottomLeft, ChromaLocation::Left),
           (ChromaLocation::BottomLeft, ChromaLocation::Bottom),
           (ChromaLocation::Bottom, ChromaLocation::BottomLeft),
+          (ChromaLocation::Center, ChromaLocation::Top),
+          (ChromaLocation::Top, ChromaLocation::Center),
+          (ChromaLocation::TopLeft, ChromaLocation::Left),
+          (ChromaLocation::Left, ChromaLocation::TopLeft),
+          (ChromaLocation::Top, ChromaLocation::Bottom),
+          (ChromaLocation::Bottom, ChromaLocation::Top),
         ] {
           // Native fast tier.
           let mut rgb = vec![0u8; 4 * 4 * 3];
