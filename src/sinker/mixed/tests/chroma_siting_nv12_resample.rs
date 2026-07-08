@@ -796,11 +796,14 @@ macro_rules! nv_resample_siting_tests {
         // loop: NV-Bottom == Yuv420p-Bottom is a strong cross-format cross-check.
         // `BottomLeft` (co-sited h + v=1) rides the SAME shared reconstruction, so
         // it joins too — pinning NV BottomLeft against the validated Yuv420p one.
+        // `Top` / `TopLeft` (the FORWARD `v = 0` fold) are EXCLUDED: RFC #238
+        // activated them in the resample tiers for `Yuv420p` ONLY (the NV twins
+        // land in their own PR), so NV keeps the co-sited-V decode while Yuv420p
+        // folds — they legitimately diverge until the NV activation lands.
         for (sw, sh, ow, oh) in [(8, 8, 4, 4), (8, 8, 5, 3), (12, 8, 4, 4), (16, 8, 6, 5)] {
           let (y, u, v) = ramp(sw, sh);
           for loc in [
             ChromaLocation::Center,
-            ChromaLocation::Top,
             ChromaLocation::Bottom,
             ChromaLocation::BottomLeft,
           ] {

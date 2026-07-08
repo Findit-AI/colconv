@@ -320,6 +320,7 @@ fn p0xx_process_native<const BITS: u32, const BE: bool>(
         plan.out_h(),
         chroma_h_phase,
         chroma_v_phase,
+        false,
       )
     },
     use_simd,

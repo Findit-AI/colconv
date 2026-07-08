@@ -118,6 +118,13 @@ pub(super) struct HsvDirectPlanarYuv {
   /// of-use siting invalidation compares this too to rebuild the join on a
   /// vertical-phase change. `false` for every horizontal-only siting.
   chroma_bottom: bool,
+  /// RFC #238 Top: whether the cached chroma plan folded the `Top` vertical
+  /// phase (`v = 0`, the FORWARD triangle) — the [`NativeYuv420`](super::planar_8bit)
+  /// `chroma_top` twin. `Center` and `Top` share `chroma_centered = true` and
+  /// both keep `chroma_bottom = false`, so the point-of-use siting invalidation
+  /// compares this too to rebuild the join on a Top ⇄ Center / Top ⇄ Bottom
+  /// vertical-phase change. `false` for every non-Top siting.
+  chroma_top: bool,
 }
 
 #[cfg(feature = "yuv-planar")]
@@ -153,6 +160,7 @@ impl HsvDirectPlanarYuv {
     // 4:2:2 readers) or whose reader checks `chroma_bottom` alone (4:4:0).
     let chroma_centered = chroma_plan.has_chroma_h_phase();
     let chroma_bottom = chroma_plan.has_chroma_v_phase();
+    let chroma_top = chroma_plan.has_chroma_v_top();
     Ok(Self {
       y: AreaStream::new(plan.h(), plan.v(), w, h, 1)?,
       y_stage: try_zeroed(stage_len).map_err(alloc)?,
@@ -177,6 +185,7 @@ impl HsvDirectPlanarYuv {
       next_emit: 0,
       chroma_centered,
       chroma_bottom,
+      chroma_top,
     })
   }
 
@@ -203,6 +212,16 @@ impl HsvDirectPlanarYuv {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(super) const fn chroma_bottom(&self) -> bool {
     self.chroma_bottom
+  }
+
+  /// Whether the cached chroma plan folded the `Top` vertical phase — see
+  /// [`Self::chroma_top`](Self#structfield.chroma_top). Read by the `Yuv420p`
+  /// HSV-only point-of-use siting invalidation, alongside
+  /// [`Self::chroma_centered`] / [`Self::chroma_bottom`], to rebuild the join on
+  /// a Top vertical-phase change.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub(super) const fn chroma_top(&self) -> bool {
+    self.chroma_top
   }
 
   /// Next source row this join expects (0 at a fresh frame). Read by the sink's
@@ -278,6 +297,7 @@ fn hsv_direct_feed_emit(
     // Cache keys read only at build / begin_frame; the feed loop ignores them.
     chroma_centered: _,
     chroma_bottom: _,
+    chroma_top: _,
   } = join;
   let cv = *chroma_vsub;
   y.feed_row(idx, y_row, use_simd, |oy, out_row| {

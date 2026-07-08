@@ -385,11 +385,14 @@ fn centered_chroma_matches_yuv420p_centered_across_tiers() {
     for native in [true, false] {
       // α is orthogonal to chroma siting on every axis, so the Yuva420p decode
       // must match the no-alpha Yuv420p decode for the horizontal centered group
-      // (Center / Top), the vertical Bottom fold (RFC #238 S4-D) AND the co-sited-H
-      // + v=1 BottomLeft fold — all route through the resample identically (α-drop).
+      // (Center), the vertical Bottom fold (RFC #238 S4-D) AND the co-sited-H + v=1
+      // BottomLeft fold — all route through the resample identically (α-drop).
+      // `Top` / `TopLeft` (the FORWARD `v = 0` fold) are EXCLUDED: RFC #238
+      // activated them in the resample tiers for `Yuv420p` ONLY, so the no-alpha
+      // twin now folds vertically while `Yuva420p` keeps the co-sited-V decode —
+      // they legitimately diverge until the `Yuva420p` Top activation lands.
       for loc in [
         ChromaLocation::Center,
-        ChromaLocation::Top,
         ChromaLocation::Bottom,
         ChromaLocation::BottomLeft,
       ] {
