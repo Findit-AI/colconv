@@ -6,7 +6,7 @@ use super::{
   RowIndexOutOfRange, RowShapeMismatch, RowSlice, WidthAlignment, check_dimensions_match,
   chroma_410_center_sited_h, chroma_411_center_sited_h, chroma_420_bottom_sited_v,
   chroma_420_center_sited_h, chroma_420_top_sited_v, chroma_422_center_sited_h,
-  chroma_440_bottom_sited_v, frozen_outputs_check,
+  chroma_440_bottom_sited_v, chroma_440_top_sited_v, frozen_outputs_check,
   planar_resample::{planar_dual_filter_resample, planar_dual_resample},
   reconstruct_chroma, rgb_row_buf_or_scratch, rgba_plane_row_slice,
 };
@@ -624,6 +624,99 @@ fn yuv444_identity_color_row(
   yuv_444_to_rgb_row_primaries(
     y, u_full, v_full, rgb_row, w, matrix, primaries, full_range, use_simd,
   );
+  if let Some(hsv) = hsv.as_mut() {
+    let (hh, ss, vv) = hsv.hsv();
+    rgb_to_hsv_row(
+      rgb_row,
+      &mut hh[one_plane_start..one_plane_end],
+      &mut ss[one_plane_start..one_plane_end],
+      &mut vv[one_plane_start..one_plane_end],
+      w,
+      use_simd,
+    );
+  }
+  if let Some(buf) = rgba.as_deref_mut() {
+    let rgba_row = rgba_plane_row_slice(buf, one_plane_start, one_plane_end, w, h)?;
+    expand_rgb_to_rgba_row(rgb_row, rgba_row, w);
+  }
+  Ok(())
+}
+
+/// The `Yuv440p` identity 4:4:4 colour decode from an ALREADY-reconstructed
+/// full-width chroma pair `(u_full, v_full)`, writing the requested colour
+/// outputs (`rgb` / `rgba` / `hsv`) for output row `[one_plane_start,
+/// one_plane_end)`. The 4:4:0 sibling of [`yuv444_identity_color_row`], factored
+/// out so the RFC #238 **Top** (`v = 0`) forward one-row delay can invoke it for
+/// BOTH the deferred odd row (buffered Y + forward-blended chroma) and the
+/// current even row (co-sited chroma) with the SAME kernel sequence the inline
+/// co-sited path runs — so a delayed decode is bit-identical to an in-order one.
+/// 4:4:0 carries NO horizontal chroma phase, so — unlike the `Yuv420p` sibling —
+/// this uses the plain (non-primaries) `yuv_444_to_*` kernels the 4:4:0 co-sited
+/// decode already uses, keeping Top byte-identical to co-sited. `rgb_scratch`
+/// must already be grown by the caller's atomicity preflight, so the only
+/// fallible steps are the checked `× 3` / `× 4` output-range computations.
+#[cfg(feature = "yuv-planar")]
+#[allow(clippy::too_many_arguments)]
+fn yuv440_identity_color_row(
+  rgb: &mut Option<&mut [u8]>,
+  rgba: &mut Option<&mut [u8]>,
+  hsv: &mut Option<HsvFrameMut<'_>>,
+  rgb_scratch: &mut std::vec::Vec<u8>,
+  y: &[u8],
+  u_full: &[u8],
+  v_full: &[u8],
+  one_plane_start: usize,
+  one_plane_end: usize,
+  w: usize,
+  h: usize,
+  matrix: crate::ColorMatrix,
+  full_range: bool,
+  use_simd: bool,
+) -> Result<(), MixedSinkerError> {
+  let want_rgb = rgb.is_some();
+  let want_rgba = rgba.is_some();
+  let want_hsv = hsv.is_some();
+  let want_hsv_direct = want_hsv && !want_rgb && !want_rgba;
+  let need_rgb_kernel = want_rgb || (want_hsv && want_rgba);
+
+  if want_hsv_direct {
+    let hsv = hsv.as_mut().expect("want_hsv_direct implies hsv attached");
+    let (hh, ss, vv) = hsv.hsv();
+    yuv_444_to_hsv_row(
+      y,
+      u_full,
+      v_full,
+      &mut hh[one_plane_start..one_plane_end],
+      &mut ss[one_plane_start..one_plane_end],
+      &mut vv[one_plane_start..one_plane_end],
+      w,
+      matrix,
+      full_range,
+      use_simd,
+    );
+    return Ok(());
+  }
+
+  if want_rgba && !need_rgb_kernel {
+    let rgba_buf = rgba.as_deref_mut().unwrap();
+    let rgba_row = rgba_plane_row_slice(rgba_buf, one_plane_start, one_plane_end, w, h)?;
+    yuv_444_to_rgba_row(y, u_full, v_full, rgba_row, w, matrix, full_range, use_simd);
+    return Ok(());
+  }
+
+  if !need_rgb_kernel {
+    return Ok(());
+  }
+
+  let rgb_row = rgb_row_buf_or_scratch(
+    rgb.as_deref_mut(),
+    rgb_scratch,
+    one_plane_start,
+    one_plane_end,
+    w,
+    h,
+  )?;
+  yuv_444_to_rgb_row(y, u_full, v_full, rgb_row, w, matrix, full_range, use_simd);
   if let Some(hsv) = hsv.as_mut() {
     let (hh, ss, vv) = hsv.hsv();
     rgb_to_hsv_row(
@@ -4670,6 +4763,15 @@ pub(super) struct NativePlanarYuv {
     allow(dead_code)
   )]
   chroma_bottom: bool,
+  /// RFC #238 Top: whether the cached chroma plan folded the `Top` vertical
+  /// chroma phase (`v = 0`, the FORWARD triangle). A vertical-co-sited plan, a
+  /// `Bottom` one, and a `Top` one leave the horizontal `chroma_centered` flag
+  /// identical, and `Top` shares `chroma_bottom = false` with the co-sited
+  /// plan, so the vertical Top axis is recorded separately here — letting a
+  /// reused sink tell them apart and rebuild the join when the vertical siting
+  /// moves to / from Top. Only the vertically-subsampled 4:4:0 layout folds it;
+  /// `false` for a luma-only join and every non-Top layout.
+  chroma_top: bool,
 }
 
 /// Chroma-grid streams and staging of [`NativePlanarYuv`].
@@ -4761,6 +4863,11 @@ impl NativePlanarYuv {
     // folds the `v = 1` phase (the 4:4:0 native tier). `Center` and `Bottom`
     // share `chroma_centered`, so the vertical axis is recorded separately.
     let mut chroma_bottom = false;
+    // RFC #238 Top companion — set when the chroma plan folds the `v = 0`
+    // FORWARD phase (the 4:4:0 native tier). `Center` / `Bottom` / `Top` all
+    // leave `chroma_centered` identical and `Top` shares `chroma_bottom = false`
+    // with the co-sited plan, so the Top axis is recorded separately.
+    let mut chroma_top = false;
     let chroma = if need_color {
       #[cfg(all(test, feature = "std", feature = "yuv-planar"))]
       if FORCE_PLANAR_NATIVE_CHROMA_FAILURE.with(|f| f.take()) {
@@ -4774,6 +4881,7 @@ impl NativePlanarYuv {
       let chroma_plan = build_chroma_plan()?;
       chroma_centered = chroma_plan.has_chroma_phase();
       chroma_bottom = chroma_plan.has_chroma_v_phase();
+      chroma_top = chroma_plan.has_chroma_v_top();
       Some(NativePlanarChroma {
         u: AreaStream::new(
           chroma_plan.h(),
@@ -4804,6 +4912,7 @@ impl NativePlanarYuv {
       next_emit: 0,
       chroma_centered,
       chroma_bottom,
+      chroma_top,
     })
   }
 
@@ -5084,6 +5193,7 @@ pub(super) fn yuv_planar_process_native(
     // Cache keys read only at build / begin_frame; the feed loop ignores them.
     chroma_centered: _,
     chroma_bottom: _,
+    chroma_top: _,
   } = &mut **join;
   y.feed_row(idx, y_row, use_simd, |oy, out_row| {
     let slot = oy & 1;
@@ -7554,11 +7664,18 @@ impl<R> PixelSink for MixedSinker<'_, Yuv440p, R> {
     // `begin_frame` but before row 0.)
     self.frozen_chroma_centered = None;
     self.frozen_chroma_bottom_v = None;
+    // RFC #238 Top companion: clear the frozen Top vertical phase so the next
+    // frame may pick Top and a mid-frame flip to / from Top stays rejected.
+    self.frozen_chroma_top_v = None;
     // New frame: invalidate the bottom-sited vertical-phase chroma lookback so
     // frame N+1's first even row can never box-blend frame N's last chroma row.
     // The buffer bytes are left as-is (re-overwritten before any trusted read);
     // only the validity tag is cleared.
     self.chroma_prev_row = None;
+    // New frame: drop any held Top (`v = 0`) forward-delay odd row so frame N's
+    // last deferred colour row never emits into frame N+1. Its Y buffer bytes
+    // are left as-is (re-overwritten before any trusted read).
+    self.chroma_top_pending = None;
     // New frame: drop the RFC #238 linear-light accumulator (if any).
     #[cfg(feature = "rgb")]
     {
@@ -7642,6 +7759,11 @@ impl<R> PixelSink for MixedSinker<'_, Yuv440p, R> {
       // the shared clear in `begin_frame` but stays `None` here — 4:4:0 has no
       // horizontal phase.
       frozen_chroma_bottom_v,
+      // RFC #238 Top: the `Top` (`v = 0`) vertical phase frozen alongside it, and
+      // the forward one-row delay line (identity decode + resample tiers).
+      frozen_chroma_top_v,
+      chroma_top_pending,
+      chroma_top_y,
       ..
     } = self;
 
@@ -7673,6 +7795,14 @@ impl<R> PixelSink for MixedSinker<'_, Yuv440p, R> {
       // invariant).
       let bottom_v = chroma_440_bottom_sited_v(chroma_location);
       let chroma_v_phase = if bottom_v { 1.0 } else { 0.0 };
+      // RFC #238 Top (`v = 0`, FORWARD fold) — `Top` / `TopLeft`. 4:4:0 has no
+      // horizontal phase, so both share the identical full-width vertical box
+      // average. Disjoint from `bottom_v` (a chroma sample cannot be both top-
+      // and bottom-sited). The binning tiers (native / HSV-only) fold it into
+      // `area_chroma_440`'s vertical weights via `top_v`; the RGB-domain
+      // reconstruction tiers reconstruct each row's chroma through a FORWARD
+      // one-row delay (mirror of `Bottom`'s backward `chroma_prev` lookback).
+      let top_v = chroma_440_top_sited_v(chroma_location);
       let want_color = rgb.is_some() || rgba.is_some() || hsv.is_some();
       let convert_rgb = |scratch: &mut [u8]| {
         yuv_444_to_rgb_row(
@@ -7728,17 +7858,20 @@ impl<R> PixelSink for MixedSinker<'_, Yuv440p, R> {
       }
       // RFC #238 S8b: freeze the effective 4:4:0 vertical chroma siting on the
       // first output-bearing row, mirroring the averaging-domain freeze above.
-      // 4:4:0 folds only the vertical axis, so `frozen_chroma_bottom_v` alone is
-      // the sentinel (co-sited freezes `Some(false)`, `Bottom` freezes
-      // `Some(true)`). This CHECK is at the always-compiled choke point; the
+      // 4:4:0 folds only the vertical axis, so `frozen_chroma_bottom_v` is the
+      // set/unset sentinel (it freezes on the same accepted row as
+      // `frozen_chroma_top_v`); the Top flag is compared alongside because
+      // co-sited and `Top` share `frozen_chroma_bottom_v = Some(false)` and only
+      // `frozen_chroma_top_v` (`Some(false)` co-sited vs `Some(true)` Top) tells
+      // them apart. This CHECK is at the always-compiled choke point; the
       // matching SET rides each tier's accept-time freeze below (never before
       // dispatch, so a rejected row leaves it unset for a corrected retry). A
       // later row observing a different vertical phase would bin a mixture of
-      // co-sited and bottom-folded chroma, so it is rejected here before any
+      // co-sited and bottom-/top-folded chroma, so it is rejected here before any
       // reconstruction.
       if need_output
         && let Some(frozen) = *frozen_chroma_bottom_v
-        && frozen != bottom_v
+        && (frozen != bottom_v || *frozen_chroma_top_v != Some(top_v))
       {
         return Err(MixedSinkerError::ChromaSitingChanged(
           ChromaSitingChanged::new(idx),
@@ -7759,6 +7892,246 @@ impl<R> PixelSink for MixedSinker<'_, Yuv440p, R> {
             // a rejected row leaves `frozen_domain` unset for a corrected retry.
             // See the Yuv420p impl.
             //
+            // RFC #238 Top (`v = 0`) FORWARD one-row delay for the linear-light
+            // reconstruction tier — the 4:4:0 mirror of the Yuv420p Top linear
+            // branch, only full-width chroma (no horizontal fold, so no
+            // `center_sited`). The whole odd row is HELD and the following even
+            // row decodes TWO source rows into the linear frame buffer (held
+            // forward-blend + current co-sited); the trailing odd row clamps to a
+            // co-sited decode. The one fallible final-row allocation is the bin
+            // tail, which the ODD-height two-row FINAL flush pre-reserves BEFORE
+            // either feed (so the final feed does no allocation) — making the
+            // flush retry-atomic (#180).
+            if top_v && want_color {
+              let is_last = idx + 1 == h;
+              let want_luma_tail = luma.is_some() || luma_u16.is_some();
+              // The frame cursor lags the source by the buffered (unfed) held odd
+              // row, so the next expected SOURCE row is `next_y + pending`. Reject
+              // an out-of-sequence walker row BEFORE any reserve (#180); the
+              // preflight below runs against the FIRST feed's frame position
+              // (== `cursor`) so it does not spuriously trip the frame's own
+              // in-order sequence check.
+              let cursor = linear_light_frame.as_ref().map_or(0, |b| b.next_y());
+              let expected_source = cursor + usize::from(chroma_top_pending.is_some());
+              if idx != expected_source {
+                return Err(MixedSinkerError::Resample(ResampleError::OutOfSequenceRow(
+                  crate::resample::OutOfSequenceRow::new(expected_source, idx),
+                )));
+              }
+              linear_light::linear_light_preflight(
+                linear_light_frame,
+                resample_outputs,
+                luma,
+                luma_u16,
+                rgb,
+                rgba,
+                hsv,
+                tf,
+                *linear_mode,
+                plan,
+                cursor,
+              )?;
+              // Reserve every buffer BOTH feeds may touch, up front. The final
+              // even flush's SECOND feed IS the final row, so pre-reserve its bin
+              // tail here too — then both feeds are infallible (#180).
+              reserve_420_chroma_full(chroma_full, w, h)?;
+              reserve_440_chroma_prev(chroma_prev, w, h)?;
+              if chroma_top_y.len() < w {
+                chroma_top_y
+                  .try_reserve_exact(w - chroma_top_y.len())
+                  .map_err(|_| {
+                    MixedSinkerError::Resample(ResampleError::AllocationFailed(PlanGeometry::new(
+                      w, h, w, h,
+                    )))
+                  })?;
+                chroma_top_y.resize(w, 0);
+              }
+              if idx & 1 == 0 && is_last && chroma_top_pending.is_some() {
+                linear_light::linear_light_reserve_final_tail(
+                  linear_light_frame,
+                  plan,
+                  w,
+                  h,
+                  want_luma_tail,
+                )?;
+              }
+              if idx & 1 == 0 {
+                if let Some((p_idx, p_matrix, p_full_range)) = chroma_top_pending.take() {
+                  let (u_full, v_full) = upsample_440_chroma_sited(
+                    chroma_full,
+                    chroma_prev,
+                    chroma_prev_row,
+                    row.u(),
+                    row.v(),
+                    idx,
+                    true,
+                    false,
+                    w,
+                  );
+                  linear_light::linear_light_resample(
+                    linear_light_frame,
+                    resample_outputs,
+                    rgb,
+                    rgba,
+                    luma,
+                    luma_u16,
+                    hsv,
+                    rgb_scratch,
+                    linear_scene_scratch,
+                    tf,
+                    *linear_mode,
+                    plan,
+                    &chroma_top_y[..w],
+                    p_idx,
+                    w,
+                    h,
+                    use_simd,
+                    |_idx, dst| {
+                      yuv_444_to_rgb_row(
+                        &chroma_top_y[..w],
+                        u_full,
+                        v_full,
+                        dst,
+                        w,
+                        p_matrix,
+                        p_full_range,
+                        use_simd,
+                      );
+                    },
+                    |_idx, dst| {
+                      crate::row::scalar::yuv_444_to_rgb_f32_unclamped_row(
+                        &chroma_top_y[..w],
+                        u_full,
+                        v_full,
+                        dst,
+                        w,
+                        p_matrix,
+                        p_full_range,
+                      );
+                    },
+                  )?;
+                }
+                let (u_full, v_full) = upsample_440_chroma_sited(
+                  chroma_full,
+                  chroma_prev,
+                  chroma_prev_row,
+                  row.u(),
+                  row.v(),
+                  idx,
+                  false,
+                  false,
+                  w,
+                );
+                linear_light::linear_light_resample(
+                  linear_light_frame,
+                  resample_outputs,
+                  rgb,
+                  rgba,
+                  luma,
+                  luma_u16,
+                  hsv,
+                  rgb_scratch,
+                  linear_scene_scratch,
+                  tf,
+                  *linear_mode,
+                  plan,
+                  row.y(),
+                  idx,
+                  w,
+                  h,
+                  use_simd,
+                  |_idx, dst| {
+                    yuv_444_to_rgb_row(
+                      row.y(),
+                      u_full,
+                      v_full,
+                      dst,
+                      w,
+                      matrix,
+                      full_range,
+                      use_simd,
+                    );
+                  },
+                  |_idx, dst| {
+                    crate::row::scalar::yuv_444_to_rgb_f32_unclamped_row(
+                      row.y(),
+                      u_full,
+                      v_full,
+                      dst,
+                      w,
+                      matrix,
+                      full_range,
+                    );
+                  },
+                )?;
+              } else if !is_last {
+                chroma_top_y[..w].copy_from_slice(&row.y()[..w]);
+                *chroma_top_pending = Some((idx, matrix, full_range));
+              } else {
+                let (u_full, v_full) = upsample_440_chroma_sited(
+                  chroma_full,
+                  chroma_prev,
+                  chroma_prev_row,
+                  row.u(),
+                  row.v(),
+                  idx,
+                  false,
+                  false,
+                  w,
+                );
+                linear_light::linear_light_resample(
+                  linear_light_frame,
+                  resample_outputs,
+                  rgb,
+                  rgba,
+                  luma,
+                  luma_u16,
+                  hsv,
+                  rgb_scratch,
+                  linear_scene_scratch,
+                  tf,
+                  *linear_mode,
+                  plan,
+                  row.y(),
+                  idx,
+                  w,
+                  h,
+                  use_simd,
+                  |_idx, dst| {
+                    yuv_444_to_rgb_row(
+                      row.y(),
+                      u_full,
+                      v_full,
+                      dst,
+                      w,
+                      matrix,
+                      full_range,
+                      use_simd,
+                    );
+                  },
+                  |_idx, dst| {
+                    crate::row::scalar::yuv_444_to_rgb_f32_unclamped_row(
+                      row.y(),
+                      u_full,
+                      v_full,
+                      dst,
+                      w,
+                      matrix,
+                      full_range,
+                    );
+                  },
+                )?;
+              }
+              stage_440_chroma_prev(chroma_prev, chroma_prev_row, row.u(), row.v(), idx, w);
+              if need_output && frozen_domain.is_none() {
+                *frozen_domain = Some(AveragingDomain::Linear);
+              }
+              if need_output && frozen_chroma_bottom_v.is_none() {
+                *frozen_chroma_bottom_v = Some(bottom_v);
+                *frozen_chroma_top_v = Some(top_v);
+              }
+              return Ok(());
+            }
             // RFC #238 S8b — bottom-sited Linear must fold the correct VERTICAL
             // chroma phase, not silently co-site. For `Bottom` reconstruct
             // full-width chroma (CODE domain) and feed the 4:4:4 decode (both the
@@ -7876,6 +8249,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuv440p, R> {
             // falsely rejected as a mid-frame change).
             if r.is_ok() && need_output && frozen_chroma_bottom_v.is_none() {
               *frozen_chroma_bottom_v = Some(bottom_v);
+              *frozen_chroma_top_v = Some(top_v);
             }
             return r;
           }
@@ -7978,8 +8352,190 @@ impl<R> PixelSink for MixedSinker<'_, Yuv440p, R> {
           // for a corrected retry).
           if r.is_ok() && need_output && frozen_chroma_bottom_v.is_none() {
             *frozen_chroma_bottom_v = Some(bottom_v);
+            *frozen_chroma_top_v = Some(top_v);
           }
           return r;
+        }
+        if top_v && want_color {
+          // RFC #238 Top (`v = 0`) FORWARD one-row delay for the single-kernel
+          // filter tier — the 4:4:0 mirror of the Yuv420p Top filter branch, only
+          // full-width chroma. The whole odd row is HELD and the following even
+          // row filter-feeds TWO source rows (held forward-blend + current
+          // co-sited); the trailing odd row clamps to a co-sited decode.
+          // `FilterStream::feed_row` allocates nothing, so once row 0 has built
+          // the streams + scratch the two feeds are infallible; reserving every
+          // buffer up front makes the two-row flush retry-atomic (#180).
+          let is_last = idx + 1 == h;
+          let need_luma = luma.is_some() || luma_u16.is_some();
+          let cursor = if need_luma {
+            luma_filter_stream.as_ref().map_or(0, |s| s.next_y())
+          } else {
+            rgb_filter_stream.as_ref().map_or(0, |s| s.next_y())
+          };
+          let expected_source = cursor + usize::from(chroma_top_pending.is_some());
+          if let core::ops::ControlFlow::Break(()) = super::resample_preflight_check_only(
+            resample_outputs,
+            luma,
+            luma_u16,
+            rgb,
+            rgba,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            hsv,
+            &None,
+            Some(expected_source),
+            idx,
+          )? {
+            return Ok(());
+          }
+          reserve_420_chroma_full(chroma_full, w, h)?;
+          reserve_440_chroma_prev(chroma_prev, w, h)?;
+          if chroma_top_y.len() < w {
+            chroma_top_y
+              .try_reserve_exact(w - chroma_top_y.len())
+              .map_err(|_| {
+                MixedSinkerError::Resample(ResampleError::AllocationFailed(PlanGeometry::new(
+                  w, h, w, h,
+                )))
+              })?;
+            chroma_top_y.resize(w, 0);
+          }
+          if idx & 1 == 0 {
+            if let Some((p_idx, p_matrix, p_full_range)) = chroma_top_pending.take() {
+              let (u_full, v_full) = upsample_440_chroma_sited(
+                chroma_full,
+                chroma_prev,
+                chroma_prev_row,
+                row.u(),
+                row.v(),
+                idx,
+                true,
+                false,
+                w,
+              );
+              planar_dual_filter_resample(
+                luma_filter_stream,
+                rgb_filter_stream,
+                resample_outputs,
+                rgb,
+                rgba,
+                luma,
+                luma_u16,
+                hsv,
+                rgb_scratch,
+                &chroma_top_y[..w],
+                w,
+                plan,
+                p_idx,
+                use_simd,
+                |scratch| {
+                  yuv_444_to_rgb_row(
+                    &chroma_top_y[..w],
+                    u_full,
+                    v_full,
+                    scratch,
+                    w,
+                    p_matrix,
+                    p_full_range,
+                    use_simd,
+                  );
+                },
+              )?;
+            }
+            let (u_full, v_full) = upsample_440_chroma_sited(
+              chroma_full,
+              chroma_prev,
+              chroma_prev_row,
+              row.u(),
+              row.v(),
+              idx,
+              false,
+              false,
+              w,
+            );
+            planar_dual_filter_resample(
+              luma_filter_stream,
+              rgb_filter_stream,
+              resample_outputs,
+              rgb,
+              rgba,
+              luma,
+              luma_u16,
+              hsv,
+              rgb_scratch,
+              row.y(),
+              w,
+              plan,
+              idx,
+              use_simd,
+              |scratch| {
+                yuv_444_to_rgb_row(
+                  row.y(),
+                  u_full,
+                  v_full,
+                  scratch,
+                  w,
+                  matrix,
+                  full_range,
+                  use_simd,
+                );
+              },
+            )?;
+          } else if !is_last {
+            chroma_top_y[..w].copy_from_slice(&row.y()[..w]);
+            *chroma_top_pending = Some((idx, matrix, full_range));
+          } else {
+            let (u_full, v_full) = upsample_440_chroma_sited(
+              chroma_full,
+              chroma_prev,
+              chroma_prev_row,
+              row.u(),
+              row.v(),
+              idx,
+              false,
+              false,
+              w,
+            );
+            planar_dual_filter_resample(
+              luma_filter_stream,
+              rgb_filter_stream,
+              resample_outputs,
+              rgb,
+              rgba,
+              luma,
+              luma_u16,
+              hsv,
+              rgb_scratch,
+              row.y(),
+              w,
+              plan,
+              idx,
+              use_simd,
+              |scratch| {
+                yuv_444_to_rgb_row(
+                  row.y(),
+                  u_full,
+                  v_full,
+                  scratch,
+                  w,
+                  matrix,
+                  full_range,
+                  use_simd,
+                );
+              },
+            )?;
+          }
+          stage_440_chroma_prev(chroma_prev, chroma_prev_row, row.u(), row.v(), idx, w);
+          if need_output && frozen_chroma_bottom_v.is_none() {
+            *frozen_chroma_bottom_v = Some(bottom_v);
+            *frozen_chroma_top_v = Some(top_v);
+          }
+          return Ok(());
         }
         let r = planar_dual_filter_resample(
           luma_filter_stream,
@@ -8000,6 +8556,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuv440p, R> {
         );
         if r.is_ok() && need_output && frozen_chroma_bottom_v.is_none() {
           *frozen_chroma_bottom_v = Some(bottom_v);
+          *frozen_chroma_top_v = Some(top_v);
         }
         return r;
       }
@@ -8049,7 +8606,9 @@ impl<R> PixelSink for MixedSinker<'_, Yuv440p, R> {
           // (siting-independent), a no-output sink built no join.
           let stale_native = idx == 0
             && native_planar.as_ref().is_some_and(|join| {
-              join.chroma.is_some() && join.chroma_bottom != bottom_v && join.y.next_y() == 0
+              join.chroma.is_some()
+                && (join.chroma_bottom != bottom_v || join.chroma_top != top_v)
+                && join.y.next_y() == 0
             });
           let prev_native = if stale_native {
             native_planar.take()
@@ -8075,7 +8634,17 @@ impl<R> PixelSink for MixedSinker<'_, Yuv440p, R> {
             w,
             h,
             2,
-            || ResamplePlan::area_chroma_440(w, h, plan.out_w(), plan.out_h(), 0.0, chroma_v_phase),
+            || {
+              ResamplePlan::area_chroma_440(
+                w,
+                h,
+                plan.out_w(),
+                plan.out_h(),
+                0.0,
+                chroma_v_phase,
+                top_v,
+              )
+            },
             use_simd,
           );
           // Restore the taken stale-phase join if the delegate's rebuild was
@@ -8098,6 +8667,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuv440p, R> {
           // RFC #238 S8b: freeze the siting on the same accepted output row.
           if frozen_chroma_bottom_v.is_none() && need_output {
             *frozen_chroma_bottom_v = Some(bottom_v);
+            *frozen_chroma_top_v = Some(top_v);
           }
           return Ok(());
         }
@@ -8117,9 +8687,10 @@ impl<R> PixelSink for MixedSinker<'_, Yuv440p, R> {
             // let the delegate build the replacement, restore the intact join on a
             // rejected rebuild so the REJECTED row mutates nothing).
             let stale_hsv = idx == 0
-              && hsv_planar
-                .as_ref()
-                .is_some_and(|join| join.chroma_bottom() != bottom_v && join.next_y() == 0);
+              && hsv_planar.as_ref().is_some_and(|join| {
+                (join.chroma_bottom() != bottom_v || join.chroma_top() != top_v)
+                  && join.next_y() == 0
+              });
             let prev_hsv = if stale_hsv { hsv_planar.take() } else { None };
             let hsv_result = super::planar_resample::hsv_direct_resample(
               hsv_planar,
@@ -8134,7 +8705,15 @@ impl<R> PixelSink for MixedSinker<'_, Yuv440p, R> {
               full_range,
               2,
               || {
-                ResamplePlan::area_chroma_440(w, h, plan.out_w(), plan.out_h(), 0.0, chroma_v_phase)
+                ResamplePlan::area_chroma_440(
+                  w,
+                  h,
+                  plan.out_w(),
+                  plan.out_h(),
+                  0.0,
+                  chroma_v_phase,
+                  top_v,
+                )
               },
               w,
               plan,
@@ -8224,6 +8803,188 @@ impl<R> PixelSink for MixedSinker<'_, Yuv440p, R> {
             // row leaves the predecessor for a clean retry — the sited
             // reconstruction read it above but did not stage.
             stage_440_chroma_prev(chroma_prev, chroma_prev_row, row.u(), row.v(), idx, w);
+          } else if top_v && want_color {
+            // RFC #238 Top (`v = 0`) FORWARD one-row delay for the RGB/RGBA
+            // row-stage tier — the 4:4:0 mirror of the Yuv420p Top row-stage
+            // branch, only full-width chroma. An EVEN source row decodes co-sited
+            // chroma while an ODD source row needs the vertical box-average of its
+            // chroma row and the NEXT one, unavailable when the odd row arrives.
+            // The whole odd row is HELD (`chroma_top_pending` + the buffered
+            // `chroma_top_y`) and the following even row feeds TWO source rows:
+            // the held odd row (forward-blended through the `Bottom`-EVEN
+            // `(prev + cur) >> 1` kernel at THIS even index) then the current even
+            // row (co-sited). The trailing odd row clamps to a co-sited decode.
+            // `feed_row` allocates nothing, so reserving every buffer up front
+            // makes the two-row flush retry-atomic (#180).
+            let is_last = idx + 1 == h;
+            let need_luma = luma.is_some() || luma_u16.is_some();
+            let cursor = if need_luma {
+              luma_stream.as_ref().map_or(0, |s| s.next_y())
+            } else {
+              rgb_stream.as_ref().map_or(0, |s| s.next_y())
+            };
+            let expected_source = cursor + usize::from(chroma_top_pending.is_some());
+            if let core::ops::ControlFlow::Break(()) = super::resample_preflight_check_only(
+              resample_outputs,
+              luma,
+              luma_u16,
+              rgb,
+              rgba,
+              &None,
+              &None,
+              &None,
+              &None,
+              &None,
+              &None,
+              &None,
+              hsv,
+              &None,
+              Some(expected_source),
+              idx,
+            )? {
+              return Ok(());
+            }
+            reserve_420_chroma_full(chroma_full, w, h)?;
+            reserve_440_chroma_prev(chroma_prev, w, h)?;
+            if chroma_top_y.len() < w {
+              chroma_top_y
+                .try_reserve_exact(w - chroma_top_y.len())
+                .map_err(|_| {
+                  MixedSinkerError::Resample(ResampleError::AllocationFailed(PlanGeometry::new(
+                    w, h, w, h,
+                  )))
+                })?;
+              chroma_top_y.resize(w, 0);
+            }
+            if idx & 1 == 0 {
+              if let Some((p_idx, p_matrix, p_full_range)) = chroma_top_pending.take() {
+                let (u_full, v_full) = upsample_440_chroma_sited(
+                  chroma_full,
+                  chroma_prev,
+                  chroma_prev_row,
+                  row.u(),
+                  row.v(),
+                  idx,
+                  true,
+                  false,
+                  w,
+                );
+                planar_dual_resample(
+                  luma_stream,
+                  rgb_stream,
+                  resample_outputs,
+                  rgb,
+                  rgba,
+                  luma,
+                  luma_u16,
+                  hsv,
+                  rgb_scratch,
+                  &chroma_top_y[..w],
+                  w,
+                  plan,
+                  p_idx,
+                  use_simd,
+                  |scratch| {
+                    yuv_444_to_rgb_row(
+                      &chroma_top_y[..w],
+                      u_full,
+                      v_full,
+                      scratch,
+                      w,
+                      p_matrix,
+                      p_full_range,
+                      use_simd,
+                    );
+                  },
+                )?;
+              }
+              let (u_full, v_full) = upsample_440_chroma_sited(
+                chroma_full,
+                chroma_prev,
+                chroma_prev_row,
+                row.u(),
+                row.v(),
+                idx,
+                false,
+                false,
+                w,
+              );
+              planar_dual_resample(
+                luma_stream,
+                rgb_stream,
+                resample_outputs,
+                rgb,
+                rgba,
+                luma,
+                luma_u16,
+                hsv,
+                rgb_scratch,
+                row.y(),
+                w,
+                plan,
+                idx,
+                use_simd,
+                |scratch| {
+                  yuv_444_to_rgb_row(
+                    row.y(),
+                    u_full,
+                    v_full,
+                    scratch,
+                    w,
+                    matrix,
+                    full_range,
+                    use_simd,
+                  );
+                },
+              )?;
+            } else if !is_last {
+              chroma_top_y[..w].copy_from_slice(&row.y()[..w]);
+              *chroma_top_pending = Some((idx, matrix, full_range));
+            } else {
+              let (u_full, v_full) = upsample_440_chroma_sited(
+                chroma_full,
+                chroma_prev,
+                chroma_prev_row,
+                row.u(),
+                row.v(),
+                idx,
+                false,
+                false,
+                w,
+              );
+              planar_dual_resample(
+                luma_stream,
+                rgb_stream,
+                resample_outputs,
+                rgb,
+                rgba,
+                luma,
+                luma_u16,
+                hsv,
+                rgb_scratch,
+                row.y(),
+                w,
+                plan,
+                idx,
+                use_simd,
+                |scratch| {
+                  yuv_444_to_rgb_row(
+                    row.y(),
+                    u_full,
+                    v_full,
+                    scratch,
+                    w,
+                    matrix,
+                    full_range,
+                    use_simd,
+                  );
+                },
+              )?;
+            }
+            // Refresh the lookback with the current chroma row (after the reads
+            // above) so the NEXT even row's flush forward-blends this row as its
+            // predecessor.
+            stage_440_chroma_prev(chroma_prev, chroma_prev_row, row.u(), row.v(), idx, w);
           } else {
             // Co-sited RGB / RGBA / luma: the byte-identical row-stage tail.
             planar_dual_resample(
@@ -8255,6 +9016,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuv440p, R> {
           // RFC #238 S8b: freeze the siting on the same accepted output row.
           if frozen_chroma_bottom_v.is_none() && need_output {
             *frozen_chroma_bottom_v = Some(bottom_v);
+            *frozen_chroma_top_v = Some(top_v);
           }
           return Ok(());
         }
@@ -8303,23 +9065,36 @@ impl<R> PixelSink for MixedSinker<'_, Yuv440p, R> {
 
     // Chroma siting (RFC #238 S8b): `Bottom` (v = 1) box-blends the even output
     // row's full-width chroma with the previous chroma row; the default / Center
-    // / Top sitings keep the byte-identical co-sited decode (their odd output row
-    // needs the *next* chroma row, deferred). 4:4:0 has full-width chroma, so
-    // there is no horizontal phase.
+    // sitings keep the byte-identical co-sited decode. 4:4:0 has full-width
+    // chroma, so there is no horizontal phase.
     let bottom_v = chroma_440_bottom_sited_v(chroma_location);
+    // Top-sited vertical phase (RFC #238): `Top` / `TopLeft` (`v = 0`) box-blend
+    // the ODD output row's chroma with the NEXT chroma row — which a
+    // row-at-a-time stream has not been fed when the odd row arrives — so the
+    // identity colour decode holds the odd row's output in a FORWARD one-row
+    // delay (`chroma_top_pending` / `chroma_top_y`) and emits it once the
+    // following even row supplies the next chroma. Handled in its own branch
+    // below; the luma planes are siting-independent and written in order.
+    let top_v = chroma_440_top_sited_v(chroma_location);
 
-    // RFC #238 S8b: freeze the vertical chroma siting on the direct (identity)
-    // path too. The resample branch above rejects a mid-frame vertical-phase flip
-    // via `frozen_chroma_bottom_v`, and this path must honour the SAME per-frame
-    // invariant: `set_chroma_location` is public, so without this a caller could
-    // emit rows `Bottom`, switch to a co-sited location, then back, binning a
-    // mixture of co-sited and bottom-folded chroma (and, after a co-sited gap,
-    // box-blend a later even row against a stale lookback). CHECK here — before any
-    // reservation or lookback mutation; the matching SET rides the row's accept
-    // point below (after the fallible preflight). `need_output` is already
-    // established (the no-output guard returned above).
+    // RFC #238: freeze the vertical chroma siting on the direct (identity) path
+    // too. The resample branch above rejects a mid-frame vertical-phase flip via
+    // `frozen_chroma_bottom_v` / `frozen_chroma_top_v`, and this path must honour
+    // the SAME per-frame invariant: `set_chroma_location` is public, so without
+    // this a caller could hold an odd `Top` row (buffered in `chroma_top_pending`
+    // / `chroma_top_y`), flip to `Center` / a co-sited location — whose
+    // `top_v == false` skips the flush/defer branch, so the held row is neither
+    // emitted nor cleared — then flip back and flush that STALE row against the
+    // wrong chroma row (silent corruption); or emit `Bottom` then flip and
+    // box-blend a later even row against a stale lookback. Reject any mid-frame
+    // flip TO or FROM `Bottom` / `Top`. CHECK here — before any reservation or
+    // delay-state mutation; the matching SET rides the row's accept point below
+    // (after the fallible preflight). `frozen_chroma_bottom_v` is the set/unset
+    // sentinel; the Top flag is compared alongside because co-sited and `Top`
+    // share `Some(false)` there. `need_output` is already established (the
+    // no-output guard returned above).
     if let Some(frozen) = *frozen_chroma_bottom_v
-      && frozen != bottom_v
+      && (frozen != bottom_v || *frozen_chroma_top_v != Some(top_v))
     {
       return Err(MixedSinkerError::ChromaSitingChanged(
         ChromaSitingChanged::new(idx),
@@ -8338,12 +9113,27 @@ impl<R> PixelSink for MixedSinker<'_, Yuv440p, R> {
     //     maintained so a later colour row can box-blend it (the luma-only
     //     staging runs below, before any luma write); and
     //  3. the RGB row scratch, exactly `want_hsv && want_rgba && !want_rgb`.
+    // The Top (`v = 0`) forward-delay decode reads the SAME full-width blend
+    // scratch + lookback at its EVEN flush index, so it reserves both too.
     // A no-output row returned early above, so it never reaches here.
-    if bottom_v && want_color {
+    if (bottom_v || top_v) && want_color {
       reserve_420_chroma_full(chroma_full, w, h)?;
     }
-    if bottom_v {
+    if bottom_v || top_v {
       reserve_440_chroma_prev(chroma_prev, w, h)?;
+    }
+    // Top forward-delay Y buffer (RFC #238): reserved up front — BEFORE any luma
+    // write — so the later deferred-row copy is infallible and an allocator
+    // refusal leaves the output frame untouched (the #180 atomicity contract).
+    if top_v && want_color && chroma_top_y.len() < w {
+      chroma_top_y
+        .try_reserve_exact(w - chroma_top_y.len())
+        .map_err(|_| {
+          MixedSinkerError::Resample(ResampleError::AllocationFailed(PlanGeometry::new(
+            w, h, w, h,
+          )))
+        })?;
+      chroma_top_y.resize(w, 0);
     }
     if want_hsv && want_rgba && !want_rgb {
       // Grow the RGB scratch up front via the same helper the decode uses, so its
@@ -8360,25 +9150,27 @@ impl<R> PixelSink for MixedSinker<'_, Yuv440p, R> {
       )?;
     }
 
-    // Bottom-sited LUMA-ONLY row: the colour upsample helper — which normally
-    // refreshes the vertical lookback — won't run, so stage the current
+    // Bottom / Top sited LUMA-ONLY row: the colour upsample helper — which
+    // normally refreshes the vertical lookback — won't run, so stage the current
     // full-width chroma row into the lookback HERE, after its preflight
     // reservation above and BEFORE any luma write, so a later colour row in the
     // same frame can box-blend it. A colour row instead stages inside
-    // `upsample_440_chroma_sited` after reading the previous lookback, so this is
-    // skipped for it; a no-output row returned early above.
-    if bottom_v && !want_color {
+    // `upsample_440_chroma_sited` (Bottom) or its own Top branch after reading
+    // the previous lookback, so this is skipped for it; a no-output row returned
+    // early above.
+    if (bottom_v || top_v) && !want_color {
       stage_440_chroma_prev(chroma_prev, chroma_prev_row, row.u(), row.v(), idx, w);
     }
 
-    // RFC #238 S8b: the row is now past its fallible preflight — every scratch is
+    // RFC #238: the row is now past its fallible preflight — every scratch is
     // reserved and every remaining write targets an attached output buffer or the
     // pre-grown RGB scratch, so it cannot fail. Commit the vertical-siting freeze
     // here (mirroring the resample arms' accept-time SET), at the single point all
-    // four output sub-paths pass through before diverging. Only the frame's first
+    // output sub-paths pass through before diverging. Only the frame's first
     // output-bearing row sets it; the CHECK above rejects any later phase flip.
     if frozen_chroma_bottom_v.is_none() {
       *frozen_chroma_bottom_v = Some(bottom_v);
+      *frozen_chroma_top_v = Some(top_v);
     }
 
     if let Some(luma) = luma.as_deref_mut() {
@@ -8393,6 +9185,97 @@ impl<R> PixelSink for MixedSinker<'_, Yuv440p, R> {
         w,
         use_simd,
       );
+    }
+
+    // RFC #238 Top (`v = 0`) forward one-row delay for the identity colour
+    // decode — the 4:4:0 mirror of the Yuv420p Top identity branch, only
+    // full-width chroma. A `Top` chroma sample is co-sited with the TOP luma row
+    // of its pair, so an EVEN output row is a plain co-sited decode while an ODD
+    // output row needs the vertical box-average of the current chroma row and the
+    // NEXT one — unavailable until the following even row arrives. Each odd colour
+    // row is therefore HELD (`chroma_top_pending` + the buffered `chroma_top_y`)
+    // and emitted at the following even row, box-blended through the SAME
+    // `(prev + cur) >> 1` fold a `Bottom` EVEN row uses — reused verbatim via
+    // `upsample_440_chroma_sited(bottom_v = true)` at the even row's index, whose
+    // lookback validity check (`chroma_prev` holds `chroma_row - 1`) is exactly
+    // what the held odd row wants. The trailing odd row of the frame has no next
+    // chroma, so it clamps to a co-sited decode. Luma was already written above
+    // (siting-independent); only colour is delayed.
+    if top_v && want_color {
+      let is_last = idx + 1 == h;
+      // Flush the held odd predecessor (`idx - 1`) at this even row, box-blending
+      // the previous chroma row (`chroma_prev`) with the current one.
+      if idx & 1 == 0
+        && let Some((p_idx, p_matrix, p_full_range)) = chroma_top_pending.take()
+      {
+        let (u_full, v_full) = upsample_440_chroma_sited(
+          chroma_full,
+          chroma_prev,
+          chroma_prev_row,
+          row.u(),
+          row.v(),
+          idx,
+          true,
+          false,
+          w,
+        );
+        yuv440_identity_color_row(
+          rgb,
+          rgba,
+          hsv,
+          rgb_scratch,
+          &chroma_top_y[..w],
+          u_full,
+          v_full,
+          p_idx * w,
+          p_idx * w + w,
+          w,
+          h,
+          p_matrix,
+          p_full_range,
+          use_simd,
+        )?;
+      }
+      if idx & 1 == 1 && !is_last {
+        // Defer this odd row: copy its Y (the row borrow expires after `process`)
+        // and record its decode parameters; its colour emits at the next even row.
+        chroma_top_y[..w].copy_from_slice(&row.y()[..w]);
+        *chroma_top_pending = Some((idx, row.matrix(), row.full_range()));
+      } else {
+        // Even row (co-sited `c[i]`) or the trailing odd row (bottom-edge clamp →
+        // co-sited): a plain co-sited decode of the current chroma row.
+        let (u_full, v_full) = upsample_440_chroma_sited(
+          chroma_full,
+          chroma_prev,
+          chroma_prev_row,
+          row.u(),
+          row.v(),
+          idx,
+          false,
+          false,
+          w,
+        );
+        yuv440_identity_color_row(
+          rgb,
+          rgba,
+          hsv,
+          rgb_scratch,
+          row.y(),
+          u_full,
+          v_full,
+          one_plane_start,
+          one_plane_end,
+          w,
+          h,
+          row.matrix(),
+          row.full_range(),
+          use_simd,
+        )?;
+      }
+      // Refresh the lookback with the current chroma row so the NEXT even row's
+      // odd-flush box-blends this row as its predecessor (after the read above).
+      stage_440_chroma_prev(chroma_prev, chroma_prev_row, row.u(), row.v(), idx, w);
+      return Ok(());
     }
 
     // HSV-only (no RGB / RGBA) goes direct through `yuv_444_to_hsv_row` (4:4:0

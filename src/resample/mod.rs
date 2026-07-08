@@ -1443,14 +1443,19 @@ impl ResamplePlan {
   /// horizontally, so `h_phase` folds no triangle here), vertical spans over
   /// the LUMA height.
   ///
-  /// The vertical axis carries the RFC #238 vertical chroma siting. At
-  /// `v_phase == 0` it is the co-sited [`AxisSpans::area_halved`] luma→chroma
-  /// pairing (an odd trailing luma row weights its chroma row by half — the
-  /// same luma-domain vertical weighting as 4:2:0) and the stored `src_h`
-  /// stays `luma_h`, byte-identical to before vertical siting existed; for
-  /// **Bottom** siting (`v_phase ≠ 0`) it is the folded `v = 1` triangle
-  /// ([`AxisSpans::area_chroma_phased_v`]), whose spans sum to `2·luma_h`, so
-  /// the stored `src_h` becomes that scaled V denominator. The stored source
+  /// The vertical axis carries the RFC #238 vertical chroma siting and — like
+  /// the 4:2:0 [`Self::area_chroma_420`] whose vertical fold it shares verbatim
+  /// — has THREE modes. At `v_phase == 0 && !v_top` it is the co-sited
+  /// [`AxisSpans::area_halved`] luma→chroma pairing (an odd trailing luma row
+  /// weights its chroma row by half — the same luma-domain vertical weighting as
+  /// 4:2:0) and the stored `src_h` stays `luma_h`, byte-identical to before
+  /// vertical siting existed. For **Bottom** siting (`v_phase ≠ 0`) it is the
+  /// BACKWARD-reaching folded `v = 1` triangle ([`AxisSpans::area_chroma_phased_v`]);
+  /// for **Top** siting (`v_top`, carried alongside `v_phase == 0`) it is the
+  /// FORWARD-reaching `v = 0` triangle ([`AxisSpans::area_chroma_phased_v_top`]).
+  /// Both folds' spans sum to `2·luma_h`, so the stored `src_h` becomes that
+  /// scaled V denominator. `v_top` and a non-zero `v_phase` are mutually
+  /// exclusive sitings (Top is `v = 0`, Bottom is `v = 1`). The stored source
   /// width is always `frame_w`.
   #[cfg(feature = "yuv-planar")]
   pub(crate) fn area_chroma_440(
@@ -1460,6 +1465,7 @@ impl ResamplePlan {
     out_h: usize,
     h_phase: f64,
     v_phase: f64,
+    v_top: bool,
   ) -> Result<Self, ResampleError> {
     let fail_overflow =
       || ResampleError::Overflow(PlanGeometry::new(frame_w, luma_h, out_w, out_h));
@@ -1473,12 +1479,20 @@ impl ResamplePlan {
     // chroma, so there is no folded H triangle and the denominator stays
     // `frame_w`.
     let h = AxisSpans::area(frame_w, out_w).map_err(fail)?;
-    // Vertical axis: the co-sited luma→chroma pairing, or — for Bottom siting
-    // — the folded `v = 1` triangle whose spans sum to `2·luma_h`, making that
-    // the scaled V denominator. At `v_phase == 0` the spans and the `luma_h`
-    // denominator are byte-identical to the plain pairing every co-sited
-    // caller built before vertical siting existed.
-    let (v, denom_h) = if v_phase == 0.0 {
+    // Vertical axis: the co-sited luma→chroma pairing, or — for Bottom (`v = 1`,
+    // backward) / Top (`v = 0`, forward) siting — the folded triangle whose
+    // spans sum to `2·luma_h`, making that the scaled V denominator. At
+    // `v_phase == 0 && !v_top` the spans and the `luma_h` denominator are
+    // byte-identical to the plain pairing every co-sited caller built before
+    // vertical siting existed. `v_top` and a non-zero `v_phase` are mutually
+    // exclusive sitings (Top is `v = 0`, Bottom is `v = 1`).
+    let (v, denom_h) = if v_top {
+      let denom_h = luma_h.checked_mul(2).ok_or_else(fail_overflow)?;
+      (
+        AxisSpans::area_chroma_phased_v_top(luma_h, out_h).map_err(fail)?,
+        denom_h,
+      )
+    } else if v_phase == 0.0 {
       (AxisSpans::area_halved(luma_h, out_h).map_err(fail)?, luma_h)
     } else {
       let denom_h = luma_h.checked_mul(2).ok_or_else(fail_overflow)?;
@@ -1501,7 +1515,7 @@ impl ResamplePlan {
       filter_v_chroma: None,
       h_phase,
       v_phase,
-      v_top: false,
+      v_top,
     })
   }
 

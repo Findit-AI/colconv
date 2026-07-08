@@ -268,15 +268,53 @@ pub(super) const fn chroma_420_top_sited_v(loc: crate::ChromaLocation) -> bool {
 /// identical vertical box average. (4:2:0 excludes `BottomLeft` because there the
 /// `h = 0` phase would need a co-sited full-width horizontal staging its
 /// `h = 0.5` path lacks; 4:4:0 has no such constraint.) The `v = 0` (`Top` /
-/// `TopLeft`) and `v = 0.5` (`Center` / `Left`) phases need the *next* chroma row
-/// for a causal reconstruction — which the row-at-a-time `process` cannot see —
-/// so they keep the byte-identical vertical-replicate decode.
+/// `TopLeft`) phase needs the *next* chroma row and is handled by its FORWARD
+/// one-row-delay companion [`chroma_440_top_sited_v`]; the `v = 0.5` (`Center` /
+/// `Left`) phase keeps the byte-identical vertical-replicate decode.
 #[cfg(feature = "yuv-planar")]
 #[inline]
 pub(super) const fn chroma_440_bottom_sited_v(loc: crate::ChromaLocation) -> bool {
   matches!(
     loc,
     crate::ChromaLocation::Bottom | crate::ChromaLocation::BottomLeft
+  )
+}
+
+/// Whether `loc` places 4:4:0 chroma at the **top** vertical phase (`v = 0`) —
+/// the FFmpeg `AVCHROMA_LOC_TOP` (`Top`) and `AVCHROMA_LOC_TOPLEFT` (`TopLeft`)
+/// sitings, whose chroma is co-sited with the **top** luma row of each vertical
+/// pair. The 4:4:0 companion of the 4:2:0 [`chroma_420_top_sited_v`] and the
+/// vertical MIRROR of [`chroma_440_bottom_sited_v`]'s `Bottom` (`v = 1`): where
+/// Bottom's even row reaches BACKWARD to the already-streamed `c[i-1]`, Top's
+/// odd row reaches FORWARD to `c[i+1]` — the *next* chroma row, which a
+/// top-to-bottom row-at-a-time stream has not been fed when the odd row arrives.
+///
+/// 4:4:0 subsamples chroma 2:1 **vertically only** (full-width chroma), so the
+/// siting reduces to its vertical axis alone and there is NO horizontal phase to
+/// stage. Both `Top` (`h = 0.5`, `v = 0`) AND `TopLeft` (`h = 0`, `v = 0`) are
+/// `v = 0`, and because 4:4:0 never reconstructs horizontally their horizontal
+/// difference is irrelevant — both fold the identical vertical box average, so
+/// this predicate matches both (the wider match mirrors [`chroma_440_bottom_sited_v`]).
+///
+/// The 4:4:0 sink reconstructs `Top` with a **forward one-row output delay** (the
+/// mirror of Bottom's backward `chroma_prev` lookback): an EVEN luma row `2i` is
+/// co-sited with chroma row `i` (a plain co-sited decode), while an ODD luma row
+/// `2i+1` needs the vertical box average of chroma rows `i` and `i+1` — so its
+/// colour output is held until the following even row supplies `c[i+1]`, then
+/// box-blended through the SAME `(c[i] + c[i+1]) / 2` fold a `Bottom` EVEN row
+/// applies to `(c[i-1], c[i])` (reused verbatim at the even index). The native /
+/// HSV-only binning tiers instead fold the `v = 0` FORWARD triangle into
+/// `area_chroma_440`'s vertical weights
+/// ([`AxisSpans::area_chroma_phased_v_top`](crate::resample)), needing no delay
+/// because the [`AreaStream`](crate::resample) window absorbs the forward reach.
+/// `Center` / `Left` (`v = 0.5`) and every unspecified siting keep the
+/// byte-identical vertical-replicate decode.
+#[cfg(feature = "yuv-planar")]
+#[inline]
+pub(super) const fn chroma_440_top_sited_v(loc: crate::ChromaLocation) -> bool {
+  matches!(
+    loc,
+    crate::ChromaLocation::Top | crate::ChromaLocation::TopLeft
   )
 }
 

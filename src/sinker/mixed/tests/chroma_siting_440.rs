@@ -160,19 +160,19 @@ fn bottom_v_kernel_equals_passthrough_when_rows_match() {
   ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
 )]
 fn default_and_cosited_and_horizontal_sitings_are_byte_identical() {
-  // 4:4:0 has no horizontal phase, so ONLY `Bottom` reconstructs; every other
-  // siting — including the horizontally-centered Center / Top — keeps the exact
-  // vertical-replicate decode, bit-for-bit equal to the Unspecified baseline
-  // even though the chroma plane is a non-trivial ramp.
+  // 4:4:0 has no horizontal phase and folds only its VERTICAL axis, so `Bottom`
+  // (v=1) and `Top` (v=0) reconstruct while the co-sited (`Left`) and
+  // horizontally-centered but vertically-central (`Center`, v=0.5) sitings keep the
+  // exact vertical-replicate decode, bit-for-bit equal to the Unspecified baseline
+  // even though the chroma plane is a non-trivial ramp. (`Top` / `TopLeft` now fold
+  // the forward `v=0` triangle and left this group — covered by the Top tests.)
   let (yp, up, vp) = ramp_yuv440p();
   let baseline = convert_rgb_with(ChromaLocation::Unspecified, true, &yp, &up, &vp);
   for loc in [
     ChromaLocation::Unspecified,
     ChromaLocation::Unknown(99),
     ChromaLocation::Left,
-    ChromaLocation::TopLeft,
     ChromaLocation::Center,
-    ChromaLocation::Top,
   ] {
     assert_eq!(
       convert_rgb_with(loc, true, &yp, &up, &vp),
@@ -379,10 +379,11 @@ fn bottom_grows_full_width_chroma_prev_lookback() {
   ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
 )]
 fn non_bottom_sitings_do_not_grow_chroma_prev() {
-  // Center / Top / Left never touch the vertical lookback (no vertical fold).
+  // Center / Left never touch the vertical lookback (no vertical fold). `Top`
+  // (v=0) now DOES maintain the lookback for its forward one-row delay, so it is
+  // excluded here and covered by the Top tests.
   for loc in [
     ChromaLocation::Center,
-    ChromaLocation::Top,
     ChromaLocation::Left,
     ChromaLocation::Unspecified,
   ] {
@@ -595,6 +596,13 @@ fn direct_path_mid_frame_siting_flip_is_rejected() {
     // changes the vertical fold and must reject too.
     (ChromaLocation::BottomLeft, ChromaLocation::Left),
     (ChromaLocation::Top, ChromaLocation::BottomLeft),
+    // `Top` / `TopLeft` (v=0) now fold the forward triangle, so flipping to / from
+    // a co-sited or `Bottom` siting must reject too.
+    (ChromaLocation::Top, ChromaLocation::Left),
+    (ChromaLocation::Left, ChromaLocation::Top),
+    (ChromaLocation::Top, ChromaLocation::Center),
+    (ChromaLocation::Top, ChromaLocation::Bottom),
+    (ChromaLocation::TopLeft, ChromaLocation::Left),
   ] {
     let mut rgb = std::vec![0u8; w * h * 3];
     let mut sink = MixedSinker::<Yuv440p>::new(w, h)
@@ -629,4 +637,338 @@ fn direct_path_mid_frame_siting_flip_is_rejected() {
       "direct path {loc1:?}->{loc2:?}: want ChromaSitingChanged, got {err:?}"
     );
   }
+}
+
+// ============ Top-sited (v = 0) FORWARD one-row delay =======================
+
+/// Independent reference for the top-sited (`v = 0`) full-height chroma
+/// reconstruction — the FORWARD mirror of [`ref_full_chroma_bottom`]: per luma row
+/// `r`, the EVEN rows take chroma row `r/2` directly (co-sited with the pair's TOP
+/// luma); the ODD rows take the full-width vertical box average of chroma rows
+/// `r/2` and `r/2 + 1` (clamped to `r/2` at the bottom edge). `ch = ceil(h / 2)`.
+/// Feeding these full-resolution planes to a `Yuv444p` conversion is the
+/// end-to-end oracle for `Top`.
+fn ref_full_chroma_top_hw(
+  u440: &[u8],
+  v440: &[u8],
+  w: usize,
+  h: usize,
+  ch: usize,
+) -> (Vec<u8>, Vec<u8>) {
+  let mut u444 = std::vec![0u8; w * h];
+  let mut v444 = std::vec![0u8; w * h];
+  let vblend = |plane: &[u8], a: usize, b: usize| -> Vec<u8> {
+    (0..w)
+      .map(|c| {
+        let x = plane[a * w + c] as u32;
+        let y = plane[b * w + c] as u32;
+        ((x + y + 1) >> 1) as u8
+      })
+      .collect::<Vec<u8>>()
+  };
+  for r in 0..h {
+    let cr = r / 2;
+    let (urow, vrow) = if r & 1 == 0 {
+      (
+        u440[cr * w..cr * w + w].to_vec(),
+        v440[cr * w..cr * w + w].to_vec(),
+      )
+    } else {
+      let next = (cr + 1).min(ch - 1);
+      (vblend(u440, cr, next), vblend(v440, cr, next))
+    };
+    u444[r * w..r * w + w].copy_from_slice(&urow);
+    v444[r * w..r * w + w].copy_from_slice(&vrow);
+  }
+  (u444, v444)
+}
+
+fn ref_full_chroma_top(u440: &[u8], v440: &[u8]) -> (Vec<u8>, Vec<u8>) {
+  ref_full_chroma_top_hw(u440, v440, W as usize, H as usize, (H / 2) as usize)
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn top_rgb_matches_vfold_then_444_reference() {
+  let (yp, up, vp) = ramp_yuv440p();
+  let (u444, v444) = ref_full_chroma_top(&up, &vp);
+  let ref_src = Yuv444pFrame::new(&yp, &u444, &v444, W, H, W, W, W);
+  let mut rgb_ref = std::vec![0u8; (W * H * 3) as usize];
+  let mut ref_sink = MixedSinker::<Yuv444p>::new(W as usize, H as usize)
+    .with_rgb(&mut rgb_ref)
+    .unwrap();
+  yuv444p_to(&ref_src, false, ColorMatrix::Bt601, &mut ref_sink).unwrap();
+  assert_eq!(
+    convert_rgb_with(ChromaLocation::Top, true, &yp, &up, &vp),
+    rgb_ref,
+    "top-sited 4:4:0 RGB must equal forward-vfold then 4:4:4"
+  );
+  // `TopLeft` is v=0 for 4:4:0 (no horizontal phase), so it decodes identically.
+  assert_eq!(
+    convert_rgb_with(ChromaLocation::TopLeft, true, &yp, &up, &vp),
+    rgb_ref,
+    "TopLeft must fold the identical vertical phase as Top for 4:4:0"
+  );
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn top_rgba_and_hsv_match_vfold_then_444_reference() {
+  let (yp, up, vp) = ramp_yuv440p();
+  let (u444, v444) = ref_full_chroma_top(&up, &vp);
+
+  // RGBA-only path.
+  {
+    let src = Yuv440pFrame::new(&yp, &up, &vp, W, H, W, W, W);
+    let mut rgba = std::vec![0u8; (W * H * 4) as usize];
+    let mut sink = MixedSinker::<Yuv440p>::new(W as usize, H as usize)
+      .with_rgba(&mut rgba)
+      .unwrap()
+      .with_chroma_location(ChromaLocation::Top);
+    yuv440p_to(&src, false, ColorMatrix::Bt601, &mut sink).unwrap();
+
+    let ref_src = Yuv444pFrame::new(&yp, &u444, &v444, W, H, W, W, W);
+    let mut rgba_ref = std::vec![0u8; (W * H * 4) as usize];
+    let mut ref_sink = MixedSinker::<Yuv444p>::new(W as usize, H as usize)
+      .with_rgba(&mut rgba_ref)
+      .unwrap();
+    yuv444p_to(&ref_src, false, ColorMatrix::Bt601, &mut ref_sink).unwrap();
+    assert_eq!(
+      rgba, rgba_ref,
+      "top RGBA must equal forward-vfold-then-4:4:4"
+    );
+  }
+
+  // HSV-direct path (no RGB / RGBA attached).
+  {
+    let src = Yuv440pFrame::new(&yp, &up, &vp, W, H, W, W, W);
+    let (mut h, mut s, mut v) = (
+      std::vec![0u8; (W * H) as usize],
+      std::vec![0u8; (W * H) as usize],
+      std::vec![0u8; (W * H) as usize],
+    );
+    let mut sink = MixedSinker::<Yuv440p>::new(W as usize, H as usize)
+      .with_hsv(&mut h, &mut s, &mut v)
+      .unwrap()
+      .with_chroma_location(ChromaLocation::Top);
+    yuv440p_to(&src, false, ColorMatrix::Bt601, &mut sink).unwrap();
+
+    let ref_src = Yuv444pFrame::new(&yp, &u444, &v444, W, H, W, W, W);
+    let (mut hr, mut sr, mut vr) = (
+      std::vec![0u8; (W * H) as usize],
+      std::vec![0u8; (W * H) as usize],
+      std::vec![0u8; (W * H) as usize],
+    );
+    let mut ref_sink = MixedSinker::<Yuv444p>::new(W as usize, H as usize)
+      .with_hsv(&mut hr, &mut sr, &mut vr)
+      .unwrap();
+    yuv444p_to(&ref_src, false, ColorMatrix::Bt601, &mut ref_sink).unwrap();
+    assert_eq!(
+      (h, s, v),
+      (hr, sr, vr),
+      "top HSV must equal forward-vfold-then-4:4:4"
+    );
+  }
+}
+
+/// Drives a Top RGB decode over a full in-order frame of arbitrary `w x h` through
+/// the walker, and the independent forward-vfold-then-4:4:4 reference for the same
+/// planes, returning `(got, want)`. Exercises the two-row FINAL flush (odd height,
+/// last row even) and the trailing-odd clamp (even height, last row odd).
+fn top_rgb_and_ref_hw(w: usize, h: usize) -> (Vec<u8>, Vec<u8>) {
+  let ch = h.div_ceil(2);
+  let mut y = std::vec![0u8; w * h];
+  for (i, p) in y.iter_mut().enumerate() {
+    *p = (40 + (i as u32 * 3) % 160) as u8;
+  }
+  let mut u = std::vec![0u8; w * ch];
+  let mut v = std::vec![0u8; w * ch];
+  for r in 0..ch {
+    for c in 0..w {
+      u[r * w + c] = (16 + c * 8 + r * 40).min(240) as u8;
+      v[r * w + c] = (240u32.saturating_sub((c * 6 + r * 30) as u32)).max(16) as u8;
+    }
+  }
+  let src = Yuv440pFrame::new(&y, &u, &v, w as u32, h as u32, w as u32, w as u32, w as u32);
+  let mut rgb = std::vec![0u8; w * h * 3];
+  let mut sink = MixedSinker::<Yuv440p>::new(w, h)
+    .with_rgb(&mut rgb)
+    .unwrap()
+    .with_chroma_location(ChromaLocation::Top);
+  yuv440p_to(&src, false, ColorMatrix::Bt601, &mut sink).unwrap();
+  drop(sink);
+
+  let (u444, v444) = ref_full_chroma_top_hw(&u, &v, w, h, ch);
+  let ref_src = Yuv444pFrame::new(
+    &y, &u444, &v444, w as u32, h as u32, w as u32, w as u32, w as u32,
+  );
+  let mut rgb_ref = std::vec![0u8; w * h * 3];
+  let mut ref_sink = MixedSinker::<Yuv444p>::new(w, h)
+    .with_rgb(&mut rgb_ref)
+    .unwrap();
+  yuv444p_to(&ref_src, false, ColorMatrix::Bt601, &mut ref_sink).unwrap();
+  (rgb, rgb_ref)
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn top_even_and_odd_height_two_row_flush_match_reference() {
+  // Even heights end on the trailing-odd clamp; odd heights end on the final even
+  // row's TWO-row flush (held odd + current even). Both must equal the oracle.
+  for (w, h) in [(8, 8), (8, 7), (6, 5), (4, 3), (4, 1)] {
+    let (got, want) = top_rgb_and_ref_hw(w, h);
+    assert_eq!(
+      got, want,
+      "Top {w}x{h} must equal the forward-vfold-then-4:4:4 oracle"
+    );
+  }
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn top_differs_from_bottom_and_cosited_on_vertical_ramp() {
+  // On a purely-vertical chroma ramp, Top's odd-row forward blend must move chroma
+  // vs the co-sited default, vs the horizontal-only co-sited sitings, and vs the
+  // BACKWARD-folded Bottom (Top != Bottom).
+  let (yp, up, vp) = vramp_yuv440p();
+  let top = convert_rgb_with(ChromaLocation::Top, true, &yp, &up, &vp);
+  for loc in [
+    ChromaLocation::Left,
+    ChromaLocation::Center,
+    ChromaLocation::Unspecified,
+    ChromaLocation::Bottom,
+  ] {
+    assert_ne!(
+      top,
+      convert_rgb_with(loc, true, &yp, &up, &vp),
+      "Top (v=0) must differ from {loc:?} on a vertical chroma ramp"
+    );
+  }
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn top_equals_cosited_on_flat_chroma() {
+  // On constant chroma the forward vertical blend is a no-op, so Top collapses to
+  // the co-sited decode byte-for-byte.
+  let (yp, up, vp) = flat_chroma_yuv440p();
+  assert_eq!(
+    convert_rgb_with(ChromaLocation::Top, true, &yp, &up, &vp),
+    convert_rgb_with(ChromaLocation::Left, true, &yp, &up, &vp),
+    "flat-chroma Top must equal co-sited"
+  );
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn top_path_simd_matches_scalar() {
+  let (yp, up, vp) = ramp_yuv440p();
+  assert_eq!(
+    convert_rgb_with(ChromaLocation::Top, true, &yp, &up, &vp),
+    convert_rgb_with(ChromaLocation::Top, false, &yp, &up, &vp),
+    "top path must be bit-identical across the SIMD and scalar tiers"
+  );
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn top_grows_full_width_chroma_prev_lookback() {
+  // The forward one-row delay maintains the same full-width (2·w) U+V lookback as
+  // Bottom, so a later even row can forward-blend the held odd row's chroma.
+  let (yp, up, vp) = vramp_yuv440p();
+  let src = Yuv440pFrame::new(&yp, &up, &vp, W, H, W, W, W);
+  let mut rgb = std::vec![0u8; (W * H * 3) as usize];
+  let mut sink = MixedSinker::<Yuv440p>::new(W as usize, H as usize)
+    .with_rgb(&mut rgb)
+    .unwrap()
+    .with_chroma_location(ChromaLocation::Top);
+  yuv440p_to(&src, false, ColorMatrix::Bt601, &mut sink).unwrap();
+  let prev_len = sink.chroma_prev.len();
+  drop(sink);
+  assert_eq!(
+    prev_len,
+    2 * W as usize,
+    "top-sited 4:4:0 stages a full-width (2·w) U+V chroma lookback"
+  );
+}
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn top_begin_frame_after_held_odd_row_clears_state() {
+  // The Nv21 cross-frame-corruption class: a deferred odd Top row is HELD (no
+  // output); `begin_frame` MUST drop it so it never flushes into the next frame. A
+  // fresh in-order frame then decodes byte-identically to a clean Top decode.
+  let (yp, up, vp) = vramp_yuv440p();
+  let w = W as usize;
+  let h = H as usize;
+  let mut rgb = std::vec![0u8; w * h * 3];
+  let mut sink = MixedSinker::<Yuv440p>::new(w, h)
+    .with_rgb(&mut rgb)
+    .unwrap()
+    .with_chroma_location(ChromaLocation::Top);
+  crate::PixelSink::begin_frame(&mut sink, W, H).unwrap();
+  // Deliver ONLY row 1 (odd) — it is HELD in the forward delay, producing no output.
+  let cr = 1 / 2;
+  let row1 = Yuv440pRow::new(
+    &yp[w..2 * w],
+    &up[cr * w..cr * w + w],
+    &vp[cr * w..cr * w + w],
+    1,
+    ColorMatrix::Bt601,
+    false,
+  );
+  crate::PixelSink::process(&mut sink, row1).unwrap();
+  assert!(
+    sink.chroma_top_pending.is_some(),
+    "an odd Top row must be HELD in the forward delay"
+  );
+  // New frame: the held odd row must be dropped.
+  crate::PixelSink::begin_frame(&mut sink, W, H).unwrap();
+  assert!(
+    sink.chroma_top_pending.is_none(),
+    "begin_frame must clear the held Top odd row (Nv21 class)"
+  );
+  // A full in-order decode now matches a clean decode — no stale held row leaked.
+  for r in 0..h {
+    let cr = r / 2;
+    let row = Yuv440pRow::new(
+      &yp[r * w..r * w + w],
+      &up[cr * w..cr * w + w],
+      &vp[cr * w..cr * w + w],
+      r,
+      ColorMatrix::Bt601,
+      false,
+    );
+    crate::PixelSink::process(&mut sink, row).unwrap();
+  }
+  drop(sink);
+  let clean = convert_rgb_with(ChromaLocation::Top, true, &yp, &up, &vp);
+  assert_eq!(
+    rgb, clean,
+    "post-clear frame must decode identically to a clean Top decode"
+  );
 }
