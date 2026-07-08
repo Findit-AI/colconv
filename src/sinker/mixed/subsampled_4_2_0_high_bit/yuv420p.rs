@@ -98,14 +98,19 @@ pub(crate) fn upsample_420_chroma_center_h_u16<'s, const BITS: u32>(
   v_half: &[u16],
   width: usize,
   big_endian: bool,
+  use_simd: bool,
 ) -> (&'s [u16], &'s [u16]) {
   debug_assert!(
     chroma_full.len() >= 2 * width,
     "chroma_full must be reserved via reserve_420_chroma_full_u16 first"
   );
   let (u_full, v_full) = chroma_full[..2 * width].split_at_mut(width);
-  crate::row::scalar::chroma_upsample_2to1_center_h_u16::<BITS>(u_half, u_full, width, big_endian);
-  crate::row::scalar::chroma_upsample_2to1_center_h_u16::<BITS>(v_half, v_full, width, big_endian);
+  crate::row::chroma_upsample_2to1_center_h_u16_row::<BITS>(
+    u_half, u_full, width, big_endian, use_simd,
+  );
+  crate::row::chroma_upsample_2to1_center_h_u16_row::<BITS>(
+    v_half, v_full, width, big_endian, use_simd,
+  );
   (u_full, v_full)
 }
 
@@ -258,6 +263,7 @@ pub(crate) fn upsample_420_chroma_sited_u16<'s, const BITS: u32>(
   stage: bool,
   width: usize,
   big_endian: bool,
+  use_simd: bool,
 ) -> (&'s [u16], &'s [u16]) {
   debug_assert!(
     chroma_full.len() >= 2 * width,
@@ -297,7 +303,14 @@ pub(crate) fn upsample_420_chroma_sited_u16<'s, const BITS: u32>(
     }
     (&*u_full, &*v_full)
   } else if center_h {
-    upsample_420_chroma_center_h_u16::<BITS>(chroma_full, u_half, v_half, width, big_endian)
+    upsample_420_chroma_center_h_u16::<BITS>(
+      chroma_full,
+      u_half,
+      v_half,
+      width,
+      big_endian,
+      use_simd,
+    )
   } else {
     upsample_420_chroma_cosited_h_u16::<BITS>(chroma_full, u_half, v_half, width, big_endian)
   };
@@ -717,6 +730,7 @@ fn yuv420p_top_reconstruct_area<const BITS: u32, const BE: bool>(
         false,
         w,
         BE,
+        use_simd,
       );
       let held_y: &[u16] = &chroma_top_y_u16[..w];
       packed_yuv422_triple_resample::<BITS>(
@@ -782,6 +796,7 @@ fn yuv420p_top_reconstruct_area<const BITS: u32, const BE: bool>(
       false,
       w,
       BE,
+      use_simd,
     );
     packed_yuv422_triple_resample::<BITS>(
       luma_stream_u16,
@@ -835,6 +850,7 @@ fn yuv420p_top_reconstruct_area<const BITS: u32, const BE: bool>(
       false,
       w,
       BE,
+      use_simd,
     );
     packed_yuv422_triple_resample::<BITS>(
       luma_stream_u16,
@@ -960,6 +976,7 @@ fn yuv420p_top_reconstruct_filter<const BITS: u32, const BE: bool>(
         false,
         w,
         BE,
+        use_simd,
       );
       let held_y: &[u16] = &chroma_top_y_u16[..w];
       packed_yuv422_triple_filter_resample::<BITS>(
@@ -1024,6 +1041,7 @@ fn yuv420p_top_reconstruct_filter<const BITS: u32, const BE: bool>(
       false,
       w,
       BE,
+      use_simd,
     );
     packed_yuv422_triple_filter_resample::<BITS>(
       luma_filter_stream_u16,
@@ -1074,6 +1092,7 @@ fn yuv420p_top_reconstruct_filter<const BITS: u32, const BE: bool>(
       false,
       w,
       BE,
+      use_simd,
     );
     packed_yuv422_triple_filter_resample::<BITS>(
       luma_filter_stream_u16,
@@ -1488,6 +1507,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p9<BE>, R> {
             false,
             w,
             BE,
+            use_simd,
           );
           let r = packed_yuv422_triple_filter_resample::<BITS>(
             luma_filter_stream_u16,
@@ -1803,6 +1823,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p9<BE>, R> {
               false,
               w,
               BE,
+              use_simd,
             );
             packed_yuv422_triple_resample::<BITS>(
               luma_stream_u16,
@@ -2070,6 +2091,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p9<BE>, R> {
         true,
         w,
         BE,
+        use_simd,
       ))
     } else {
       None
@@ -2133,6 +2155,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p9<BE>, R> {
             false,
             w,
             BE,
+            use_simd,
           );
           yuv444p_top_identity_color_row::<BITS, BE>(
             rgb,
@@ -2166,6 +2189,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p9<BE>, R> {
           false,
           w,
           BE,
+          use_simd,
         );
         yuv444p_top_identity_color_row::<BITS, BE>(
           rgb,
@@ -2205,6 +2229,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p9<BE>, R> {
           false,
           w,
           BE,
+          use_simd,
         );
         yuv444p_top_identity_color_row::<BITS, BE>(
           rgb,
@@ -2845,6 +2870,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p10<BE>, R> {
             false,
             w,
             BE,
+            use_simd,
           );
           let r = packed_yuv422_triple_filter_resample::<BITS>(
             luma_filter_stream_u16,
@@ -3160,6 +3186,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p10<BE>, R> {
               false,
               w,
               BE,
+              use_simd,
             );
             packed_yuv422_triple_resample::<BITS>(
               luma_stream_u16,
@@ -3427,6 +3454,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p10<BE>, R> {
         true,
         w,
         BE,
+        use_simd,
       ))
     } else {
       None
@@ -3494,6 +3522,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p10<BE>, R> {
             false,
             w,
             BE,
+            use_simd,
           );
           yuv444p_top_identity_color_row::<BITS, BE>(
             rgb,
@@ -3527,6 +3556,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p10<BE>, R> {
           false,
           w,
           BE,
+          use_simd,
         );
         yuv444p_top_identity_color_row::<BITS, BE>(
           rgb,
@@ -3566,6 +3596,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p10<BE>, R> {
           false,
           w,
           BE,
+          use_simd,
         );
         yuv444p_top_identity_color_row::<BITS, BE>(
           rgb,
@@ -4181,6 +4212,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p12<BE>, R> {
             false,
             w,
             BE,
+            use_simd,
           );
           let r = packed_yuv422_triple_filter_resample::<BITS>(
             luma_filter_stream_u16,
@@ -4496,6 +4528,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p12<BE>, R> {
               false,
               w,
               BE,
+              use_simd,
             );
             packed_yuv422_triple_resample::<BITS>(
               luma_stream_u16,
@@ -4763,6 +4796,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p12<BE>, R> {
         true,
         w,
         BE,
+        use_simd,
       ))
     } else {
       None
@@ -4826,6 +4860,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p12<BE>, R> {
             false,
             w,
             BE,
+            use_simd,
           );
           yuv444p_top_identity_color_row::<BITS, BE>(
             rgb,
@@ -4859,6 +4894,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p12<BE>, R> {
           false,
           w,
           BE,
+          use_simd,
         );
         yuv444p_top_identity_color_row::<BITS, BE>(
           rgb,
@@ -4898,6 +4934,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p12<BE>, R> {
           false,
           w,
           BE,
+          use_simd,
         );
         yuv444p_top_identity_color_row::<BITS, BE>(
           rgb,
@@ -5501,6 +5538,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p14<BE>, R> {
             false,
             w,
             BE,
+            use_simd,
           );
           let r = packed_yuv422_triple_filter_resample::<BITS>(
             luma_filter_stream_u16,
@@ -5816,6 +5854,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p14<BE>, R> {
               false,
               w,
               BE,
+              use_simd,
             );
             packed_yuv422_triple_resample::<BITS>(
               luma_stream_u16,
@@ -6083,6 +6122,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p14<BE>, R> {
         true,
         w,
         BE,
+        use_simd,
       ))
     } else {
       None
@@ -6146,6 +6186,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p14<BE>, R> {
             false,
             w,
             BE,
+            use_simd,
           );
           yuv444p_top_identity_color_row::<BITS, BE>(
             rgb,
@@ -6179,6 +6220,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p14<BE>, R> {
           false,
           w,
           BE,
+          use_simd,
         );
         yuv444p_top_identity_color_row::<BITS, BE>(
           rgb,
@@ -6218,6 +6260,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p14<BE>, R> {
           false,
           w,
           BE,
+          use_simd,
         );
         yuv444p_top_identity_color_row::<BITS, BE>(
           rgb,
@@ -6821,6 +6864,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p16<BE>, R> {
             false,
             w,
             BE,
+            use_simd,
           );
           let r = packed_yuv422_triple_filter_resample::<BITS>(
             luma_filter_stream_u16,
@@ -7136,6 +7180,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p16<BE>, R> {
               false,
               w,
               BE,
+              use_simd,
             );
             packed_yuv422_triple_resample::<BITS>(
               luma_stream_u16,
@@ -7403,6 +7448,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p16<BE>, R> {
         true,
         w,
         BE,
+        use_simd,
       ))
     } else {
       None
@@ -7466,6 +7512,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p16<BE>, R> {
             false,
             w,
             BE,
+            use_simd,
           );
           yuv444p_top_identity_color_row::<BITS, BE>(
             rgb,
@@ -7499,6 +7546,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p16<BE>, R> {
           false,
           w,
           BE,
+          use_simd,
         );
         yuv444p_top_identity_color_row::<BITS, BE>(
           rgb,
@@ -7538,6 +7586,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv420p16<BE>, R> {
           false,
           w,
           BE,
+          use_simd,
         );
         yuv444p_top_identity_color_row::<BITS, BE>(
           rgb,

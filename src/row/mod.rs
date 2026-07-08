@@ -203,6 +203,29 @@ pub(crate) use dispatch::filter_reduce::{
 ))]
 pub(crate) use dispatch::y_plane_to_luma_u16::y_plane_to_luma_u16_row;
 
+// Centered (#302 phase-0.5) 2:1 horizontal chroma-upsample reconstruct
+// dispatchers, consumed by the MixedSinker centered-siting paths. Each is
+// gated to its consumer families (u8 planar / NV / packed / YUVA; u16
+// planar; interleaved-UV P-format).
+#[cfg(all(
+  any(feature = "std", feature = "alloc"),
+  feature = "yuv-planar",
+  feature = "yuv-semi-planar"
+))]
+pub(crate) use dispatch::chroma_upsample::chroma_upsample_2to1_center_h_p0xx_row;
+#[cfg(all(
+  any(feature = "std", feature = "alloc"),
+  any(
+    feature = "yuv-planar",
+    feature = "yuv-semi-planar",
+    feature = "yuv-packed",
+    feature = "yuva"
+  )
+))]
+pub(crate) use dispatch::chroma_upsample::chroma_upsample_2to1_center_h_row;
+#[cfg(all(any(feature = "std", feature = "alloc"), feature = "yuv-planar"))]
+pub(crate) use dispatch::chroma_upsample::chroma_upsample_2to1_center_h_u16_row;
+
 // Task 3 — packed YUV 4:2:2 luma_u16 dispatchers (pub(crate) because they are
 // consumed only by the MixedSinker impls, not the public API).
 #[cfg(all(feature = "yuv-packed", any(feature = "std", feature = "alloc")))]

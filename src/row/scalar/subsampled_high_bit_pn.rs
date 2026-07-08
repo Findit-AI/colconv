@@ -138,6 +138,51 @@ pub(crate) fn chroma_upsample_2to1_center_h_p0xx<const BITS: u32, const LOW_PACK
   }
 }
 
+/// Reconstructs the four output elements (`U`/`V` × even/odd column) for a
+/// single interleaved chroma sample `j` of the centered (#302 phase-0.5) 2:1
+/// horizontal upsample — the per-sample body of
+/// [`chroma_upsample_2to1_center_h_p0xx`], factored out so the SIMD backends
+/// share this exact de-pack / blend / re-pack / re-interleave math for their
+/// edge / tail columns and stay byte-identical to this reference. `c[j-1]`
+/// clamps to `c[0]` and `c[j+1]` to `c[half-1]`, applied independently to `U`
+/// (even element) and `V` (odd element).
+#[cfg(all(any(feature = "std", feature = "alloc"), feature = "yuv-planar"))]
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn chroma_upsample_2to1_center_h_p0xx_pair<const BITS: u32, const LOW_PACKED: bool>(
+  uv_half: &[u16],
+  uv_full: &mut [u16],
+  j: usize,
+  half: usize,
+  big_endian: bool,
+) {
+  let shift = 16 - BITS;
+  let load = |c: usize, comp: usize| -> u32 {
+    let raw = uv_half[2 * c + comp];
+    let host = if big_endian {
+      u16::from_be(raw)
+    } else {
+      u16::from_le(raw)
+    };
+    depack_pn::<BITS, LOW_PACKED>(host) as u32
+  };
+  let store = |logical: u32| -> u16 {
+    let v = if LOW_PACKED {
+      logical as u16
+    } else {
+      (logical as u16) << shift
+    };
+    if big_endian { v.to_be() } else { v.to_le() }
+  };
+  let lj = j.saturating_sub(1);
+  let rj = if j + 1 < half { j + 1 } else { j };
+  let (ul, um, ur) = (load(lj, 0), load(j, 0), load(rj, 0));
+  let (vl, vm, vr) = (load(lj, 1), load(j, 1), load(rj, 1));
+  uv_full[2 * (2 * j)] = store((ul + 3 * um + 2) >> 2);
+  uv_full[2 * (2 * j) + 1] = store((vl + 3 * vm + 2) >> 2);
+  uv_full[2 * (2 * j + 1)] = store((3 * um + ur + 2) >> 2);
+  uv_full[2 * (2 * j + 1) + 1] = store((3 * vm + vr + 2) >> 2);
+}
+
 /// Bottom-sited (`AVCHROMA_LOC_BOTTOM`, `v = 1`) vertical + horizontal 2:1
 /// chroma reconstruction for the **high-bit-packed semi-planar** 4:2:0 P-format
 /// family — `P010` / `P012` / `P016` (RFC #238 S6e), the interleaved MSB-aligned

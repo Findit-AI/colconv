@@ -287,6 +287,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv422p9<BE>, R> {
             u_half,
             v_half,
             w,
+            use_simd,
           );
           let r = packed_yuv422_triple_filter_resample::<BITS>(
             luma_filter_stream_u16,
@@ -505,6 +506,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv422p9<BE>, R> {
               u_half,
               v_half,
               w,
+              use_simd,
             );
             packed_yuv422_triple_resample::<BITS>(
               luma_stream_u16,
@@ -684,6 +686,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv422p9<BE>, R> {
         row.u_half(),
         row.v_half(),
         w,
+        use_simd,
       ))
     } else {
       None
@@ -1183,6 +1186,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv422p10<BE>, R> {
             u_half,
             v_half,
             w,
+            use_simd,
           );
           let r = packed_yuv422_triple_filter_resample::<BITS>(
             luma_filter_stream_u16,
@@ -1401,6 +1405,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv422p10<BE>, R> {
               u_half,
               v_half,
               w,
+              use_simd,
             );
             packed_yuv422_triple_resample::<BITS>(
               luma_stream_u16,
@@ -1580,6 +1585,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv422p10<BE>, R> {
         row.u_half(),
         row.v_half(),
         w,
+        use_simd,
       ))
     } else {
       None
@@ -2064,6 +2070,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv422p12<BE>, R> {
             u_half,
             v_half,
             w,
+            use_simd,
           );
           let r = packed_yuv422_triple_filter_resample::<BITS>(
             luma_filter_stream_u16,
@@ -2282,6 +2289,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv422p12<BE>, R> {
               u_half,
               v_half,
               w,
+              use_simd,
             );
             packed_yuv422_triple_resample::<BITS>(
               luma_stream_u16,
@@ -2461,6 +2469,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv422p12<BE>, R> {
         row.u_half(),
         row.v_half(),
         w,
+        use_simd,
       ))
     } else {
       None
@@ -2945,6 +2954,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv422p14<BE>, R> {
             u_half,
             v_half,
             w,
+            use_simd,
           );
           let r = packed_yuv422_triple_filter_resample::<BITS>(
             luma_filter_stream_u16,
@@ -3163,6 +3173,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv422p14<BE>, R> {
               u_half,
               v_half,
               w,
+              use_simd,
             );
             packed_yuv422_triple_resample::<BITS>(
               luma_stream_u16,
@@ -3342,6 +3353,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv422p14<BE>, R> {
         row.u_half(),
         row.v_half(),
         w,
+        use_simd,
       ))
     } else {
       None
@@ -3833,6 +3845,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv422p16<BE>, R> {
             u_half,
             v_half,
             w,
+            use_simd,
           );
           let r = packed_yuv422_triple_filter_resample::<BITS>(
             luma_filter_stream_u16,
@@ -4051,6 +4064,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv422p16<BE>, R> {
               u_half,
               v_half,
               w,
+              use_simd,
             );
             packed_yuv422_triple_resample::<BITS>(
               luma_stream_u16,
@@ -4230,6 +4244,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv422p16<BE>, R> {
         row.u_half(),
         row.v_half(),
         w,
+        use_simd,
       ))
     } else {
       None

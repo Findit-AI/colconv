@@ -284,6 +284,7 @@ fn packed_411_center_upsample_chroma<'s>(
   v_quarter: &mut [u8],
   packed: &[u8],
   width: usize,
+  use_simd: bool,
 ) -> (&'s [u8], &'s [u8]) {
   let cw = width / 4;
   debug_assert!(
@@ -300,6 +301,7 @@ fn packed_411_center_upsample_chroma<'s>(
     &u_quarter[..cw],
     &v_quarter[..cw],
     width,
+    use_simd,
   )
 }
 
@@ -589,6 +591,7 @@ impl<R> PixelSink for MixedSinker<'_, Uyyvyy411, R> {
               packed_yuv_v_half,
               packed,
               w,
+              use_simd,
             );
             let r = packed_yuv422_dual_filter_resample(
               luma_filter_stream,
@@ -801,6 +804,7 @@ impl<R> PixelSink for MixedSinker<'_, Uyyvyy411, R> {
           packed_yuv_v_half,
           packed,
           w,
+          use_simd,
         );
         packed_yuv_dual_resample(
           luma_stream,
@@ -992,6 +996,7 @@ impl<R> PixelSink for MixedSinker<'_, Uyyvyy411, R> {
           packed_yuv_v_half,
           packed,
           w,
+          use_simd,
         );
         yuv_444_to_hsv_row(
           &packed_yuv_y_full[..w],
@@ -1037,6 +1042,7 @@ impl<R> PixelSink for MixedSinker<'_, Uyyvyy411, R> {
           packed_yuv_v_half,
           packed,
           w,
+          use_simd,
         );
         yuv_444_to_rgba_row(
           &packed_yuv_y_full[..w],
@@ -1085,6 +1091,7 @@ impl<R> PixelSink for MixedSinker<'_, Uyyvyy411, R> {
         packed_yuv_v_half,
         packed,
         w,
+        use_simd,
       );
       yuv_444_to_rgb_row(
         &packed_yuv_y_full[..w],

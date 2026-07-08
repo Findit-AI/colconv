@@ -122,6 +122,19 @@ mod alpha_extract;
 pub(crate) mod area_reduce;
 #[cfg(feature = "yuv-444-packed")]
 mod ayuv64;
+// Centered (#302 phase-0.5) 2:1 horizontal chroma-upsample reconstruct
+// kernels; see the NEON twin for the design. Union gate keeps the module
+// live wherever any consumer family is; per-kernel gates carve out the rest.
+#[cfg(all(
+  any(feature = "std", feature = "alloc"),
+  any(
+    feature = "yuv-planar",
+    feature = "yuv-semi-planar",
+    feature = "yuv-packed",
+    feature = "yuva"
+  )
+))]
+pub(crate) mod chroma_upsample;
 pub(crate) mod endian;
 #[cfg(all(
   any(feature = "std", feature = "alloc"),

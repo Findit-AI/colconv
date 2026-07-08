@@ -946,6 +946,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuva420p, R> {
                       center_sited,
                       false,
                       w,
+                      use_simd,
                     );
                     let held_y: &[u8] = &chroma_top_y[..w];
                     let held_a: &[u8] = &chroma_top_a[..w];
@@ -1004,6 +1005,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuva420p, R> {
                     center_sited,
                     false,
                     w,
+                    use_simd,
                   );
                   packed_yuva444_resample::<8>(
                     rgba_stream,
@@ -1059,6 +1061,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuva420p, R> {
                     center_sited,
                     false,
                     w,
+                    use_simd,
                   );
                   packed_yuva444_resample::<8>(
                     rgba_stream,
@@ -1150,6 +1153,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuva420p, R> {
                   center_sited,
                   false,
                   w,
+                  use_simd,
                 );
                 packed_yuva444_resample::<8>(
                   rgba_stream,
@@ -1339,6 +1343,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuva420p, R> {
                   center_sited,
                   false,
                   w,
+                  use_simd,
                 );
                 let held_y: &[u8] = &chroma_top_y[..w];
                 let held_a: &[u8] = &chroma_top_a[..w];
@@ -1395,6 +1400,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuva420p, R> {
                 center_sited,
                 false,
                 w,
+                use_simd,
               );
               packed_yuva444_filter_resample::<8, true, false>(
                 rgba_filter_stream,
@@ -1443,6 +1449,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuva420p, R> {
                 center_sited,
                 false,
                 w,
+                use_simd,
               );
               packed_yuva444_filter_resample::<8, true, false>(
                 rgba_filter_stream,
@@ -1530,6 +1537,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuva420p, R> {
               center_sited,
               false,
               w,
+              use_simd,
             );
             packed_yuva444_filter_resample::<8, true, false>(
               rgba_filter_stream,
@@ -1840,6 +1848,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuva420p, R> {
             center_sited,
             false,
             w,
+            use_simd,
           );
           yuva444_top_identity_color_row(
             rgb,
@@ -1871,6 +1880,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuva420p, R> {
           center_sited,
           false,
           w,
+          use_simd,
         );
         yuva444_top_identity_color_row(
           rgb,
@@ -1909,6 +1919,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuva420p, R> {
           center_sited,
           false,
           w,
+          use_simd,
         );
         yuva444_top_identity_color_row(
           rgb,
@@ -1978,6 +1989,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuva420p, R> {
         center_sited,
         true,
         w,
+        use_simd,
       ))
     } else {
       None
@@ -3162,6 +3174,7 @@ fn yuva420p_high_bit_process<const BITS: u32, const BE: bool, F: crate::SourceFo
           false,
           w,
           BE,
+          use_simd,
         );
         yuva444p_high_bit_top_identity_color_row::<BITS, BE>(
           rgb,
@@ -3201,6 +3214,7 @@ fn yuva420p_high_bit_process<const BITS: u32, const BE: bool, F: crate::SourceFo
         false,
         w,
         BE,
+        use_simd,
       );
       yuva444p_high_bit_top_identity_color_row::<BITS, BE>(
         rgb,
@@ -3247,6 +3261,7 @@ fn yuva420p_high_bit_process<const BITS: u32, const BE: bool, F: crate::SourceFo
         false,
         w,
         BE,
+        use_simd,
       );
       yuva444p_high_bit_top_identity_color_row::<BITS, BE>(
         rgb,
@@ -3319,6 +3334,7 @@ fn yuva420p_high_bit_process<const BITS: u32, const BE: bool, F: crate::SourceFo
       true,
       w,
       BE,
+      use_simd,
     ))
   } else {
     None
@@ -3791,6 +3807,7 @@ fn yuva420p_high_bit_resample<const BITS: u32, const BE: bool>(
               false,
               w,
               BE,
+              use_simd,
             );
             let held_y: &[u16] = &chroma_top_y_u16[..w];
             let held_a: &[u16] = &chroma_top_a_u16[..w];
@@ -3859,6 +3876,7 @@ fn yuva420p_high_bit_resample<const BITS: u32, const BE: bool>(
             false,
             w,
             BE,
+            use_simd,
           );
           packed_yuva444_resample::<BITS>(
             rgba_stream,
@@ -3911,6 +3929,7 @@ fn yuva420p_high_bit_resample<const BITS: u32, const BE: bool>(
             false,
             w,
             BE,
+            use_simd,
           );
           packed_yuva444_resample::<BITS>(
             rgba_stream,
@@ -4004,6 +4023,7 @@ fn yuva420p_high_bit_resample<const BITS: u32, const BE: bool>(
               false,
               w,
               BE,
+              use_simd,
             );
             let held_y: &[u16] = &chroma_top_y_u16[..w];
             let held_a: &[u16] = &chroma_top_a_u16[..w];
@@ -4075,6 +4095,7 @@ fn yuva420p_high_bit_resample<const BITS: u32, const BE: bool>(
             false,
             w,
             BE,
+            use_simd,
           );
           packed_yuva444_filter_resample::<BITS, false, false>(
             rgba_filter_stream,
@@ -4130,6 +4151,7 @@ fn yuva420p_high_bit_resample<const BITS: u32, const BE: bool>(
             false,
             w,
             BE,
+            use_simd,
           );
           packed_yuva444_filter_resample::<BITS, false, false>(
             rgba_filter_stream,
@@ -4256,6 +4278,7 @@ fn yuva420p_high_bit_resample<const BITS: u32, const BE: bool>(
               false,
               w,
               BE,
+              use_simd,
             );
             let r = packed_yuva444_resample::<BITS>(
               rgba_stream,
@@ -4444,6 +4467,7 @@ fn yuva420p_high_bit_resample<const BITS: u32, const BE: bool>(
               false,
               w,
               BE,
+              use_simd,
             );
             let r = packed_yuva444_filter_resample::<BITS, false, false>(
               rgba_filter_stream,

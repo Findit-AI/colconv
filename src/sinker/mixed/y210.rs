@@ -412,6 +412,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Y210<BE>, R> {
               w,
               h,
               BE,
+              use_simd,
             )?;
             let y_full = &y2xx_y_full[..w];
             let r = packed_yuv422_triple_filter_resample::<BITS>(
@@ -625,6 +626,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Y210<BE>, R> {
           w,
           h,
           BE,
+          use_simd,
         )?;
         let y_full = &y2xx_y_full[..w];
         packed_yuv422_triple_resample::<BITS>(

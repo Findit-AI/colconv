@@ -12538,6 +12538,7 @@ fn y2xx_center_reconstruct<'c, const BITS: u32>(
   w: usize,
   h: usize,
   be: bool,
+  use_simd: bool,
 ) -> Result<(&'c [u16], &'c [u16]), MixedSinkerError> {
   let cw = w / 2;
   subsampled_4_2_0_high_bit::reserve_420_chroma_full_u16(chroma_full, w, h)?;
@@ -12565,6 +12566,7 @@ fn y2xx_center_reconstruct<'c, const BITS: u32>(
     &u_half[..cw],
     &v_half[..cw],
     w,
+    use_simd,
   ))
 }
 
@@ -12942,6 +12944,7 @@ fn v210_center_reconstruct<'c>(
   w: usize,
   h: usize,
   be: bool,
+  use_simd: bool,
 ) -> Result<(&'c [u16], &'c [u16]), MixedSinkerError> {
   const BITS: u32 = 10;
   let cw = w / 2;
@@ -13009,6 +13012,7 @@ fn v210_center_reconstruct<'c>(
     &u_half[..cw],
     &v_half[..cw],
     w,
+    use_simd,
   ))
 }
 
