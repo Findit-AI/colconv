@@ -2891,6 +2891,17 @@ pub struct MixedSinker<'a, F: SourceFormat, R = NoopResampler> {
   /// `None` and passes `v_phase = 0`. Cleared each `begin_frame`.
   #[cfg(feature = "yuv-planar")]
   frozen_chroma_bottom_v: Option<bool>,
+  /// RFC #238 Top companion to [`Self::frozen_chroma_bottom_v`]: the effective
+  /// 4:2:0 **Top** vertical phase (`true` = `Top` / `TopLeft` `v = 0` forward
+  /// fold, `false` otherwise) frozen on the first output-bearing row of the
+  /// current frame. `Center` and `Top` are BOTH horizontally centered and BOTH
+  /// carry `frozen_chroma_bottom_v = Some(false)`, so neither prior flag can
+  /// tell them apart; freezing the Top phase too rejects a mid-frame
+  /// `Center`/`Bottom` ⇆ `Top` flip with
+  /// [`MixedSinkerError::ChromaSitingChanged`]. Only the `Yuv420p` dispatch sets
+  /// it; every other format leaves it `None`. Cleared each `begin_frame`.
+  #[cfg(feature = "yuv-planar")]
+  frozen_chroma_top_v: Option<bool>,
   /// Forward one-row output-delay state for the 4:2:0 **Top** (`v = 0`) identity
   /// decode (RFC #238) — the mirror of the backward [`Self::chroma_prev`]
   /// lookback `Bottom` uses. A `Top` chroma sample sits on the TOP luma row of
@@ -4068,6 +4079,8 @@ impl<F: SourceFormat, R> MixedSinker<'_, F, R> {
       frozen_chroma_centered: None,
       #[cfg(feature = "yuv-planar")]
       frozen_chroma_bottom_v: None,
+      #[cfg(feature = "yuv-planar")]
+      frozen_chroma_top_v: None,
       #[cfg(feature = "yuv-planar")]
       chroma_top_pending: None,
       #[cfg(feature = "yuv-planar")]

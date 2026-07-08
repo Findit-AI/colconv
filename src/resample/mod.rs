@@ -1030,6 +1030,17 @@ pub struct ResamplePlan {
   /// Vertical chroma sampling phase — the `h_phase` twin on the V axis
   /// (e.g. 4:2:0 Bottom siting). `0.0` = co-sited.
   v_phase: f64,
+  /// Whether the vertical axis carries the RFC #238 4:2:0 **Top** (`v = 0`)
+  /// FORWARD-reaching chroma fold ([`AxisSpans::area_chroma_phased_v_top`]).
+  /// `v_top` is disjoint from a non-zero [`Self::v_phase`] (`Bottom`, `v = 1`,
+  /// BACKWARD): both cannot hold at once. It is a SEPARATE field because a Top
+  /// plan carries `v_phase == 0.0` (its sample sits ON the even luma row) yet is
+  /// NOT co-sited vertically, so [`Self::has_chroma_v_phase`] alone cannot tell
+  /// a Top fold from the plain co-sited pairing — the native / HSV-only joins
+  /// read [`Self::has_chroma_v_top`] alongside it to rebuild a cached chroma
+  /// plan whose vertical siting moved to / from Top. `false` for every non-Top
+  /// plan, so those are byte-identical to before the field existed.
+  v_top: bool,
 }
 
 impl ResamplePlan {
@@ -1068,6 +1079,7 @@ impl ResamplePlan {
       filter_v_chroma: None,
       h_phase: 0.0,
       v_phase: 0.0,
+      v_top: false,
     })
   }
 
@@ -1101,6 +1113,7 @@ impl ResamplePlan {
       filter_v_chroma: None,
       h_phase: 0.0,
       v_phase: 0.0,
+      v_top: false,
     })
   }
 
@@ -1163,6 +1176,7 @@ impl ResamplePlan {
       filter_v_chroma: Some(filter_v_chroma),
       h_phase,
       v_phase,
+      v_top: false,
     })
   }
 
@@ -1269,6 +1283,7 @@ impl ResamplePlan {
       filter_v_chroma: None,
       h_phase,
       v_phase,
+      v_top,
     })
   }
 
@@ -1335,6 +1350,7 @@ impl ResamplePlan {
       filter_v_chroma: None,
       h_phase,
       v_phase,
+      v_top: false,
     })
   }
 
@@ -1379,6 +1395,7 @@ impl ResamplePlan {
       filter_v_chroma: None,
       h_phase,
       v_phase,
+      v_top: false,
     })
   }
 
@@ -1423,6 +1440,7 @@ impl ResamplePlan {
       filter_v_chroma: None,
       h_phase,
       v_phase,
+      v_top: false,
     })
   }
 
@@ -1484,6 +1502,7 @@ impl ResamplePlan {
       filter_v_chroma: None,
       h_phase,
       v_phase,
+      v_top: false,
     })
   }
 
@@ -1530,6 +1549,20 @@ impl ResamplePlan {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(crate) const fn has_chroma_v_phase(&self) -> bool {
     self.v_phase != 0.0
+  }
+
+  /// Whether this plan carries the RFC #238 4:2:0 **Top** (`v = 0`) FORWARD
+  /// vertical chroma fold ([`AxisSpans::area_chroma_phased_v_top`]). A Top plan
+  /// keeps `v_phase == 0.0` (the sample sits ON the even luma row), so
+  /// [`Self::has_chroma_v_phase`] reads `false` for it and cannot distinguish it
+  /// from the plain co-sited pairing; the native / HSV-only joins compare THIS
+  /// flag alongside `has_chroma_v_phase` / `has_chroma_h_phase` to rebuild a
+  /// cached chroma plan whose vertical siting moved to / from Top. `false` for
+  /// every non-Top siting (co-sited, `Center`, `Bottom`, `BottomLeft`).
+  #[cfg(feature = "yuv-planar")]
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub(crate) const fn has_chroma_v_top(&self) -> bool {
+    self.v_top
   }
 
   /// Whether this plan carries a non-zero **horizontal** chroma phase (RFC #238

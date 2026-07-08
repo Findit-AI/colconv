@@ -162,6 +162,20 @@ fn linear_tail_rgb_len(out_w: usize, out_h: usize) -> Result<usize, MixedSinkerE
 ///
 /// `Vec` resolves to `alloc::vec::Vec` under `no_std` (the crate aliases
 /// `alloc` to `std`), so this is `no_std + alloc` clean.
+/// The final-row bin tail — the `f32` RGB bin stream, the `binned` output
+/// accumulator, the optional luma `u8` bin stream, and the per-output re-encode
+/// row. All four are dimension-only allocations (independent of any row's
+/// data), so they can be pre-built ahead of the final row and consumed there.
+/// Pre-building lets the RFC #238 Top odd-height two-row FINAL flush reserve
+/// them BEFORE either of its feeds, keeping the flush retry-atomic (a refusal
+/// returns before any feed advances the frame cursor).
+type LinearTail = (
+  AreaStream<f32>,
+  std::vec::Vec<f32>,
+  Option<AreaStream<u8>>,
+  std::vec::Vec<u8>,
+);
+
 #[derive(Debug)]
 pub(super) struct LinearLightFrame {
   /// `src_w * src_h * 3` interleaved linear-light RGB (`f32`), filled row
@@ -190,6 +204,13 @@ pub(super) struct LinearLightFrame {
   /// a different mode is rejected (a mid-frame flip would bin display- and
   /// scene-decoded rows in the same frame).
   frozen_linear_mode: LinearMode,
+  /// RFC #238 Top: an optionally pre-built final-row bin tail. `None` on the
+  /// ordinary path — the final row builds the tail inline. The Top odd-height
+  /// two-row FINAL flush pre-reserves it here via
+  /// [`linear_light_reserve_final_tail`] BEFORE either of its two feeds, so the
+  /// final feed consumes it instead of allocating and the flush stays
+  /// retry-atomic. Cleared (taken) when the final row consumes it.
+  reserved_tail: Option<LinearTail>,
 }
 
 impl LinearLightFrame {
@@ -239,8 +260,67 @@ impl LinearLightFrame {
       src_h,
       frozen_transfer,
       frozen_linear_mode,
+      reserved_tail: None,
     })
   }
+
+  /// The next source row this frame expects (0 at a fresh frame). Read by the
+  /// `Yuv420p` Top forward-delay dispatch to derive the next expected SOURCE row
+  /// (`next_y + buffered-held`), for the out-of-sequence walker guard.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub(super) const fn next_y(&self) -> usize {
+    self.next_y
+  }
+}
+
+/// Pre-builds the final-row bin tail into an already-committed
+/// [`LinearLightFrame`] so the RFC #238 Top odd-height two-row FINAL flush can
+/// reserve it BEFORE either of its feeds. The tail is the ONLY fallible
+/// allocation the final row runs, and in the two-row flush the final feed (the
+/// second) would otherwise allocate it AFTER the first feed already advanced the
+/// frame cursor — un-retryable. Hoisting it here (via the SAME failpoint and the
+/// SAME dimension-only allocations [`linear_light_resample`] uses) makes both
+/// feeds infallible, so a refusal returns before any feed and the same row
+/// retries cleanly (#180). Idempotent (a second call is a no-op once reserved);
+/// a `None` frame (the first row, never a two-row flush) reserves nothing.
+pub(super) fn linear_light_reserve_final_tail(
+  frame: &mut Option<LinearLightFrame>,
+  plan: &ResamplePlan,
+  w: usize,
+  h: usize,
+  want_luma: bool,
+) -> Result<(), MixedSinkerError> {
+  let Some(buf) = frame.as_mut() else {
+    return Ok(());
+  };
+  if buf.reserved_tail.is_some() {
+    return Ok(());
+  }
+  let ow = plan.out_w();
+  let oh = plan.out_h();
+  if take_linear_tail_alloc_failure() {
+    return Err(MixedSinkerError::Resample(
+      crate::resample::ResampleError::AllocationFailed(crate::resample::PlanGeometry::new(
+        w, h, ow, oh,
+      )),
+    ));
+  }
+  let rgb_len = linear_tail_rgb_len(ow, oh)?;
+  let alloc_failed = || {
+    MixedSinkerError::Resample(crate::resample::ResampleError::AllocationFailed(
+      crate::resample::PlanGeometry::new(w, h, ow, oh),
+    ))
+  };
+  let stream = AreaStream::<f32>::new(plan.h(), plan.v(), w, h, 3)?;
+  let binned = try_zeroed::<f32>(rgb_len).map_err(|_| alloc_failed())?;
+  let y_stream = if want_luma {
+    Some(AreaStream::<u8>::new(plan.h(), plan.v(), w, h, 1)?)
+  } else {
+    None
+  };
+  let enc_out = try_zeroed::<u8>(rgb_row_bytes(ow)).map_err(|_| alloc_failed())?;
+  buf.reserved_tail = Some((stream, binned, y_stream, enc_out));
+  Ok(())
 }
 
 /// Check-only Linear preflight: the exact rejects [`linear_light_resample`]
@@ -607,7 +687,21 @@ pub(super) fn linear_light_resample(
   // `src_w` / `src_h`) and `plan` — never persistent frame state. Held in
   // `tail` and consumed after the commit below.
   let is_final = idx + 1 == h;
-  let tail = if is_final {
+  let tail = if is_final && let Some(pre) = frame.as_mut().and_then(|b| b.reserved_tail.take()) {
+    // RFC #238 Top: the two-row FINAL flush pre-reserved this tail (via
+    // `linear_light_reserve_final_tail`) BEFORE its first feed, so the final feed
+    // consumes it here with no allocation — the failpoint already fired at the
+    // reserve, keeping the flush retry-atomic.
+    let (stream, binned, y_stream, enc_out) = pre;
+    Some((
+      plan.out_w(),
+      plan.out_h(),
+      stream,
+      binned,
+      y_stream,
+      enc_out,
+    ))
+  } else if is_final {
     let ow = plan.out_w();
     let oh = plan.out_h();
     if take_linear_tail_alloc_failure() {
