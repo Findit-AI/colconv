@@ -529,6 +529,8 @@ impl<R> PixelSink for MixedSinker<'_, Yuva422p, R> {
       hsv,
       rgb_scratch,
       chroma_full,
+      // RFC #238 S7: the 4:2:2 chroma phase frozen on the first output row.
+      frozen_chroma_centered,
       ..
     } = self;
 
@@ -559,6 +561,21 @@ impl<R> PixelSink for MixedSinker<'_, Yuva422p, R> {
     // pair). 4:2:2 is subsampled horizontally only — no vertical blend or chroma
     // lookback (cf. the 4:2:0 sibling).
     let center_sited = chroma_422_center_sited_h(chroma_location);
+
+    // Per-frame chroma-siting freeze (RFC #238, mirroring the resample-path guard
+    // above): the first output-bearing row pins the phase; a later row whose siting
+    // flipped would decode a mixture of centered and co-sited chroma into ONE
+    // frame, so reject it here BEFORE any scratch reserve or output write.
+    // `begin_frame` clears the freeze so the next frame may pick either phase.
+    if need_output
+      && let Some(frozen) = *frozen_chroma_centered
+      && frozen != center_sited
+    {
+      return Err(MixedSinkerError::ChromaSitingChanged(
+        ChromaSitingChanged::new(idx),
+      ));
+    }
+
     // HSV-without-RGB-or-RGBA goes through the direct `yuv_*_to_hsv_row` kernel
     // (no source-width RGB scratch). HSV is colour-only — the source alpha plane
     // is dropped — so a YUVA HSV is byte-identical to the no-alpha `Yuv422p` HSV
@@ -616,6 +633,13 @@ impl<R> PixelSink for MixedSinker<'_, Yuva422p, R> {
     } else {
       None
     };
+
+    // Freeze the phase on the first output-bearing row — AFTER the fallible scratch
+    // reserves above have succeeded, so an `AllocationFailed` row stays retryable
+    // (frozen stays unset); later rows are checked against it up top.
+    if need_output && frozen_chroma_centered.is_none() {
+      *frozen_chroma_centered = Some(center_sited);
+    }
 
     // Luma — copy the Y plane verbatim (8-bit YUVA's Y is already u8).
     if let Some(luma) = luma.as_deref_mut() {
@@ -1585,6 +1609,8 @@ fn yuva422p_high_bit_process<const BITS: u32, const BE: bool, F: crate::SourceFo
     hsv,
     rgb_scratch,
     chroma_full_u16,
+    // RFC #238 S7: the 4:2:2 chroma phase frozen on the first output row.
+    frozen_chroma_centered,
     ..
   } = sinker;
 
@@ -1622,6 +1648,22 @@ fn yuva422p_high_bit_process<const BITS: u32, const BE: bool, F: crate::SourceFo
   // pair). 4:2:2 is subsampled horizontally only — no vertical blend or chroma
   // lookback (cf. the 4:2:0 sibling).
   let center_sited = chroma_422_center_sited_h(chroma_location);
+
+  // Per-frame chroma-siting freeze (RFC #238, mirroring the resample-path guard):
+  // the first output-bearing row pins the phase; a later row whose siting flipped
+  // would decode a mixture of centered and co-sited chroma into ONE frame, so
+  // reject it here BEFORE any scratch reserve or output write. `begin_frame`'s
+  // `reset_high_bit_yuva_streams` clears the freeze so the next frame may pick
+  // either phase.
+  if need_output
+    && let Some(frozen) = *frozen_chroma_centered
+    && frozen != center_sited
+  {
+    return Err(MixedSinkerError::ChromaSitingChanged(
+      ChromaSitingChanged::new(idx),
+    ));
+  }
+
   // HSV-without-RGB-or-RGBA goes through the direct alpha-drop `hsv_dispatch`
   // kernel (no source-width RGB scratch). HSV is colour-only — the source alpha
   // plane is dropped. See `yuva420p_high_bit_process` for the full routing
@@ -1676,6 +1718,13 @@ fn yuva422p_high_bit_process<const BITS: u32, const BE: bool, F: crate::SourceFo
   } else {
     None
   };
+
+  // Freeze the phase on the first output-bearing row — AFTER the fallible scratch
+  // reserves above have succeeded, so an `AllocationFailed` row stays retryable
+  // (frozen stays unset); later rows are checked against it up top.
+  if need_output && frozen_chroma_centered.is_none() {
+    *frozen_chroma_centered = Some(center_sited);
+  }
 
   // ---- luma (native Y; luma narrows `>> (BITS - 8)`, luma_u16 is the
   // host-native logical Y) — see `yuva420p_high_bit_process`. -----------

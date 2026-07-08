@@ -931,6 +931,23 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P210<BE>, R> {
     #[cfg(feature = "yuv-planar")]
     let center_sited = chroma_422_center_sited_h(chroma_location);
 
+    // Per-frame chroma-siting freeze (RFC #238, mirroring the resample-path guard
+    // + the Nv20 sibling's direct-path freeze in this file): the first
+    // output-bearing row pins the phase; a later row whose siting flipped would
+    // decode a mixture of centered and co-sited chroma into ONE frame, so reject
+    // it here BEFORE any scratch reserve or output write. `begin_frame`'s
+    // `reset_high_bit_yuv_streams` clears the freeze so the next frame may pick
+    // either phase.
+    #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
+    if need_output
+      && let Some(frozen) = *frozen_chroma_centered
+      && frozen != center_sited
+    {
+      return Err(MixedSinkerError::ChromaSitingChanged(
+        ChromaSitingChanged::new(idx),
+      ));
+    }
+
     // Atomicity preflight (#302 / #308, cf. the crate's #180 resample fix and the
     // high-bit 4:2:0 `p0xx` sibling): reserve EVERY fallible row scratch this
     // identity row can touch BEFORE any output row is written (the luma plane
@@ -989,6 +1006,16 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P210<BE>, R> {
     };
     #[cfg(not(feature = "yuv-planar"))]
     let centered: Option<&[u16]> = None;
+
+    // Freeze the phase on the first output-bearing row — AFTER the fallible
+    // scratch reserves above have succeeded, so an `AllocationFailed` row stays
+    // retryable (frozen stays unset); later rows are checked against it up top.
+    // The remaining fallible ops below are geometry / bounds checks, deterministic
+    // regardless of siting.
+    #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
+    if need_output && frozen_chroma_centered.is_none() {
+      *frozen_chroma_centered = Some(center_sited);
+    }
 
     if let Some(luma) = luma.as_deref_mut() {
       let dst = &mut luma[one_plane_start..one_plane_end];
@@ -1795,6 +1822,23 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P212<BE>, R> {
     #[cfg(feature = "yuv-planar")]
     let center_sited = chroma_422_center_sited_h(chroma_location);
 
+    // Per-frame chroma-siting freeze (RFC #238, mirroring the resample-path guard
+    // + the Nv20 sibling's direct-path freeze in this file): the first
+    // output-bearing row pins the phase; a later row whose siting flipped would
+    // decode a mixture of centered and co-sited chroma into ONE frame, so reject
+    // it here BEFORE any scratch reserve or output write. `begin_frame`'s
+    // `reset_high_bit_yuv_streams` clears the freeze so the next frame may pick
+    // either phase.
+    #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
+    if need_output
+      && let Some(frozen) = *frozen_chroma_centered
+      && frozen != center_sited
+    {
+      return Err(MixedSinkerError::ChromaSitingChanged(
+        ChromaSitingChanged::new(idx),
+      ));
+    }
+
     // Atomicity preflight (#302 / #308, cf. the crate's #180 resample fix and the
     // high-bit 4:2:0 `p0xx` sibling): reserve EVERY fallible row scratch this
     // identity row can touch BEFORE any output row is written (the luma plane
@@ -1853,6 +1897,16 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P212<BE>, R> {
     };
     #[cfg(not(feature = "yuv-planar"))]
     let centered: Option<&[u16]> = None;
+
+    // Freeze the phase on the first output-bearing row — AFTER the fallible
+    // scratch reserves above have succeeded, so an `AllocationFailed` row stays
+    // retryable (frozen stays unset); later rows are checked against it up top.
+    // The remaining fallible ops below are geometry / bounds checks, deterministic
+    // regardless of siting.
+    #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
+    if need_output && frozen_chroma_centered.is_none() {
+      *frozen_chroma_centered = Some(center_sited);
+    }
 
     if let Some(luma) = luma.as_deref_mut() {
       let dst = &mut luma[one_plane_start..one_plane_end];
@@ -2660,6 +2714,23 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P216<BE>, R> {
     #[cfg(feature = "yuv-planar")]
     let center_sited = chroma_422_center_sited_h(chroma_location);
 
+    // Per-frame chroma-siting freeze (RFC #238, mirroring the resample-path guard
+    // + the Nv20 sibling's direct-path freeze in this file): the first
+    // output-bearing row pins the phase; a later row whose siting flipped would
+    // decode a mixture of centered and co-sited chroma into ONE frame, so reject
+    // it here BEFORE any scratch reserve or output write. `begin_frame`'s
+    // `reset_high_bit_yuv_streams` clears the freeze so the next frame may pick
+    // either phase.
+    #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
+    if need_output
+      && let Some(frozen) = *frozen_chroma_centered
+      && frozen != center_sited
+    {
+      return Err(MixedSinkerError::ChromaSitingChanged(
+        ChromaSitingChanged::new(idx),
+      ));
+    }
+
     // Atomicity preflight (#302 / #308, cf. the crate's #180 resample fix and the
     // high-bit 4:2:0 `p0xx` sibling): reserve EVERY fallible row scratch this
     // identity row can touch BEFORE any output row is written (the luma plane
@@ -2718,6 +2789,16 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P216<BE>, R> {
     };
     #[cfg(not(feature = "yuv-planar"))]
     let centered: Option<&[u16]> = None;
+
+    // Freeze the phase on the first output-bearing row — AFTER the fallible
+    // scratch reserves above have succeeded, so an `AllocationFailed` row stays
+    // retryable (frozen stays unset); later rows are checked against it up top.
+    // The remaining fallible ops below are geometry / bounds checks, deterministic
+    // regardless of siting.
+    #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
+    if need_output && frozen_chroma_centered.is_none() {
+      *frozen_chroma_centered = Some(center_sited);
+    }
 
     // 16-bit Y >> 8 is the top byte (all bits active).
     if let Some(luma) = luma.as_deref_mut() {

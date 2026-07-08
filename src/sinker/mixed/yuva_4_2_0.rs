@@ -852,6 +852,10 @@ impl<R> PixelSink for MixedSinker<'_, Yuva420p, R> {
       chroma_full,
       chroma_prev,
       chroma_prev_row,
+      // RFC #238 S4-D: the 4:2:0 horizontal + vertical (`Bottom`) chroma phase
+      // frozen on the first output row.
+      frozen_chroma_centered,
+      frozen_chroma_bottom_v,
       ..
     } = self;
 
@@ -880,6 +884,25 @@ impl<R> PixelSink for MixedSinker<'_, Yuva420p, R> {
     // row's chroma with the previous chroma row via the `chroma_prev` lookback.
     let center_sited = chroma_420_center_sited_h(chroma_location);
     let bottom_v = chroma_420_bottom_sited_v(chroma_location);
+
+    // Per-frame chroma-siting freeze (RFC #238, mirroring the resample-path guard
+    // above): the first output-bearing row pins the effective 4:2:0 phase — BOTH
+    // the horizontal centered flag and the vertical `Bottom` flag. A later row
+    // whose siting flipped would decode a mixture of phases into ONE frame, or box-
+    // blend against a STALE `chroma_prev` lookback, so reject it here BEFORE any
+    // scratch reserve, lookback priming, or output write. This CHECK precedes the
+    // `stage_420_chroma_prev` / reconstruct staging below so a rejected flip leaves
+    // `chroma_prev` / `chroma_prev_row` untouched (retry-atomic, #180).
+    // `begin_frame` clears the freeze so the next frame may pick either phase.
+    if need_output
+      && let Some(frozen) = *frozen_chroma_centered
+      && (frozen != center_sited || *frozen_chroma_bottom_v != Some(bottom_v))
+    {
+      return Err(MixedSinkerError::ChromaSitingChanged(
+        ChromaSitingChanged::new(idx),
+      ));
+    }
+
     // HSV-without-RGB-or-RGBA goes through the direct `yuv_420_to_hsv_row`
     // kernel (no source-width RGB scratch). HSV is colour-only — the
     // source alpha plane is dropped — so a YUVA HSV is byte-identical to
@@ -980,6 +1003,16 @@ impl<R> PixelSink for MixedSinker<'_, Yuva420p, R> {
         idx,
         w,
       );
+    }
+
+    // Freeze the effective 4:2:0 phase on the first output-bearing row — AFTER the
+    // fallible scratch reserves above have succeeded, so an `AllocationFailed` row
+    // stays retryable (frozen stays unset); later rows are checked against it up
+    // top. Both the horizontal centered flag and the vertical `Bottom` flag are
+    // pinned together.
+    if need_output && frozen_chroma_centered.is_none() {
+      *frozen_chroma_centered = Some(center_sited);
+      *frozen_chroma_bottom_v = Some(bottom_v);
     }
 
     // Luma — copy the Y plane verbatim (8-bit YUVA's Y is already u8).
@@ -1952,6 +1985,10 @@ fn yuva420p_high_bit_process<const BITS: u32, const BE: bool, F: crate::SourceFo
     chroma_full_u16,
     chroma_prev_u16,
     chroma_prev_row,
+    // RFC #238 S6f: the 4:2:0 horizontal + vertical (`Bottom`) chroma phase frozen
+    // on the first output row.
+    frozen_chroma_centered,
+    frozen_chroma_bottom_v,
     ..
   } = sinker;
 
@@ -1988,6 +2025,26 @@ fn yuva420p_high_bit_process<const BITS: u32, const BE: bool, F: crate::SourceFo
   // row via the `chroma_prev_u16` lookback maintained below; `Center` / `Top` keep
   // the vertical-replicate (co-sited) decode, byte-identical to S6c.
   let bottom_v = chroma_420_bottom_sited_v(chroma_location);
+
+  // Per-frame chroma-siting freeze (RFC #238, mirroring the resample-path guard):
+  // the first output-bearing row pins the effective 4:2:0 phase — BOTH the
+  // horizontal centered flag and the vertical `Bottom` flag. A later row whose
+  // siting flipped would decode a mixture of phases into ONE frame, or box-blend
+  // against a STALE `chroma_prev_u16` lookback, so reject it here BEFORE any
+  // scratch reserve, lookback priming, or output write. This CHECK precedes the
+  // `stage_420_chroma_prev_u16` / reconstruct staging below so a rejected flip
+  // leaves `chroma_prev_u16` / `chroma_prev_row` untouched (retry-atomic, #180).
+  // `begin_frame`'s `reset_high_bit_yuva_streams` clears the freeze so the next
+  // frame may pick either phase.
+  if need_output
+    && let Some(frozen) = *frozen_chroma_centered
+    && (frozen != center_sited || *frozen_chroma_bottom_v != Some(bottom_v))
+  {
+    return Err(MixedSinkerError::ChromaSitingChanged(
+      ChromaSitingChanged::new(idx),
+    ));
+  }
+
   // HSV-without-RGB-or-RGBA goes through the direct alpha-drop
   // `hsv_dispatch` kernel (no source-width RGB scratch). HSV is
   // colour-only — the source alpha plane is dropped — so a high-bit YUVA
@@ -2085,6 +2142,16 @@ fn yuva420p_high_bit_process<const BITS: u32, const BE: bool, F: crate::SourceFo
       idx,
       w,
     );
+  }
+
+  // Freeze the effective 4:2:0 phase on the first output-bearing row — AFTER the
+  // fallible scratch reserves above have succeeded, so an `AllocationFailed` row
+  // stays retryable (frozen stays unset); later rows are checked against it up top.
+  // Both the horizontal centered flag and the vertical `Bottom` flag are pinned
+  // together.
+  if need_output && frozen_chroma_centered.is_none() {
+    *frozen_chroma_centered = Some(center_sited);
+    *frozen_chroma_bottom_v = Some(bottom_v);
   }
 
   // ---- luma (native Y; luma narrows `>> (BITS - 8)`, luma_u16 is the
