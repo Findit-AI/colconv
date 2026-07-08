@@ -3065,6 +3065,17 @@ pub struct MixedSinker<'a, F: SourceFormat, R = NoopResampler> {
   /// [`Self::chroma_full_u16`] which it feeds.
   #[cfg(feature = "yuv-planar")]
   chroma_prev_u16: Vec<u16>,
+  /// Buffered wire-format Y row for the deferred [`Self::chroma_top_pending`] odd
+  /// output row on the HIGH-BIT 4:2:0 **Top** (`v = 0`) forward one-row delay
+  /// (RFC #238) — the `u16` twin of [`Self::chroma_top_y`]. Holds a copy of the
+  /// odd row's `width` `u16` luma in the source's wire byte order (the walker's
+  /// row borrow is invalidated after `process` returns), retained until the
+  /// following even row flushes it. Shared by the planar `Yuv420p9` …
+  /// `Yuv420p16` identity decode and the row-stage / filter reconstruction
+  /// tiers. Lazily grown to `width` `u16` on the first deferred `Top` row; empty
+  /// otherwise. Gated to `yuv-planar`, like [`Self::chroma_prev_u16`].
+  #[cfg(feature = "yuv-planar")]
+  chroma_top_y_u16: Vec<u16>,
   /// Source-width `u8` luma staging for the **packed YUV 4:2:2** resample
   /// path (the interleaved Y bytes are de-interleaved here via the format's
   /// own `*_to_luma_row` kernel — the exact Y→luma derivation the direct
@@ -4152,6 +4163,8 @@ impl<F: SourceFormat, R> MixedSinker<'_, F, R> {
       chroma_full_u16: Vec::new(),
       #[cfg(feature = "yuv-planar")]
       chroma_prev_u16: Vec::new(),
+      #[cfg(feature = "yuv-planar")]
+      chroma_top_y_u16: Vec::new(),
       #[cfg(any(feature = "yuv-packed", feature = "gray"))]
       luma_scratch: Vec::new(),
       #[cfg(feature = "rgb-legacy")]
@@ -10478,6 +10491,14 @@ pub(super) fn reset_high_bit_yuv_streams<F: SourceFormat, R>(sink: &mut MixedSin
     // row. Both stay `None` / untouched for every non-`Bottom` high-bit format.
     sink.frozen_chroma_bottom_v = None;
     sink.chroma_prev_row = None;
+    // RFC #238 Top: clear the frozen VERTICAL (`Top`, `v = 0`) chroma phase so
+    // the next frame may pick Top while a mid-frame flip to / from Top stays
+    // rejected, and drop any held Top forward-delay odd row so frame N's last
+    // deferred colour row never emits into frame N+1 (its `chroma_top_y_u16`
+    // bytes are left as-is, re-overwritten before any trusted read). Both stay
+    // `None` for every non-`Top` high-bit format.
+    sink.frozen_chroma_top_v = None;
+    sink.chroma_top_pending = None;
   }
   sink.resample_outputs = None;
 }

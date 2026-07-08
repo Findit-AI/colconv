@@ -590,7 +590,10 @@ macro_rules! hibit_420_yuva_resample_siting {
         // packed YUVA tail is RGB-domain, so it matches the row-stage tier, α-drop).
         for (sw, sh, ow, oh) in GEOMS {
           let (y, u, v, a) = ramp(sw, sh);
-          for loc in [ChromaLocation::Center, ChromaLocation::Top] {
+          // `Top` (`v = 0`) is EXCLUDED: the no-alpha `Yuv420pN` now folds the
+          // forward vertical triangle while the `Yuva420pN` Top rollout is a
+          // follow-up, so the two families' Top decodes intentionally diverge.
+          for loc in [ChromaLocation::Center] {
             let ya = run(&y, &u, &v, &a, sw, sh, ow, oh, loc, true);
             let yv = run_yuv(&y, &u, &v, sw, sh, ow, oh, loc, true);
             assert_eq!(ya.0, yv.0, "rgb {loc:?} ({sw}x{sh}->{ow}x{oh})");

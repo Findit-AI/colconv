@@ -170,6 +170,94 @@ fn ref_full_chroma_bottomleft_u16(u420: &[u16], v420: &[u16]) -> (Vec<u16>, Vec<
   (u444, v444)
 }
 
+/// Independent reference for the top-sited (`v = 0`, FORWARD fold) full
+/// reconstruction on logical `u16` (RFC #238 Top) — the vertical MIRROR of
+/// [`ref_full_chroma_bottom_u16`]: per luma row `r`, the EVEN rows take chroma
+/// row `r/2` directly (co-sited on the even row); the ODD rows take the vertical
+/// box average `(cur + next + 1) >> 1` of chroma rows `r/2` and `r/2 + 1`
+/// (clamped to `r/2` at the BOTTOM edge). Each half-row is then horizontally
+/// upsampled with the SAME centered `1/4`–`3/4` weights (Top is `h = 0.5`).
+fn ref_full_chroma_top_u16(u420: &[u16], v420: &[u16]) -> (Vec<u16>, Vec<u16>) {
+  let w = W as usize;
+  let h = H as usize;
+  let cw = w / 2;
+  let ch = h.div_ceil(2);
+  let mut u444 = std::vec![0u16; w * h];
+  let mut v444 = std::vec![0u16; w * h];
+  let vblend = |plane: &[u16], cr: usize, next: usize| -> Vec<u16> {
+    (0..cw)
+      .map(|c| {
+        let a = plane[cr * cw + c] as u32;
+        let b = plane[next * cw + c] as u32;
+        ((a + b + 1) >> 1) as u16
+      })
+      .collect::<Vec<u16>>()
+  };
+  for r in 0..h {
+    let cr = r / 2;
+    let (uhalf, vhalf) = if r & 1 == 1 {
+      let next = (cr + 1).min(ch - 1);
+      (vblend(u420, cr, next), vblend(v420, cr, next))
+    } else {
+      (
+        u420[cr * cw..cr * cw + cw].to_vec(),
+        v420[cr * cw..cr * cw + cw].to_vec(),
+      )
+    };
+    let urow = ref_upsample_center_h_u16(&uhalf, w);
+    let vrow = ref_upsample_center_h_u16(&vhalf, w);
+    u444[r * w..r * w + w].copy_from_slice(&urow);
+    v444[r * w..r * w + w].copy_from_slice(&vrow);
+  }
+  (u444, v444)
+}
+
+/// The full-resolution U / V a **`TopLeft`** (`h = 0`, `v = 0`) high-bit 4:2:0
+/// decode reconstructs: [`ref_full_chroma_top_u16`]'s odd-row forward vertical
+/// box blend, but fed to the CO-SITED horizontal 2× replicate instead of the
+/// centered kernel. The direct-decode ground truth for the co-sited-h + top-v
+/// siting.
+fn ref_full_chroma_topleft_u16(u420: &[u16], v420: &[u16]) -> (Vec<u16>, Vec<u16>) {
+  let w = W as usize;
+  let h = H as usize;
+  let cw = w / 2;
+  let ch = h.div_ceil(2);
+  let mut u444 = std::vec![0u16; w * h];
+  let mut v444 = std::vec![0u16; w * h];
+  let vblend = |plane: &[u16], cr: usize, next: usize| -> Vec<u16> {
+    (0..cw)
+      .map(|c| {
+        let a = plane[cr * cw + c] as u32;
+        let b = plane[next * cw + c] as u32;
+        ((a + b + 1) >> 1) as u16
+      })
+      .collect::<Vec<u16>>()
+  };
+  let replicate = |half: &[u16]| -> Vec<u16> {
+    let mut out = std::vec![0u16; w];
+    for j in 0..cw {
+      out[2 * j] = half[j];
+      out[2 * j + 1] = half[j];
+    }
+    out
+  };
+  for r in 0..h {
+    let cr = r / 2;
+    let (uhalf, vhalf) = if r & 1 == 1 {
+      let next = (cr + 1).min(ch - 1);
+      (vblend(u420, cr, next), vblend(v420, cr, next))
+    } else {
+      (
+        u420[cr * cw..cr * cw + cw].to_vec(),
+        v420[cr * cw..cr * cw + cw].to_vec(),
+      )
+    };
+    u444[r * w..r * w + w].copy_from_slice(&replicate(&uhalf));
+    v444[r * w..r * w + w].copy_from_slice(&replicate(&vhalf));
+  }
+  (u444, v444)
+}
+
 // ---- u16 kernel oracle (endianness-explicit) -------------------------------
 
 #[test]
@@ -605,11 +693,12 @@ macro_rules! hibit_420_chroma_tests {
       )]
       fn default_and_cosited_sitings_are_byte_identical() {
         let baseline = convert_rgb(ChromaLocation::Unspecified, true);
+        // `TopLeft` (`v = 0`) now folds the forward vertical triangle (RFC #238
+        // Top), so it LEAVES the co-sited byte-identity group.
         for loc in [
           ChromaLocation::Unspecified,
           ChromaLocation::Unknown(99),
           ChromaLocation::Left,
-          ChromaLocation::TopLeft,
         ] {
           assert_eq!(
             convert_rgb(loc, true),
@@ -801,23 +890,179 @@ macro_rules! hibit_420_chroma_tests {
         miri,
         ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
       )]
-      fn top_routes_like_center_and_bottom_folds_vertically() {
-        // Top shares Center's horizontal (centered) phase and is vertically
-        // co-sited (`v = 0`), so it still agrees with Center. Bottom (RFC #238
-        // S6d) additionally folds the `v = 1` vertical blend, so on a vertical
-        // chroma ramp (strong per-row step, visible in 8-bit RGB at EVERY depth)
-        // it must DIVERGE from Center. (`bottom_rgb_matches_vblend_then_444_reference`
-        // pins its value.)
-        assert_eq!(
-          convert_rgb(ChromaLocation::Top, true),
-          convert_rgb(ChromaLocation::Center, true)
-        );
+      fn top_differs_from_center_and_bottom_folding_vertically() {
+        // RFC #238 Top folds the `v = 0` FORWARD vertical triangle, so on a
+        // vertical chroma ramp (strong per-row step) it must DIVERGE from BOTH the
+        // vertically co-sited Center and the backward-folding Bottom.
         let (yp, up, vp) = vramp_planes_n(MAXV);
-        assert_ne!(
-          convert_rgb_with(ChromaLocation::Bottom, true, &yp, &up, &vp),
-          convert_rgb_with(ChromaLocation::Center, true, &yp, &up, &vp),
-          "Bottom must fold the vertical phase (differs from vertically co-sited Center)"
+        let top = convert_rgb_with(ChromaLocation::Top, true, &yp, &up, &vp);
+        let center = convert_rgb_with(ChromaLocation::Center, true, &yp, &up, &vp);
+        let bottom = convert_rgb_with(ChromaLocation::Bottom, true, &yp, &up, &vp);
+        assert_ne!(top, center, "Top must fold the v=0 forward phase (differs from Center)");
+        assert_ne!(top, bottom, "Top (v=0) must differ from Bottom (v=1)");
+        assert_ne!(bottom, center, "Bottom must fold the vertical phase (differs from Center)");
+      }
+
+      #[test]
+      #[cfg_attr(
+        miri,
+        ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+      )]
+      fn top_rgb_and_u16_match_forward_vblend_then_444_reference() {
+        // Top RGB (u8 and native u16) must equal the independent forward-vblend +
+        // centered-h reconstruction fed to an identity 4:4:4 sink.
+        let (yp, up, vp) = vramp_planes_n(MAXV);
+        let (u444, v444) = ref_full_chroma_top_u16(&up, &vp);
+
+        // RGB (u8).
+        let ref_src = $RefFrame::new(&yp, &u444, &v444, W, H, W, W, W);
+        let mut rgb_ref = std::vec![0u8; (W * H * 3) as usize];
+        let mut ref_sink = MixedSinker::<$Ref>::new(W as usize, H as usize)
+          .with_rgb(&mut rgb_ref)
+          .unwrap();
+        $ref_walker(&ref_src, false, ColorMatrix::Bt601, &mut ref_sink).unwrap();
+        assert_eq!(
+          convert_rgb_with(ChromaLocation::Top, true, &yp, &up, &vp),
+          rgb_ref,
+          "top-sited high-bit 4:2:0 RGB must equal forward-vblend then 4:4:4"
         );
+
+        // RGB (u16).
+        let src = $Frame::new(&yp, &up, &vp, W, H, W, W / 2, W / 2);
+        let mut rgb16 = std::vec![0u16; (W * H * 3) as usize];
+        let mut sink = MixedSinker::<$Marker>::new(W as usize, H as usize)
+          .with_rgb_u16(&mut rgb16)
+          .unwrap()
+          .with_chroma_location(ChromaLocation::Top);
+        $walker(&src, false, ColorMatrix::Bt601, &mut sink).unwrap();
+        let ref_src = $RefFrame::new(&yp, &u444, &v444, W, H, W, W, W);
+        let mut rgb16_ref = std::vec![0u16; (W * H * 3) as usize];
+        let mut ref_sink = MixedSinker::<$Ref>::new(W as usize, H as usize)
+          .with_rgb_u16(&mut rgb16_ref)
+          .unwrap();
+        $ref_walker(&ref_src, false, ColorMatrix::Bt601, &mut ref_sink).unwrap();
+        assert_eq!(rgb16, rgb16_ref, "top-sited RGB u16 must equal forward-vblend-then-4:4:4");
+      }
+
+      #[test]
+      #[cfg_attr(
+        miri,
+        ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+      )]
+      fn top_path_simd_matches_scalar() {
+        let (yp, up, vp) = vramp_planes_n(MAXV);
+        assert_eq!(
+          convert_rgb_with(ChromaLocation::Top, true, &yp, &up, &vp),
+          convert_rgb_with(ChromaLocation::Top, false, &yp, &up, &vp),
+          "top path must be bit-identical across the SIMD and scalar tiers"
+        );
+      }
+
+      #[test]
+      #[cfg_attr(
+        miri,
+        ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+      )]
+      fn topleft_matches_cosited_forward_vblend_and_differs_from_top() {
+        let (yp, up, vp) = vramp_planes_n(MAXV);
+        let (u444, v444) = ref_full_chroma_topleft_u16(&up, &vp);
+        let ref_src = $RefFrame::new(&yp, &u444, &v444, W, H, W, W, W);
+        let mut rgb_ref = std::vec![0u8; (W * H * 3) as usize];
+        let mut ref_sink = MixedSinker::<$Ref>::new(W as usize, H as usize)
+          .with_rgb(&mut rgb_ref)
+          .unwrap();
+        $ref_walker(&ref_src, false, ColorMatrix::Bt601, &mut ref_sink).unwrap();
+        assert_eq!(
+          convert_rgb_with(ChromaLocation::TopLeft, true, &yp, &up, &vp),
+          rgb_ref,
+          "top-left high-bit 4:2:0 RGB must equal co-sited-replicate + forward-vblend then 4:4:4"
+        );
+        assert_eq!(
+          convert_rgb_with(ChromaLocation::TopLeft, true, &yp, &up, &vp),
+          convert_rgb_with(ChromaLocation::TopLeft, false, &yp, &up, &vp),
+          "top-left path must be bit-identical across SIMD and scalar"
+        );
+        // TopLeft (h=0) must differ from Top (h=0.5) on a horizontal ramp.
+        let (yp, up, vp) = ramp_planes_n(MAXV);
+        assert_ne!(
+          convert_rgb_with(ChromaLocation::TopLeft, true, &yp, &up, &vp),
+          convert_rgb_with(ChromaLocation::Top, true, &yp, &up, &vp),
+          "TopLeft (h=0) must differ from Top (h=0.5) on a horizontal ramp"
+        );
+      }
+
+      #[test]
+      #[cfg_attr(
+        miri,
+        ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+      )]
+      fn top_mid_frame_flip_is_rejected_and_begin_frame_clears_held_row() {
+        // RFC #238 Top identity decode: an ODD `Top` row DEFERS its colour output
+        // into the forward one-row delay (`chroma_top_pending` set + the Top phase
+        // frozen). A mid-frame flip TO a non-Top siting before the following even
+        // row must reject with `ChromaSitingChanged` (leaving the held row + the
+        // lookback untouched), and `begin_frame` must CLEAR both the held row and
+        // the frozen Top phase (the Nv21 cross-frame-corruption regression class).
+        let (yp, up, vp) = vramp_planes_n(MAXV);
+        let w = W as usize;
+        let cw = w / 2;
+        for (loc1, loc2) in [
+          (ChromaLocation::Top, ChromaLocation::Center),
+          (ChromaLocation::TopLeft, ChromaLocation::Left),
+        ] {
+          let mut rgb = std::vec![0u8; w * H as usize * 3];
+          let mut sink = MixedSinker::<$Marker>::new(w, H as usize)
+            .with_rgb(&mut rgb)
+            .unwrap()
+            .with_chroma_location(loc1)
+            .with_simd(true);
+          crate::PixelSink::begin_frame(&mut sink, W, H).unwrap();
+          let row_at = |r: usize| {
+            let cr = r / 2;
+            $Row::new(
+              &yp[r * w..r * w + w],
+              &up[cr * cw..cr * cw + cw],
+              &vp[cr * cw..cr * cw + cw],
+              r,
+              ColorMatrix::Bt601,
+              false,
+            )
+          };
+          // Row 0 (even Top) decodes immediately and freezes the Top phase; row 1
+          // (odd Top) DEFERS into the held delay line.
+          crate::PixelSink::process(&mut sink, row_at(0)).unwrap();
+          crate::PixelSink::process(&mut sink, row_at(1)).unwrap();
+          assert!(
+            sink.chroma_top_pending.is_some(),
+            "{loc1:?}: odd Top row must be HELD in the forward delay line"
+          );
+          assert_eq!(
+            sink.frozen_chroma_top_v,
+            Some(true),
+            "{loc1:?}: the Top vertical phase must be frozen"
+          );
+          // Mid-frame flip → reject; held row survives.
+          sink.set_chroma_location(loc2);
+          let err = crate::PixelSink::process(&mut sink, row_at(2)).unwrap_err();
+          assert!(
+            matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
+            "{loc1:?}->{loc2:?}: want ChromaSitingChanged, got {err:?}"
+          );
+          assert!(
+            sink.chroma_top_pending.is_some(),
+            "{loc1:?}->{loc2:?}: a rejected flip must leave the held row untouched"
+          );
+          // begin_frame CLEARS the held row + the frozen Top phase.
+          crate::PixelSink::begin_frame(&mut sink, W, H).unwrap();
+          assert!(
+            sink.chroma_top_pending.is_none(),
+            "{loc1:?}: begin_frame must clear the held Top row (cross-frame corruption guard)"
+          );
+          assert!(
+            sink.frozen_chroma_top_v.is_none(),
+            "{loc1:?}: begin_frame must clear the frozen Top phase"
+          );
+        }
       }
 
       // ---- bottom-sited (v = 1) vertical fold (RFC #238 S6d) ---------------
