@@ -567,17 +567,15 @@ macro_rules! hibit_420_semiplanar_resample_siting {
       fn centered_equals_planar_yuv420p_across_tiers() {
         for (sw, sh, ow, oh) in GEOMS {
           let (y, u, v) = ramp(sw, sh);
-          // Center / Top are horizontal-only; Bottom folds the vertical `v = 1`
-          // blend. RFC #238 S6e routes Bottom through the semi-planar P0xx
-          // resample too (matching the planar S6d fold), so P0xx Bottom is once
-          // again byte-identical to the planar `Yuv420pN` Bottom across every
-          // tier — the strongest catch for a U/V swap or a mis-sited vertical
-          // blend in the de-interleave.
-          for loc in [
-            ChromaLocation::Center,
-            ChromaLocation::Top,
-            ChromaLocation::Bottom,
-          ] {
+          // Center is horizontal-only; Bottom folds the vertical `v = 1` blend.
+          // RFC #238 S6e routes Bottom through the semi-planar P0xx resample too
+          // (matching the planar S6d fold), so P0xx Bottom is once again
+          // byte-identical to the planar `Yuv420pN` Bottom across every tier — the
+          // strongest catch for a U/V swap or a mis-sited vertical blend in the
+          // de-interleave. `Top` (`v = 0`) is EXCLUDED: the planar `Yuv420pN` now
+          // folds the forward triangle while the semi-planar P0xx Top rollout is a
+          // follow-up, so the two families' Top decodes intentionally diverge.
+          for loc in [ChromaLocation::Center, ChromaLocation::Bottom] {
             for native in [true, false] {
               assert_eq!(
                 run(&y, &u, &v, sw, sh, ow, oh, loc, native, true),
