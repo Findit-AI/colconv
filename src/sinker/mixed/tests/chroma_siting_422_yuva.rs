@@ -578,6 +578,73 @@ mod p8 {
       "default YUVA ChromaDerivedNcl must resolve via the same BT.709 fallback"
     );
   }
+
+  // ---- mid-frame siting-flip rejection (identity path freeze) ---------------
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn direct_path_mid_frame_siting_flip_is_rejected() {
+    // The identity (no-resample) 4:2:2 YUVA decode freezes the horizontal siting on
+    // its first output-bearing row. Flipping co-sited ⇆ centered mid-frame must
+    // reject the next in-sequence row with `ChromaSitingChanged` (leaving the
+    // centered chroma scratch untouched); flipping back and retrying then matches a
+    // clean single-phase decode byte-for-byte.
+    let (y, u, v, a) = ramp_planes();
+    let w = W as usize;
+    let h = H as usize;
+    let cw = w / 2;
+    let row_at = |r: usize| {
+      Yuva422pRow::new(
+        &y[r * w..(r + 1) * w],
+        &u[r * cw..(r + 1) * cw],
+        &v[r * cw..(r + 1) * cw],
+        &a[r * w..(r + 1) * w],
+        r,
+        ColorMatrix::Bt601,
+        false,
+      )
+    };
+    for (loc1, loc2) in [
+      (ChromaLocation::Left, ChromaLocation::Center),
+      (ChromaLocation::Center, ChromaLocation::Left),
+    ] {
+      let want = convert_rgb(loc1, true);
+      let mut rgb = std::vec![0u8; w * h * 3];
+      let mut sink = MixedSinker::<Yuva422p>::new(w, h)
+        .with_rgb(&mut rgb)
+        .unwrap()
+        .with_chroma_location(loc1)
+        .with_simd(true);
+      crate::PixelSink::begin_frame(&mut sink, W, H).unwrap();
+      crate::PixelSink::process(&mut sink, row_at(0)).unwrap();
+      let scratch_len = sink.chroma_full.len();
+
+      sink.set_chroma_location(loc2);
+      let err = crate::PixelSink::process(&mut sink, row_at(1)).unwrap_err();
+      assert!(
+        matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
+        "direct path {loc1:?}->{loc2:?}: want ChromaSitingChanged, got {err:?}"
+      );
+      assert_eq!(
+        sink.chroma_full.len(),
+        scratch_len,
+        "{loc1:?}->{loc2:?}: a rejected flip must not grow the chroma scratch"
+      );
+
+      sink.set_chroma_location(loc1);
+      for r in 1..h {
+        crate::PixelSink::process(&mut sink, row_at(r)).unwrap();
+      }
+      drop(sink);
+      assert_eq!(
+        rgb, want,
+        "{loc1:?}: retry after a rejected flip must match a clean in-order decode"
+      );
+    }
+  }
 }
 
 // ===========================================================================

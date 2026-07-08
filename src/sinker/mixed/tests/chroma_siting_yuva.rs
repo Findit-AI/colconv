@@ -631,6 +631,97 @@ mod p8 {
       "default YUVA ChromaDerivedNcl must resolve via the same BT.709 fallback"
     );
   }
+
+  // ---- mid-frame siting-flip rejection (identity path freeze) ---------------
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn direct_path_mid_frame_siting_flip_is_rejected() {
+    // The identity (no-resample) 4:2:0 YUVA decode freezes the effective phase —
+    // BOTH the horizontal centered flag and the vertical `Bottom` flag — on its
+    // first output-bearing row. `set_chroma_location` is public, so flipping
+    // `Bottom` ⇆ co-sited mid-frame must reject the next in-sequence row with
+    // `ChromaSitingChanged`, WITHOUT growing the chroma scratch OR advancing the
+    // stateful `chroma_prev` vertical lookback (its validity tag included) — else a
+    // later even row would box-blend against a stale, gap-advanced chroma row.
+    // Flipping back and retrying then decodes byte-for-byte like a clean single-phase
+    // frame.
+    let (y, u, v, a) = ramp_planes();
+    let w = W as usize;
+    let h = H as usize;
+    let cw = w / 2;
+    let row_at = |r: usize| {
+      let cr = r / 2;
+      Yuva420pRow::new(
+        &y[r * w..(r + 1) * w],
+        &u[cr * cw..cr * cw + cw],
+        &v[cr * cw..cr * cw + cw],
+        &a[r * w..(r + 1) * w],
+        r,
+        ColorMatrix::Bt601,
+        false,
+      )
+    };
+    for (loc1, loc2) in [
+      (ChromaLocation::Bottom, ChromaLocation::Left),
+      (ChromaLocation::Left, ChromaLocation::Bottom),
+      (ChromaLocation::Bottom, ChromaLocation::Center),
+    ] {
+      let want = convert_rgb(loc1, true);
+      let mut rgb = std::vec![0u8; w * h * 3];
+      let mut sink = MixedSinker::<Yuva420p>::new(w, h)
+        .with_rgb(&mut rgb)
+        .unwrap()
+        .with_chroma_location(loc1)
+        .with_simd(true);
+      crate::PixelSink::begin_frame(&mut sink, W, H).unwrap();
+      // Rows 0, 1 at the held siting; row 0 (even) primes the `Bottom` lookback.
+      crate::PixelSink::process(&mut sink, row_at(0)).unwrap();
+      crate::PixelSink::process(&mut sink, row_at(1)).unwrap();
+      let scratch_len = sink.chroma_full.len();
+      let prev_len = sink.chroma_prev.len();
+      let prev_tag = sink.chroma_prev_row;
+
+      // Flip and deliver the next EVEN row (idx 2) — the one a `Bottom` decode
+      // box-blends against the lookback.
+      sink.set_chroma_location(loc2);
+      let err = crate::PixelSink::process(&mut sink, row_at(2)).unwrap_err();
+      assert!(
+        matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
+        "direct path {loc1:?}->{loc2:?}: want ChromaSitingChanged, got {err:?}"
+      );
+      // Retry-atomic (#180): the reject grew no scratch and left the vertical
+      // lookback (buffer + validity tag) exactly as the accepted rows left it.
+      assert_eq!(
+        sink.chroma_full.len(),
+        scratch_len,
+        "{loc1:?}->{loc2:?}: a rejected flip must not grow the chroma scratch"
+      );
+      assert_eq!(
+        sink.chroma_prev.len(),
+        prev_len,
+        "{loc1:?}->{loc2:?}: a rejected flip must not grow the vertical lookback"
+      );
+      assert_eq!(
+        sink.chroma_prev_row, prev_tag,
+        "{loc1:?}->{loc2:?}: a rejected flip must not advance the lookback validity tag"
+      );
+
+      // Flip back and drive the rest in order; the output must match a clean decode.
+      sink.set_chroma_location(loc1);
+      for r in 2..h {
+        crate::PixelSink::process(&mut sink, row_at(r)).unwrap();
+      }
+      drop(sink);
+      assert_eq!(
+        rgb, want,
+        "{loc1:?}: retry after a rejected flip must match a clean in-order decode"
+      );
+    }
+  }
 }
 
 // ===========================================================================

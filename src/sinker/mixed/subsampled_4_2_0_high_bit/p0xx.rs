@@ -1369,6 +1369,26 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P010<BE>, R> {
     #[cfg(feature = "yuv-planar")]
     let bottom_v = chroma_420_bottom_sited_v(chroma_location);
 
+    // Per-frame chroma-siting freeze (RFC #238, mirroring the resample-path guard
+    // above): the first output-bearing row pins the effective 4:2:0 phase — BOTH
+    // the horizontal centered flag and the vertical `Bottom` flag. A later row
+    // whose siting flipped would decode a mixture of phases into ONE frame, or box-
+    // blend against a STALE `chroma_prev_u16` lookback, so reject it here BEFORE
+    // any scratch reserve, lookback priming, or output write. This CHECK precedes
+    // the `stage_420_chroma_prev_p0xx` / reconstruct staging below so a rejected
+    // flip leaves `chroma_prev_u16` / `chroma_prev_row` untouched (retry-atomic,
+    // #180). `begin_frame`'s `reset_high_bit_yuv_streams` clears the freeze so the
+    // next frame may pick either phase.
+    #[cfg(feature = "yuv-planar")]
+    if need_output
+      && let Some(frozen) = *frozen_chroma_centered
+      && (frozen != center_sited || *frozen_chroma_bottom_v != Some(bottom_v))
+    {
+      return Err(MixedSinkerError::ChromaSitingChanged(
+        ChromaSitingChanged::new(idx),
+      ));
+    }
+
     // Atomicity preflight (#302 / #308, cf. the crate's #180 resample fix and
     // the planar_8bit / semi_planar_8bit 8-bit siblings): reserve EVERY fallible
     // row scratch this identity row can touch BEFORE any output row is written
@@ -1457,6 +1477,17 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P010<BE>, R> {
     };
     #[cfg(not(feature = "yuv-planar"))]
     let centered: Option<&[u16]> = None;
+
+    // Freeze the effective 4:2:0 phase on the first output-bearing row — AFTER the
+    // fallible scratch reserves above have succeeded, so an `AllocationFailed` row
+    // stays retryable (frozen stays unset); later rows are checked against it up
+    // top. Both the horizontal centered flag and the vertical `Bottom` flag are
+    // pinned together.
+    #[cfg(feature = "yuv-planar")]
+    if need_output && frozen_chroma_centered.is_none() {
+      *frozen_chroma_centered = Some(center_sited);
+      *frozen_chroma_bottom_v = Some(bottom_v);
+    }
 
     // Luma: P010 samples are high-bit-packed (`value << 6`). Taking the
     // high byte via `>> 8` gives the top 8 bits of the 10-bit value —
@@ -2390,6 +2421,26 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P012<BE>, R> {
     #[cfg(feature = "yuv-planar")]
     let bottom_v = chroma_420_bottom_sited_v(chroma_location);
 
+    // Per-frame chroma-siting freeze (RFC #238, mirroring the resample-path guard
+    // above): the first output-bearing row pins the effective 4:2:0 phase — BOTH
+    // the horizontal centered flag and the vertical `Bottom` flag. A later row
+    // whose siting flipped would decode a mixture of phases into ONE frame, or box-
+    // blend against a STALE `chroma_prev_u16` lookback, so reject it here BEFORE
+    // any scratch reserve, lookback priming, or output write. This CHECK precedes
+    // the `stage_420_chroma_prev_p0xx` / reconstruct staging below so a rejected
+    // flip leaves `chroma_prev_u16` / `chroma_prev_row` untouched (retry-atomic,
+    // #180). `begin_frame`'s `reset_high_bit_yuv_streams` clears the freeze so the
+    // next frame may pick either phase.
+    #[cfg(feature = "yuv-planar")]
+    if need_output
+      && let Some(frozen) = *frozen_chroma_centered
+      && (frozen != center_sited || *frozen_chroma_bottom_v != Some(bottom_v))
+    {
+      return Err(MixedSinkerError::ChromaSitingChanged(
+        ChromaSitingChanged::new(idx),
+      ));
+    }
+
     // Atomicity preflight (#302 / #308, cf. the crate's #180 resample fix and
     // the planar_8bit / semi_planar_8bit 8-bit siblings): reserve EVERY fallible
     // row scratch this identity row can touch BEFORE any output row is written
@@ -2478,6 +2529,17 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P012<BE>, R> {
     };
     #[cfg(not(feature = "yuv-planar"))]
     let centered: Option<&[u16]> = None;
+
+    // Freeze the effective 4:2:0 phase on the first output-bearing row — AFTER the
+    // fallible scratch reserves above have succeeded, so an `AllocationFailed` row
+    // stays retryable (frozen stays unset); later rows are checked against it up
+    // top. Both the horizontal centered flag and the vertical `Bottom` flag are
+    // pinned together.
+    #[cfg(feature = "yuv-planar")]
+    if need_output && frozen_chroma_centered.is_none() {
+      *frozen_chroma_centered = Some(center_sited);
+      *frozen_chroma_bottom_v = Some(bottom_v);
+    }
 
     // Luma: P012 samples are high‑bit‑packed (`value << 4`). Taking the
     // high byte via `>> 8` gives the top 8 bits of the 12‑bit value —
@@ -3407,6 +3469,26 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P016<BE>, R> {
     #[cfg(feature = "yuv-planar")]
     let bottom_v = chroma_420_bottom_sited_v(chroma_location);
 
+    // Per-frame chroma-siting freeze (RFC #238, mirroring the resample-path guard
+    // above): the first output-bearing row pins the effective 4:2:0 phase — BOTH
+    // the horizontal centered flag and the vertical `Bottom` flag. A later row
+    // whose siting flipped would decode a mixture of phases into ONE frame, or box-
+    // blend against a STALE `chroma_prev_u16` lookback, so reject it here BEFORE
+    // any scratch reserve, lookback priming, or output write. This CHECK precedes
+    // the `stage_420_chroma_prev_p0xx` / reconstruct staging below so a rejected
+    // flip leaves `chroma_prev_u16` / `chroma_prev_row` untouched (retry-atomic,
+    // #180). `begin_frame`'s `reset_high_bit_yuv_streams` clears the freeze so the
+    // next frame may pick either phase.
+    #[cfg(feature = "yuv-planar")]
+    if need_output
+      && let Some(frozen) = *frozen_chroma_centered
+      && (frozen != center_sited || *frozen_chroma_bottom_v != Some(bottom_v))
+    {
+      return Err(MixedSinkerError::ChromaSitingChanged(
+        ChromaSitingChanged::new(idx),
+      ));
+    }
+
     // Atomicity preflight (#302 / #308, cf. the crate's #180 resample fix and
     // the planar_8bit / semi_planar_8bit 8-bit siblings): reserve EVERY fallible
     // row scratch this identity row can touch BEFORE any output row is written
@@ -3495,6 +3577,17 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P016<BE>, R> {
     };
     #[cfg(not(feature = "yuv-planar"))]
     let centered: Option<&[u16]> = None;
+
+    // Freeze the effective 4:2:0 phase on the first output-bearing row — AFTER the
+    // fallible scratch reserves above have succeeded, so an `AllocationFailed` row
+    // stays retryable (frozen stays unset); later rows are checked against it up
+    // top. Both the horizontal centered flag and the vertical `Bottom` flag are
+    // pinned together.
+    #[cfg(feature = "yuv-planar")]
+    if need_output && frozen_chroma_centered.is_none() {
+      *frozen_chroma_centered = Some(center_sited);
+      *frozen_chroma_bottom_v = Some(bottom_v);
+    }
 
     // Luma: 16‑bit Y value >> 8 is the top byte. Routed through the
     // native-Y kernel (bit-identical to the former inline `>> 8` loop,

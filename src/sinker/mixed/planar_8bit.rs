@@ -6697,6 +6697,20 @@ impl<R> PixelSink for MixedSinker<'_, Yuv422p, R> {
     // lookback (cf. the Yuv420p `Bottom` path).
     let center_sited = chroma_422_center_sited_h(chroma_location);
 
+    // Per-frame chroma-siting freeze (RFC #238, mirroring the resample-path guard
+    // above): the first output-bearing row pins the phase; a later row whose siting
+    // flipped would decode a mixture of centered and co-sited chroma into ONE
+    // frame, so reject it here BEFORE any scratch reserve or output write.
+    // `begin_frame` clears the freeze so the next frame may pick either phase.
+    if need_output
+      && let Some(frozen) = *frozen_chroma_centered
+      && frozen != center_sited
+    {
+      return Err(MixedSinkerError::ChromaSitingChanged(
+        ChromaSitingChanged::new(idx),
+      ));
+    }
+
     // Atomicity preflight (#302 / #308, cf. the crate's #180 resample fix and the
     // Yuv420p sibling): reserve EVERY fallible row scratch this row needs BEFORE
     // any output row (luma / luma_u16 included) is written, so an allocator
@@ -6723,6 +6737,13 @@ impl<R> PixelSink for MixedSinker<'_, Yuv422p, R> {
         w,
         h,
       )?;
+    }
+
+    // Freeze the phase on the first output-bearing row — AFTER the fallible scratch
+    // reserves above have succeeded, so an `AllocationFailed` row stays retryable
+    // (frozen stays unset); later rows are checked against it up top.
+    if need_output && frozen_chroma_centered.is_none() {
+      *frozen_chroma_centered = Some(center_sited);
     }
 
     if let Some(luma) = luma.as_deref_mut() {

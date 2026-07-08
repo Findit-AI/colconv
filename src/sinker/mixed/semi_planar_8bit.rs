@@ -1258,6 +1258,25 @@ impl<R> PixelSink for MixedSinker<'_, Nv12, R> {
     #[cfg(feature = "yuv-planar")]
     let bottom_v = chroma_420_bottom_sited_v(chroma_location);
 
+    // Per-frame chroma-siting freeze (RFC #238, mirroring the resample-path guard
+    // above): the first output-bearing row pins the effective 4:2:0 phase — BOTH
+    // the horizontal centered flag and the vertical `Bottom` flag. A later row
+    // whose siting flipped would decode a mixture of phases into ONE frame, or box-
+    // blend against a STALE `chroma_prev` lookback, so reject it here BEFORE any
+    // scratch reserve, lookback priming, or output write. This CHECK precedes the
+    // `stage_420_chroma_prev` / reconstruct staging below so a rejected flip leaves
+    // `chroma_prev` / `chroma_prev_row` untouched (retry-atomic, #180).
+    // `begin_frame` clears the freeze so the next frame may pick either phase.
+    #[cfg(feature = "yuv-planar")]
+    if need_output
+      && let Some(frozen) = *frozen_chroma_centered
+      && (frozen != center_sited || *frozen_chroma_bottom_v != Some(bottom_v))
+    {
+      return Err(MixedSinkerError::ChromaSitingChanged(
+        ChromaSitingChanged::new(idx),
+      ));
+    }
+
     // Atomicity preflight (#302 / #308, cf. the crate's #180 resample fix and
     // the planar_8bit / Yuv420p siblings): reserve EVERY fallible row scratch
     // this row needs BEFORE any output row (luma / luma_u16 included) is
@@ -1315,6 +1334,17 @@ impl<R> PixelSink for MixedSinker<'_, Nv12, R> {
           w,
         );
       }
+    }
+
+    // Freeze the effective 4:2:0 phase on the first output-bearing row — AFTER the
+    // fallible scratch reserves above have succeeded, so an `AllocationFailed` row
+    // stays retryable (frozen stays unset); later rows are checked against it up
+    // top. Both the horizontal centered flag and the vertical `Bottom` flag are
+    // pinned together.
+    #[cfg(feature = "yuv-planar")]
+    if need_output && frozen_chroma_centered.is_none() {
+      *frozen_chroma_centered = Some(center_sited);
+      *frozen_chroma_bottom_v = Some(bottom_v);
     }
 
     // Luma — NV12 luma is the Y plane, copied verbatim by the native-Y
@@ -2115,6 +2145,21 @@ impl<R> PixelSink for MixedSinker<'_, Nv16, R> {
     #[cfg(feature = "yuv-planar")]
     let center_sited = chroma_422_center_sited_h(chroma_location);
 
+    // Per-frame chroma-siting freeze (RFC #238, mirroring the resample-path guard
+    // above): the first output-bearing row pins the phase; a later row whose siting
+    // flipped would decode a mixture of centered and co-sited chroma into ONE
+    // frame, so reject it here BEFORE any scratch reserve or output write.
+    // `begin_frame` clears the freeze so the next frame may pick either phase.
+    #[cfg(feature = "yuv-planar")]
+    if need_output
+      && let Some(frozen) = *frozen_chroma_centered
+      && frozen != center_sited
+    {
+      return Err(MixedSinkerError::ChromaSitingChanged(
+        ChromaSitingChanged::new(idx),
+      ));
+    }
+
     // Atomicity preflight (#302 / #308, cf. the crate's #180 resample fix and the
     // planar_8bit / Yuv420p / Nv12 siblings): reserve EVERY fallible row scratch
     // this row needs BEFORE any output row (luma / luma_u16 included) is written,
@@ -2143,6 +2188,14 @@ impl<R> PixelSink for MixedSinker<'_, Nv16, R> {
         w,
         h,
       )?;
+    }
+
+    // Freeze the phase on the first output-bearing row — AFTER the fallible scratch
+    // reserves above have succeeded, so an `AllocationFailed` row stays retryable
+    // (frozen stays unset); later rows are checked against it up top.
+    #[cfg(feature = "yuv-planar")]
+    if need_output && frozen_chroma_centered.is_none() {
+      *frozen_chroma_centered = Some(center_sited);
     }
 
     if let Some(luma) = luma.as_deref_mut() {
@@ -3018,6 +3071,25 @@ impl<R> PixelSink for MixedSinker<'_, Nv21, R> {
     #[cfg(feature = "yuv-planar")]
     let bottom_v = chroma_420_bottom_sited_v(chroma_location);
 
+    // Per-frame chroma-siting freeze (RFC #238, mirroring the resample-path guard
+    // above): the first output-bearing row pins the effective 4:2:0 phase — BOTH
+    // the horizontal centered flag and the vertical `Bottom` flag. A later row
+    // whose siting flipped would decode a mixture of phases into ONE frame, or box-
+    // blend against a STALE `chroma_prev` lookback, so reject it here BEFORE any
+    // scratch reserve, lookback priming, or output write. This CHECK precedes the
+    // `stage_420_chroma_prev` / reconstruct staging below so a rejected flip leaves
+    // `chroma_prev` / `chroma_prev_row` untouched (retry-atomic, #180).
+    // `begin_frame` clears the freeze so the next frame may pick either phase.
+    #[cfg(feature = "yuv-planar")]
+    if need_output
+      && let Some(frozen) = *frozen_chroma_centered
+      && (frozen != center_sited || *frozen_chroma_bottom_v != Some(bottom_v))
+    {
+      return Err(MixedSinkerError::ChromaSitingChanged(
+        ChromaSitingChanged::new(idx),
+      ));
+    }
+
     // Atomicity preflight (#302 / #308) — see the Nv12 impl for the full
     // rationale: reserve EVERY fallible row scratch this row needs BEFORE any
     // output row (luma / luma_u16 included) is written, so an allocator refusal
@@ -3068,6 +3140,17 @@ impl<R> PixelSink for MixedSinker<'_, Nv21, R> {
           w,
         );
       }
+    }
+
+    // Freeze the effective 4:2:0 phase on the first output-bearing row — AFTER the
+    // fallible scratch reserves above have succeeded, so an `AllocationFailed` row
+    // stays retryable (frozen stays unset); later rows are checked against it up
+    // top. Both the horizontal centered flag and the vertical `Bottom` flag are
+    // pinned together.
+    #[cfg(feature = "yuv-planar")]
+    if need_output && frozen_chroma_centered.is_none() {
+      *frozen_chroma_centered = Some(center_sited);
+      *frozen_chroma_bottom_v = Some(bottom_v);
     }
 
     if let Some(luma) = luma.as_deref_mut() {

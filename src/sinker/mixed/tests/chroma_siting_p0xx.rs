@@ -829,3 +829,112 @@ p0xx_chroma_tests!(
   P016BeFrame,
   p016_to_endian
 );
+
+// ---- mid-frame siting-flip rejection (identity path freeze) -----------------
+
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn p010_direct_path_mid_frame_siting_flip_is_rejected() {
+  // The identity (no-resample) high-bit semi-planar 4:2:0 `P010` decode freezes the
+  // effective phase — BOTH the horizontal centered flag and the vertical `Bottom`
+  // flag — on its first output-bearing row. Flipping `Bottom` ⇆ co-sited mid-frame
+  // must reject the next in-sequence row with `ChromaSitingChanged`, WITHOUT growing
+  // the chroma scratch OR advancing the stateful `chroma_prev_u16` vertical lookback
+  // (its validity tag included). Flipping back and retrying then matches a clean
+  // single-phase decode byte-for-byte.
+  use super::super::MixedSinkerError;
+  const BITS: u32 = 10;
+  let maxv = (1u32 << BITS) - 1;
+  let (yp, up, vp) = ramp_planes_logical(maxv);
+  let (y_wire, uv_wire) = pack_p0xx(&yp, &up, &vp, BITS);
+  let w = W as usize;
+  let h = H as usize;
+  for (loc1, loc2) in [
+    (ChromaLocation::Bottom, ChromaLocation::Left),
+    (ChromaLocation::Left, ChromaLocation::Bottom),
+    (ChromaLocation::Bottom, ChromaLocation::Center),
+  ] {
+    // Reference: a clean whole-frame decode at the held siting.
+    let mut want = std::vec![0u8; w * h * 3];
+    {
+      let src = P010Frame::new(&y_wire, &uv_wire, W, H, W, W);
+      let mut ref_sink = MixedSinker::<P010>::new(w, h)
+        .with_rgb(&mut want)
+        .unwrap()
+        .with_chroma_location(loc1)
+        .with_simd(true);
+      p010_to(&src, false, ColorMatrix::Bt601, &mut ref_sink).unwrap();
+    }
+
+    let mut rgb = std::vec![0u8; w * h * 3];
+    let mut sink = MixedSinker::<P010>::new(w, h)
+      .with_rgb(&mut rgb)
+      .unwrap()
+      .with_chroma_location(loc1)
+      .with_simd(true);
+    crate::PixelSink::begin_frame(&mut sink, W, H).unwrap();
+    for r in 0..2 {
+      let cr = r / 2;
+      let row = P010Row::new(
+        &y_wire[r * w..(r + 1) * w],
+        &uv_wire[cr * w..(cr + 1) * w],
+        r,
+        ColorMatrix::Bt601,
+        false,
+      );
+      crate::PixelSink::process(&mut sink, row).unwrap();
+    }
+    let scratch_len = sink.chroma_full_u16.len();
+    let prev_len = sink.chroma_prev_u16.len();
+    let prev_tag = sink.chroma_prev_row;
+
+    sink.set_chroma_location(loc2);
+    let row2 = P010Row::new(
+      &y_wire[2 * w..3 * w],
+      &uv_wire[w..2 * w],
+      2,
+      ColorMatrix::Bt601,
+      false,
+    );
+    let err = crate::PixelSink::process(&mut sink, row2).unwrap_err();
+    assert!(
+      matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
+      "direct path {loc1:?}->{loc2:?}: want ChromaSitingChanged, got {err:?}"
+    );
+    assert_eq!(
+      sink.chroma_full_u16.len(),
+      scratch_len,
+      "{loc1:?}->{loc2:?}: a rejected flip must not grow the chroma scratch"
+    );
+    assert_eq!(
+      sink.chroma_prev_u16.len(),
+      prev_len,
+      "{loc1:?}->{loc2:?}: a rejected flip must not grow the vertical lookback"
+    );
+    assert_eq!(
+      sink.chroma_prev_row, prev_tag,
+      "{loc1:?}->{loc2:?}: a rejected flip must not advance the lookback tag"
+    );
+
+    sink.set_chroma_location(loc1);
+    for r in 2..h {
+      let cr = r / 2;
+      let row = P010Row::new(
+        &y_wire[r * w..(r + 1) * w],
+        &uv_wire[cr * w..(cr + 1) * w],
+        r,
+        ColorMatrix::Bt601,
+        false,
+      );
+      crate::PixelSink::process(&mut sink, row).unwrap();
+    }
+    drop(sink);
+    assert_eq!(
+      rgb, want,
+      "{loc1:?}: retry after a rejected flip must match a clean in-order decode"
+    );
+  }
+}
