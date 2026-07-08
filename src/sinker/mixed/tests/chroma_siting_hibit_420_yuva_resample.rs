@@ -116,6 +116,45 @@ fn recon_full_bottom_u16(u: &[u16], v: &[u16], sw: usize, sh: usize) -> (Vec<u16
   (uf, vf)
 }
 
+/// Reconstruct half-res `u16` chroma to full resolution (`sw x sh`) for the
+/// top-sited (`v = 0`, FORWARD fold, RFC #238 Top) decode — the vertical MIRROR of
+/// [`recon_full_bottom_u16`]: EVEN rows take chroma row `i` co-sited, ODD rows
+/// forward box-blend chroma rows `i` and `i + 1` (round-half-up, bottom-edge
+/// clamp), each then horizontally upsampled with the #302 centered kernel. This is
+/// the row-order chroma the packed YUVA area / filter tail reconstructs for `Top`
+/// (via the forward one-row delay), so binning this full-res frame reproduces the
+/// routed Top path.
+fn recon_full_top_u16(u: &[u16], v: &[u16], sw: usize, sh: usize) -> (Vec<u16>, Vec<u16>) {
+  let cw = sw / 2;
+  let ch = sh.div_ceil(2);
+  let vblend = |plane: &[u16], cr: usize, next: usize| -> Vec<u16> {
+    (0..cw)
+      .map(|c| {
+        let a = u32::from(plane[cr * cw + c]);
+        let b = u32::from(plane[next * cw + c]);
+        ((a + b + 1) >> 1) as u16
+      })
+      .collect::<Vec<u16>>()
+  };
+  let mut uf = vec![0u16; sw * sh];
+  let mut vf = vec![0u16; sw * sh];
+  for r in 0..sh {
+    let cr = r / 2;
+    let (uh, vh) = if r & 1 == 1 {
+      let next = (cr + 1).min(ch - 1);
+      (vblend(u, cr, next), vblend(v, cr, next))
+    } else {
+      (
+        u[cr * cw..cr * cw + cw].to_vec(),
+        v[cr * cw..cr * cw + cw].to_vec(),
+      )
+    };
+    uf[r * sw..r * sw + sw].copy_from_slice(&recon_full_row_u16(&uh, cw));
+    vf[r * sw..r * sw + sw].copy_from_slice(&recon_full_row_u16(&vh, cw));
+  }
+  (uf, vf)
+}
+
 /// The geometries the oracle-equality tests sweep: clean 2:1 and fractional
 /// ratios, EVEN source heights only (so the vertical luma-domain pairing equals
 /// the co-sited chroma box). Widths are even (`Yuva420p` requires it).
@@ -507,8 +546,8 @@ macro_rules! hibit_420_yuva_resample_siting {
             true,
           );
           for loc in [
+            // `TopLeft` (`v = 0` forward fold) is EXCLUDED — its own tests below.
             ChromaLocation::Left,
-            ChromaLocation::TopLeft,
             ChromaLocation::Unknown(7),
           ] {
             assert_eq!(
@@ -547,7 +586,9 @@ macro_rules! hibit_420_yuva_resample_siting {
         for (sw, sh, ow, oh) in GEOMS {
           let (y, u, v, a) = ramp(sw, sh);
           let (want_rgba, want_rgba16) = rgba_oracle(&y, &u, &v, &a, sw, sh, ow, oh, true, false);
-          for loc in [ChromaLocation::Center, ChromaLocation::Top] {
+          // Only `Center` matches this co-sited-vertical oracle; `Top` folds the
+          // FORWARD `v = 0` triangle and has its own oracle below.
+          for loc in [ChromaLocation::Center] {
             let got = run(&y, &u, &v, &a, sw, sh, ow, oh, loc, true);
             assert_eq!(
               got.1, want_rgba,
@@ -590,10 +631,10 @@ macro_rules! hibit_420_yuva_resample_siting {
         // packed YUVA tail is RGB-domain, so it matches the row-stage tier, α-drop).
         for (sw, sh, ow, oh) in GEOMS {
           let (y, u, v, a) = ramp(sw, sh);
-          // `Top` (`v = 0`) is EXCLUDED: the no-alpha `Yuv420pN` now folds the
-          // forward vertical triangle while the `Yuva420pN` Top rollout is a
-          // follow-up, so the two families' Top decodes intentionally diverge.
-          for loc in [ChromaLocation::Center] {
+          // `Top` / `TopLeft` (the FORWARD `v = 0` fold) are now active on BOTH
+          // families, so the α-drop `Yuva420pN` decode matches the merged no-alpha
+          // `Yuv420pN` Top decode row-for-row (the RGB-domain reconstruct-then-bin).
+          for loc in [ChromaLocation::Center, ChromaLocation::Top, ChromaLocation::TopLeft] {
             let ya = run(&y, &u, &v, &a, sw, sh, ow, oh, loc, true);
             let yv = run_yuv(&y, &u, &v, sw, sh, ow, oh, loc, true);
             assert_eq!(ya.0, yv.0, "rgb {loc:?} ({sw}x{sh}->{ow}x{oh})");
@@ -1490,6 +1531,323 @@ macro_rules! hibit_420_yuva_resample_siting {
           &fresh[row2..row3],
           "begin_frame must invalidate the Bottom lookback: frame 2's first even row \
            must clamp (== fresh sink), never box-blend the previous frame's stale chroma"
+        );
+      }
+
+      // ==== RFC #238 Top: top-sited (v = 0) FORWARD vertical fold ============
+      //
+      // Packed-only, so `Top` folds via the RGB-domain reconstruct-then-bin with a
+      // FORWARD one-row OUTPUT delay: the ODD source row is HELD (its Y + its
+      // full-resolution alpha) and the following EVEN row feeds TWO source rows
+      // (the held odd row forward-blended + the current even row co-sited).
+
+      /// The top-sited RGB-domain oracle for the packed area / filter tail: the
+      /// FORWARD-fold twin of [`rgba_oracle_bottom`] — reconstruct U / V to full
+      /// width with [`recon_full_top_u16`] (α UNTOUCHED), then bin that
+      /// `Yuva444pN` frame through the given resampler with STRAIGHT alpha. Feeding
+      /// the stream the same per-row reconstructed chroma the delay path feeds (in
+      /// source-row order) makes this the exact routed-Top output.
+      #[allow(clippy::too_many_arguments)]
+      fn rgba_oracle_top(
+        y: &[u16],
+        u: &[u16],
+        v: &[u16],
+        a: &[u16],
+        sw: usize,
+        sh: usize,
+        ow: usize,
+        oh: usize,
+        simd: bool,
+        filter: bool,
+      ) -> (Vec<u8>, Vec<u16>) {
+        let (uf, vf) = recon_full_top_u16(u, v, sw, sh);
+        let mut rgba = vec![0u8; ow * oh * 4];
+        let mut rgba16 = vec![0u16; ow * oh * 4];
+        let f = $F444::try_new(
+          y, &uf, &vf, a, sw as u32, sh as u32, sw as u32, sw as u32, sw as u32, sw as u32,
+        )
+        .unwrap();
+        if filter {
+          let mut sink = MixedSinker::<$M444, FilteredResampler<Triangle>>::with_resampler(
+            sw,
+            sh,
+            FilteredResampler::new(ow, oh, Triangle),
+          )
+          .unwrap()
+          .with_alpha_mode(AlphaMode::Straight)
+          .with_simd(simd)
+          .with_rgba(&mut rgba)
+          .unwrap()
+          .with_rgba_u16(&mut rgba16)
+          .unwrap();
+          $w444(&f, FR, M, &mut sink).unwrap();
+        } else {
+          let mut sink =
+            MixedSinker::<$M444, AreaResampler>::with_resampler(sw, sh, AreaResampler::to(ow, oh))
+              .unwrap()
+              .with_alpha_mode(AlphaMode::Straight)
+              .with_simd(simd)
+              .with_rgba(&mut rgba)
+              .unwrap()
+              .with_rgba_u16(&mut rgba16)
+              .unwrap();
+          $w444(&f, FR, M, &mut sink).unwrap();
+        }
+        (rgba, rgba16)
+      }
+
+      /// Direct (non-resample) `Yuva420pN` `Top` decode to straight RGBA (u8 +
+      /// native u16) — the forward-delay kernel path, the identity reference the
+      /// resample path must match at identity dimensions (colour AND α).
+      fn direct_top_yuva(
+        y: &[u16],
+        u: &[u16],
+        v: &[u16],
+        a: &[u16],
+        sw: usize,
+        sh: usize,
+        simd: bool,
+      ) -> (Vec<u8>, Vec<u16>) {
+        let cw = sw / 2;
+        let mut rgba = vec![0u8; sw * sh * 4];
+        let mut rgba16 = vec![0u16; sw * sh * 4];
+        {
+          let mut sink = MixedSinker::<$M420>::new(sw, sh)
+            .with_alpha_mode(AlphaMode::Straight)
+            .with_chroma_location(ChromaLocation::Top)
+            .with_simd(simd)
+            .with_rgba(&mut rgba)
+            .unwrap()
+            .with_rgba_u16(&mut rgba16)
+            .unwrap();
+          let f = $F420le::try_new(
+            y, u, v, a, sw as u32, sh as u32, sw as u32, cw as u32, cw as u32, sw as u32,
+          )
+          .unwrap();
+          $w420(&f, FR, M, &mut sink).unwrap();
+        }
+        (rgba, rgba16)
+      }
+
+      #[test]
+      #[cfg_attr(miri, ignore = "SIMD row kernels use intrinsics unsupported by Miri")]
+      fn top_area_rgba_equals_rgb_domain_oracle() {
+        for (sw, sh, ow, oh) in GEOMS {
+          let (y, u, v, a) = ramp(sw, sh);
+          let (want_rgba, want_rgba16) =
+            rgba_oracle_top(&y, &u, &v, &a, sw, sh, ow, oh, true, false);
+          let got = run(&y, &u, &v, &a, sw, sh, ow, oh, ChromaLocation::Top, true);
+          assert_eq!(got.1, want_rgba, "top area rgba ({sw}x{sh}->{ow}x{oh})");
+          assert_eq!(got.3, want_rgba16, "top area rgba_u16 ({sw}x{sh}->{ow}x{oh})");
+        }
+      }
+
+      #[test]
+      #[cfg_attr(miri, ignore = "SIMD row kernels use intrinsics unsupported by Miri")]
+      fn top_filter_rgba_equals_rgb_domain_oracle() {
+        for (sw, sh, ow, oh) in GEOMS {
+          let (y, u, v, a) = ramp(sw, sh);
+          let (want_rgba, want_rgba16) =
+            rgba_oracle_top(&y, &u, &v, &a, sw, sh, ow, oh, true, true);
+          let got = run_filter(&y, &u, &v, &a, sw, sh, ow, oh, ChromaLocation::Top, true);
+          assert_eq!(got.1, want_rgba, "top filter rgba ({sw}x{sh}->{ow}x{oh})");
+          assert_eq!(got.3, want_rgba16, "top filter rgba_u16 ({sw}x{sh}->{ow}x{oh})");
+        }
+      }
+
+      #[test]
+      #[cfg_attr(miri, ignore = "SIMD row kernels use intrinsics unsupported by Miri")]
+      fn top_alpha_is_identical_to_cosited() {
+        // The forward fold holds each odd row's full-resolution α and emits it in
+        // order, so the Top RGBA α channel equals the co-sited path's α byte-for-
+        // byte on BOTH tiers, while the colour channels move (a vertical ramp).
+        for is_filter in [false, true] {
+          let (y, u, v, a) = vramp(8, 8);
+          let drive = |loc| {
+            if is_filter {
+              run_filter(&y, &u, &v, &a, 8, 8, 4, 4, loc, true)
+            } else {
+              run(&y, &u, &v, &a, 8, 8, 4, 4, loc, true)
+            }
+          };
+          let cos = drive(ChromaLocation::Left);
+          let top = drive(ChromaLocation::Top);
+          let cos_a: Vec<u8> = cos.1.iter().skip(3).step_by(4).copied().collect();
+          let top_a: Vec<u8> = top.1.iter().skip(3).step_by(4).copied().collect();
+          assert_eq!(top_a, cos_a, "top α (u8) must equal co-sited (filter={is_filter})");
+          let cos_a16: Vec<u16> = cos.3.iter().skip(3).step_by(4).copied().collect();
+          let top_a16: Vec<u16> = top.3.iter().skip(3).step_by(4).copied().collect();
+          assert_eq!(top_a16, cos_a16, "top α (u16) must equal co-sited (filter={is_filter})");
+          assert_ne!(top.0, cos.0, "top colour must differ from co-sited (filter={is_filter})");
+        }
+      }
+
+      #[test]
+      #[cfg_attr(miri, ignore = "SIMD row kernels use intrinsics unsupported by Miri")]
+      fn top_differs_from_center_and_bottom_on_a_vertical_chroma_ramp() {
+        // The forward v=0 fold must MOVE the chroma: on a purely-vertical ramp Top
+        // diverges from the co-sited Center AND from the backward-folded Bottom.
+        let (y, u, v, a) = vramp(8, 8);
+        let cen = run(&y, &u, &v, &a, 8, 8, 4, 4, ChromaLocation::Center, true);
+        let bot = run(&y, &u, &v, &a, 8, 8, 4, 4, ChromaLocation::Bottom, true);
+        let top = run(&y, &u, &v, &a, 8, 8, 4, 4, ChromaLocation::Top, true);
+        assert_ne!(top.3, cen.3, "top area rgba_u16 must differ from center");
+        assert_ne!(top.3, bot.3, "top must fold opposite to bottom");
+        let topf = run_filter(&y, &u, &v, &a, 8, 8, 4, 4, ChromaLocation::Top, true);
+        let cenf = run_filter(&y, &u, &v, &a, 8, 8, 4, 4, ChromaLocation::Center, true);
+        assert_ne!(topf.1, cenf.1, "top filter rgba must differ from center");
+      }
+
+      #[test]
+      #[cfg_attr(miri, ignore = "SIMD row kernels use intrinsics unsupported by Miri")]
+      fn top_equals_cosited_on_flat_chroma() {
+        // Constant chroma: the forward vertical blend and horizontal triangle are
+        // both no-ops, so Top collapses to the co-sited decode byte-for-byte.
+        let (y, u, v, a) = flat(8, 8);
+        let cos = run(&y, &u, &v, &a, 8, 8, 4, 4, ChromaLocation::Left, true);
+        let top = run(&y, &u, &v, &a, 8, 8, 4, 4, ChromaLocation::Top, true);
+        assert_eq!(cos.1, top.1, "flat-chroma top rgba");
+        assert_eq!(cos.3, top.3, "flat-chroma top rgba_u16");
+        assert_eq!(cos.4, top.4, "flat-chroma top hsv");
+      }
+
+      #[test]
+      #[cfg_attr(miri, ignore = "SIMD row kernels use intrinsics unsupported by Miri")]
+      fn top_simd_matches_scalar() {
+        let (y, u, v, a) = ramp(8, 8);
+        assert_eq!(
+          run(&y, &u, &v, &a, 8, 8, 4, 4, ChromaLocation::Top, true),
+          run(&y, &u, &v, &a, 8, 8, 4, 4, ChromaLocation::Top, false),
+          "top area SIMD vs scalar must agree"
+        );
+        assert_eq!(
+          run_filter(&y, &u, &v, &a, 8, 8, 4, 4, ChromaLocation::Top, true),
+          run_filter(&y, &u, &v, &a, 8, 8, 4, 4, ChromaLocation::Top, false),
+          "top filter SIMD vs scalar must agree"
+        );
+      }
+
+      #[test]
+      #[cfg_attr(miri, ignore = "SIMD row kernels use intrinsics unsupported by Miri")]
+      fn top_be_matches_le() {
+        let (y, u, v, a) = ramp(8, 8);
+        assert_eq!(
+          run_be(&y, &u, &v, &a, 8, 8, 4, 4, ChromaLocation::Top),
+          run(&y, &u, &v, &a, 8, 8, 4, 4, ChromaLocation::Top, true),
+          "BE top decode must equal LE for the same logical planes"
+        );
+      }
+
+      #[test]
+      #[cfg_attr(miri, ignore = "SIMD row kernels use intrinsics unsupported by Miri")]
+      fn top_identity_resample_matches_direct_decode() {
+        // At identity dims the resample tier reconstructs chroma with the SAME
+        // forward-delay kernel as the direct decode, so routing Top through the
+        // resample preserves the alpha-aware decode byte-for-byte (colour AND α).
+        let (y, u, v, a) = vramp(8, 8);
+        let res = run(&y, &u, &v, &a, 8, 8, 8, 8, ChromaLocation::Top, true);
+        let (drgba, drgba16) = direct_top_yuva(&y, &u, &v, &a, 8, 8, true);
+        assert_eq!(res.1, drgba, "identity resample top rgba == direct decode");
+        assert_eq!(res.3, drgba16, "identity resample top rgba_u16 == direct decode");
+      }
+
+      #[test]
+      #[cfg_attr(miri, ignore = "SIMD row kernels use intrinsics unsupported by Miri")]
+      fn mid_frame_center_top_flip_rejected() {
+        // Center and Top are BOTH horizontally centered, so the `center_sited` flag
+        // alone cannot tell them apart; the frozen VERTICAL Top phase rejects the
+        // flip on every tier.
+        let (y, u, v, a) = vramp(8, 8);
+        for (loc1, loc2) in [
+          (ChromaLocation::Center, ChromaLocation::Top),
+          (ChromaLocation::Top, ChromaLocation::Center),
+          (ChromaLocation::Top, ChromaLocation::Bottom),
+        ] {
+          let mut rgba = vec![0u8; 4 * 4 * 4];
+          let sink =
+            MixedSinker::<$M420, AreaResampler>::with_resampler(8, 8, AreaResampler::to(4, 4))
+              .unwrap()
+              .with_alpha_mode(AlphaMode::Straight)
+              .with_rgba(&mut rgba)
+              .unwrap();
+          let err = flip_row1(sink, &y, &u, &v, &a, loc1, loc2).unwrap_err();
+          assert!(
+            matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
+            "area {loc1:?}->{loc2:?}: want ChromaSitingChanged, got {err:?}"
+          );
+
+          let mut rgba = vec![0u8; 4 * 4 * 4];
+          let sink = MixedSinker::<$M420, FilteredResampler<Triangle>>::with_resampler(
+            8,
+            8,
+            FilteredResampler::new(4, 4, Triangle),
+          )
+          .unwrap()
+          .with_alpha_mode(AlphaMode::Straight)
+          .with_rgba(&mut rgba)
+          .unwrap();
+          let err = flip_row1(sink, &y, &u, &v, &a, loc1, loc2).unwrap_err();
+          assert!(
+            matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
+            "filter {loc1:?}->{loc2:?}: want ChromaSitingChanged, got {err:?}"
+          );
+        }
+      }
+
+      #[test]
+      #[cfg_attr(miri, ignore = "SIMD row kernels use intrinsics unsupported by Miri")]
+      fn top_begin_frame_after_held_odd_row_no_cross_frame_leak() {
+        // Nv21 cross-frame-corruption regression class (REQUIRED): a Top RESAMPLE
+        // frame ending on a HELD odd row must drop that held state at the next
+        // `begin_frame`, so frame N's deferred colour row never flushes into frame
+        // N+1. Feed a partial frame (rows 0 + 1 — row 1 HELD by the forward delay),
+        // then `begin_frame` + a full frame; it must decode identically to a fresh
+        // single-frame Top resample.
+        let (y, u, v, a) = vramp(8, 8);
+        let (sw, sh, ow, oh, cw) = (8usize, 8usize, 4usize, 4usize, 4usize);
+        let row_at = |r: usize| {
+          let cr = r / 2;
+          $Row::new(
+            &y[r * sw..r * sw + sw],
+            &u[cr * cw..cr * cw + cw],
+            &v[cr * cw..cr * cw + cw],
+            &a[r * sw..r * sw + sw],
+            r,
+            M,
+            FR,
+          )
+        };
+        // Fresh single-frame reference.
+        let fresh = run(&y, &u, &v, &a, sw, sh, ow, oh, ChromaLocation::Top, true).1;
+        // Reused sink: partial frame (rows 0, 1 → row 1 held), begin_frame, full frame.
+        let mut reused = vec![0u8; ow * oh * 4];
+        {
+          let mut sink = MixedSinker::<$M420, AreaResampler>::with_resampler(
+            sw,
+            sh,
+            AreaResampler::to(ow, oh),
+          )
+          .unwrap()
+          .with_alpha_mode(AlphaMode::Straight)
+          .with_chroma_location(ChromaLocation::Top)
+          .with_rgba(&mut reused)
+          .unwrap();
+          PixelSink::begin_frame(&mut sink, sw as u32, sh as u32).unwrap();
+          PixelSink::process(&mut sink, row_at(0)).unwrap();
+          PixelSink::process(&mut sink, row_at(1)).unwrap();
+          assert!(sink.chroma_top_pending.is_some(), "row 1 must be held pending");
+          PixelSink::begin_frame(&mut sink, sw as u32, sh as u32).unwrap();
+          assert!(
+            sink.chroma_top_pending.is_none(),
+            "begin_frame must drop the held Top odd row (Nv21 regression class)"
+          );
+          for r in 0..sh {
+            PixelSink::process(&mut sink, row_at(r)).unwrap();
+          }
+        }
+        assert_eq!(
+          reused, fresh,
+          "the post-clear frame 2 must equal a fresh single-frame Top resample"
         );
       }
     }

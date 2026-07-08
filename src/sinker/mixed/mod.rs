@@ -2998,6 +2998,15 @@ pub struct MixedSinker<'a, F: SourceFormat, R = NoopResampler> {
   /// on the first deferred `Top` row; empty otherwise. Gated to `yuv-planar`.
   #[cfg(feature = "yuv-planar")]
   chroma_top_y: Vec<u8>,
+  /// Buffered **alpha** row for the deferred [`Self::chroma_top_pending`] odd
+  /// output row on the 8-bit YUVA 4:2:0 **Top** (`v = 0`) forward one-row delay
+  /// (RFC #238) — the alpha companion of [`Self::chroma_top_y`]. The 8-bit
+  /// `Yuva420p` carries a full-resolution `u8` alpha plane; the Top forward delay
+  /// defers the odd row's whole decode, so its alpha is held here alongside its
+  /// luma until the following even row flushes it. Lazily grown to `width` `u8`
+  /// on the first deferred `Top` row; empty otherwise. Gated to `yuv-planar`.
+  #[cfg(feature = "yuv-planar")]
+  chroma_top_a: Vec<u8>,
   /// Lazily grown to `3 * width` bytes when HSV is requested without a
   /// user RGB buffer. Empty otherwise.
   ///
@@ -3114,6 +3123,20 @@ pub struct MixedSinker<'a, F: SourceFormat, R = NoopResampler> {
   /// otherwise. Gated to `yuv-planar`, like [`Self::chroma_prev_u16`].
   #[cfg(feature = "yuv-planar")]
   chroma_top_y_u16: Vec<u16>,
+  /// Buffered wire-format **alpha** row for the deferred
+  /// [`Self::chroma_top_pending`] odd output row on the HIGH-BIT 4:2:0 YUVA
+  /// **Top** (`v = 0`) forward one-row delay (RFC #238) — the alpha companion of
+  /// [`Self::chroma_top_y_u16`]. YUVA carries a FULL-RESOLUTION alpha plane
+  /// (never chroma-subsampled) alongside Y; the Top forward delay defers the odd
+  /// row's whole decode, so its alpha — like its luma — must be held until the
+  /// following even row flushes it (the walker's row borrow expires after
+  /// `process` returns). Holds a copy of the odd row's `width` `u16` alpha in the
+  /// source's wire byte order. Only a `Yuva420p9` … `Yuva420p16` sink under
+  /// `Top` / `TopLeft` touches it; lazily grown to `width` `u16` on the first
+  /// deferred `Top` row, empty otherwise. Gated to `yuv-planar`, like
+  /// [`Self::chroma_top_y_u16`].
+  #[cfg(feature = "yuv-planar")]
+  chroma_top_a_u16: Vec<u16>,
   /// Source-width `u8` luma staging for the **packed YUV 4:2:2** resample
   /// path (the interleaved Y bytes are de-interleaved here via the format's
   /// own `*_to_luma_row` kernel — the exact Y→luma derivation the direct
@@ -4173,6 +4196,8 @@ impl<F: SourceFormat, R> MixedSinker<'_, F, R> {
       chroma_top_pending: None,
       #[cfg(feature = "yuv-planar")]
       chroma_top_y: Vec::new(),
+      #[cfg(feature = "yuv-planar")]
+      chroma_top_a: Vec::new(),
       #[cfg(any(
         feature = "bayer",
         feature = "gbr",
@@ -4203,6 +4228,8 @@ impl<F: SourceFormat, R> MixedSinker<'_, F, R> {
       chroma_prev_u16: Vec::new(),
       #[cfg(feature = "yuv-planar")]
       chroma_top_y_u16: Vec::new(),
+      #[cfg(feature = "yuv-planar")]
+      chroma_top_a_u16: Vec::new(),
       #[cfg(any(feature = "yuv-packed", feature = "gray"))]
       luma_scratch: Vec::new(),
       #[cfg(feature = "rgb-legacy")]
@@ -12171,6 +12198,14 @@ pub(super) fn reset_high_bit_yuva_streams<F: SourceFormat, R>(sink: &mut MixedSi
   // reset (they never set them).
   sink.frozen_chroma_bottom_v = None;
   sink.chroma_prev_row = None;
+  // RFC #238 Top: clear the frozen VERTICAL (`Top`, `v = 0`) chroma phase so the
+  // next frame may pick Top while a mid-frame flip to / from Top stays rejected,
+  // and drop any held Top forward-delay odd row so frame N's last deferred colour
+  // row never emits into frame N+1 (its held `chroma_top_y_u16` / `chroma_top_a_u16`
+  // bytes are left as-is, re-overwritten before any trusted read). Both stay
+  // `None` for the non-`Top` / 4:2:2 / 4:4:4 YUVA families that share this reset.
+  sink.frozen_chroma_top_v = None;
+  sink.chroma_top_pending = None;
   sink.frozen_alpha_mode = Some(sink.alpha_mode);
 }
 

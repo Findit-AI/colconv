@@ -4280,6 +4280,7 @@ impl NativeYuva420 {
   /// attached AND the alpha mode is straight; the caller resolves it. The
   /// embedded [`NativeYuv420`] is built with `need_color` for the Y / U / V
   /// chroma half (rgb / rgba / hsv all need chroma); α rides its own stream.
+  #[allow(clippy::too_many_arguments)]
   fn new(
     plan: &ResamplePlan,
     w: usize,
@@ -4288,13 +4289,17 @@ impl NativeYuva420 {
     need_alpha: bool,
     chroma_h_phase: f64,
     chroma_v_phase: f64,
+    top_v: bool,
   ) -> Result<Self, ResampleError> {
     // The embedded no-alpha 4:2:0 join folds the RFC #238 horizontal chroma
     // sampling phase (`chroma_h_phase`: `0.25` centered, `0.0` co-sited) into the
     // chroma area weights, exactly as the no-alpha `Yuv420p` / semi-planar `Nv12`
     // native arms do, and (RFC #238 S4-D) the vertical `Bottom` phase
     // (`chroma_v_phase`: `1.0` for `v = 1`, `0.0` co-sited vertical) into the V
-    // weights. The full-resolution α plane is siting-independent (never
+    // weights. RFC #238 Top folds the DISJOINT forward vertical triangle (`v = 0`,
+    // `top_v`) into the V weights instead (`area_chroma_420`'s `top_v` argument —
+    // the binning window absorbs the forward reach, so the native tier needs no
+    // forward delay). The full-resolution α plane is siting-independent (never
     // subsampled), so it is untouched. At phase 0 on both axes the folded plan is
     // byte-identical to the plain co-sited grid, so co-sited output is unchanged.
     let inner = NativeYuv420::new(
@@ -4307,7 +4312,7 @@ impl NativeYuva420 {
           plan.out_h(),
           chroma_h_phase,
           chroma_v_phase,
-          false,
+          top_v,
         )
       },
       w,
@@ -4370,6 +4375,17 @@ impl NativeYuva420 {
     self.inner.chroma_bottom
   }
 
+  /// Whether the embedded join's cached chroma plan folded the `Top` forward
+  /// vertical triangle (`v = 0`, RFC #238). `Center` and `Top` share
+  /// `chroma_centered = true` while `Bottom` and `Top` are disjoint, so neither
+  /// the horizontal nor the `Bottom` flag alone can tell `Top` apart; the
+  /// `Yuva420p` native arm compares this too to rebuild the join when the vertical
+  /// siting moves to / from `Top`.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub(super) const fn chroma_top(&self) -> bool {
+    self.inner.chroma_top
+  }
+
   /// Next source row the embedded join expects (0 at a fresh frame). Read by the
   /// `Yuva420p` native arm to fire the phase-rebuild drop ONLY at a fresh-frame
   /// boundary (`next_y() == 0`), never mid-frame.
@@ -4398,12 +4414,13 @@ impl NativeYuva420 {
 /// runs, and the sink only routes here under `AlphaMode::Straight`, so a
 /// mid-frame flip to Premultiplied is rejected before any native feed.
 ///
-/// `chroma_h_phase` / `chroma_v_phase` are the RFC #238 horizontal and vertical
-/// chroma sampling phases folded into the embedded Y / U / V join's chroma area
-/// weights (`chroma_h_phase` `0.25` centered / `0.0` co-sited; `chroma_v_phase`
-/// `1.0` for the S4-D `Bottom` `v = 1` fold / `0.0` co-sited vertical); the
-/// full-resolution α plane is siting-independent, so neither phase touches it. At
-/// phase 0 on both axes the folded plan is byte-identical to the plain co-sited
+/// `chroma_h_phase` / `chroma_v_phase` / `top_v` are the RFC #238 horizontal and
+/// vertical chroma sampling phases folded into the embedded Y / U / V join's
+/// chroma area weights (`chroma_h_phase` `0.25` centered / `0.0` co-sited;
+/// `chroma_v_phase` `1.0` for the S4-D `Bottom` `v = 1` fold / `0.0` co-sited
+/// vertical; `top_v` folds the DISJOINT `Top` `v = 0` forward triangle instead);
+/// the full-resolution α plane is siting-independent, so no phase touches it. At
+/// phase 0 on every axis the folded plan is byte-identical to the plain co-sited
 /// grid.
 #[cfg(feature = "yuva")]
 #[allow(clippy::too_many_arguments)]
@@ -4428,6 +4445,7 @@ pub(super) fn yuva420p_process_native(
   h: usize,
   chroma_h_phase: f64,
   chroma_v_phase: f64,
+  top_v: bool,
   use_simd: bool,
 ) -> Result<(), MixedSinkerError> {
   let ow = plan.out_w();
@@ -4482,6 +4500,7 @@ pub(super) fn yuva420p_process_native(
       need_alpha,
       chroma_h_phase,
       chroma_v_phase,
+      top_v,
     )?;
     Some(crate::resample::try_box(join).map_err(|_| {
       MixedSinkerError::Resample(ResampleError::AllocationFailed(PlanGeometry::new(

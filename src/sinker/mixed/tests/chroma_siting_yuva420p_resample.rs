@@ -354,8 +354,9 @@ fn cosited_group_is_byte_identical_across_tiers() {
       true,
     );
     for loc in [
+      // `TopLeft` is EXCLUDED: co-sited horizontally but vertically forward-folded
+      // (`v = 0`), so it diverges from the phase-0 co-sited group (its own tests).
       ChromaLocation::Left,
-      ChromaLocation::TopLeft,
       ChromaLocation::Unknown(7),
     ] {
       let got = run(&y, &u, &v, &a, 8, 8, 4, 4, loc, native, true);
@@ -385,16 +386,16 @@ fn centered_chroma_matches_yuv420p_centered_across_tiers() {
     for native in [true, false] {
       // α is orthogonal to chroma siting on every axis, so the Yuva420p decode
       // must match the no-alpha Yuv420p decode for the horizontal centered group
-      // (Center), the vertical Bottom fold (RFC #238 S4-D) AND the co-sited-H + v=1
-      // BottomLeft fold — all route through the resample identically (α-drop).
-      // `Top` / `TopLeft` (the FORWARD `v = 0` fold) are EXCLUDED: RFC #238
-      // activated them in the resample tiers for `Yuv420p` ONLY, so the no-alpha
-      // twin now folds vertically while `Yuva420p` keeps the co-sited-V decode —
-      // they legitimately diverge until the `Yuva420p` Top activation lands.
+      // (Center), the vertical Bottom fold (RFC #238 S4-D), the co-sited-H + v=1
+      // BottomLeft fold, AND the RFC #238 FORWARD `v = 0` `Top` / `TopLeft` folds
+      // (now active on both families) — all route through the resample identically
+      // (α-drop) on both the native and row-stage tiers.
       for loc in [
         ChromaLocation::Center,
         ChromaLocation::Bottom,
         ChromaLocation::BottomLeft,
+        ChromaLocation::Top,
+        ChromaLocation::TopLeft,
       ] {
         let ya = run(&y, &u, &v, &a, sw, sh, ow, oh, loc, native, true);
         let yv = run_yuv420p(&y, &u, &v, sw, sh, ow, oh, loc, native, true);
@@ -437,16 +438,28 @@ fn centered_chroma_matches_yuv420p_centered_across_tiers() {
 fn centered_native_rgba_equals_code_domain_oracle() {
   // The straight-alpha native tier IS bin-Y/U/V/A-then-convert: Y / A co-sited,
   // U / V through the exact centered chroma oracle, one `Yuva444p` convert. Only
-  // the vertically-co-sited centered sitings (Center / Top) match this oracle;
-  // `Bottom` folds the vertical `v = 1` triangle and has its own V-fold oracle
-  // ([`bottom_native_rgba_equals_code_domain_oracle`]).
+  // the vertically-co-sited centered siting (Center) matches this co-sited-V
+  // oracle; `Bottom` folds the `v = 1` triangle and `Top` the FORWARD `v = 0` one,
+  // each with its own oracle (`Bottom` via `bottom_native_rgba_equals_code_domain_oracle`,
+  // `Top` via the cross-format `centered_chroma_matches_yuv420p_centered_across_tiers`
+  // against the merged `Yuv420p` Top decode).
   for (sw, sh, ow, oh) in [(8, 8, 4, 4), (8, 8, 5, 3), (12, 8, 4, 4), (16, 8, 6, 5)] {
     let (y, u, v, a) = ramp(sw, sh);
     let oracle = native_rgba_oracle(&y, &u, &v, &a, sw, sh, ow, oh, true);
-    for loc in [ChromaLocation::Center, ChromaLocation::Top] {
-      let n = run(&y, &u, &v, &a, sw, sh, ow, oh, loc, true, true);
-      assert_eq!(n.1, oracle, "native rgba {loc:?} {sw}x{sh}->{ow}x{oh}");
-    }
+    let n = run(
+      &y,
+      &u,
+      &v,
+      &a,
+      sw,
+      sh,
+      ow,
+      oh,
+      ChromaLocation::Center,
+      true,
+      true,
+    );
+    assert_eq!(n.1, oracle, "native rgba Center {sw}x{sh}->{ow}x{oh}");
   }
 }
 
