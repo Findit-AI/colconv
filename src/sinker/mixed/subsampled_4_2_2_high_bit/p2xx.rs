@@ -603,7 +603,8 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P210<BE>, R> {
               return Ok(());
             }
             reserve_pn_chroma_full_u16(chroma_full_u16, w, h)?;
-            let uv_full = upsample_pn_chroma_center_h::<BITS>(chroma_full_u16, uv_half, w, BE);
+            let uv_full =
+              upsample_pn_chroma_center_h::<BITS>(chroma_full_u16, uv_half, w, BE, use_simd);
             let r = packed_yuv422_triple_filter_resample::<BITS>(
               luma_filter_stream_u16,
               rgb_filter_stream,
@@ -815,7 +816,8 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P210<BE>, R> {
           return Ok(());
         }
         reserve_pn_chroma_full_u16(chroma_full_u16, w, h)?;
-        let uv_full = upsample_pn_chroma_center_h::<BITS>(chroma_full_u16, uv_half, w, BE);
+        let uv_full =
+          upsample_pn_chroma_center_h::<BITS>(chroma_full_u16, uv_half, w, BE, use_simd);
         packed_yuv422_triple_resample::<BITS>(
           luma_stream_u16,
           rgb_stream,
@@ -1000,6 +1002,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P210<BE>, R> {
         row.uv_half(),
         w,
         BE,
+        use_simd,
       ))
     } else {
       None
@@ -1499,7 +1502,8 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P212<BE>, R> {
               return Ok(());
             }
             reserve_pn_chroma_full_u16(chroma_full_u16, w, h)?;
-            let uv_full = upsample_pn_chroma_center_h::<BITS>(chroma_full_u16, uv_half, w, BE);
+            let uv_full =
+              upsample_pn_chroma_center_h::<BITS>(chroma_full_u16, uv_half, w, BE, use_simd);
             let r = packed_yuv422_triple_filter_resample::<BITS>(
               luma_filter_stream_u16,
               rgb_filter_stream,
@@ -1706,7 +1710,8 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P212<BE>, R> {
           return Ok(());
         }
         reserve_pn_chroma_full_u16(chroma_full_u16, w, h)?;
-        let uv_full = upsample_pn_chroma_center_h::<BITS>(chroma_full_u16, uv_half, w, BE);
+        let uv_full =
+          upsample_pn_chroma_center_h::<BITS>(chroma_full_u16, uv_half, w, BE, use_simd);
         packed_yuv422_triple_resample::<BITS>(
           luma_stream_u16,
           rgb_stream,
@@ -1891,6 +1896,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P212<BE>, R> {
         row.uv_half(),
         w,
         BE,
+        use_simd,
       ))
     } else {
       None
@@ -2391,7 +2397,8 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P216<BE>, R> {
               return Ok(());
             }
             reserve_pn_chroma_full_u16(chroma_full_u16, w, h)?;
-            let uv_full = upsample_pn_chroma_center_h::<BITS>(chroma_full_u16, uv_half, w, BE);
+            let uv_full =
+              upsample_pn_chroma_center_h::<BITS>(chroma_full_u16, uv_half, w, BE, use_simd);
             let r = packed_yuv422_triple_filter_resample::<BITS>(
               luma_filter_stream_u16,
               rgb_filter_stream,
@@ -2598,7 +2605,8 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P216<BE>, R> {
           return Ok(());
         }
         reserve_pn_chroma_full_u16(chroma_full_u16, w, h)?;
-        let uv_full = upsample_pn_chroma_center_h::<BITS>(chroma_full_u16, uv_half, w, BE);
+        let uv_full =
+          upsample_pn_chroma_center_h::<BITS>(chroma_full_u16, uv_half, w, BE, use_simd);
         packed_yuv422_triple_resample::<BITS>(
           luma_stream_u16,
           rgb_stream,
@@ -2783,6 +2791,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P216<BE>, R> {
         row.uv_half(),
         w,
         BE,
+        use_simd,
       ))
     } else {
       None
@@ -3295,8 +3304,13 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Nv20<BE>, R> {
               return Ok(());
             }
             reserve_pn_chroma_full_u16(chroma_full_u16, w, h)?;
-            let uv_full =
-              upsample_pn_chroma_center_h_low_packed::<BITS>(chroma_full_u16, uv_half, w, BE);
+            let uv_full = upsample_pn_chroma_center_h_low_packed::<BITS>(
+              chroma_full_u16,
+              uv_half,
+              w,
+              BE,
+              use_simd,
+            );
             let r = packed_yuv422_triple_filter_resample::<BITS>(
               luma_filter_stream_u16,
               rgb_filter_stream,
@@ -3506,7 +3520,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Nv20<BE>, R> {
         }
         reserve_pn_chroma_full_u16(chroma_full_u16, w, h)?;
         let uv_full =
-          upsample_pn_chroma_center_h_low_packed::<BITS>(chroma_full_u16, uv_half, w, BE);
+          upsample_pn_chroma_center_h_low_packed::<BITS>(chroma_full_u16, uv_half, w, BE, use_simd);
         packed_yuv422_triple_resample::<BITS>(
           luma_stream_u16,
           rgb_stream,
@@ -3688,6 +3702,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Nv20<BE>, R> {
         row.uv(),
         w,
         BE,
+        use_simd,
       ))
     } else {
       None

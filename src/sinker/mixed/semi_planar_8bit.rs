@@ -537,6 +537,7 @@ fn nv_center_upsample_chroma<'s>(
   stage: bool,
   width: usize,
   swap_uv: bool,
+  use_simd: bool,
 ) -> (&'s [u8], &'s [u8]) {
   let cw = width / 2;
   nv_deinterleave_chroma_half(u_half, v_half, uv, width, swap_uv);
@@ -551,6 +552,7 @@ fn nv_center_upsample_chroma<'s>(
     center_h,
     stage,
     width,
+    use_simd,
   )
 }
 
@@ -1044,6 +1046,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv12, R> {
                   false,
                   w,
                   false,
+                  use_simd,
                 );
                 planar_dual_filter_resample(
                   luma_filter_stream,
@@ -1087,6 +1090,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv12, R> {
                 false,
                 w,
                 false,
+                use_simd,
               );
               planar_dual_filter_resample(
                 luma_filter_stream,
@@ -1140,6 +1144,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv12, R> {
                 false,
                 w,
                 false,
+                use_simd,
               );
               planar_dual_filter_resample(
                 luma_filter_stream,
@@ -1233,6 +1238,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv12, R> {
               false,
               w,
               false,
+              use_simd,
             );
             let r = planar_dual_filter_resample(
               luma_filter_stream,
@@ -1497,6 +1503,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv12, R> {
               false,
               w,
               false,
+              use_simd,
             );
             planar_dual_resample(
               luma_stream,
@@ -1540,6 +1547,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv12, R> {
             false,
             w,
             false,
+            use_simd,
           );
           planar_dual_resample(
             luma_stream,
@@ -1593,6 +1601,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv12, R> {
             false,
             w,
             false,
+            use_simd,
           );
           planar_dual_resample(
             luma_stream,
@@ -1641,6 +1650,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv12, R> {
         }
         return Ok(());
       }
+      #[cfg(feature = "yuv-planar")]
       if (center_sited || bottom_v) && want_color {
         let need_luma = luma.is_some() || luma_u16.is_some();
         let expected = if need_luma {
@@ -1689,6 +1699,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv12, R> {
           false,
           w,
           false,
+          use_simd,
         );
         planar_dual_resample(
           luma_stream,
@@ -1977,6 +1988,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv12, R> {
           false,
           w,
           false,
+          use_simd,
         );
         nv_yuv444_identity_color_row(
           rgb,
@@ -2025,6 +2037,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv12, R> {
           false,
           w,
           false,
+          use_simd,
         );
         nv_yuv444_identity_color_row(
           rgb,
@@ -2085,6 +2098,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv12, R> {
           true,
           w,
           false,
+          use_simd,
         );
         yuv_444_to_hsv_row(
           row.y(),
@@ -2135,6 +2149,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv12, R> {
           true,
           w,
           false,
+          use_simd,
         );
         yuv_444_to_rgba_row(
           row.y(),
@@ -2194,6 +2209,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv12, R> {
         true,
         w,
         false,
+        use_simd,
       );
       yuv_444_to_rgb_row(
         row.y(),
@@ -2543,6 +2559,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv16, R> {
               false,
               w,
               false,
+              use_simd,
             );
             let r = planar_dual_filter_resample(
               luma_filter_stream,
@@ -2749,6 +2766,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv16, R> {
           false,
           w,
           false,
+          use_simd,
         );
         planar_dual_resample(
           luma_stream,
@@ -2933,6 +2951,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv16, R> {
           false,
           w,
           false,
+          use_simd,
         );
         yuv_444_to_hsv_row(
           row.y(),
@@ -2982,6 +3001,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv16, R> {
           false,
           w,
           false,
+          use_simd,
         );
         yuv_444_to_rgba_row(
           row.y(),
@@ -3039,6 +3059,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv16, R> {
         false,
         w,
         false,
+        use_simd,
       );
       yuv_444_to_rgb_row(
         row.y(),
@@ -3455,6 +3476,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv21, R> {
                   false,
                   w,
                   true,
+                  use_simd,
                 );
                 planar_dual_filter_resample(
                   luma_filter_stream,
@@ -3498,6 +3520,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv21, R> {
                 false,
                 w,
                 true,
+                use_simd,
               );
               planar_dual_filter_resample(
                 luma_filter_stream,
@@ -3551,6 +3574,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv21, R> {
                 false,
                 w,
                 true,
+                use_simd,
               );
               planar_dual_filter_resample(
                 luma_filter_stream,
@@ -3644,6 +3668,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv21, R> {
               false,
               w,
               true,
+              use_simd,
             );
             let r = planar_dual_filter_resample(
               luma_filter_stream,
@@ -3902,6 +3927,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv21, R> {
               false,
               w,
               true,
+              use_simd,
             );
             planar_dual_resample(
               luma_stream,
@@ -3945,6 +3971,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv21, R> {
             false,
             w,
             true,
+            use_simd,
           );
           planar_dual_resample(
             luma_stream,
@@ -3998,6 +4025,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv21, R> {
             false,
             w,
             true,
+            use_simd,
           );
           planar_dual_resample(
             luma_stream,
@@ -4046,6 +4074,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv21, R> {
         }
         return Ok(());
       }
+      #[cfg(feature = "yuv-planar")]
       if (center_sited || bottom_v) && want_color {
         let need_luma = luma.is_some() || luma_u16.is_some();
         let expected = if need_luma {
@@ -4094,6 +4123,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv21, R> {
           false,
           w,
           true,
+          use_simd,
         );
         planar_dual_resample(
           luma_stream,
@@ -4364,6 +4394,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv21, R> {
           false,
           w,
           true,
+          use_simd,
         );
         nv_yuv444_identity_color_row(
           rgb,
@@ -4406,6 +4437,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv21, R> {
           false,
           w,
           true,
+          use_simd,
         );
         nv_yuv444_identity_color_row(
           rgb,
@@ -4461,6 +4493,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv21, R> {
           true,
           w,
           true,
+          use_simd,
         );
         yuv_444_to_hsv_row(
           row.y(),
@@ -4511,6 +4544,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv21, R> {
           true,
           w,
           true,
+          use_simd,
         );
         yuv_444_to_rgba_row(
           row.y(),
@@ -4570,6 +4604,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv21, R> {
         true,
         w,
         true,
+        use_simd,
       );
       yuv_444_to_rgb_row(
         row.y(),

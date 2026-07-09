@@ -41,7 +41,15 @@ pub(crate) trait ChromaCenterUpsampler {
 
   /// Reconstructs one half-width chroma plane (`half`) to full width at the
   /// centered phase-0.5 position, writing `width` samples into `full`.
-  fn upsample_center_h(&self, half: &[Self::Elem], full: &mut [Self::Elem], width: usize);
+  /// `use_simd` threads the sink's SIMD toggle (`MixedSinker::with_simd`)
+  /// into the shared dispatcher, byte-identical to the scalar fallback.
+  fn upsample_center_h(
+    &self,
+    half: &[Self::Elem],
+    full: &mut [Self::Elem],
+    width: usize,
+    use_simd: bool,
+  );
 }
 
 /// 8-bit planar centered chroma upsampler — delegates to
@@ -55,8 +63,8 @@ impl ChromaCenterUpsampler for ChromaU8 {
   type Elem = u8;
 
   #[cfg_attr(not(tarpaulin), inline(always))]
-  fn upsample_center_h(&self, half: &[u8], full: &mut [u8], width: usize) {
-    crate::row::scalar::chroma_upsample_2to1_center_h(half, full, width);
+  fn upsample_center_h(&self, half: &[u8], full: &mut [u8], width: usize, use_simd: bool) {
+    crate::row::chroma_upsample_2to1_center_h_row(half, full, width, use_simd);
   }
 }
 
@@ -71,7 +79,9 @@ impl ChromaCenterUpsampler for Chroma411U8 {
   type Elem = u8;
 
   #[cfg_attr(not(tarpaulin), inline(always))]
-  fn upsample_center_h(&self, quarter: &[u8], full: &mut [u8], width: usize) {
+  fn upsample_center_h(&self, quarter: &[u8], full: &mut [u8], width: usize, _use_simd: bool) {
+    // The 1→4 (4:1:1 / 4:1:0) kernel is scalar-only; its SIMD path is a
+    // separate follow-up, so the toggle is accepted but unused here.
     crate::row::scalar::chroma_upsample_4to1_center_h(quarter, full, width);
   }
 }
@@ -93,12 +103,13 @@ impl<const BITS: u32> ChromaCenterUpsampler for ChromaU16<BITS> {
   type Elem = u16;
 
   #[cfg_attr(not(tarpaulin), inline(always))]
-  fn upsample_center_h(&self, half: &[u16], full: &mut [u16], width: usize) {
-    crate::row::scalar::chroma_upsample_2to1_center_h_u16::<BITS>(
+  fn upsample_center_h(&self, half: &[u16], full: &mut [u16], width: usize, use_simd: bool) {
+    crate::row::chroma_upsample_2to1_center_h_u16_row::<BITS>(
       half,
       full,
       width,
       self.big_endian,
+      use_simd,
     );
   }
 }
@@ -124,13 +135,14 @@ pub(crate) fn reconstruct_chroma<'s, K: ChromaCenterUpsampler>(
   u_half: &[K::Elem],
   v_half: &[K::Elem],
   width: usize,
+  use_simd: bool,
 ) -> (&'s [K::Elem], &'s [K::Elem]) {
   debug_assert!(
     chroma_full.len() >= 2 * width,
     "chroma_full must be reserved to >= 2 * width before reconstruct_chroma"
   );
   let (u_full, v_full) = chroma_full[..2 * width].split_at_mut(width);
-  kernel.upsample_center_h(u_half, u_full, width);
-  kernel.upsample_center_h(v_half, v_full, width);
+  kernel.upsample_center_h(u_half, u_full, width, use_simd);
+  kernel.upsample_center_h(v_half, v_full, width, use_simd);
   (u_full, v_full)
 }

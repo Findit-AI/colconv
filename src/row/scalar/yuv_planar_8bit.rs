@@ -342,6 +342,41 @@ pub(crate) fn chroma_upsample_2to1_center_h(c_half: &[u8], c_full: &mut [u8], wi
   }
 }
 
+/// Reconstructs the two output columns for a single chroma sample `j` of the
+/// centered (#302 phase-0.5) 2:1 horizontal upsample — the per-sample body of
+/// [`chroma_upsample_2to1_center_h`], factored out so the SIMD backends can
+/// share this exact scalar math for their edge / tail columns (the boundary
+/// samples the vector body skips) and stay byte-identical to this reference.
+///
+/// `c[j-1]` clamps to `c[0]` at the left edge and `c[j+1]` to `c[half-1]` at
+/// the right, so `j = 0` and `j = half - 1` reproduce the reference's boundary
+/// replication exactly.
+#[cfg(any(feature = "std", feature = "alloc"))]
+// Consumed only by the SIMD arch kernels (`arch::{neon, x86_sse41, x86_avx2,
+// x86_avx512, wasm_simd128}`), which compile solely on aarch64 / x86_64 /
+// wasm32 under `yuv-planar`. On any other target (e.g. the s390x / i686 miri
+// jobs) there is no caller and the helper is genuinely dead; allow it there
+// while the SIMD builds keep it live and `-D warnings`-checked.
+#[cfg_attr(
+  not(all(
+    feature = "yuv-planar",
+    any(
+      target_arch = "aarch64",
+      target_arch = "x86_64",
+      target_arch = "wasm32"
+    )
+  )),
+  allow(dead_code)
+)]
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn chroma_upsample_2to1_center_h_pair(c: &[u8], full: &mut [u8], j: usize, half: usize) {
+  let left = c[j.saturating_sub(1)] as u32;
+  let mid = c[j] as u32;
+  let right = c[if j + 1 < half { j + 1 } else { j }] as u32;
+  full[2 * j] = ((left + 3 * mid + 2) >> 2) as u8;
+  full[2 * j + 1] = ((3 * mid + right + 2) >> 2) as u8;
+}
+
 /// Horizontally upsamples a quarter-width chroma row (4:1:1 or 4:1:0) to full
 /// width for **center-sited** chroma — the MPEG-1 / JPEG horizontal phase
 /// (FFmpeg `AVCHROMA_LOC_CENTER` / `Top` / `Bottom`), the 1→4 analog of
@@ -659,6 +694,58 @@ pub(crate) fn chroma_upsample_2to1_center_h_u16<const BITS: u32>(
     c_full[2 * j] = store((left + 3 * mid + 2) >> 2);
     c_full[2 * j + 1] = store((3 * mid + right + 2) >> 2);
   }
+}
+
+/// `u16` per-sample twin of [`chroma_upsample_2to1_center_h_pair`] — the
+/// single-sample body of [`chroma_upsample_2to1_center_h_u16`], shared with the
+/// SIMD backends for their edge / tail columns so those stay byte-identical to
+/// this reference. Both `c` and `full` carry samples in the source's wire byte
+/// order (`big_endian`); each input is normalized wire → host-native and masked
+/// to the low `BITS` before the `1/4`–`3/4` blend, and the output re-encoded to
+/// the same wire order — identical to the reference's `load` / `store`.
+#[cfg(any(feature = "std", feature = "alloc"))]
+// Consumed only by the SIMD arch kernels (`arch::{neon, x86_sse41, x86_avx2,
+// x86_avx512, wasm_simd128}`), which compile solely on aarch64 / x86_64 /
+// wasm32 under `yuv-planar`. On any other target (e.g. the s390x / i686 miri
+// jobs) there is no caller and the helper is genuinely dead; allow it there
+// while the SIMD builds keep it live and `-D warnings`-checked.
+#[cfg_attr(
+  not(all(
+    feature = "yuv-planar",
+    any(
+      target_arch = "aarch64",
+      target_arch = "x86_64",
+      target_arch = "wasm32"
+    )
+  )),
+  allow(dead_code)
+)]
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn chroma_upsample_2to1_center_h_u16_pair<const BITS: u32>(
+  c: &[u16],
+  full: &mut [u16],
+  j: usize,
+  half: usize,
+  big_endian: bool,
+) {
+  let mask = ((1u32 << BITS) - 1) as u16;
+  let load = |raw: u16| -> u32 {
+    let logical = if big_endian {
+      u16::from_be(raw)
+    } else {
+      u16::from_le(raw)
+    };
+    (logical & mask) as u32
+  };
+  let store = |logical: u32| -> u16 {
+    let v = logical as u16;
+    if big_endian { v.to_be() } else { v.to_le() }
+  };
+  let left = load(c[j.saturating_sub(1)]);
+  let mid = load(c[j]);
+  let right = load(c[if j + 1 < half { j + 1 } else { j }]);
+  full[2 * j] = store((left + 3 * mid + 2) >> 2);
+  full[2 * j + 1] = store((3 * mid + right + 2) >> 2);
 }
 
 /// `u16` twin of [`chroma_upsample_420_bottom_even_h`] for the **high-bit**

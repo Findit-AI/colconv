@@ -768,6 +768,7 @@ fn reserve_packed_center_chroma(
 /// [`reserve_packed_center_chroma`] up front (every centered output path does,
 /// before any output write), so all three buffers are guaranteed long enough.
 #[cfg(all(feature = "yuv-packed", feature = "yuv-planar"))]
+#[allow(clippy::too_many_arguments)]
 fn packed_center_upsample_chroma<'s>(
   chroma_full: &'s mut [u8],
   u_half: &mut [u8],
@@ -776,6 +777,7 @@ fn packed_center_upsample_chroma<'s>(
   width: usize,
   u_off: usize,
   v_off: usize,
+  use_simd: bool,
 ) -> (&'s [u8], &'s [u8]) {
   let cw = width / 2;
   debug_assert!(
@@ -786,7 +788,7 @@ fn packed_center_upsample_chroma<'s>(
     u_half[i] = group[u_off];
     v_half[i] = group[v_off];
   }
-  upsample_420_chroma_center_h(chroma_full, &u_half[..cw], &v_half[..cw], width)
+  upsample_420_chroma_center_h(chroma_full, &u_half[..cw], &v_half[..cw], width, use_simd)
 }
 
 // ---- Yuyv422 impl ------------------------------------------------------
@@ -1074,6 +1076,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuyv422, R> {
               w,
               1,
               3,
+              use_simd,
             );
             let r = packed_yuv422_dual_filter_resample(
               luma_filter_stream,
@@ -1292,6 +1295,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuyv422, R> {
           w,
           1,
           3,
+          use_simd,
         );
         packed_yuv422_dual_resample(
           luma_stream,
@@ -1489,6 +1493,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuyv422, R> {
           w,
           1,
           3,
+          use_simd,
         );
         yuv_444_to_hsv_row(
           &packed_yuv_y_full[..w],
@@ -1536,6 +1541,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuyv422, R> {
           w,
           1,
           3,
+          use_simd,
         );
         yuv_444_to_rgba_row(
           &packed_yuv_y_full[..w],
@@ -1586,6 +1592,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuyv422, R> {
         w,
         1,
         3,
+        use_simd,
       );
       yuv_444_to_rgb_row(
         &packed_yuv_y_full[..w],
@@ -1875,6 +1882,7 @@ impl<R> PixelSink for MixedSinker<'_, Uyvy422, R> {
               w,
               0,
               2,
+              use_simd,
             );
             let r = packed_yuv422_dual_filter_resample(
               luma_filter_stream,
@@ -2060,6 +2068,7 @@ impl<R> PixelSink for MixedSinker<'_, Uyvy422, R> {
           w,
           0,
           2,
+          use_simd,
         );
         packed_yuv422_dual_resample(
           luma_stream,
@@ -2257,6 +2266,7 @@ impl<R> PixelSink for MixedSinker<'_, Uyvy422, R> {
           w,
           0,
           2,
+          use_simd,
         );
         yuv_444_to_hsv_row(
           &packed_yuv_y_full[..w],
@@ -2301,6 +2311,7 @@ impl<R> PixelSink for MixedSinker<'_, Uyvy422, R> {
           w,
           0,
           2,
+          use_simd,
         );
         yuv_444_to_rgba_row(
           &packed_yuv_y_full[..w],
@@ -2352,6 +2363,7 @@ impl<R> PixelSink for MixedSinker<'_, Uyvy422, R> {
         w,
         0,
         2,
+        use_simd,
       );
       yuv_444_to_rgb_row(
         &packed_yuv_y_full[..w],
@@ -2638,6 +2650,7 @@ impl<R> PixelSink for MixedSinker<'_, Yvyu422, R> {
               w,
               3,
               1,
+              use_simd,
             );
             let r = packed_yuv422_dual_filter_resample(
               luma_filter_stream,
@@ -2823,6 +2836,7 @@ impl<R> PixelSink for MixedSinker<'_, Yvyu422, R> {
           w,
           3,
           1,
+          use_simd,
         );
         packed_yuv422_dual_resample(
           luma_stream,
@@ -3020,6 +3034,7 @@ impl<R> PixelSink for MixedSinker<'_, Yvyu422, R> {
           w,
           3,
           1,
+          use_simd,
         );
         yuv_444_to_hsv_row(
           &packed_yuv_y_full[..w],
@@ -3064,6 +3079,7 @@ impl<R> PixelSink for MixedSinker<'_, Yvyu422, R> {
           w,
           3,
           1,
+          use_simd,
         );
         yuv_444_to_rgba_row(
           &packed_yuv_y_full[..w],
@@ -3115,6 +3131,7 @@ impl<R> PixelSink for MixedSinker<'_, Yvyu422, R> {
         w,
         3,
         1,
+        use_simd,
       );
       yuv_444_to_rgb_row(
         &packed_yuv_y_full[..w],

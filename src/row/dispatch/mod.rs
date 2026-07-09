@@ -37,6 +37,14 @@ pub(super) mod area_reduce;
 pub(super) mod ayuv64;
 #[cfg(feature = "bayer")]
 pub(super) mod bayer;
+// Consumer: the centered-siting (#302) chroma-reconstruction sink paths.
+// All three dispatchers (u8 / u16 planar, interleaved-UV P-format) require
+// `yuv-planar` — the scalar reconstruct references live in the `yuv-planar`
+// scalar modules — so the module gate is `yuv-planar`; the per-fn gates
+// inside add `yuv-semi-planar` for the P-format dispatcher and select which
+// exist in a given feature subset.
+#[cfg(all(any(feature = "std", feature = "alloc"), feature = "yuv-planar"))]
+pub(super) mod chroma_upsample;
 // Consumer: the separable filter resampler (`crate::resample::filter`),
 // the signed twin of `area_reduce`; same 14-feature engine cascade.
 #[cfg(all(

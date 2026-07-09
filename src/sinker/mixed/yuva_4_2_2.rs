@@ -303,7 +303,8 @@ impl<R> PixelSink for MixedSinker<'_, Yuva422p, R> {
             core::ops::ControlFlow::Break(()) => Ok(()),
             core::ops::ControlFlow::Continue(()) => {
               reserve_420_chroma_full(chroma_full, w, h)?;
-              let (u_full, v_full) = upsample_420_chroma_center_h(chroma_full, u_half, v_half, w);
+              let (u_full, v_full) =
+                upsample_420_chroma_center_h(chroma_full, u_half, v_half, w, use_simd);
               packed_yuva444_resample::<8>(
                 rgba_stream,
                 rgba_stream_u16,
@@ -440,7 +441,8 @@ impl<R> PixelSink for MixedSinker<'_, Yuva422p, R> {
             core::ops::ControlFlow::Break(()) => Ok(()),
             core::ops::ControlFlow::Continue(()) => {
               reserve_420_chroma_full(chroma_full, w, h)?;
-              let (u_full, v_full) = upsample_420_chroma_center_h(chroma_full, u_half, v_half, w);
+              let (u_full, v_full) =
+                upsample_420_chroma_center_h(chroma_full, u_half, v_half, w, use_simd);
               packed_yuva444_filter_resample::<8, true, false>(
                 rgba_filter_stream,
                 rgba_filter_stream_u16,
@@ -629,6 +631,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuva422p, R> {
         row.u_half(),
         row.v_half(),
         w,
+        use_simd,
       ))
     } else {
       None
@@ -1714,6 +1717,7 @@ fn yuva422p_high_bit_process<const BITS: u32, const BE: bool, F: crate::SourceFo
       v_half_row,
       w,
       BE,
+      use_simd,
     ))
   } else {
     None
@@ -2188,6 +2192,7 @@ fn yuva422p_high_bit_resample<const BITS: u32, const BE: bool>(
             v_half_row,
             w,
             BE,
+            use_simd,
           );
           packed_yuva444_resample::<BITS>(
             rgba_stream,
@@ -2343,6 +2348,7 @@ fn yuva422p_high_bit_resample<const BITS: u32, const BE: bool>(
             v_half_row,
             w,
             BE,
+            use_simd,
           );
           packed_yuva444_filter_resample::<BITS, false, false>(
             rgba_filter_stream,

@@ -495,6 +495,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, V210<BE>, R> {
           w,
           h,
           BE,
+          use_simd,
         )?;
         let y_full = &v210_y_full[..w];
         packed_yuv422_triple_resample::<BITS>(
