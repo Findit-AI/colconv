@@ -448,6 +448,61 @@ pub(crate) fn chroma_upsample_4to1_center_h(c_quarter: &[u8], c_full: &mut [u8],
   }
 }
 
+/// Reconstructs the (up to four) output columns for a single quarter-width
+/// chroma sample group `j` of the centered (#302 phase-0.5) 1→4 horizontal
+/// upsample — the per-group body of [`chroma_upsample_4to1_center_h`], factored
+/// out so the SIMD backends can share this exact scalar math for their edge /
+/// tail groups (the boundary groups `j = 0` / `j = quarter - 1` and the trailing
+/// partial group the vector body skips) and stay byte-identical to the reference.
+///
+/// `c[j-1]` clamps to `c[0]` at the left edge and `c[j+1]` to `c[quarter-1]` at
+/// the right, so `j = 0` and `j = quarter - 1` reproduce the reference's boundary
+/// replication exactly. Each of the four columns `4j..4j+4` is written only when
+/// it lies within `width` (the last group may be partial for a non-multiple-of-4
+/// width).
+#[cfg(any(feature = "std", feature = "alloc"))]
+// Consumed only by the SIMD arch kernels (`arch::{neon, x86_sse41, x86_avx2,
+// x86_avx512, wasm_simd128}`), which compile solely on aarch64 / x86_64 / wasm32
+// under `yuv-planar`. On any other target (e.g. the s390x / i686 miri jobs) there
+// is no caller and the helper is genuinely dead; allow it there while the SIMD
+// builds keep it live and `-D warnings`-checked.
+#[cfg_attr(
+  not(all(
+    feature = "yuv-planar",
+    any(
+      target_arch = "aarch64",
+      target_arch = "x86_64",
+      target_arch = "wasm32"
+    )
+  )),
+  allow(dead_code)
+)]
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn chroma_upsample_4to1_center_h_group(
+  c_quarter: &[u8],
+  c_full: &mut [u8],
+  j: usize,
+  quarter: usize,
+  width: usize,
+) {
+  let left = c_quarter[j.saturating_sub(1)] as u32;
+  let mid = c_quarter[j] as u32;
+  let right = c_quarter[if j + 1 < quarter { j + 1 } else { j }] as u32;
+  let base = 4 * j;
+  if base < width {
+    c_full[base] = ((3 * left + 5 * mid + 4) >> 3) as u8;
+  }
+  if base + 1 < width {
+    c_full[base + 1] = ((left + 7 * mid + 4) >> 3) as u8;
+  }
+  if base + 2 < width {
+    c_full[base + 2] = ((7 * mid + right + 4) >> 3) as u8;
+  }
+  if base + 3 < width {
+    c_full[base + 3] = ((5 * mid + 3 * right + 4) >> 3) as u8;
+  }
+}
+
 /// Vertically-blended twin of [`chroma_upsample_2to1_center_h`] for the
 /// **bottom-sited** vertical phase of an *even* output luma row (#302): the
 /// FFmpeg `AVCHROMA_LOC_BOTTOM` (`Bottom`) vertical position `v = 1`, where the
@@ -1214,6 +1269,60 @@ pub(crate) fn chroma_upsample_440_bottom_v_u16(
 
   for j in 0..width {
     out[j] = (((prev[j] as u32) + (cur[j] as u32) + 1) >> 1) as u16;
+  }
+}
+
+/// Wire-order + depth-aware realization of [`chroma_upsample_440_bottom_v_u16`]
+/// for the high-bit planar 4:4:0 sink (`Yuv440p{9..16}`): the bottom-sited
+/// (`v = 1`) full-width vertical box average
+///
+/// ```text
+///   out[j] = (prev[j] + cur[j] + 1) >> 1      (top edge: prev clamped to cur)
+/// ```
+///
+/// with the wire→host normalization AND low-`BITS` mask that the host-native
+/// [`chroma_upsample_440_bottom_v_u16`] documents its caller must apply
+/// (`& ((1 << BITS) - 1)`, `u16::MAX` / a no-op at `BITS = 16`) fused in per
+/// sample — so `prev` / `cur` / `out` all stay in the source's wire byte order
+/// (`big_endian`) and the blended full-width chroma feeds the
+/// `yuv444p{10,12}_to_*_row_endian` decode with the SAME flag. The vertical-only
+/// 4:4:0 counterpart of the horizontally-reconstructing 4:2:0
+/// [`chroma_upsample_420_bottom_even_h_u16`]; the SIMD twins
+/// ([`chroma_upsample_440_bottom_v_u16_row`](crate::row::chroma_upsample_440_bottom_v_u16_row))
+/// fuse the identical normalization, staying bit-identical per tier.
+///
+/// # Panics (debug builds)
+///
+/// - `prev.len() >= width`, `cur.len() >= width`, `out.len() >= width`.
+#[cfg(all(any(feature = "std", feature = "alloc"), feature = "yuv-planar"))]
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn chroma_upsample_440_bottom_v_u16_wire<const BITS: u32>(
+  prev: &[u16],
+  cur: &[u16],
+  out: &mut [u16],
+  width: usize,
+  big_endian: bool,
+) {
+  debug_assert!(prev.len() >= width, "prev row too short");
+  debug_assert!(cur.len() >= width, "cur row too short");
+  debug_assert!(out.len() >= width, "out row too short");
+
+  let mask = ((1u32 << BITS) - 1) as u16;
+  let load = |raw: u16| -> u32 {
+    let logical = if big_endian {
+      u16::from_be(raw)
+    } else {
+      u16::from_le(raw)
+    };
+    u32::from(logical & mask)
+  };
+  for j in 0..width {
+    let blended = ((load(prev[j]) + load(cur[j]) + 1) >> 1) as u16;
+    out[j] = if big_endian {
+      blended.to_be()
+    } else {
+      blended.to_le()
+    };
   }
 }
 

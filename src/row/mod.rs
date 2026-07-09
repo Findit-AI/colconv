@@ -236,6 +236,15 @@ pub(crate) use dispatch::chroma_upsample::{
   chroma_upsample_420_bottomleft_even_h_row, chroma_upsample_420_bottomleft_even_h_u16_row,
 };
 
+// Bottom-sited 4:4:0 even-row **vertical** + centered **1→4** horizontal
+// chroma-upsample reconstruct dispatchers (#48c), consumed by the MixedSinker
+// 4:4:0 bottom-sited (`v = 1`) and 4:1:x centered paths. u8 / u16 planar homes.
+#[cfg(all(any(feature = "std", feature = "alloc"), feature = "yuv-planar"))]
+pub(crate) use dispatch::chroma_upsample::{
+  chroma_upsample_4to1_center_h_row, chroma_upsample_440_bottom_v_row,
+  chroma_upsample_440_bottom_v_u16_row,
+};
+
 // Task 3 — packed YUV 4:2:2 luma_u16 dispatchers (pub(crate) because they are
 // consumed only by the MixedSinker impls, not the public API).
 #[cfg(all(feature = "yuv-packed", any(feature = "std", feature = "alloc")))]

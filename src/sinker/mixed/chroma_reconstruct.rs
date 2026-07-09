@@ -69,20 +69,21 @@ impl ChromaCenterUpsampler for ChromaU8 {
 }
 
 /// 8-bit planar centered chroma upsampler for the `1→4` subsampled layouts
-/// (4:1:1 / 4:1:0) — delegates to
-/// [`chroma_upsample_4to1_center_h`](crate::row::scalar::chroma_upsample_4to1_center_h).
-/// The quarter-width sibling of [`ChromaU8`]: the trait's `half` argument carries
-/// the quarter-width chroma plane, reconstructed to `width` full-width samples.
+/// (4:1:1 / 4:1:0) — delegates to the SIMD-dispatched
+/// [`chroma_upsample_4to1_center_h_row`](crate::row::chroma_upsample_4to1_center_h_row)
+/// (byte-identical to the scalar
+/// [`chroma_upsample_4to1_center_h`](crate::row::scalar::chroma_upsample_4to1_center_h)
+/// per tier). The quarter-width sibling of [`ChromaU8`]: the trait's `half`
+/// argument carries the quarter-width chroma plane, reconstructed to `width`
+/// full-width samples.
 pub(crate) struct Chroma411U8;
 
 impl ChromaCenterUpsampler for Chroma411U8 {
   type Elem = u8;
 
   #[cfg_attr(not(tarpaulin), inline(always))]
-  fn upsample_center_h(&self, quarter: &[u8], full: &mut [u8], width: usize, _use_simd: bool) {
-    // The 1→4 (4:1:1 / 4:1:0) kernel is scalar-only; its SIMD path is a
-    // separate follow-up, so the toggle is accepted but unused here.
-    crate::row::scalar::chroma_upsample_4to1_center_h(quarter, full, width);
+  fn upsample_center_h(&self, quarter: &[u8], full: &mut [u8], width: usize, use_simd: bool) {
+    crate::row::chroma_upsample_4to1_center_h_row(quarter, full, width, use_simd);
   }
 }
 
