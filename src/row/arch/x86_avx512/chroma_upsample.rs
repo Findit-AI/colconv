@@ -231,6 +231,337 @@ pub(crate) unsafe fn chroma_upsample_2to1_center_h_p0xx_row<
   }
 }
 
+/// AVX-512 u8 bottom-sited even-row 4:2:0 chroma upsample — the SIMD twin of
+/// [`chroma_upsample_420_bottom_even_h`](crate::row::scalar::chroma_upsample_420_bottom_even_h).
+/// Each 32-sample offset's vertical box average `e = (prev + cur + 1) >> 1` is
+/// one `_mm256_avg_epu8`, widened to u16x32 and fed into the same centered
+/// `1/4`–`3/4` blend as the horizontal sibling; boundary columns reuse the
+/// shared scalar pair.
+///
+/// Block size: 32 chroma samples / iter (→ 64 output columns).
+///
+/// # Safety
+///
+/// AVX-512F + BW must be available. `width` even; `prev_half.len() >= width / 2`;
+/// `cur_half.len() >= width / 2`; `c_full.len() >= width`.
+#[cfg(feature = "yuv-planar")]
+#[inline]
+#[target_feature(enable = "avx512f,avx512bw")]
+pub(crate) unsafe fn chroma_upsample_420_bottom_even_h_row(
+  prev_half: &[u8],
+  cur_half: &[u8],
+  c_full: &mut [u8],
+  width: usize,
+) {
+  debug_assert_eq!(width & 1, 0, "YUV 4:2:0 requires even width");
+  debug_assert!(prev_half.len() >= width / 2, "prev_half row too short");
+  debug_assert!(cur_half.len() >= width / 2, "cur_half row too short");
+  debug_assert!(c_full.len() >= width, "c_full row too short");
+
+  let half = width / 2;
+  if half == 0 {
+    return;
+  }
+  scalar::chroma_upsample_420_bottom_even_h_pair(prev_half, cur_half, c_full, 0, half);
+  if half == 1 {
+    return;
+  }
+
+  let mut j = 1usize;
+  // SAFETY: `j + 32 < half` keeps every offset load inside the half rows and
+  // every 64-byte store inside `c_full[0..width]`.
+  unsafe {
+    let two = _mm512_set1_epi16(2);
+    let three = _mm512_set1_epi16(3);
+    let avg = |off: usize| {
+      _mm512_cvtepu8_epi16(_mm256_avg_epu8(
+        _mm256_loadu_si256(prev_half.as_ptr().add(off).cast()),
+        _mm256_loadu_si256(cur_half.as_ptr().add(off).cast()),
+      ))
+    };
+    while j + 32 < half {
+      let e_left = avg(j - 1);
+      let e_mid = avg(j);
+      let e_right = avg(j + 1);
+      let tm = _mm512_mullo_epi16(e_mid, three);
+      let even = _mm512_srli_epi16::<2>(_mm512_add_epi16(_mm512_add_epi16(e_left, tm), two));
+      let odd = _mm512_srli_epi16::<2>(_mm512_add_epi16(_mm512_add_epi16(tm, e_right), two));
+      let (out0, out1) = zip_u8x32(_mm512_cvtepi16_epi8(even), _mm512_cvtepi16_epi8(odd));
+      _mm256_storeu_si256(c_full.as_mut_ptr().add(2 * j).cast(), out0);
+      _mm256_storeu_si256(c_full.as_mut_ptr().add(2 * j + 32).cast(), out1);
+      j += 32;
+    }
+  }
+
+  while j < half {
+    scalar::chroma_upsample_420_bottom_even_h_pair(prev_half, cur_half, c_full, j, half);
+    j += 1;
+  }
+}
+
+/// AVX-512 u8 bottom-left-sited even-row 4:2:0 chroma upsample — the SIMD twin of
+/// [`chroma_upsample_420_bottomleft_even_h`](crate::row::scalar::chroma_upsample_420_bottomleft_even_h).
+/// The co-sited (`h = 0`) horizontal phase is a plain 2× replicate:
+/// `e = _mm256_avg_epu8(prev, cur)`, self-interleaved via [`zip_u8x32`].
+///
+/// Block size: 32 chroma samples / iter (→ 64 output columns).
+///
+/// # Safety
+///
+/// AVX-512F + BW must be available. `width` even; `prev_half.len() >= width / 2`;
+/// `cur_half.len() >= width / 2`; `c_full.len() >= width`.
+#[cfg(feature = "yuv-planar")]
+#[inline]
+#[target_feature(enable = "avx512f,avx512bw")]
+pub(crate) unsafe fn chroma_upsample_420_bottomleft_even_h_row(
+  prev_half: &[u8],
+  cur_half: &[u8],
+  c_full: &mut [u8],
+  width: usize,
+) {
+  debug_assert_eq!(width & 1, 0, "YUV 4:2:0 requires even width");
+  debug_assert!(prev_half.len() >= width / 2, "prev_half row too short");
+  debug_assert!(cur_half.len() >= width / 2, "cur_half row too short");
+  debug_assert!(c_full.len() >= width, "c_full row too short");
+
+  let half = width / 2;
+  let mut j = 0usize;
+  // SAFETY: `j + 32 <= half` keeps every load inside the half rows and every
+  // 64-byte store inside `c_full[0..width]`.
+  unsafe {
+    while j + 32 <= half {
+      let e = _mm256_avg_epu8(
+        _mm256_loadu_si256(prev_half.as_ptr().add(j).cast()),
+        _mm256_loadu_si256(cur_half.as_ptr().add(j).cast()),
+      );
+      let (out0, out1) = zip_u8x32(e, e);
+      _mm256_storeu_si256(c_full.as_mut_ptr().add(2 * j).cast(), out0);
+      _mm256_storeu_si256(c_full.as_mut_ptr().add(2 * j + 32).cast(), out1);
+      j += 32;
+    }
+  }
+
+  while j < half {
+    scalar::chroma_upsample_420_bottomleft_even_h_pair(prev_half, cur_half, c_full, j);
+    j += 1;
+  }
+}
+
+/// AVX-512 u16 bottom-sited even-row 4:2:0 chroma upsample — the SIMD twin of
+/// [`chroma_upsample_420_bottom_even_h_u16`](crate::row::scalar::chroma_upsample_420_bottom_even_h_u16).
+/// Each 16-sample offset's `e` is `_mm256_avg_epu16` of the two masked,
+/// host-normalized rows, widened to u32x16 and fed into the same centered blend
+/// as the horizontal sibling, then re-encoded to wire order.
+///
+/// Block size: 16 chroma samples / iter (→ 32 output columns).
+///
+/// # Safety
+///
+/// AVX-512F + BW must be available. `width` even; `prev_half.len() >= width / 2`;
+/// `cur_half.len() >= width / 2`; `c_full.len() >= width`.
+#[cfg(feature = "yuv-planar")]
+#[inline]
+#[target_feature(enable = "avx512f,avx512bw")]
+pub(crate) unsafe fn chroma_upsample_420_bottom_even_h_u16_row<const BITS: u32>(
+  prev_half: &[u16],
+  cur_half: &[u16],
+  c_full: &mut [u16],
+  width: usize,
+  big_endian: bool,
+) {
+  debug_assert_eq!(width & 1, 0, "YUV 4:2:0 requires even width");
+  debug_assert!(prev_half.len() >= width / 2, "prev_half row too short");
+  debug_assert!(cur_half.len() >= width / 2, "cur_half row too short");
+  debug_assert!(c_full.len() >= width, "c_full row too short");
+
+  let half = width / 2;
+  if half == 0 {
+    return;
+  }
+  scalar::chroma_upsample_420_bottom_even_h_u16_pair::<BITS>(
+    prev_half, cur_half, c_full, 0, half, big_endian,
+  );
+  if half == 1 {
+    return;
+  }
+
+  let swap = big_endian != cfg!(target_endian = "big");
+  let mut j = 1usize;
+  // SAFETY: `j + 16 < half` keeps every offset load inside the half rows and
+  // every 32-`u16` store inside `c_full[0..width]`.
+  unsafe {
+    let bmask = bswap16_mask256();
+    let mask = _mm256_set1_epi16(((1u32 << BITS) - 1) as i16);
+    let two = _mm512_set1_epi32(2);
+    let three = _mm512_set1_epi32(3);
+    let norm16 = |row: &[u16], off: usize| {
+      let raw = _mm256_loadu_si256(row.as_ptr().add(off).cast());
+      let host = if swap {
+        _mm256_shuffle_epi8(raw, bmask)
+      } else {
+        raw
+      };
+      _mm256_and_si256(host, mask)
+    };
+    let vavg = |off: usize| {
+      _mm512_cvtepu16_epi32(_mm256_avg_epu16(
+        norm16(prev_half, off),
+        norm16(cur_half, off),
+      ))
+    };
+    while j + 16 < half {
+      let e_left = vavg(j - 1);
+      let e_mid = vavg(j);
+      let e_right = vavg(j + 1);
+      let tm = _mm512_mullo_epi32(e_mid, three);
+      let even32 = _mm512_srli_epi32::<2>(_mm512_add_epi32(_mm512_add_epi32(e_left, tm), two));
+      let odd32 = _mm512_srli_epi32::<2>(_mm512_add_epi32(_mm512_add_epi32(tm, e_right), two));
+      let mut even = _mm512_cvtepi32_epi16(even32);
+      let mut odd = _mm512_cvtepi32_epi16(odd32);
+      if swap {
+        even = _mm256_shuffle_epi8(even, bmask);
+        odd = _mm256_shuffle_epi8(odd, bmask);
+      }
+      let (out0, out1) = zip_u16x16(even, odd);
+      _mm256_storeu_si256(c_full.as_mut_ptr().add(2 * j).cast(), out0);
+      _mm256_storeu_si256(c_full.as_mut_ptr().add(2 * j + 16).cast(), out1);
+      j += 16;
+    }
+  }
+
+  while j < half {
+    scalar::chroma_upsample_420_bottom_even_h_u16_pair::<BITS>(
+      prev_half, cur_half, c_full, j, half, big_endian,
+    );
+    j += 1;
+  }
+}
+
+/// AVX-512 u16 bottom-left-sited even-row 4:2:0 chroma upsample — the SIMD twin
+/// of
+/// [`chroma_upsample_420_bottomleft_even_h_u16`](crate::row::scalar::chroma_upsample_420_bottomleft_even_h_u16).
+/// Per-column `e = _mm256_avg_epu16` of the masked, host-normalized rows,
+/// re-encoded to wire order and replicated across the column pair via
+/// [`zip_u16x16`].
+///
+/// Block size: 16 chroma samples / iter (→ 32 output columns).
+///
+/// # Safety
+///
+/// AVX-512F + BW must be available. `width` even; `prev_half.len() >= width / 2`;
+/// `cur_half.len() >= width / 2`; `c_full.len() >= width`.
+#[cfg(feature = "yuv-planar")]
+#[inline]
+#[target_feature(enable = "avx512f,avx512bw")]
+pub(crate) unsafe fn chroma_upsample_420_bottomleft_even_h_u16_row<const BITS: u32>(
+  prev_half: &[u16],
+  cur_half: &[u16],
+  c_full: &mut [u16],
+  width: usize,
+  big_endian: bool,
+) {
+  debug_assert_eq!(width & 1, 0, "YUV 4:2:0 requires even width");
+  debug_assert!(prev_half.len() >= width / 2, "prev_half row too short");
+  debug_assert!(cur_half.len() >= width / 2, "cur_half row too short");
+  debug_assert!(c_full.len() >= width, "c_full row too short");
+
+  let half = width / 2;
+  let swap = big_endian != cfg!(target_endian = "big");
+  let mut j = 0usize;
+  // SAFETY: `j + 16 <= half` keeps every load inside the half rows and every
+  // 32-`u16` store inside `c_full[0..width]`.
+  unsafe {
+    let bmask = bswap16_mask256();
+    let mask = _mm256_set1_epi16(((1u32 << BITS) - 1) as i16);
+    let norm16 = |row: &[u16], off: usize| {
+      let raw = _mm256_loadu_si256(row.as_ptr().add(off).cast());
+      let host = if swap {
+        _mm256_shuffle_epi8(raw, bmask)
+      } else {
+        raw
+      };
+      _mm256_and_si256(host, mask)
+    };
+    while j + 16 <= half {
+      let e = _mm256_avg_epu16(norm16(prev_half, j), norm16(cur_half, j));
+      let e = if swap {
+        _mm256_shuffle_epi8(e, bmask)
+      } else {
+        e
+      };
+      let (out0, out1) = zip_u16x16(e, e);
+      _mm256_storeu_si256(c_full.as_mut_ptr().add(2 * j).cast(), out0);
+      _mm256_storeu_si256(c_full.as_mut_ptr().add(2 * j + 16).cast(), out1);
+      j += 16;
+    }
+  }
+
+  while j < half {
+    scalar::chroma_upsample_420_bottomleft_even_h_u16_pair::<BITS>(
+      prev_half, cur_half, c_full, j, big_endian,
+    );
+    j += 1;
+  }
+}
+
+/// AVX-512 semi-planar P-format bottom-sited even-row 4:2:0 chroma upsample.
+/// Delegates to the 128-bit SSE4.1 kernel (see the centered twin): the
+/// interleaved layout does not widen cleanly, and SSE4.1 is always available
+/// under AVX-512.
+///
+/// # Safety
+///
+/// AVX-512 (hence SSE4.1) must be available. `width` even;
+/// `prev_uv_half.len() >= width`; `cur_uv_half.len() >= width`;
+/// `uv_full.len() >= 2 * width`.
+#[cfg(all(feature = "yuv-planar", feature = "yuv-semi-planar"))]
+#[inline]
+#[target_feature(enable = "avx512f,avx512bw")]
+pub(crate) unsafe fn chroma_upsample_420_bottom_even_h_p0xx_row<const BITS: u32>(
+  prev_uv_half: &[u16],
+  cur_uv_half: &[u16],
+  uv_full: &mut [u16],
+  width: usize,
+  big_endian: bool,
+) {
+  // SAFETY: SSE4.1 ⊆ AVX-512; the delegate carries the same slice contract.
+  unsafe {
+    crate::row::arch::x86_sse41::chroma_upsample::chroma_upsample_420_bottom_even_h_p0xx_row::<BITS>(
+      prev_uv_half,
+      cur_uv_half,
+      uv_full,
+      width,
+      big_endian,
+    );
+  }
+}
+
+/// AVX-512 semi-planar P-format bottom-left-sited even-row 4:2:0 chroma upsample.
+/// Delegates to the 128-bit SSE4.1 kernel (see the centered twin).
+///
+/// # Safety
+///
+/// AVX-512 (hence SSE4.1) must be available. `width` even;
+/// `prev_uv_half.len() >= width`; `cur_uv_half.len() >= width`;
+/// `uv_full.len() >= 2 * width`.
+#[cfg(all(feature = "yuv-planar", feature = "yuv-semi-planar"))]
+#[inline]
+#[target_feature(enable = "avx512f,avx512bw")]
+pub(crate) unsafe fn chroma_upsample_420_bottomleft_even_h_p0xx_row<const BITS: u32>(
+  prev_uv_half: &[u16],
+  cur_uv_half: &[u16],
+  uv_full: &mut [u16],
+  width: usize,
+  big_endian: bool,
+) {
+  // SAFETY: SSE4.1 ⊆ AVX-512; the delegate carries the same slice contract.
+  unsafe {
+    crate::row::arch::x86_sse41::chroma_upsample::chroma_upsample_420_bottomleft_even_h_p0xx_row::<
+      BITS,
+    >(prev_uv_half, cur_uv_half, uv_full, width, big_endian);
+  }
+}
+
 #[cfg(all(
   test,
   feature = "std",
@@ -361,5 +692,188 @@ mod tests {
     check_p0xx::<12, false>(false);
     check_p0xx::<16, false>(false);
     check_p0xx::<16, false>(true);
+  }
+
+  fn pseudo_random_u8(out: &mut [u8], seed: u32) {
+    let mut state = seed;
+    for v in out.iter_mut() {
+      state = state.wrapping_mul(1664525).wrapping_add(1013904223);
+      *v = (state >> 16) as u8;
+    }
+  }
+
+  // Both the top-edge (prev == cur, box-blend clamps to the current row) and the
+  // interior (distinct prev / cur) vertical cases are exercised per width.
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn avx512_u8_vertical_matches_scalar_widths() {
+    if !have_avx512() {
+      return;
+    }
+    for &w in WIDTHS {
+      let half = w / 2;
+      let mut prev = std::vec![0u8; half];
+      let mut cur = std::vec![0u8; half];
+      pseudo_random_u8(&mut prev, 0xBEEF);
+      pseudo_random_u8(&mut cur, 0xFACE);
+      for (prev_row, tag) in [(prev.as_slice(), "interior"), (cur.as_slice(), "topedge")] {
+        let mut bot_simd = std::vec![0u8; w];
+        let mut bot_scalar = std::vec![0u8; w];
+        let mut bl_simd = std::vec![0u8; w];
+        let mut bl_scalar = std::vec![0u8; w];
+        unsafe {
+          super::chroma_upsample_420_bottom_even_h_row(prev_row, &cur, &mut bot_simd, w);
+          super::chroma_upsample_420_bottomleft_even_h_row(prev_row, &cur, &mut bl_simd, w);
+        }
+        scalar::chroma_upsample_420_bottom_even_h(prev_row, &cur, &mut bot_scalar, w);
+        scalar::chroma_upsample_420_bottomleft_even_h(prev_row, &cur, &mut bl_scalar, w);
+        assert_eq!(bot_simd, bot_scalar, "u8 bottom {tag} width={w}");
+        assert_eq!(bl_simd, bl_scalar, "u8 bottomleft {tag} width={w}");
+      }
+    }
+  }
+
+  fn check_u16_vertical<const BITS: u32>(big_endian: bool) {
+    for &w in WIDTHS {
+      let half = w / 2;
+      let mut prev = std::vec![0u16; half];
+      let mut cur = std::vec![0u16; half];
+      pseudo_random_u16(&mut prev, 0x51A5 ^ BITS ^ (big_endian as u32));
+      pseudo_random_u16(&mut cur, 0xC0DE ^ BITS ^ (big_endian as u32));
+      for (prev_row, tag) in [(prev.as_slice(), "interior"), (cur.as_slice(), "topedge")] {
+        let mut bot_simd = std::vec![0u16; w];
+        let mut bot_scalar = std::vec![0u16; w];
+        let mut bl_simd = std::vec![0u16; w];
+        let mut bl_scalar = std::vec![0u16; w];
+        unsafe {
+          super::chroma_upsample_420_bottom_even_h_u16_row::<BITS>(
+            prev_row,
+            &cur,
+            &mut bot_simd,
+            w,
+            big_endian,
+          );
+          super::chroma_upsample_420_bottomleft_even_h_u16_row::<BITS>(
+            prev_row,
+            &cur,
+            &mut bl_simd,
+            w,
+            big_endian,
+          );
+        }
+        scalar::chroma_upsample_420_bottom_even_h_u16::<BITS>(
+          prev_row,
+          &cur,
+          &mut bot_scalar,
+          w,
+          big_endian,
+        );
+        scalar::chroma_upsample_420_bottomleft_even_h_u16::<BITS>(
+          prev_row,
+          &cur,
+          &mut bl_scalar,
+          w,
+          big_endian,
+        );
+        assert_eq!(
+          bot_simd, bot_scalar,
+          "u16 bottom BITS={BITS} be={big_endian} {tag} width={w}"
+        );
+        assert_eq!(
+          bl_simd, bl_scalar,
+          "u16 bottomleft BITS={BITS} be={big_endian} {tag} width={w}"
+        );
+      }
+    }
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn avx512_u16_vertical_matches_scalar_widths() {
+    if !have_avx512() {
+      return;
+    }
+    check_u16_vertical::<10>(false);
+    check_u16_vertical::<10>(true);
+    check_u16_vertical::<12>(false);
+    check_u16_vertical::<12>(true);
+    check_u16_vertical::<16>(false);
+    check_u16_vertical::<16>(true);
+  }
+
+  fn check_p0xx_vertical<const BITS: u32>(big_endian: bool) {
+    for &w in WIDTHS {
+      let mut prev = std::vec![0u16; w];
+      let mut cur = std::vec![0u16; w];
+      pseudo_random_u16(&mut prev, 0x7E57 ^ BITS ^ (big_endian as u32));
+      pseudo_random_u16(&mut cur, 0xABCD ^ BITS ^ (big_endian as u32));
+      for (prev_row, tag) in [(prev.as_slice(), "interior"), (cur.as_slice(), "topedge")] {
+        let mut bot_simd = std::vec![0u16; 2 * w];
+        let mut bot_scalar = std::vec![0u16; 2 * w];
+        let mut bl_simd = std::vec![0u16; 2 * w];
+        let mut bl_scalar = std::vec![0u16; 2 * w];
+        unsafe {
+          super::chroma_upsample_420_bottom_even_h_p0xx_row::<BITS>(
+            prev_row,
+            &cur,
+            &mut bot_simd,
+            w,
+            big_endian,
+          );
+          super::chroma_upsample_420_bottomleft_even_h_p0xx_row::<BITS>(
+            prev_row,
+            &cur,
+            &mut bl_simd,
+            w,
+            big_endian,
+          );
+        }
+        scalar::chroma_upsample_420_bottom_even_h_p0xx::<BITS>(
+          prev_row,
+          &cur,
+          &mut bot_scalar,
+          w,
+          big_endian,
+        );
+        scalar::chroma_upsample_420_bottomleft_even_h_p0xx::<BITS>(
+          prev_row,
+          &cur,
+          &mut bl_scalar,
+          w,
+          big_endian,
+        );
+        assert_eq!(
+          bot_simd, bot_scalar,
+          "p0xx bottom BITS={BITS} be={big_endian} {tag} width={w}"
+        );
+        assert_eq!(
+          bl_simd, bl_scalar,
+          "p0xx bottomleft BITS={BITS} be={big_endian} {tag} width={w}"
+        );
+      }
+    }
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn avx512_p0xx_vertical_matches_scalar_widths() {
+    if !have_avx512() {
+      return;
+    }
+    check_p0xx_vertical::<10>(false);
+    check_p0xx_vertical::<10>(true);
+    check_p0xx_vertical::<12>(false);
+    check_p0xx_vertical::<12>(true);
+    check_p0xx_vertical::<16>(false);
+    check_p0xx_vertical::<16>(true);
   }
 }

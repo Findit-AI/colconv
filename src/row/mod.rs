@@ -218,6 +218,24 @@ pub(crate) use dispatch::chroma_upsample::chroma_upsample_2to1_center_h_row;
 #[cfg(all(any(feature = "std", feature = "alloc"), feature = "yuv-planar"))]
 pub(crate) use dispatch::chroma_upsample::chroma_upsample_2to1_center_h_u16_row;
 
+// Bottom / BottomLeft even-row 4:2:0 **vertical** chroma-upsample reconstruct
+// dispatchers (#48b), consumed by the MixedSinker bottom-sited (`v = 1`) paths.
+// Same feature homes as the centered dispatchers above (u8 planar; u16 planar;
+// interleaved-UV P-format = planar + semi-planar).
+#[cfg(all(
+  any(feature = "std", feature = "alloc"),
+  feature = "yuv-planar",
+  feature = "yuv-semi-planar"
+))]
+pub(crate) use dispatch::chroma_upsample::{
+  chroma_upsample_420_bottom_even_h_p0xx_row, chroma_upsample_420_bottomleft_even_h_p0xx_row,
+};
+#[cfg(all(any(feature = "std", feature = "alloc"), feature = "yuv-planar"))]
+pub(crate) use dispatch::chroma_upsample::{
+  chroma_upsample_420_bottom_even_h_row, chroma_upsample_420_bottom_even_h_u16_row,
+  chroma_upsample_420_bottomleft_even_h_row, chroma_upsample_420_bottomleft_even_h_u16_row,
+};
+
 // Task 3 — packed YUV 4:2:2 luma_u16 dispatchers (pub(crate) because they are
 // consumed only by the MixedSinker impls, not the public API).
 #[cfg(all(feature = "yuv-packed", any(feature = "std", feature = "alloc")))]

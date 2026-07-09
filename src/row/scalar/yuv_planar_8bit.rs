@@ -515,6 +515,46 @@ pub(crate) fn chroma_upsample_420_bottom_even_h(
   }
 }
 
+/// Reconstructs the two output columns for a single chroma sample `j` of the
+/// bottom-sited even-row upsample — the per-sample body of
+/// [`chroma_upsample_420_bottom_even_h`], factored out so the SIMD backends
+/// share this exact vertical-box-blend + centered `1/4`–`3/4` math for their
+/// edge / tail columns and stay byte-identical to the reference. `e[j-1]`
+/// clamps to `e[0]` and `e[j+1]` to `e[half-1]`, so `j = 0` and `j = half - 1`
+/// reproduce the boundary replication exactly.
+#[cfg(any(feature = "std", feature = "alloc"))]
+// Consumed only by the SIMD arch kernels (`arch::{neon, x86_sse41, x86_avx2,
+// x86_avx512, wasm_simd128}`), which compile solely on aarch64 / x86_64 /
+// wasm32 under `yuv-planar`. On any other target (e.g. the s390x / i686 miri
+// jobs) there is no caller and the helper is genuinely dead; allow it there
+// while the SIMD builds keep it live and `-D warnings`-checked.
+#[cfg_attr(
+  not(all(
+    feature = "yuv-planar",
+    any(
+      target_arch = "aarch64",
+      target_arch = "x86_64",
+      target_arch = "wasm32"
+    )
+  )),
+  allow(dead_code)
+)]
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn chroma_upsample_420_bottom_even_h_pair(
+  prev_half: &[u8],
+  cur_half: &[u8],
+  full: &mut [u8],
+  j: usize,
+  half: usize,
+) {
+  let vblend = |k: usize| -> u32 { ((prev_half[k] as u32) + (cur_half[k] as u32) + 1) >> 1 };
+  let left = vblend(j.saturating_sub(1));
+  let mid = vblend(j);
+  let right = vblend(if j + 1 < half { j + 1 } else { j });
+  full[2 * j] = ((left + 3 * mid + 2) >> 2) as u8;
+  full[2 * j + 1] = ((3 * mid + right + 2) >> 2) as u8;
+}
+
 /// Co-sited (`h = 0`) horizontal 4:2:0 chroma upsample — colconv's default
 /// **nearest-neighbor** reconstruction expressed as a full-width chroma row. Each
 /// half-width chroma sample `c[j]` covers its two luma columns `2j` and `2j+1`
@@ -616,6 +656,41 @@ pub(crate) fn chroma_upsample_420_bottomleft_even_h(
     c_full[2 * j] = e;
     c_full[2 * j + 1] = e;
   }
+}
+
+/// Reconstructs the two output columns for a single chroma sample `j` of the
+/// bottom-left-sited even-row upsample — the per-sample body of
+/// [`chroma_upsample_420_bottomleft_even_h`], shared with the SIMD backends for
+/// their tail columns so those stay byte-identical to the reference. The
+/// co-sited (`h = 0`) horizontal phase is a plain replicate with no neighbour,
+/// so no edge clamp is needed — every column is independent.
+#[cfg(any(feature = "std", feature = "alloc"))]
+// Consumed only by the SIMD arch kernels (`arch::{neon, x86_sse41, x86_avx2,
+// x86_avx512, wasm_simd128}`), which compile solely on aarch64 / x86_64 /
+// wasm32 under `yuv-planar`. On any other target (e.g. the s390x / i686 miri
+// jobs) there is no caller and the helper is genuinely dead; allow it there
+// while the SIMD builds keep it live and `-D warnings`-checked.
+#[cfg_attr(
+  not(all(
+    feature = "yuv-planar",
+    any(
+      target_arch = "aarch64",
+      target_arch = "x86_64",
+      target_arch = "wasm32"
+    )
+  )),
+  allow(dead_code)
+)]
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn chroma_upsample_420_bottomleft_even_h_pair(
+  prev_half: &[u8],
+  cur_half: &[u8],
+  full: &mut [u8],
+  j: usize,
+) {
+  let e = (((prev_half[j] as u32) + (cur_half[j] as u32) + 1) >> 1) as u8;
+  full[2 * j] = e;
+  full[2 * j + 1] = e;
 }
 
 /// `u16` twin of [`chroma_upsample_2to1_center_h`] for the **high-bit** planar
@@ -836,6 +911,59 @@ pub(crate) fn chroma_upsample_420_bottom_even_h_u16<const BITS: u32>(
   }
 }
 
+/// `u16` per-sample twin of [`chroma_upsample_420_bottom_even_h_pair`] — the
+/// single-sample body of [`chroma_upsample_420_bottom_even_h_u16`], shared with
+/// the SIMD backends for their edge / tail columns so those stay byte-identical
+/// to this reference. Each input is normalized wire → host-native and masked to
+/// the low `BITS` before the vertical box blend + centered `1/4`–`3/4` fold, and
+/// the output re-encoded to the same wire order.
+#[cfg(any(feature = "std", feature = "alloc"))]
+// Consumed only by the SIMD arch kernels (`arch::{neon, x86_sse41, x86_avx2,
+// x86_avx512, wasm_simd128}`), which compile solely on aarch64 / x86_64 /
+// wasm32 under `yuv-planar`. On any other target (e.g. the s390x / i686 miri
+// jobs) there is no caller and the helper is genuinely dead; allow it there
+// while the SIMD builds keep it live and `-D warnings`-checked.
+#[cfg_attr(
+  not(all(
+    feature = "yuv-planar",
+    any(
+      target_arch = "aarch64",
+      target_arch = "x86_64",
+      target_arch = "wasm32"
+    )
+  )),
+  allow(dead_code)
+)]
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn chroma_upsample_420_bottom_even_h_u16_pair<const BITS: u32>(
+  prev_half: &[u16],
+  cur_half: &[u16],
+  full: &mut [u16],
+  j: usize,
+  half: usize,
+  big_endian: bool,
+) {
+  let mask = ((1u32 << BITS) - 1) as u16;
+  let load = |raw: u16| -> u32 {
+    let logical = if big_endian {
+      u16::from_be(raw)
+    } else {
+      u16::from_le(raw)
+    };
+    (logical & mask) as u32
+  };
+  let store = |logical: u32| -> u16 {
+    let v = logical as u16;
+    if big_endian { v.to_be() } else { v.to_le() }
+  };
+  let vblend = |k: usize| -> u32 { (load(prev_half[k]) + load(cur_half[k]) + 1) >> 1 };
+  let left = vblend(j.saturating_sub(1));
+  let mid = vblend(j);
+  let right = vblend(if j + 1 < half { j + 1 } else { j });
+  full[2 * j] = store((left + 3 * mid + 2) >> 2);
+  full[2 * j + 1] = store((3 * mid + right + 2) >> 2);
+}
+
 /// `u16` twin of [`chroma_upsample_2to1_cosited_h`] for the **high-bit** planar
 /// 4:2:0 formats (`Yuv420p9` … `Yuv420p16`): the co-sited (`h = 0`) horizontal
 /// upsample — a plain 2× replicate — on `u16` chroma, so `BottomLeft` reconstructs
@@ -957,6 +1085,55 @@ pub(crate) fn chroma_upsample_420_bottomleft_even_h_u16<const BITS: u32>(
     c_full[2 * j] = e;
     c_full[2 * j + 1] = e;
   }
+}
+
+/// `u16` per-sample twin of [`chroma_upsample_420_bottomleft_even_h_pair`] — the
+/// single-sample body of [`chroma_upsample_420_bottomleft_even_h_u16`], shared
+/// with the SIMD backends for their tail columns so those stay byte-identical to
+/// this reference. Each input is normalized wire → host-native and masked to the
+/// low `BITS` before the vertical box blend, then the co-sited (`h = 0`) result
+/// is re-encoded to the same wire order and replicated across the column pair.
+#[cfg(any(feature = "std", feature = "alloc"))]
+// Consumed only by the SIMD arch kernels (`arch::{neon, x86_sse41, x86_avx2,
+// x86_avx512, wasm_simd128}`), which compile solely on aarch64 / x86_64 /
+// wasm32 under `yuv-planar`. On any other target (e.g. the s390x / i686 miri
+// jobs) there is no caller and the helper is genuinely dead; allow it there
+// while the SIMD builds keep it live and `-D warnings`-checked.
+#[cfg_attr(
+  not(all(
+    feature = "yuv-planar",
+    any(
+      target_arch = "aarch64",
+      target_arch = "x86_64",
+      target_arch = "wasm32"
+    )
+  )),
+  allow(dead_code)
+)]
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn chroma_upsample_420_bottomleft_even_h_u16_pair<const BITS: u32>(
+  prev_half: &[u16],
+  cur_half: &[u16],
+  full: &mut [u16],
+  j: usize,
+  big_endian: bool,
+) {
+  let mask = ((1u32 << BITS) - 1) as u16;
+  let load = |raw: u16| -> u32 {
+    let logical = if big_endian {
+      u16::from_be(raw)
+    } else {
+      u16::from_le(raw)
+    };
+    (logical & mask) as u32
+  };
+  let store = |logical: u32| -> u16 {
+    let v = logical as u16;
+    if big_endian { v.to_be() } else { v.to_le() }
+  };
+  let e = store((load(prev_half[j]) + load(cur_half[j]) + 1) >> 1);
+  full[2 * j] = e;
+  full[2 * j + 1] = e;
 }
 
 /// Full-width vertical chroma reconstruction for the **bottom-sited** vertical

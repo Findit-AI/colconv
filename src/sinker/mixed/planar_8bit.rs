@@ -357,11 +357,15 @@ pub(super) fn upsample_420_chroma_sited<'s>(
     let (u_full, v_full) = chroma_full[..2 * width].split_at_mut(width);
     let (u_prev, v_prev) = chroma_prev[..width].split_at(half);
     if center_h {
-      crate::row::scalar::chroma_upsample_420_bottom_even_h(u_prev, u_half, u_full, width);
-      crate::row::scalar::chroma_upsample_420_bottom_even_h(v_prev, v_half, v_full, width);
+      crate::row::chroma_upsample_420_bottom_even_h_row(u_prev, u_half, u_full, width, use_simd);
+      crate::row::chroma_upsample_420_bottom_even_h_row(v_prev, v_half, v_full, width, use_simd);
     } else {
-      crate::row::scalar::chroma_upsample_420_bottomleft_even_h(u_prev, u_half, u_full, width);
-      crate::row::scalar::chroma_upsample_420_bottomleft_even_h(v_prev, v_half, v_full, width);
+      crate::row::chroma_upsample_420_bottomleft_even_h_row(
+        u_prev, u_half, u_full, width, use_simd,
+      );
+      crate::row::chroma_upsample_420_bottomleft_even_h_row(
+        v_prev, v_half, v_full, width, use_simd,
+      );
     }
     (&*u_full, &*v_full)
   } else if center_h {
