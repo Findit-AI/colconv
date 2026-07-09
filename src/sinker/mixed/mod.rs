@@ -3129,6 +3129,20 @@ pub struct MixedSinker<'a, F: SourceFormat, R = NoopResampler> {
   /// `yuv-planar`, like [`Self::chroma_prev`].
   #[cfg(feature = "yuv-planar")]
   chroma_top_pending: Option<(usize, crate::ColorMatrix, bool)>,
+  /// ST 428-1 colorimetry frozen alongside [`Self::chroma_top_pending`] for the
+  /// 8-bit `Yuv420p` **Top** forward-delay identity decode (#310): the source
+  /// primaries and [`St428Interpretation`] active when the deferred odd row was
+  /// SUBMITTED. The identity flush decodes the held row through these frozen
+  /// values — not the sink's current [`Self::primaries`] /
+  /// [`Self::st428_interpretation`] — so a mid-frame `set_color_spec` /
+  /// `set_st428_interpretation` cannot change how an already-accepted row
+  /// decodes, and re-applies [`st428_chroma_derived_guard`] to them so the
+  /// delayed path is guarded exactly like the in-order one. Set in lockstep with
+  /// `chroma_top_pending` at the identity defer, cleared at its flush, and reset
+  /// to `None` each `begin_frame`; `None` for every non-`Top` row. Gated to
+  /// `yuv-planar`, like `chroma_top_pending`.
+  #[cfg(feature = "yuv-planar")]
+  chroma_top_st428: Option<(crate::Primaries, St428Interpretation)>,
   /// Buffered Y row for the deferred [`Self::chroma_top_pending`] odd output row
   /// — a copy of that row's `width` `u8` luma, retained because the walker's row
   /// borrow is invalidated after `process` returns. Lazily grown to `width` `u8`
@@ -4343,6 +4357,8 @@ impl<F: SourceFormat, R> MixedSinker<'_, F, R> {
       frozen_chroma_top_v: None,
       #[cfg(feature = "yuv-planar")]
       chroma_top_pending: None,
+      #[cfg(feature = "yuv-planar")]
+      chroma_top_st428: None,
       #[cfg(feature = "yuv-planar")]
       chroma_top_y: Vec::new(),
       #[cfg(feature = "yuv-planar")]

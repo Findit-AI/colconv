@@ -885,8 +885,10 @@ impl<R> PixelSink for MixedSinker<'_, Yuv420p, R> {
     self.chroma_prev_row = None;
     // New frame: drop any held Top (`v = 0`) forward-delay odd row so frame N's
     // last deferred colour row never emits into frame N+1. Its Y buffer bytes
-    // are left as-is (re-overwritten before any trusted read).
+    // are left as-is (re-overwritten before any trusted read). The frozen ST 428
+    // colorimetry (#310) is cleared alongside it, in lockstep.
     self.chroma_top_pending = None;
+    self.chroma_top_st428 = None;
     // New frame: drop the RFC #238 linear-light accumulator (if any) so the
     // next frame re-seeds it from row 0.
     #[cfg(feature = "rgb")]
@@ -908,6 +910,11 @@ impl<R> PixelSink for MixedSinker<'_, Yuv420p, R> {
     // Kr/Kb from these. `Copy`, read before the split-borrow; consumed by the
     // identity-plan RGB / RGBA path (non-`ChromaDerivedNcl` matrices ignore it).
     let primaries = self.primaries;
+    // ST 428-1 interpretation (#310): decides whether a `ChromaDerivedNcl` decode
+    // over CIE-XYZ `SmpteSt428` primaries is rejected. `Copy`, read before the
+    // split-borrow; frozen with a deferred `Top` odd row so its later flush runs
+    // the same guard the in-order decode does.
+    let st428_interpretation = self.st428_interpretation;
 
     // Defense in depth: `begin_frame` already validated frame‑level
     // dimensions, so these checks are unreachable from the walker.
@@ -1004,6 +1011,8 @@ impl<R> PixelSink for MixedSinker<'_, Yuv420p, R> {
       frozen_chroma_top_v,
       // RFC #238 Top forward one-row delay line (identity decode + resample tiers).
       chroma_top_pending,
+      // #310: ST 428 colorimetry frozen with the identity-tier Top deferred row.
+      chroma_top_st428,
       chroma_top_y,
       ..
     } = self;
@@ -2693,8 +2702,21 @@ impl<R> PixelSink for MixedSinker<'_, Yuv420p, R> {
       // Flush the held odd predecessor (`idx - 1`) at this even row, box-blending
       // the previous chroma row (`chroma_prev`) with the current one.
       if idx & 1 == 0
-        && let Some((p_idx, p_matrix, p_full_range)) = chroma_top_pending.take()
+        && let Some((p_idx, p_matrix, p_full_range)) = *chroma_top_pending
       {
+        // The deferred odd row froze the colorimetry active when it was SUBMITTED
+        // (#310): decode it through those FROZEN primaries — not the sink's current
+        // `primaries` — so a mid-frame `set_color_spec` / `set_st428_interpretation`
+        // cannot change how an already-accepted row decodes. Re-apply the ST 428-1
+        // guard on the frozen values FIRST, before clearing the pending state or
+        // writing any colour, so the forward-delay decode is guarded exactly like
+        // the in-order path and a rejected flush stays retry-atomic (#180).
+        let (frozen_primaries, frozen_interp) = chroma_top_st428
+          .expect("Top forward-delay freezes ST 428 colorimetry with chroma_top_pending");
+        st428_chroma_derived_guard(p_matrix, frozen_primaries, frozen_interp)
+          .map_err(MixedSinkerError::St428CieXyzUnsupported)?;
+        *chroma_top_pending = None;
+        *chroma_top_st428 = None;
         let (u_full, v_full) = upsample_420_chroma_sited(
           chroma_full,
           chroma_prev,
@@ -2721,7 +2743,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuv420p, R> {
           w,
           h,
           p_matrix,
-          primaries,
+          frozen_primaries,
           p_full_range,
           use_simd,
         )?;
@@ -2731,6 +2753,10 @@ impl<R> PixelSink for MixedSinker<'_, Yuv420p, R> {
         // and record its decode parameters; its colour emits at the next even row.
         chroma_top_y[..w].copy_from_slice(&row.y()[..w]);
         *chroma_top_pending = Some((idx, row.matrix(), row.full_range()));
+        // Freeze the ST 428 colorimetry (#310) alongside it, in lockstep, so the
+        // flush decodes + guards with the values active at SUBMIT — never the
+        // sink's state after a mid-frame `set_color_spec` / `set_st428_interpretation`.
+        *chroma_top_st428 = Some((primaries, st428_interpretation));
       } else {
         // Even row (co-sited `c[i]`) or the trailing odd row (bottom-edge clamp →
         // co-sited): a plain co-sited decode of the current chroma row.

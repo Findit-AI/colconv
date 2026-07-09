@@ -262,3 +262,219 @@ fn cie_xyz_is_a_no_op_for_non_st428_primaries() {
     "non-ST 428-1 primaries derive identically in both modes"
   );
 }
+
+// ---- Top forward-delay + mid-frame colorimetry switch (#310) ----------------
+//
+// The 4:2:0 `Top` (`v = 0`) identity decode HOLDS each odd colour row until the
+// following even row (the forward one-row delay), decoding it against the
+// primaries frozen when it was SUBMITTED — not the sink's current state. These
+// regressions drive that path directly through `PixelSink::process` so a
+// mid-frame `set_color_spec` cannot slip a `ChromaDerivedNcl` derivation onto
+// the switched colorimetry (the guard-bypass the forward delay would otherwise
+// open).
+
+const TOP_W: u32 = 4;
+const TOP_H: u32 = 4;
+
+/// A flat-luma `Yuv420p` frame with a strong per-chroma-row step, so BOTH the
+/// `Top` vertical blend and the `ChromaDerivedNcl` primaries derivation are
+/// observable (a neutral `128` chroma would decode identically under every
+/// primary set).
+fn top_frame() -> (std::vec::Vec<u8>, std::vec::Vec<u8>, std::vec::Vec<u8>) {
+  let (w, h) = (TOP_W as usize, TOP_H as usize);
+  let (cw, ch) = (w / 2, h / 2);
+  let y = std::vec![128u8; w * h];
+  let mut u = std::vec![0u8; cw * ch];
+  let mut v = std::vec![0u8; cw * ch];
+  for r in 0..ch {
+    for c in 0..cw {
+      u[r * cw + c] = (24 + r * 48).min(240) as u8;
+      v[r * cw + c] = (216 - r * 48).max(16) as u8;
+    }
+  }
+  (y, u, v)
+}
+
+/// Builds `Yuv420p` row `r` of [`top_frame`] with the given per-row `matrix`
+/// for direct `process` feeding (chroma row `r / 2`, the walker's vertical
+/// replication).
+fn top_row<'a>(
+  yp: &'a [u8],
+  up: &'a [u8],
+  vp: &'a [u8],
+  r: usize,
+  matrix: ColorMatrix,
+) -> Yuv420pRow<'a> {
+  let w = TOP_W as usize;
+  let cw = w / 2;
+  let cr = r / 2;
+  Yuv420pRow::new(
+    &yp[r * w..r * w + w],
+    &up[cr * cw..cr * cw + cw],
+    &vp[cr * cw..cr * cw + cw],
+    r,
+    matrix,
+    false,
+  )
+}
+
+/// A `Top`-sited `ChromaDerivedNcl` `ColorSpec` over `primaries`.
+fn top_spec(primaries: Primaries) -> ColorSpec {
+  ColorSpec::from_info(
+    PixelFormat::Yuv420p,
+    ColorInfo::new(
+      primaries,
+      Transfer::Unspecified,
+      ColorMatrix::ChromaDerivedNcl,
+      DynamicRange::Limited,
+      ChromaLocation::Top,
+    ),
+  )
+}
+
+/// A full in-order `Top` `ChromaDerivedNcl` decode over `primaries` (via the
+/// walker), the byte-exact reference an unswitched forward-delay decode must
+/// reproduce.
+fn top_walker_decode(primaries: Primaries, interp: St428Interpretation) -> std::vec::Vec<u8> {
+  let (yp, up, vp) = top_frame();
+  let (w, h) = (TOP_W as usize, TOP_H as usize);
+  let src = Yuv420pFrame::new(&yp, &up, &vp, TOP_W, TOP_H, TOP_W, TOP_W / 2, TOP_W / 2);
+  let mut rgb = std::vec![0u8; w * h * 3];
+  {
+    let mut sink = MixedSinker::<Yuv420p>::new(w, h)
+      .with_rgb(&mut rgb)
+      .unwrap()
+      .with_color_spec(top_spec(primaries))
+      .with_st428_interpretation(interp);
+    yuv420p_to(&src, false, ColorMatrix::ChromaDerivedNcl, &mut sink).unwrap();
+  }
+  rgb
+}
+
+/// The default (FFmpeg-tabulated) `Top` forward-delay path is unperturbed by the
+/// frozen-colorimetry bookkeeping: a direct `process` decode of an all-
+/// `ChromaDerivedNcl` frame (holding + flushing the odd rows) is byte-identical
+/// to the walker, for both a non-ST 428-1 primary (`Bt709`) and `SmpteSt428`.
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn top_delay_ncl_direct_matches_walker() {
+  let (yp, up, vp) = top_frame();
+  let (w, h) = (TOP_W as usize, TOP_H as usize);
+  for primaries in [Primaries::Bt709, Primaries::SmpteSt428] {
+    let reference = top_walker_decode(primaries, St428Interpretation::FfmpegTabulated);
+    let mut rgb = std::vec![0u8; w * h * 3];
+    {
+      let mut sink = MixedSinker::<Yuv420p>::new(w, h)
+        .with_rgb(&mut rgb)
+        .unwrap()
+        .with_color_spec(top_spec(primaries));
+      crate::PixelSink::begin_frame(&mut sink, TOP_W, TOP_H).unwrap();
+      for r in 0..h {
+        crate::PixelSink::process(
+          &mut sink,
+          top_row(&yp, &up, &vp, r, ColorMatrix::ChromaDerivedNcl),
+        )
+        .unwrap();
+      }
+    }
+    assert_eq!(
+      rgb, reference,
+      "{primaries:?}: the Top forward-delay decode must match the in-order walker"
+    );
+  }
+}
+
+/// The forward delay HOLDS an odd `ChromaDerivedNcl` row against the colorimetry
+/// active at SUBMIT. Switching the sink to `SmpteSt428` + `CieXyz` mid-frame
+/// (the combination whose tabulated derivation the guard forbids) must NOT
+/// change how the already-accepted row decodes: it flushes through its FROZEN
+/// (`Bt709`, non-XYZ) primaries, so no silent ST 428 derivation runs and the
+/// output matches a clean unswitched `Bt709` decode.
+#[test]
+#[cfg_attr(
+  miri,
+  ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+)]
+fn top_delay_freezes_submit_colorimetry_across_cie_xyz_switch() {
+  let (yp, up, vp) = top_frame();
+  let (w, h) = (TOP_W as usize, TOP_H as usize);
+
+  // The frozen (Bt709) and switched (SmpteSt428) primaries must derive
+  // observably-different RGB, else the assertion below would pass vacuously.
+  let bt709_ref = top_walker_decode(Primaries::Bt709, St428Interpretation::CieXyz);
+  let smpte_ref = top_walker_decode(Primaries::SmpteSt428, St428Interpretation::FfmpegTabulated);
+  assert_ne!(
+    bt709_ref, smpte_ref,
+    "Bt709 vs SmpteSt428 ChromaDerivedNcl must differ for this chroma"
+  );
+
+  // Subject: rows 0/1 submitted with Bt709 + CieXyz (permitted — Bt709 is not
+  // CIE XYZ). Row 1 (odd) is DEFERRED, freezing (Bt709, CieXyz).
+  let mut rgb = std::vec![0u8; w * h * 3];
+  {
+    let mut sink = MixedSinker::<Yuv420p>::new(w, h)
+      .with_rgb(&mut rgb)
+      .unwrap()
+      .with_color_spec(top_spec(Primaries::Bt709))
+      .with_st428_interpretation(St428Interpretation::CieXyz);
+    crate::PixelSink::begin_frame(&mut sink, TOP_W, TOP_H).unwrap();
+    crate::PixelSink::process(
+      &mut sink,
+      top_row(&yp, &up, &vp, 0, ColorMatrix::ChromaDerivedNcl),
+    )
+    .unwrap();
+    crate::PixelSink::process(
+      &mut sink,
+      top_row(&yp, &up, &vp, 1, ColorMatrix::ChromaDerivedNcl),
+    )
+    .unwrap();
+    assert!(
+      sink.chroma_top_pending.is_some(),
+      "the odd ChromaDerivedNcl row must be held pending its even-row flush"
+    );
+
+    // Flip to SmpteSt428 (CIE-XYZ interpretation unchanged) — the SAME Top siting,
+    // so the phase freeze holds. The now-active (SmpteSt428, CieXyz) would reject
+    // a fresh ChromaDerivedNcl row, but must not reach back to the held one.
+    sink.set_color_spec(top_spec(Primaries::SmpteSt428));
+    assert_eq!(sink.primaries(), Primaries::SmpteSt428);
+
+    // The even flush row carries a FIXED matrix, which the current-row guard
+    // permits even under (SmpteSt428, CieXyz); it flushes the deferred odd row.
+    crate::PixelSink::process(&mut sink, top_row(&yp, &up, &vp, 2, ColorMatrix::Bt601))
+      .expect("the fixed-matrix even row is permitted and flushes the held row");
+    crate::PixelSink::process(&mut sink, top_row(&yp, &up, &vp, 3, ColorMatrix::Bt601))
+      .expect("the trailing odd row clamps co-sited");
+  }
+
+  // Reference: the identical row program with Bt709 held throughout (no switch).
+  let mut rgb_ref = std::vec![0u8; w * h * 3];
+  {
+    let mut sink = MixedSinker::<Yuv420p>::new(w, h)
+      .with_rgb(&mut rgb_ref)
+      .unwrap()
+      .with_color_spec(top_spec(Primaries::Bt709))
+      .with_st428_interpretation(St428Interpretation::CieXyz);
+    crate::PixelSink::begin_frame(&mut sink, TOP_W, TOP_H).unwrap();
+    crate::PixelSink::process(
+      &mut sink,
+      top_row(&yp, &up, &vp, 0, ColorMatrix::ChromaDerivedNcl),
+    )
+    .unwrap();
+    crate::PixelSink::process(
+      &mut sink,
+      top_row(&yp, &up, &vp, 1, ColorMatrix::ChromaDerivedNcl),
+    )
+    .unwrap();
+    crate::PixelSink::process(&mut sink, top_row(&yp, &up, &vp, 2, ColorMatrix::Bt601)).unwrap();
+    crate::PixelSink::process(&mut sink, top_row(&yp, &up, &vp, 3, ColorMatrix::Bt601)).unwrap();
+  }
+
+  assert_eq!(
+    rgb, rgb_ref,
+    "the held odd row must decode through its FROZEN Bt709 primaries, not the switched SmpteSt428"
+  );
+}
