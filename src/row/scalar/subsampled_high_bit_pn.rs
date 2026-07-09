@@ -287,6 +287,65 @@ pub(crate) fn chroma_upsample_420_bottom_even_h_p0xx<const BITS: u32>(
   }
 }
 
+/// Reconstructs the four output elements (`U`/`V` × even/odd column) for a
+/// single interleaved chroma sample `j` of the bottom-sited even-row upsample —
+/// the per-sample body of [`chroma_upsample_420_bottom_even_h_p0xx`], factored
+/// out so the SIMD backends share this exact de-pack / vertical-blend / centered
+/// fold / re-pack / re-interleave math for their edge / tail columns and stay
+/// byte-identical to this reference. `e[j-1]` clamps to `e[0]` and `e[j+1]` to
+/// `e[half-1]`, applied independently to `U` (even element) and `V` (odd).
+#[cfg(all(any(feature = "std", feature = "alloc"), feature = "yuv-planar"))]
+// Consumed only by the semi-planar SIMD arch kernels (`arch::{neon, x86_sse41,
+// wasm_simd128}`), which compile solely on aarch64 / x86_64 / wasm32 under
+// `yuv-semi-planar`. Without that feature, or on any other target (e.g. the
+// s390x / i686 miri jobs), there is no caller and the helper is genuinely dead;
+// allow it there while the SIMD builds keep it live and `-D warnings`-checked.
+#[cfg_attr(
+  not(all(
+    feature = "yuv-semi-planar",
+    any(
+      target_arch = "aarch64",
+      target_arch = "x86_64",
+      target_arch = "wasm32"
+    )
+  )),
+  allow(dead_code)
+)]
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn chroma_upsample_420_bottom_even_h_p0xx_pair<const BITS: u32>(
+  prev_uv_half: &[u16],
+  cur_uv_half: &[u16],
+  uv_full: &mut [u16],
+  j: usize,
+  half: usize,
+  big_endian: bool,
+) {
+  let shift = 16 - BITS;
+  let load = |row: &[u16], c: usize, comp: usize| -> u32 {
+    let raw = row[2 * c + comp];
+    (if big_endian {
+      u16::from_be(raw)
+    } else {
+      u16::from_le(raw)
+    } >> shift) as u32
+  };
+  let store = |logical: u32| -> u16 {
+    let v = (logical as u16) << shift;
+    if big_endian { v.to_be() } else { v.to_le() }
+  };
+  let vblend = |c: usize, comp: usize| -> u32 {
+    (load(prev_uv_half, c, comp) + load(cur_uv_half, c, comp) + 1) >> 1
+  };
+  let lj = j.saturating_sub(1);
+  let rj = if j + 1 < half { j + 1 } else { j };
+  let (ul, um, ur) = (vblend(lj, 0), vblend(j, 0), vblend(rj, 0));
+  let (vl, vm, vr) = (vblend(lj, 1), vblend(j, 1), vblend(rj, 1));
+  uv_full[2 * (2 * j)] = store((ul + 3 * um + 2) >> 2);
+  uv_full[2 * (2 * j) + 1] = store((vl + 3 * vm + 2) >> 2);
+  uv_full[2 * (2 * j + 1)] = store((3 * um + ur + 2) >> 2);
+  uv_full[2 * (2 * j + 1) + 1] = store((3 * vm + vr + 2) >> 2);
+}
+
 /// Co-sited (`h = 0`) horizontal 2:1 chroma reconstruction for the interleaved
 /// high-bit semi-planar 4:2:0 P-format family — the co-sited (nearest-neighbor)
 /// twin of [`chroma_upsample_2to1_center_h_p0xx`] used by `BottomLeft`. Each
@@ -412,6 +471,61 @@ pub(crate) fn chroma_upsample_420_bottomleft_even_h_p0xx<const BITS: u32>(
     uv_full[2 * (2 * j + 1)] = u;
     uv_full[2 * (2 * j + 1) + 1] = v;
   }
+}
+
+/// Reconstructs the four output elements for a single interleaved chroma sample
+/// `j` of the bottom-left-sited even-row upsample — the per-sample body of
+/// [`chroma_upsample_420_bottomleft_even_h_p0xx`], shared with the SIMD backends
+/// for their tail columns so those stay byte-identical to this reference. The
+/// co-sited (`h = 0`) horizontal phase is a plain replicate with no neighbour, so
+/// no edge clamp is needed; `U` (even element) and `V` (odd) each get the
+/// independent vertical box blend in the de-packed domain, then re-packed.
+#[cfg(all(any(feature = "std", feature = "alloc"), feature = "yuv-planar"))]
+// Consumed only by the semi-planar SIMD arch kernels (`arch::{neon, x86_sse41,
+// wasm_simd128}`), which compile solely on aarch64 / x86_64 / wasm32 under
+// `yuv-semi-planar`. Without that feature, or on any other target (e.g. the
+// s390x / i686 miri jobs), there is no caller and the helper is genuinely dead;
+// allow it there while the SIMD builds keep it live and `-D warnings`-checked.
+#[cfg_attr(
+  not(all(
+    feature = "yuv-semi-planar",
+    any(
+      target_arch = "aarch64",
+      target_arch = "x86_64",
+      target_arch = "wasm32"
+    )
+  )),
+  allow(dead_code)
+)]
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn chroma_upsample_420_bottomleft_even_h_p0xx_pair<const BITS: u32>(
+  prev_uv_half: &[u16],
+  cur_uv_half: &[u16],
+  uv_full: &mut [u16],
+  j: usize,
+  big_endian: bool,
+) {
+  let shift = 16 - BITS;
+  let load = |row: &[u16], c: usize, comp: usize| -> u32 {
+    let raw = row[2 * c + comp];
+    (if big_endian {
+      u16::from_be(raw)
+    } else {
+      u16::from_le(raw)
+    } >> shift) as u32
+  };
+  let store = |logical: u32| -> u16 {
+    let v = (logical as u16) << shift;
+    if big_endian { v.to_be() } else { v.to_le() }
+  };
+  let vblend =
+    |comp: usize| -> u32 { (load(prev_uv_half, j, comp) + load(cur_uv_half, j, comp) + 1) >> 1 };
+  let u = store(vblend(0));
+  let v = store(vblend(1));
+  uv_full[2 * (2 * j)] = u;
+  uv_full[2 * (2 * j) + 1] = v;
+  uv_full[2 * (2 * j + 1)] = u;
+  uv_full[2 * (2 * j + 1) + 1] = v;
 }
 
 // ---- P010 (semi-planar 10-bit, high-bit-packed) → RGB ------------------

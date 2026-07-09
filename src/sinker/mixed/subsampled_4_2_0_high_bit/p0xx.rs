@@ -604,20 +604,22 @@ pub(crate) fn upsample_420_chroma_sited_p0xx<'s, const BITS: u32>(
       "chroma_prev must be reserved via reserve_420_chroma_prev_u16 first"
     );
     if center_h {
-      crate::row::scalar::chroma_upsample_420_bottom_even_h_p0xx::<BITS>(
+      crate::row::chroma_upsample_420_bottom_even_h_p0xx_row::<BITS>(
         &chroma_prev[..width],
         uv_half,
         &mut chroma_full[..2 * width],
         width,
         big_endian,
+        use_simd,
       );
     } else {
-      crate::row::scalar::chroma_upsample_420_bottomleft_even_h_p0xx::<BITS>(
+      crate::row::chroma_upsample_420_bottomleft_even_h_p0xx_row::<BITS>(
         &chroma_prev[..width],
         uv_half,
         &mut chroma_full[..2 * width],
         width,
         big_endian,
+        use_simd,
       );
     }
     &chroma_full[..2 * width]
