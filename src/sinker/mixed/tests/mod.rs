@@ -429,6 +429,8 @@ mod semi_planar_hsv_direct;
 #[cfg(feature = "yuv-planar")]
 mod smpte2085;
 #[cfg(feature = "yuv-planar")]
+mod st428;
+#[cfg(feature = "yuv-planar")]
 mod subsampled_4_2_0_high_bit;
 #[cfg(feature = "yuv-planar")]
 mod yuv444p_msb;

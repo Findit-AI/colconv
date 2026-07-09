@@ -26,3 +26,8 @@ pub use mixed::{
   MixedSinker, MixedSinkerError, NativeRouteChanged, ResampleOutputsChanged, RowIndexOutOfRange,
   RowShapeMismatch, WidthAlignment, WidthAlignmentRequirement,
 };
+
+/// The SMPTE ST 428-1 CIE-XYZ interpretation toggle (#310) and its rejection
+/// error, gated on the sink's `yuv-planar` `ChromaDerivedNcl` path.
+#[cfg(all(any(feature = "std", feature = "alloc"), feature = "yuv-planar"))]
+pub use mixed::{St428CieXyzUnsupported, St428Interpretation};

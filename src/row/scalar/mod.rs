@@ -839,6 +839,18 @@ impl Coefficients {
   ///
   /// Cost is one 3×3 solve per call — resolved per row/frame, never per
   /// pixel — so it is negligible against the conversion itself.
+  ///
+  /// # SMPTE ST 428-1 interpretation (#310)
+  ///
+  /// This function always derives from the **FFmpeg-tabulated** chromaticities
+  /// `Primaries::chromaticities` reports, including for `Primaries::SmpteSt428`
+  /// (FFmpeg's D-Cinema RGB values). The alternative CIE-XYZ reading of
+  /// ST 428-1 — where the data *is* CIE XYZ and a YCbCr `ChromaDerivedNcl`
+  /// matrix is meaningless — is enforced *upstream* by the sink's
+  /// `St428Interpretation::CieXyz` guard, which rejects that combination before
+  /// this derivation is reached; it is intentionally not re-checked here. A
+  /// full XYZ↔RGB matrix derivation (tabulated → real matrix vs CIE-XYZ →
+  /// identity) is future work with no consumer today.
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(crate) fn for_matrix_with_primaries(matrix: ColorMatrix, primaries: Primaries) -> Self {
     match matrix {

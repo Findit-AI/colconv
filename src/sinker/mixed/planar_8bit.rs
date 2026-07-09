@@ -8,7 +8,7 @@ use super::{
   chroma_420_center_sited_h, chroma_420_top_sited_v, chroma_422_center_sited_h,
   chroma_440_bottom_sited_v, chroma_440_top_sited_v, frozen_outputs_check,
   planar_resample::{planar_dual_filter_resample, planar_dual_resample},
-  reconstruct_chroma, rgb_row_buf_or_scratch, rgba_plane_row_slice,
+  reconstruct_chroma, rgb_row_buf_or_scratch, rgba_plane_row_slice, st428_chroma_derived_guard,
 };
 use crate::{
   ColorMatrix, PixelSink,
@@ -953,6 +953,15 @@ impl<R> PixelSink for MixedSinker<'_, Yuv420p, R> {
         RowIndexOutOfRange::new(idx, self.height),
       ));
     }
+
+    // ST 428-1 CIE-XYZ interpretation (#310): in the opt-in
+    // `St428Interpretation::CieXyz` mode a `ChromaDerivedNcl` decode over
+    // `SmpteSt428` primaries is rejected before the derivation runs — ST 428-1
+    // is CIE XYZ, so deriving YCbCr weights from its tabulated primaries is
+    // meaningless. The default `FfmpegTabulated` mode always returns `Ok`, so
+    // the derivation below stays byte-identical to the pre-#310 behaviour.
+    st428_chroma_derived_guard(row.matrix(), primaries, self.st428_interpretation)
+      .map_err(MixedSinkerError::St428CieXyzUnsupported)?;
 
     // Split-borrow so the `rgb_scratch` path and the `hsv` write don't
     // collide with the `rgb` read-after-write chain below.

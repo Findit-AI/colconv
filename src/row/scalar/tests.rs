@@ -1465,6 +1465,46 @@ fn chroma_derived_ncl_without_primaries_falls_back_to_bt709() {
   );
 }
 
+/// SMPTE ST 428-1 (#310), FFmpeg-tabulated interpretation (the default):
+/// `ChromaDerivedNcl` with `SmpteSt428` primaries derives its luma weights from
+/// FFmpeg's tabulated D-Cinema RGB chromaticities — the pre-#310 behaviour,
+/// unchanged. Pins the derivation to those tabulated weights (a proper convex
+/// set that reconstructs the white point) and confirms it is *not* the
+/// degenerate CIE-XYZ identity. The CIE-XYZ interpretation is rejected upstream
+/// by the sink guard (`St428Interpretation::CieXyz`), not here.
+#[cfg(feature = "yuv-planar")]
+#[test]
+fn chroma_derived_ncl_smpte_st428_derives_from_tabulated_primaries() {
+  let (kr, kg, kb) = chroma_derived_luma_weights(Primaries::SmpteSt428)
+    .expect("SmpteSt428 carries FFmpeg's tabulated primaries + white point E");
+  assert!(
+    (kr + kg + kb - 1.0).abs() < 1e-9,
+    "tabulated weights sum {} != 1",
+    kr + kg + kb
+  );
+  assert!(
+    kr > 0.0 && kg > 0.0 && kb > 0.0,
+    "tabulated D-Cinema weights are all positive: ({kr}, {kg}, {kb})"
+  );
+  // A degenerate CIE-XYZ reading (channels are X/Y/Z) would collapse all luma
+  // onto the Y axis (kg ≈ 1); the tabulated RGB derivation must not.
+  assert!(
+    kg < 0.999,
+    "tabulated derivation must not collapse to the XYZ Y-axis identity (kg={kg})"
+  );
+  // The wired `ChromaDerivedNcl` derivation resolves through exactly these
+  // tabulated weights — byte-identical to the pre-#310 coefficients.
+  let derived =
+    Coefficients::for_matrix_with_primaries(ColorMatrix::ChromaDerivedNcl, Primaries::SmpteSt428);
+  let from_weights = Coefficients::from_luma_weights(kr, kg, kb);
+  assert_coeffs_within(
+    &derived,
+    &from_weights,
+    0,
+    "ChromaDerivedNcl(SmpteSt428) == tabulated from_luma_weights",
+  );
+}
+
 /// Every fixed matrix resolves byte-identically through
 /// `for_matrix_with_primaries` regardless of the primaries — the BT.601 /
 /// BT.709 grouping (and all others) is unaffected by the new parameter.
