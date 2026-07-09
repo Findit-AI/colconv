@@ -1408,6 +1408,18 @@ pub enum MixedSinkerError {
     .0.row()
   )]
   UnsupportedMatrixResample(UnsupportedMatrixResample),
+
+  /// A [`ColorMatrix::ChromaDerivedNcl`](crate::ColorMatrix::ChromaDerivedNcl)
+  /// decode was requested over [`Primaries::SmpteSt428`](crate::Primaries::SmpteSt428)
+  /// while the sink is in [`St428Interpretation::CieXyz`] mode (#310).
+  ///
+  /// ST 428-1 is CIE XYZ, so a YCbCr `ChromaDerivedNcl` matrix derived from
+  /// its tabulated primaries is meaningless; the default
+  /// [`St428Interpretation::FfmpegTabulated`] never raises this. See
+  /// [`MixedSinker::with_st428_interpretation`].
+  #[cfg(feature = "yuv-planar")]
+  #[error(transparent)]
+  St428CieXyzUnsupported(St428CieXyzUnsupported),
 }
 
 /// Identifies which slice of a multi‑plane source row mismatched in
@@ -2027,6 +2039,131 @@ pub trait DefaultAlphaMode: SourceFormat {
 }
 
 impl<F: SourceFormat> DefaultAlphaMode for F {}
+
+/// How SMPTE ST 428-1 (Digital Cinema) [`Primaries::SmpteSt428`] are
+/// interpreted when they feed the
+/// [`ColorMatrix::ChromaDerivedNcl`] luma-weight derivation.
+///
+/// ST 428-1 encodes colour directly in **CIE XYZ** — its channels *are*
+/// X, Y, Z, so colorimetrically its primaries are the XYZ axes (a
+/// near-identity), not an RGB gamut. FFmpeg's `av_csp_primaries_desc`
+/// nonetheless tabulates ST 428-1 as the D-Cinema RGB primaries
+/// `R(0.735, 0.265) G(0.274, 0.718) B(0.167, 0.009)`, white point E, and
+/// mediaframe's [`Primaries::chromaticities`] mirrors FFmpeg (its
+/// authority). This toggle selects which reading the sink applies:
+///
+/// - [`Self::FfmpegTabulated`] (the **default**) derives `ChromaDerivedNcl`
+///   luma weights from FFmpeg's tabulated chromaticities, exactly as before —
+///   every existing caller stays byte-identical.
+/// - [`Self::CieXyz`] takes ST 428-1 at its true CIE-XYZ meaning. A YCbCr
+///   `ChromaDerivedNcl` matrix over XYZ data is colorimetrically meaningless,
+///   so the sink **rejects** that combination with [`St428CieXyzUnsupported`]
+///   rather than deriving weights from the tabulated RGB primaries;
+///   XYZ-encoded ST 428-1 belongs on the `xyz12` path instead.
+///
+/// The toggle only affects `ChromaDerivedNcl` decodes whose source primaries
+/// are [`Primaries::SmpteSt428`]; every other matrix, and every other primary
+/// set, resolves identically in both modes.
+///
+/// # Future extension
+///
+/// A full XYZ↔RGB *matrix* derivation — tabulated primaries → the real
+/// D-Cinema RGB matrix under [`Self::FfmpegTabulated`], versus the XYZ
+/// identity under [`Self::CieXyz`] — is a later enhancement with no consumer
+/// today (colconv has no primaries-driven RGB↔XYZ matrix path; XYZ sources go
+/// through the separate `xyz12` colorimetry). This toggle reserves the
+/// caller-facing switch so that derivation has a home when a consumer arrives.
+///
+/// [`Primaries::SmpteSt428`]: crate::Primaries::SmpteSt428
+/// [`Primaries::chromaticities`]: crate::Primaries::chromaticities
+/// [`ColorMatrix::ChromaDerivedNcl`]: crate::ColorMatrix::ChromaDerivedNcl
+#[cfg(feature = "yuv-planar")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, IsVariant)]
+pub enum St428Interpretation {
+  /// Derive from FFmpeg's tabulated D-Cinema RGB primaries — the default,
+  /// preserving every existing conversion byte-for-byte.
+  #[default]
+  FfmpegTabulated,
+  /// Treat ST 428-1 as its true CIE-XYZ encoding: reject a `ChromaDerivedNcl`
+  /// YCbCr derivation over [`Primaries::SmpteSt428`](crate::Primaries::SmpteSt428)
+  /// instead of deriving meaningless weights from the tabulated RGB values.
+  CieXyz,
+}
+
+#[cfg(feature = "yuv-planar")]
+impl St428Interpretation {
+  /// Lowercase identifier for the interpretation
+  /// (`"ffmpeg-tabulated"` / `"cie-xyz"`).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn as_str(self) -> &'static str {
+    match self {
+      Self::FfmpegTabulated => "ffmpeg-tabulated",
+      Self::CieXyz => "cie-xyz",
+    }
+  }
+}
+
+/// A [`ColorMatrix::ChromaDerivedNcl`](crate::ColorMatrix::ChromaDerivedNcl)
+/// decode was requested over [`Primaries::SmpteSt428`](crate::Primaries::SmpteSt428)
+/// while the sink is in [`St428Interpretation::CieXyz`] mode.
+///
+/// Under the CIE-XYZ interpretation ST 428-1 data *is* CIE XYZ, so deriving
+/// YCbCr luma weights from its (RGB-shaped, FFmpeg-tabulated) primaries is
+/// colorimetrically meaningless. Decode XYZ-encoded ST 428-1 through the
+/// `xyz12` path, switch to [`St428Interpretation::FfmpegTabulated`] to accept
+/// FFmpeg's tabulated interpretation, or select a non-`ChromaDerivedNcl`
+/// matrix.
+#[cfg(feature = "yuv-planar")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+#[error(
+  "ChromaDerivedNcl over SmpteSt428 primaries is unsupported under the CIE-XYZ \
+   interpretation: ST 428-1 is CIE XYZ, not RGB — decode via the xyz12 path, or \
+   select St428Interpretation::FfmpegTabulated"
+)]
+pub struct St428CieXyzUnsupported(());
+
+#[cfg(feature = "yuv-planar")]
+impl St428CieXyzUnsupported {
+  /// Constructs the marker error.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub(crate) const fn new() -> Self {
+    Self(())
+  }
+}
+
+/// Whether `primaries` denote data that is *already* CIE XYZ under the
+/// [CIE-XYZ interpretation](St428Interpretation::CieXyz).
+///
+/// Self-contained colconv knowledge, independent of the mediaframe version:
+/// Enforces the [`St428Interpretation`] contract at the single
+/// primaries-driven luma-weight derivation
+/// ([`ChromaDerivedNcl`](crate::ColorMatrix::ChromaDerivedNcl), resolved by
+/// `row::scalar::Coefficients::for_matrix_with_primaries`).
+///
+/// Returns [`St428CieXyzUnsupported`] iff `interp` is
+/// [`St428Interpretation::CieXyz`], `matrix` is `ChromaDerivedNcl`, and
+/// `primaries` are CIE-XYZ ([`Primaries::is_cie_xyz`](crate::Primaries::is_cie_xyz))
+/// — the one combination
+/// whose tabulated YCbCr derivation is colorimetrically meaningless. Every
+/// other combination (the default
+/// [`FfmpegTabulated`](St428Interpretation::FfmpegTabulated) mode, any
+/// non-`ChromaDerivedNcl` matrix, any non-ST 428-1 primaries) is `Ok`, so the
+/// tabulated derivation runs unchanged.
+#[cfg(feature = "yuv-planar")]
+#[cfg_attr(not(tarpaulin), inline(always))]
+const fn st428_chroma_derived_guard(
+  matrix: crate::ColorMatrix,
+  primaries: crate::Primaries,
+  interp: St428Interpretation,
+) -> Result<(), St428CieXyzUnsupported> {
+  if matches!(interp, St428Interpretation::CieXyz)
+    && matches!(matrix, crate::ColorMatrix::ChromaDerivedNcl)
+    && primaries.is_cie_xyz()
+  {
+    return Err(St428CieXyzUnsupported::new());
+  }
+  Ok(())
+}
 
 /// A sink that writes any subset of `{RGB, Luma, HSV}` into
 /// caller-provided buffers.
@@ -2992,6 +3129,20 @@ pub struct MixedSinker<'a, F: SourceFormat, R = NoopResampler> {
   /// `yuv-planar`, like [`Self::chroma_prev`].
   #[cfg(feature = "yuv-planar")]
   chroma_top_pending: Option<(usize, crate::ColorMatrix, bool)>,
+  /// ST 428-1 colorimetry frozen alongside [`Self::chroma_top_pending`] for the
+  /// 8-bit `Yuv420p` **Top** forward-delay identity decode (#310): the source
+  /// primaries and [`St428Interpretation`] active when the deferred odd row was
+  /// SUBMITTED. The identity flush decodes the held row through these frozen
+  /// values — not the sink's current [`Self::primaries`] /
+  /// [`Self::st428_interpretation`] — so a mid-frame `set_color_spec` /
+  /// `set_st428_interpretation` cannot change how an already-accepted row
+  /// decodes, and re-applies [`st428_chroma_derived_guard`] to them so the
+  /// delayed path is guarded exactly like the in-order one. Set in lockstep with
+  /// `chroma_top_pending` at the identity defer, cleared at its flush, and reset
+  /// to `None` each `begin_frame`; `None` for every non-`Top` row. Gated to
+  /// `yuv-planar`, like `chroma_top_pending`.
+  #[cfg(feature = "yuv-planar")]
+  chroma_top_st428: Option<(crate::Primaries, St428Interpretation)>,
   /// Buffered Y row for the deferred [`Self::chroma_top_pending`] odd output row
   /// — a copy of that row's `width` `u8` luma, retained because the walker's row
   /// borrow is invalidated after `process` returns. Lazily grown to `width` `u8`
@@ -3512,6 +3663,18 @@ pub struct MixedSinker<'a, F: SourceFormat, R = NoopResampler> {
   /// tiers keep the matrix-tag coefficients until wired in.
   #[cfg(feature = "yuv-planar")]
   primaries: crate::Primaries,
+  /// How [`Primaries::SmpteSt428`](crate::Primaries::SmpteSt428) is interpreted
+  /// when it feeds the [`ColorMatrix::ChromaDerivedNcl`](crate::ColorMatrix::ChromaDerivedNcl)
+  /// luma-weight derivation (#310). Defaults to
+  /// [`St428Interpretation::FfmpegTabulated`] — the tabulated derivation,
+  /// byte-identical to the pre-#310 behaviour. [`St428Interpretation::CieXyz`]
+  /// instead rejects the (meaningless) YCbCr-over-XYZ combination. Set via
+  /// [`Self::with_st428_interpretation`] / [`Self::set_st428_interpretation`].
+  /// Consulted by the planar 8-bit `Yuv420p` `ChromaDerivedNcl` path (the
+  /// representative #310 wiring, mirroring [`primaries`](Self::primaries)); the
+  /// remaining families keep the tabulated derivation until wired in.
+  #[cfg(feature = "yuv-planar")]
+  st428_interpretation: St428Interpretation,
   /// Source [`Transfer`](crate::Transfer) characteristics — **sink-consumed**,
   /// like [`primaries`](Self::primaries): mediaframe's YUV row carries only
   /// range + matrix, not the transfer, so the
@@ -4195,6 +4358,8 @@ impl<F: SourceFormat, R> MixedSinker<'_, F, R> {
       #[cfg(feature = "yuv-planar")]
       chroma_top_pending: None,
       #[cfg(feature = "yuv-planar")]
+      chroma_top_st428: None,
+      #[cfg(feature = "yuv-planar")]
       chroma_top_y: Vec::new(),
       #[cfg(feature = "yuv-planar")]
       chroma_top_a: Vec::new(),
@@ -4336,6 +4501,8 @@ impl<F: SourceFormat, R> MixedSinker<'_, F, R> {
       chroma_location: crate::ChromaLocation::Unspecified,
       #[cfg(feature = "yuv-planar")]
       primaries: crate::Primaries::Unspecified,
+      #[cfg(feature = "yuv-planar")]
+      st428_interpretation: St428Interpretation::FfmpegTabulated,
       #[cfg(feature = "yuv-planar")]
       transfer: crate::Transfer::Unspecified,
       #[cfg(feature = "yuv-planar")]
@@ -5105,6 +5272,16 @@ impl<F: SourceFormat, R> MixedSinker<'_, F, R> {
     self.primaries
   }
 
+  /// How [`Primaries::SmpteSt428`](crate::Primaries::SmpteSt428) is interpreted
+  /// for the [`ColorMatrix::ChromaDerivedNcl`](crate::ColorMatrix::ChromaDerivedNcl)
+  /// decode (#310), set via [`Self::with_st428_interpretation`]. Defaults to
+  /// [`St428Interpretation::FfmpegTabulated`].
+  #[cfg(feature = "yuv-planar")]
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn st428_interpretation(&self) -> St428Interpretation {
+    self.st428_interpretation
+  }
+
   /// The source [`Transfer`](crate::Transfer) carried via
   /// [`Self::with_color_spec`] — the PQ/HLG selector for the
   /// [`ColorMatrix::Ictcp`](crate::ColorMatrix::Ictcp) non-affine decode
@@ -5260,6 +5437,43 @@ impl<F: SourceFormat, R> MixedSinker<'_, F, R> {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn with_linear_mode(mut self, mode: LinearMode) -> Self {
     self.set_linear_mode(mode);
+    self
+  }
+
+  /// Sets the [`St428Interpretation`] in place. See
+  /// [`Self::with_st428_interpretation`] for the consuming builder variant.
+  #[cfg(feature = "yuv-planar")]
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn set_st428_interpretation(&mut self, interp: St428Interpretation) -> &mut Self {
+    self.st428_interpretation = interp;
+    self
+  }
+
+  /// Selects how [`Primaries::SmpteSt428`](crate::Primaries::SmpteSt428) is
+  /// interpreted when it feeds the
+  /// [`ColorMatrix::ChromaDerivedNcl`](crate::ColorMatrix::ChromaDerivedNcl)
+  /// luma-weight derivation (#310), overriding the default
+  /// [`St428Interpretation::FfmpegTabulated`].
+  ///
+  /// [`St428Interpretation::FfmpegTabulated`] (the default) derives the YCbCr
+  /// weights from FFmpeg's tabulated D-Cinema RGB primaries — byte-identical to
+  /// the pre-#310 behaviour, so a sink built without this builder is unchanged.
+  /// [`St428Interpretation::CieXyz`] treats ST 428-1 as its true CIE-XYZ
+  /// encoding and **rejects** a `ChromaDerivedNcl` decode over `SmpteSt428`
+  /// primaries with [`MixedSinkerError::St428CieXyzUnsupported`] (a YCbCr matrix
+  /// over XYZ data is meaningless; route XYZ-encoded ST 428-1 through the
+  /// `xyz12` path instead).
+  ///
+  /// The interpretation is consulted only for the `ChromaDerivedNcl` +
+  /// `SmpteSt428` combination on the planar 8-bit `Yuv420p` decode (the
+  /// representative #310 wiring); every other matrix, every non-ST 428-1
+  /// primary set, and the not-yet-wired families are unaffected in both modes.
+  /// See [`Self::set_st428_interpretation`] for the in-place variant.
+  #[cfg(feature = "yuv-planar")]
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  #[must_use]
+  pub const fn with_st428_interpretation(mut self, interp: St428Interpretation) -> Self {
+    self.set_st428_interpretation(interp);
     self
   }
 
