@@ -147,6 +147,22 @@ pub(crate) fn chroma_upsample_2to1_center_h_p0xx<const BITS: u32, const LOW_PACK
 /// clamps to `c[0]` and `c[j+1]` to `c[half-1]`, applied independently to `U`
 /// (even element) and `V` (odd element).
 #[cfg(all(any(feature = "std", feature = "alloc"), feature = "yuv-planar"))]
+// Consumed only by the semi-planar SIMD arch kernels (`arch::{neon, x86_sse41,
+// wasm_simd128}`), which compile solely on aarch64 / x86_64 / wasm32 under
+// `yuv-semi-planar`. Without that feature, or on any other target (e.g. the
+// s390x / i686 miri jobs), there is no caller and the helper is genuinely dead;
+// allow it there while the SIMD builds keep it live and `-D warnings`-checked.
+#[cfg_attr(
+  not(all(
+    feature = "yuv-semi-planar",
+    any(
+      target_arch = "aarch64",
+      target_arch = "x86_64",
+      target_arch = "wasm32"
+    )
+  )),
+  allow(dead_code)
+)]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn chroma_upsample_2to1_center_h_p0xx_pair<const BITS: u32, const LOW_PACKED: bool>(
   uv_half: &[u16],

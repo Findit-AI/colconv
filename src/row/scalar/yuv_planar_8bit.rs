@@ -352,6 +352,22 @@ pub(crate) fn chroma_upsample_2to1_center_h(c_half: &[u8], c_full: &mut [u8], wi
 /// the right, so `j = 0` and `j = half - 1` reproduce the reference's boundary
 /// replication exactly.
 #[cfg(any(feature = "std", feature = "alloc"))]
+// Consumed only by the SIMD arch kernels (`arch::{neon, x86_sse41, x86_avx2,
+// x86_avx512, wasm_simd128}`), which compile solely on aarch64 / x86_64 /
+// wasm32 under `yuv-planar`. On any other target (e.g. the s390x / i686 miri
+// jobs) there is no caller and the helper is genuinely dead; allow it there
+// while the SIMD builds keep it live and `-D warnings`-checked.
+#[cfg_attr(
+  not(all(
+    feature = "yuv-planar",
+    any(
+      target_arch = "aarch64",
+      target_arch = "x86_64",
+      target_arch = "wasm32"
+    )
+  )),
+  allow(dead_code)
+)]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn chroma_upsample_2to1_center_h_pair(c: &[u8], full: &mut [u8], j: usize, half: usize) {
   let left = c[j.saturating_sub(1)] as u32;
@@ -688,6 +704,22 @@ pub(crate) fn chroma_upsample_2to1_center_h_u16<const BITS: u32>(
 /// to the low `BITS` before the `1/4`–`3/4` blend, and the output re-encoded to
 /// the same wire order — identical to the reference's `load` / `store`.
 #[cfg(any(feature = "std", feature = "alloc"))]
+// Consumed only by the SIMD arch kernels (`arch::{neon, x86_sse41, x86_avx2,
+// x86_avx512, wasm_simd128}`), which compile solely on aarch64 / x86_64 /
+// wasm32 under `yuv-planar`. On any other target (e.g. the s390x / i686 miri
+// jobs) there is no caller and the helper is genuinely dead; allow it there
+// while the SIMD builds keep it live and `-D warnings`-checked.
+#[cfg_attr(
+  not(all(
+    feature = "yuv-planar",
+    any(
+      target_arch = "aarch64",
+      target_arch = "x86_64",
+      target_arch = "wasm32"
+    )
+  )),
+  allow(dead_code)
+)]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn chroma_upsample_2to1_center_h_u16_pair<const BITS: u32>(
   c: &[u16],
