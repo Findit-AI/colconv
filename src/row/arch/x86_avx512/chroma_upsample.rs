@@ -724,6 +724,158 @@ mod tests {
       && std::arch::is_x86_feature_detected!("avx512bw")
   }
 
+  fn check_p0xx<const BITS: u32, const LOW_PACKED: bool>(big_endian: bool) {
+    for &w in WIDTHS {
+      let mut uv_half = std::vec![0u16; w];
+      pseudo_random_u16(
+        &mut uv_half,
+        0x9E37 ^ BITS ^ ((LOW_PACKED as u32) << 8) ^ (big_endian as u32),
+      );
+      let mut out_simd = std::vec![0u16; 2 * w];
+      let mut out_scalar = std::vec![0u16; 2 * w];
+      unsafe {
+        super::chroma_upsample_2to1_center_h_p0xx_row::<BITS, LOW_PACKED>(
+          &uv_half,
+          &mut out_simd,
+          w,
+          big_endian,
+        )
+      };
+      scalar::chroma_upsample_2to1_center_h_p0xx::<BITS, LOW_PACKED>(
+        &uv_half,
+        &mut out_scalar,
+        w,
+        big_endian,
+      );
+      assert_eq!(
+        out_simd, out_scalar,
+        "p0xx BITS={BITS} low_packed={LOW_PACKED} be={big_endian} width={w}"
+      );
+    }
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn avx512_p0xx_matches_scalar_widths() {
+    if !have_avx512() {
+      return;
+    }
+    check_p0xx::<10, false>(false);
+    check_p0xx::<10, false>(true);
+    check_p0xx::<10, true>(false);
+    check_p0xx::<10, true>(true);
+    check_p0xx::<12, false>(false);
+    check_p0xx::<16, false>(false);
+    check_p0xx::<16, false>(true);
+  }
+
+  fn check_p0xx_vertical<const BITS: u32>(big_endian: bool) {
+    for &w in WIDTHS {
+      let mut prev = std::vec![0u16; w];
+      let mut cur = std::vec![0u16; w];
+      pseudo_random_u16(&mut prev, 0x7E57 ^ BITS ^ (big_endian as u32));
+      pseudo_random_u16(&mut cur, 0xABCD ^ BITS ^ (big_endian as u32));
+      for (prev_row, tag) in [(prev.as_slice(), "interior"), (cur.as_slice(), "topedge")] {
+        let mut bot_simd = std::vec![0u16; 2 * w];
+        let mut bot_scalar = std::vec![0u16; 2 * w];
+        let mut bl_simd = std::vec![0u16; 2 * w];
+        let mut bl_scalar = std::vec![0u16; 2 * w];
+        unsafe {
+          super::chroma_upsample_420_bottom_even_h_p0xx_row::<BITS>(
+            prev_row,
+            &cur,
+            &mut bot_simd,
+            w,
+            big_endian,
+          );
+          super::chroma_upsample_420_bottomleft_even_h_p0xx_row::<BITS>(
+            prev_row,
+            &cur,
+            &mut bl_simd,
+            w,
+            big_endian,
+          );
+        }
+        scalar::chroma_upsample_420_bottom_even_h_p0xx::<BITS>(
+          prev_row,
+          &cur,
+          &mut bot_scalar,
+          w,
+          big_endian,
+        );
+        scalar::chroma_upsample_420_bottomleft_even_h_p0xx::<BITS>(
+          prev_row,
+          &cur,
+          &mut bl_scalar,
+          w,
+          big_endian,
+        );
+        assert_eq!(
+          bot_simd, bot_scalar,
+          "p0xx bottom BITS={BITS} be={big_endian} {tag} width={w}"
+        );
+        assert_eq!(
+          bl_simd, bl_scalar,
+          "p0xx bottomleft BITS={BITS} be={big_endian} {tag} width={w}"
+        );
+      }
+    }
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn avx512_p0xx_vertical_matches_scalar_widths() {
+    if !have_avx512() {
+      return;
+    }
+    check_p0xx_vertical::<10>(false);
+    check_p0xx_vertical::<10>(true);
+    check_p0xx_vertical::<12>(false);
+    check_p0xx_vertical::<12>(true);
+    check_p0xx_vertical::<16>(false);
+    check_p0xx_vertical::<16>(true);
+  }
+}
+
+#[cfg(all(test, feature = "std", feature = "yuv-planar"))]
+mod tests_planar {
+  use crate::row::scalar;
+
+  fn pseudo_random_u8(out: &mut [u8], seed: u32) {
+    let mut state = seed;
+    for v in out.iter_mut() {
+      state = state.wrapping_mul(1664525).wrapping_add(1013904223);
+      *v = (state >> 16) as u8;
+    }
+  }
+
+  fn pseudo_random_u16(out: &mut [u16], seed: u32) {
+    let mut state = seed;
+    for v in out.iter_mut() {
+      state = state.wrapping_mul(1664525).wrapping_add(1013904223);
+      *v = (state >> 8) as u16;
+    }
+  }
+
+  const WIDTHS_440: &[usize] = &[
+    1, 2, 3, 4, 7, 8, 9, 15, 16, 17, 31, 32, 33, 63, 64, 65, 128, 129, 1920,
+  ];
+  const WIDTHS_4TO1: &[usize] = &[
+    1, 2, 3, 4, 5, 6, 7, 8, 16, 20, 63, 64, 65, 66, 67, 68, 69, 72, 73, 128, 129, 130, 131, 260,
+  ];
+  const WIDTHS: &[usize] = &[2, 4, 6, 8, 16, 18, 30, 32, 34, 62, 64, 66, 128, 130];
+
+  fn have_avx512() -> bool {
+    std::arch::is_x86_feature_detected!("avx512f")
+      && std::arch::is_x86_feature_detected!("avx512bw")
+  }
+
   #[test]
   #[cfg_attr(
     miri,
@@ -782,62 +934,6 @@ mod tests {
     check_u16::<12>(true);
     check_u16::<16>(false);
     check_u16::<16>(true);
-  }
-
-  fn check_p0xx<const BITS: u32, const LOW_PACKED: bool>(big_endian: bool) {
-    for &w in WIDTHS {
-      let mut uv_half = std::vec![0u16; w];
-      pseudo_random_u16(
-        &mut uv_half,
-        0x9E37 ^ BITS ^ ((LOW_PACKED as u32) << 8) ^ (big_endian as u32),
-      );
-      let mut out_simd = std::vec![0u16; 2 * w];
-      let mut out_scalar = std::vec![0u16; 2 * w];
-      unsafe {
-        super::chroma_upsample_2to1_center_h_p0xx_row::<BITS, LOW_PACKED>(
-          &uv_half,
-          &mut out_simd,
-          w,
-          big_endian,
-        )
-      };
-      scalar::chroma_upsample_2to1_center_h_p0xx::<BITS, LOW_PACKED>(
-        &uv_half,
-        &mut out_scalar,
-        w,
-        big_endian,
-      );
-      assert_eq!(
-        out_simd, out_scalar,
-        "p0xx BITS={BITS} low_packed={LOW_PACKED} be={big_endian} width={w}"
-      );
-    }
-  }
-
-  #[test]
-  #[cfg_attr(
-    miri,
-    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
-  )]
-  fn avx512_p0xx_matches_scalar_widths() {
-    if !have_avx512() {
-      return;
-    }
-    check_p0xx::<10, false>(false);
-    check_p0xx::<10, false>(true);
-    check_p0xx::<10, true>(false);
-    check_p0xx::<10, true>(true);
-    check_p0xx::<12, false>(false);
-    check_p0xx::<16, false>(false);
-    check_p0xx::<16, false>(true);
-  }
-
-  fn pseudo_random_u8(out: &mut [u8], seed: u32) {
-    let mut state = seed;
-    for v in out.iter_mut() {
-      state = state.wrapping_mul(1664525).wrapping_add(1013904223);
-      *v = (state >> 16) as u8;
-    }
   }
 
   // Both the top-edge (prev == cur, box-blend clamps to the current row) and the
@@ -944,104 +1040,6 @@ mod tests {
     check_u16_vertical::<16>(false);
     check_u16_vertical::<16>(true);
   }
-
-  fn check_p0xx_vertical<const BITS: u32>(big_endian: bool) {
-    for &w in WIDTHS {
-      let mut prev = std::vec![0u16; w];
-      let mut cur = std::vec![0u16; w];
-      pseudo_random_u16(&mut prev, 0x7E57 ^ BITS ^ (big_endian as u32));
-      pseudo_random_u16(&mut cur, 0xABCD ^ BITS ^ (big_endian as u32));
-      for (prev_row, tag) in [(prev.as_slice(), "interior"), (cur.as_slice(), "topedge")] {
-        let mut bot_simd = std::vec![0u16; 2 * w];
-        let mut bot_scalar = std::vec![0u16; 2 * w];
-        let mut bl_simd = std::vec![0u16; 2 * w];
-        let mut bl_scalar = std::vec![0u16; 2 * w];
-        unsafe {
-          super::chroma_upsample_420_bottom_even_h_p0xx_row::<BITS>(
-            prev_row,
-            &cur,
-            &mut bot_simd,
-            w,
-            big_endian,
-          );
-          super::chroma_upsample_420_bottomleft_even_h_p0xx_row::<BITS>(
-            prev_row,
-            &cur,
-            &mut bl_simd,
-            w,
-            big_endian,
-          );
-        }
-        scalar::chroma_upsample_420_bottom_even_h_p0xx::<BITS>(
-          prev_row,
-          &cur,
-          &mut bot_scalar,
-          w,
-          big_endian,
-        );
-        scalar::chroma_upsample_420_bottomleft_even_h_p0xx::<BITS>(
-          prev_row,
-          &cur,
-          &mut bl_scalar,
-          w,
-          big_endian,
-        );
-        assert_eq!(
-          bot_simd, bot_scalar,
-          "p0xx bottom BITS={BITS} be={big_endian} {tag} width={w}"
-        );
-        assert_eq!(
-          bl_simd, bl_scalar,
-          "p0xx bottomleft BITS={BITS} be={big_endian} {tag} width={w}"
-        );
-      }
-    }
-  }
-
-  #[test]
-  #[cfg_attr(
-    miri,
-    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
-  )]
-  fn avx512_p0xx_vertical_matches_scalar_widths() {
-    if !have_avx512() {
-      return;
-    }
-    check_p0xx_vertical::<10>(false);
-    check_p0xx_vertical::<10>(true);
-    check_p0xx_vertical::<12>(false);
-    check_p0xx_vertical::<12>(true);
-    check_p0xx_vertical::<16>(false);
-    check_p0xx_vertical::<16>(true);
-  }
-}
-
-#[cfg(all(test, feature = "std", feature = "yuv-planar"))]
-mod tests_planar {
-  use crate::row::scalar;
-
-  fn pseudo_random_u8(out: &mut [u8], seed: u32) {
-    let mut state = seed;
-    for v in out.iter_mut() {
-      state = state.wrapping_mul(1664525).wrapping_add(1013904223);
-      *v = (state >> 16) as u8;
-    }
-  }
-
-  fn pseudo_random_u16(out: &mut [u16], seed: u32) {
-    let mut state = seed;
-    for v in out.iter_mut() {
-      state = state.wrapping_mul(1664525).wrapping_add(1013904223);
-      *v = (state >> 8) as u16;
-    }
-  }
-
-  const WIDTHS_440: &[usize] = &[
-    1, 2, 3, 4, 7, 8, 9, 15, 16, 17, 31, 32, 33, 63, 64, 65, 128, 129, 1920,
-  ];
-  const WIDTHS_4TO1: &[usize] = &[
-    1, 2, 3, 4, 5, 6, 7, 8, 16, 20, 63, 64, 65, 66, 67, 68, 69, 72, 73, 128, 129, 130, 131, 260,
-  ];
 
   #[test]
   #[cfg_attr(

@@ -1052,60 +1052,6 @@ mod tests {
   // non-multiples of the vector width with a scalar tail.
   const WIDTHS: &[usize] = &[2, 4, 6, 8, 16, 18, 30, 32, 34, 62, 64, 66, 128, 130];
 
-  #[test]
-  #[cfg_attr(
-    miri,
-    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
-  )]
-  fn neon_u8_matches_scalar_widths() {
-    for &w in WIDTHS {
-      let half = w / 2;
-      let mut c_half = std::vec![0u8; half];
-      let mut state = 0xC0FFEEu32;
-      for v in c_half.iter_mut() {
-        state = state.wrapping_mul(1664525).wrapping_add(1013904223);
-        *v = (state >> 16) as u8;
-      }
-      let mut out_simd = std::vec![0u8; w];
-      let mut out_scalar = std::vec![0u8; w];
-      unsafe { super::chroma_upsample_2to1_center_h_row(&c_half, &mut out_simd, w) };
-      scalar::chroma_upsample_2to1_center_h(&c_half, &mut out_scalar, w);
-      assert_eq!(out_simd, out_scalar, "u8 width={w}");
-    }
-  }
-
-  fn check_u16<const BITS: u32>(big_endian: bool) {
-    for &w in WIDTHS {
-      let half = w / 2;
-      let mut c_half = std::vec![0u16; half];
-      pseudo_random_u16(&mut c_half, 0x1234 ^ BITS ^ (big_endian as u32));
-      let mut out_simd = std::vec![0u16; w];
-      let mut out_scalar = std::vec![0u16; w];
-      unsafe {
-        super::chroma_upsample_2to1_center_h_u16_row::<BITS>(&c_half, &mut out_simd, w, big_endian)
-      };
-      scalar::chroma_upsample_2to1_center_h_u16::<BITS>(&c_half, &mut out_scalar, w, big_endian);
-      assert_eq!(
-        out_simd, out_scalar,
-        "u16 BITS={BITS} be={big_endian} width={w}"
-      );
-    }
-  }
-
-  #[test]
-  #[cfg_attr(
-    miri,
-    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
-  )]
-  fn neon_u16_matches_scalar_widths() {
-    check_u16::<10>(false);
-    check_u16::<10>(true);
-    check_u16::<12>(false);
-    check_u16::<12>(true);
-    check_u16::<16>(false);
-    check_u16::<16>(true);
-  }
-
   fn check_p0xx<const BITS: u32, const LOW_PACKED: bool>(big_endian: bool) {
     for &w in WIDTHS {
       let mut uv_half = std::vec![0u16; w];
@@ -1149,113 +1095,6 @@ mod tests {
     check_p0xx::<12, false>(false);
     check_p0xx::<16, false>(false);
     check_p0xx::<16, false>(true);
-  }
-
-  fn pseudo_random_u8(out: &mut [u8], seed: u32) {
-    let mut state = seed;
-    for v in out.iter_mut() {
-      state = state.wrapping_mul(1664525).wrapping_add(1013904223);
-      *v = (state >> 16) as u8;
-    }
-  }
-
-  // Both the top-edge (prev == cur, box-blend clamps to the current row) and the
-  // interior (distinct prev / cur) vertical cases are exercised per width.
-  #[test]
-  #[cfg_attr(
-    miri,
-    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
-  )]
-  fn neon_u8_vertical_matches_scalar_widths() {
-    for &w in WIDTHS {
-      let half = w / 2;
-      let mut prev = std::vec![0u8; half];
-      let mut cur = std::vec![0u8; half];
-      pseudo_random_u8(&mut prev, 0xBEEF);
-      pseudo_random_u8(&mut cur, 0xFACE);
-      for (prev_row, tag) in [(prev.as_slice(), "interior"), (cur.as_slice(), "topedge")] {
-        let mut bot_simd = std::vec![0u8; w];
-        let mut bot_scalar = std::vec![0u8; w];
-        let mut bl_simd = std::vec![0u8; w];
-        let mut bl_scalar = std::vec![0u8; w];
-        unsafe {
-          super::chroma_upsample_420_bottom_even_h_row(prev_row, &cur, &mut bot_simd, w);
-          super::chroma_upsample_420_bottomleft_even_h_row(prev_row, &cur, &mut bl_simd, w);
-        }
-        scalar::chroma_upsample_420_bottom_even_h(prev_row, &cur, &mut bot_scalar, w);
-        scalar::chroma_upsample_420_bottomleft_even_h(prev_row, &cur, &mut bl_scalar, w);
-        assert_eq!(bot_simd, bot_scalar, "u8 bottom {tag} width={w}");
-        assert_eq!(bl_simd, bl_scalar, "u8 bottomleft {tag} width={w}");
-      }
-    }
-  }
-
-  fn check_u16_vertical<const BITS: u32>(big_endian: bool) {
-    for &w in WIDTHS {
-      let half = w / 2;
-      let mut prev = std::vec![0u16; half];
-      let mut cur = std::vec![0u16; half];
-      pseudo_random_u16(&mut prev, 0x51A5 ^ BITS ^ (big_endian as u32));
-      pseudo_random_u16(&mut cur, 0xC0DE ^ BITS ^ (big_endian as u32));
-      for (prev_row, tag) in [(prev.as_slice(), "interior"), (cur.as_slice(), "topedge")] {
-        let mut bot_simd = std::vec![0u16; w];
-        let mut bot_scalar = std::vec![0u16; w];
-        let mut bl_simd = std::vec![0u16; w];
-        let mut bl_scalar = std::vec![0u16; w];
-        unsafe {
-          super::chroma_upsample_420_bottom_even_h_u16_row::<BITS>(
-            prev_row,
-            &cur,
-            &mut bot_simd,
-            w,
-            big_endian,
-          );
-          super::chroma_upsample_420_bottomleft_even_h_u16_row::<BITS>(
-            prev_row,
-            &cur,
-            &mut bl_simd,
-            w,
-            big_endian,
-          );
-        }
-        scalar::chroma_upsample_420_bottom_even_h_u16::<BITS>(
-          prev_row,
-          &cur,
-          &mut bot_scalar,
-          w,
-          big_endian,
-        );
-        scalar::chroma_upsample_420_bottomleft_even_h_u16::<BITS>(
-          prev_row,
-          &cur,
-          &mut bl_scalar,
-          w,
-          big_endian,
-        );
-        assert_eq!(
-          bot_simd, bot_scalar,
-          "u16 bottom BITS={BITS} be={big_endian} {tag} width={w}"
-        );
-        assert_eq!(
-          bl_simd, bl_scalar,
-          "u16 bottomleft BITS={BITS} be={big_endian} {tag} width={w}"
-        );
-      }
-    }
-  }
-
-  #[test]
-  #[cfg_attr(
-    miri,
-    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
-  )]
-  fn neon_u16_vertical_matches_scalar_widths() {
-    check_u16_vertical::<10>(false);
-    check_u16_vertical::<10>(true);
-    check_u16_vertical::<12>(false);
-    check_u16_vertical::<12>(true);
-    check_u16_vertical::<16>(false);
-    check_u16_vertical::<16>(true);
   }
 
   fn check_p0xx_vertical<const BITS: u32>(big_endian: bool) {
@@ -1356,6 +1195,160 @@ mod tests_planar {
   const WIDTHS_4TO1: &[usize] = &[
     1, 2, 3, 4, 5, 6, 7, 8, 16, 20, 63, 64, 65, 66, 67, 68, 69, 72, 73, 128, 129, 130, 131, 260,
   ];
+  const WIDTHS: &[usize] = &[2, 4, 6, 8, 16, 18, 30, 32, 34, 62, 64, 66, 128, 130];
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn neon_u8_matches_scalar_widths() {
+    for &w in WIDTHS {
+      let half = w / 2;
+      let mut c_half = std::vec![0u8; half];
+      let mut state = 0xC0FFEEu32;
+      for v in c_half.iter_mut() {
+        state = state.wrapping_mul(1664525).wrapping_add(1013904223);
+        *v = (state >> 16) as u8;
+      }
+      let mut out_simd = std::vec![0u8; w];
+      let mut out_scalar = std::vec![0u8; w];
+      unsafe { super::chroma_upsample_2to1_center_h_row(&c_half, &mut out_simd, w) };
+      scalar::chroma_upsample_2to1_center_h(&c_half, &mut out_scalar, w);
+      assert_eq!(out_simd, out_scalar, "u8 width={w}");
+    }
+  }
+
+  fn check_u16<const BITS: u32>(big_endian: bool) {
+    for &w in WIDTHS {
+      let half = w / 2;
+      let mut c_half = std::vec![0u16; half];
+      pseudo_random_u16(&mut c_half, 0x1234 ^ BITS ^ (big_endian as u32));
+      let mut out_simd = std::vec![0u16; w];
+      let mut out_scalar = std::vec![0u16; w];
+      unsafe {
+        super::chroma_upsample_2to1_center_h_u16_row::<BITS>(&c_half, &mut out_simd, w, big_endian)
+      };
+      scalar::chroma_upsample_2to1_center_h_u16::<BITS>(&c_half, &mut out_scalar, w, big_endian);
+      assert_eq!(
+        out_simd, out_scalar,
+        "u16 BITS={BITS} be={big_endian} width={w}"
+      );
+    }
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn neon_u16_matches_scalar_widths() {
+    check_u16::<10>(false);
+    check_u16::<10>(true);
+    check_u16::<12>(false);
+    check_u16::<12>(true);
+    check_u16::<16>(false);
+    check_u16::<16>(true);
+  }
+
+  // Both the top-edge (prev == cur, box-blend clamps to the current row) and the
+  // interior (distinct prev / cur) vertical cases are exercised per width.
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn neon_u8_vertical_matches_scalar_widths() {
+    for &w in WIDTHS {
+      let half = w / 2;
+      let mut prev = std::vec![0u8; half];
+      let mut cur = std::vec![0u8; half];
+      pseudo_random_u8(&mut prev, 0xBEEF);
+      pseudo_random_u8(&mut cur, 0xFACE);
+      for (prev_row, tag) in [(prev.as_slice(), "interior"), (cur.as_slice(), "topedge")] {
+        let mut bot_simd = std::vec![0u8; w];
+        let mut bot_scalar = std::vec![0u8; w];
+        let mut bl_simd = std::vec![0u8; w];
+        let mut bl_scalar = std::vec![0u8; w];
+        unsafe {
+          super::chroma_upsample_420_bottom_even_h_row(prev_row, &cur, &mut bot_simd, w);
+          super::chroma_upsample_420_bottomleft_even_h_row(prev_row, &cur, &mut bl_simd, w);
+        }
+        scalar::chroma_upsample_420_bottom_even_h(prev_row, &cur, &mut bot_scalar, w);
+        scalar::chroma_upsample_420_bottomleft_even_h(prev_row, &cur, &mut bl_scalar, w);
+        assert_eq!(bot_simd, bot_scalar, "u8 bottom {tag} width={w}");
+        assert_eq!(bl_simd, bl_scalar, "u8 bottomleft {tag} width={w}");
+      }
+    }
+  }
+
+  fn check_u16_vertical<const BITS: u32>(big_endian: bool) {
+    for &w in WIDTHS {
+      let half = w / 2;
+      let mut prev = std::vec![0u16; half];
+      let mut cur = std::vec![0u16; half];
+      pseudo_random_u16(&mut prev, 0x51A5 ^ BITS ^ (big_endian as u32));
+      pseudo_random_u16(&mut cur, 0xC0DE ^ BITS ^ (big_endian as u32));
+      for (prev_row, tag) in [(prev.as_slice(), "interior"), (cur.as_slice(), "topedge")] {
+        let mut bot_simd = std::vec![0u16; w];
+        let mut bot_scalar = std::vec![0u16; w];
+        let mut bl_simd = std::vec![0u16; w];
+        let mut bl_scalar = std::vec![0u16; w];
+        unsafe {
+          super::chroma_upsample_420_bottom_even_h_u16_row::<BITS>(
+            prev_row,
+            &cur,
+            &mut bot_simd,
+            w,
+            big_endian,
+          );
+          super::chroma_upsample_420_bottomleft_even_h_u16_row::<BITS>(
+            prev_row,
+            &cur,
+            &mut bl_simd,
+            w,
+            big_endian,
+          );
+        }
+        scalar::chroma_upsample_420_bottom_even_h_u16::<BITS>(
+          prev_row,
+          &cur,
+          &mut bot_scalar,
+          w,
+          big_endian,
+        );
+        scalar::chroma_upsample_420_bottomleft_even_h_u16::<BITS>(
+          prev_row,
+          &cur,
+          &mut bl_scalar,
+          w,
+          big_endian,
+        );
+        assert_eq!(
+          bot_simd, bot_scalar,
+          "u16 bottom BITS={BITS} be={big_endian} {tag} width={w}"
+        );
+        assert_eq!(
+          bl_simd, bl_scalar,
+          "u16 bottomleft BITS={BITS} be={big_endian} {tag} width={w}"
+        );
+      }
+    }
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn neon_u16_vertical_matches_scalar_widths() {
+    check_u16_vertical::<10>(false);
+    check_u16_vertical::<10>(true);
+    check_u16_vertical::<12>(false);
+    check_u16_vertical::<12>(true);
+    check_u16_vertical::<16>(false);
+    check_u16_vertical::<16>(true);
+  }
 
   #[test]
   #[cfg_attr(
