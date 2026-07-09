@@ -1411,6 +1411,27 @@ mod tests {
     check_p0xx_vertical::<16>(false);
     check_p0xx_vertical::<16>(true);
   }
+}
+
+#[cfg(all(test, feature = "std", feature = "yuv-planar"))]
+mod tests_planar {
+  use crate::row::scalar;
+
+  fn pseudo_random_u8(out: &mut [u8], seed: u32) {
+    let mut state = seed;
+    for v in out.iter_mut() {
+      state = state.wrapping_mul(1664525).wrapping_add(1013904223);
+      *v = (state >> 16) as u8;
+    }
+  }
+
+  fn pseudo_random_u16(out: &mut [u16], seed: u32) {
+    let mut state = seed;
+    for v in out.iter_mut() {
+      state = state.wrapping_mul(1664525).wrapping_add(1013904223);
+      *v = (state >> 8) as u16;
+    }
+  }
 
   const WIDTHS_440: &[usize] = &[
     1, 2, 3, 4, 7, 8, 9, 15, 16, 17, 31, 32, 33, 63, 64, 65, 128, 129, 1920,
