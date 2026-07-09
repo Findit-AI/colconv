@@ -510,6 +510,7 @@ pub(super) fn upsample_440_chroma_sited<'s>(
   bottom_v: bool,
   stage: bool,
   width: usize,
+  use_simd: bool,
 ) -> (&'s [u8], &'s [u8]) {
   debug_assert!(
     chroma_full.len() >= 2 * width,
@@ -530,8 +531,8 @@ pub(super) fn upsample_440_chroma_sited<'s>(
       "chroma_prev must be reserved via reserve_440_chroma_prev first"
     );
     let (u_prev, v_prev) = chroma_prev[..2 * width].split_at(width);
-    crate::row::scalar::chroma_upsample_440_bottom_v(u_prev, u, u_full, width);
-    crate::row::scalar::chroma_upsample_440_bottom_v(v_prev, v, v_full, width);
+    crate::row::chroma_upsample_440_bottom_v_row(u_prev, u, u_full, width, use_simd);
+    crate::row::chroma_upsample_440_bottom_v_row(v_prev, v, v_full, width, use_simd);
   } else {
     u_full.copy_from_slice(&u[..width]);
     v_full.copy_from_slice(&v[..width]);
@@ -8049,6 +8050,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuv440p, R> {
                     true,
                     false,
                     w,
+                    use_simd,
                   );
                   linear_light::linear_light_resample(
                     linear_light_frame,
@@ -8103,6 +8105,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuv440p, R> {
                   false,
                   false,
                   w,
+                  use_simd,
                 );
                 linear_light::linear_light_resample(
                   linear_light_frame,
@@ -8160,6 +8163,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuv440p, R> {
                   false,
                   false,
                   w,
+                  use_simd,
                 );
                 linear_light::linear_light_resample(
                   linear_light_frame,
@@ -8248,6 +8252,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuv440p, R> {
                 bottom_v,
                 false,
                 w,
+                use_simd,
               );
               linear_light::linear_light_resample(
                 linear_light_frame,
@@ -8394,6 +8399,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuv440p, R> {
             bottom_v,
             false,
             w,
+            use_simd,
           );
           let r = planar_dual_filter_resample(
             luma_filter_stream,
@@ -8499,6 +8505,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuv440p, R> {
                 true,
                 false,
                 w,
+                use_simd,
               );
               planar_dual_filter_resample(
                 luma_filter_stream,
@@ -8539,6 +8546,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuv440p, R> {
               false,
               false,
               w,
+              use_simd,
             );
             planar_dual_filter_resample(
               luma_filter_stream,
@@ -8582,6 +8590,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuv440p, R> {
               false,
               false,
               w,
+              use_simd,
             );
             planar_dual_filter_resample(
               luma_filter_stream,
@@ -8851,6 +8860,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuv440p, R> {
               bottom_v,
               false,
               w,
+              use_simd,
             );
             planar_dual_resample(
               luma_stream,
@@ -8950,6 +8960,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuv440p, R> {
                   true,
                   false,
                   w,
+                  use_simd,
                 );
                 planar_dual_resample(
                   luma_stream,
@@ -8990,6 +9001,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuv440p, R> {
                 false,
                 false,
                 w,
+                use_simd,
               );
               planar_dual_resample(
                 luma_stream,
@@ -9033,6 +9045,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuv440p, R> {
                 false,
                 false,
                 w,
+                use_simd,
               );
               planar_dual_resample(
                 luma_stream,
@@ -9300,6 +9313,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuv440p, R> {
           true,
           false,
           w,
+          use_simd,
         );
         yuv440_identity_color_row(
           rgb,
@@ -9336,6 +9350,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuv440p, R> {
           false,
           false,
           w,
+          use_simd,
         );
         yuv440_identity_color_row(
           rgb,
@@ -9382,6 +9397,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuv440p, R> {
           bottom_v,
           true,
           w,
+          use_simd,
         );
         yuv_444_to_hsv_row(
           row.y(),
@@ -9426,6 +9442,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuv440p, R> {
           bottom_v,
           true,
           w,
+          use_simd,
         );
         yuv_444_to_rgba_row(
           row.y(),
@@ -9478,6 +9495,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuv440p, R> {
         bottom_v,
         true,
         w,
+        use_simd,
       );
       yuv_444_to_rgb_row(
         row.y(),

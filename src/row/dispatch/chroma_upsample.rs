@@ -581,6 +581,187 @@ pub(crate) fn chroma_upsample_420_bottomleft_even_h_p0xx_row<const BITS: u32>(
   );
 }
 
+/// Runtime-dispatched u8 full-width bottom-sited **4:4:0** even-row vertical
+/// chroma upsample —
+/// [`chroma_upsample_440_bottom_v`](crate::row::scalar::chroma_upsample_440_bottom_v)
+/// with a SIMD fast path. 4:4:0 keeps full-width chroma, so this is the pure
+/// vertical rounding-average `out[j] = (prev[j] + cur[j] + 1) >> 1` — no
+/// horizontal reconstruction.
+#[cfg(all(any(feature = "std", feature = "alloc"), feature = "yuv-planar"))]
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn chroma_upsample_440_bottom_v_row(
+  prev: &[u8],
+  cur: &[u8],
+  out: &mut [u8],
+  width: usize,
+  use_simd: bool,
+) {
+  assert!(prev.len() >= width, "prev row too short");
+  assert!(cur.len() >= width, "cur row too short");
+  assert!(out.len() >= width, "out row too short");
+
+  if !use_simd {
+    return scalar::chroma_upsample_440_bottom_v(prev, cur, out, width);
+  }
+  cfg_select! {
+    target_arch = "aarch64" => {
+      if neon_available() {
+        // SAFETY: NEON is baseline on aarch64 and verified at runtime; bounds asserted.
+        unsafe { arch::neon::chroma_upsample::chroma_upsample_440_bottom_v_row(prev, cur, out, width); }
+        return;
+      }
+    },
+    target_arch = "x86_64" => {
+      if avx512_available() {
+        // SAFETY: AVX-512F + BW verified at runtime; bounds asserted.
+        unsafe { arch::x86_avx512::chroma_upsample::chroma_upsample_440_bottom_v_row(prev, cur, out, width); }
+        return;
+      }
+      if avx2_available() {
+        // SAFETY: AVX2 verified at runtime; bounds asserted.
+        unsafe { arch::x86_avx2::chroma_upsample::chroma_upsample_440_bottom_v_row(prev, cur, out, width); }
+        return;
+      }
+      if sse41_available() {
+        // SAFETY: SSE4.1 verified at runtime; bounds asserted.
+        unsafe { arch::x86_sse41::chroma_upsample::chroma_upsample_440_bottom_v_row(prev, cur, out, width); }
+        return;
+      }
+    },
+    target_arch = "wasm32" => {
+      if simd128_available() {
+        // SAFETY: simd128 enabled at compile time; bounds asserted.
+        unsafe { arch::wasm_simd128::chroma_upsample::chroma_upsample_440_bottom_v_row(prev, cur, out, width); }
+        return;
+      }
+    },
+    _ => {}
+  }
+  scalar::chroma_upsample_440_bottom_v(prev, cur, out, width);
+}
+
+/// Runtime-dispatched u16 full-width bottom-sited **4:4:0** even-row vertical
+/// chroma upsample for the high-bit planar sink —
+/// [`chroma_upsample_440_bottom_v_u16_wire`](crate::row::scalar::chroma_upsample_440_bottom_v_u16_wire)
+/// with a SIMD fast path. `prev` / `cur` / `out` stay in the source's wire byte
+/// order (`big_endian`); each backend fuses the wire → host normalization and
+/// low-`BITS` mask, so the result is bit-identical per tier.
+#[cfg(all(any(feature = "std", feature = "alloc"), feature = "yuv-planar"))]
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn chroma_upsample_440_bottom_v_u16_row<const BITS: u32>(
+  prev: &[u16],
+  cur: &[u16],
+  out: &mut [u16],
+  width: usize,
+  big_endian: bool,
+  use_simd: bool,
+) {
+  assert!(prev.len() >= width, "prev row too short");
+  assert!(cur.len() >= width, "cur row too short");
+  assert!(out.len() >= width, "out row too short");
+
+  if !use_simd {
+    return scalar::chroma_upsample_440_bottom_v_u16_wire::<BITS>(
+      prev, cur, out, width, big_endian,
+    );
+  }
+  cfg_select! {
+    target_arch = "aarch64" => {
+      if neon_available() {
+        // SAFETY: NEON is baseline on aarch64 and verified at runtime; bounds asserted.
+        unsafe { arch::neon::chroma_upsample::chroma_upsample_440_bottom_v_u16_row::<BITS>(prev, cur, out, width, big_endian); }
+        return;
+      }
+    },
+    target_arch = "x86_64" => {
+      if avx512_available() {
+        // SAFETY: AVX-512F + BW verified at runtime; bounds asserted.
+        unsafe { arch::x86_avx512::chroma_upsample::chroma_upsample_440_bottom_v_u16_row::<BITS>(prev, cur, out, width, big_endian); }
+        return;
+      }
+      if avx2_available() {
+        // SAFETY: AVX2 verified at runtime; bounds asserted.
+        unsafe { arch::x86_avx2::chroma_upsample::chroma_upsample_440_bottom_v_u16_row::<BITS>(prev, cur, out, width, big_endian); }
+        return;
+      }
+      if sse41_available() {
+        // SAFETY: SSE4.1 verified at runtime; bounds asserted.
+        unsafe { arch::x86_sse41::chroma_upsample::chroma_upsample_440_bottom_v_u16_row::<BITS>(prev, cur, out, width, big_endian); }
+        return;
+      }
+    },
+    target_arch = "wasm32" => {
+      if simd128_available() {
+        // SAFETY: simd128 enabled at compile time; bounds asserted.
+        unsafe { arch::wasm_simd128::chroma_upsample::chroma_upsample_440_bottom_v_u16_row::<BITS>(prev, cur, out, width, big_endian); }
+        return;
+      }
+    },
+    _ => {}
+  }
+  scalar::chroma_upsample_440_bottom_v_u16_wire::<BITS>(prev, cur, out, width, big_endian);
+}
+
+/// Runtime-dispatched u8 centered **1→4** horizontal chroma upsample (4:1:1 /
+/// 4:1:0) —
+/// [`chroma_upsample_4to1_center_h`](crate::row::scalar::chroma_upsample_4to1_center_h)
+/// with a SIMD fast path. Each quarter-width sample expands to four output
+/// columns at the centered phase; `c_quarter` carries `width.div_ceil(4)`
+/// samples.
+#[cfg(all(any(feature = "std", feature = "alloc"), feature = "yuv-planar"))]
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn chroma_upsample_4to1_center_h_row(
+  c_quarter: &[u8],
+  c_full: &mut [u8],
+  width: usize,
+  use_simd: bool,
+) {
+  assert!(
+    c_quarter.len() >= width.div_ceil(4),
+    "c_quarter row too short"
+  );
+  assert!(c_full.len() >= width, "c_full row too short");
+
+  if !use_simd {
+    return scalar::chroma_upsample_4to1_center_h(c_quarter, c_full, width);
+  }
+  cfg_select! {
+    target_arch = "aarch64" => {
+      if neon_available() {
+        // SAFETY: NEON is baseline on aarch64 and verified at runtime; bounds asserted.
+        unsafe { arch::neon::chroma_upsample::chroma_upsample_4to1_center_h_row(c_quarter, c_full, width); }
+        return;
+      }
+    },
+    target_arch = "x86_64" => {
+      if avx512_available() {
+        // SAFETY: AVX-512F + BW verified at runtime; bounds asserted.
+        unsafe { arch::x86_avx512::chroma_upsample::chroma_upsample_4to1_center_h_row(c_quarter, c_full, width); }
+        return;
+      }
+      if avx2_available() {
+        // SAFETY: AVX2 verified at runtime; bounds asserted.
+        unsafe { arch::x86_avx2::chroma_upsample::chroma_upsample_4to1_center_h_row(c_quarter, c_full, width); }
+        return;
+      }
+      if sse41_available() {
+        // SAFETY: SSE4.1 verified at runtime; bounds asserted.
+        unsafe { arch::x86_sse41::chroma_upsample::chroma_upsample_4to1_center_h_row(c_quarter, c_full, width); }
+        return;
+      }
+    },
+    target_arch = "wasm32" => {
+      if simd128_available() {
+        // SAFETY: simd128 enabled at compile time; bounds asserted.
+        unsafe { arch::wasm_simd128::chroma_upsample::chroma_upsample_4to1_center_h_row(c_quarter, c_full, width); }
+        return;
+      }
+    },
+    _ => {}
+  }
+  scalar::chroma_upsample_4to1_center_h(c_quarter, c_full, width);
+}
+
 #[cfg(all(
   test,
   feature = "std",

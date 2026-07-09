@@ -862,6 +862,246 @@ pub(crate) unsafe fn chroma_upsample_420_bottomleft_even_h_p0xx_row<const BITS: 
   }
 }
 
+/// SSE4.1 full-width vertical chroma rounding-average for the **bottom-sited**
+/// even output luma row of a 4:4:0 source. Byte-identical to
+/// [`chroma_upsample_440_bottom_v`](crate::row::scalar::chroma_upsample_440_bottom_v):
+/// `out[j] = (prev[j] + cur[j] + 1) >> 1` via `_mm_avg_epu8` (16 lanes/iter)
+/// with a scalar tail.
+///
+/// # Safety
+///
+/// SSE4.1 must be available. `prev.len() >= width`; `cur.len() >= width`;
+/// `out.len() >= width`.
+#[cfg(feature = "yuv-planar")]
+#[inline]
+#[target_feature(enable = "sse4.1")]
+pub(crate) unsafe fn chroma_upsample_440_bottom_v_row(
+  prev: &[u8],
+  cur: &[u8],
+  out: &mut [u8],
+  width: usize,
+) {
+  debug_assert!(prev.len() >= width, "prev row too short");
+  debug_assert!(cur.len() >= width, "cur row too short");
+  debug_assert!(out.len() >= width, "out row too short");
+
+  let mut j = 0;
+  // SAFETY: each iteration reads/writes 16 bytes at offset `j` with
+  // `j + 16 <= width <= len`, so every access stays in bounds.
+  unsafe {
+    while j + 16 <= width {
+      let p = _mm_loadu_si128(prev.as_ptr().add(j).cast());
+      let c = _mm_loadu_si128(cur.as_ptr().add(j).cast());
+      _mm_storeu_si128(out.as_mut_ptr().add(j).cast(), _mm_avg_epu8(p, c));
+      j += 16;
+    }
+  }
+  while j < width {
+    out[j] = (((prev[j] as u16) + (cur[j] as u16) + 1) >> 1) as u8;
+    j += 1;
+  }
+}
+
+/// SSE4.1 `u16` twin of [`chroma_upsample_440_bottom_v_row`] for the high-bit
+/// planar 4:4:0 sink, byte-identical to
+/// [`chroma_upsample_440_bottom_v_u16_wire`](crate::row::scalar::chroma_upsample_440_bottom_v_u16_wire):
+/// each 8-lane block is normalized wire → host, masked to the low `BITS`,
+/// averaged with `_mm_avg_epu16`, and re-encoded to the same wire order, with a
+/// scalar tail.
+///
+/// # Safety
+///
+/// SSE4.1 must be available. `prev.len() >= width`; `cur.len() >= width`;
+/// `out.len() >= width`.
+#[cfg(feature = "yuv-planar")]
+#[inline]
+#[target_feature(enable = "sse4.1")]
+pub(crate) unsafe fn chroma_upsample_440_bottom_v_u16_row<const BITS: u32>(
+  prev: &[u16],
+  cur: &[u16],
+  out: &mut [u16],
+  width: usize,
+  big_endian: bool,
+) {
+  debug_assert!(prev.len() >= width, "prev row too short");
+  debug_assert!(cur.len() >= width, "cur row too short");
+  debug_assert!(out.len() >= width, "out row too short");
+
+  let swap = big_endian != cfg!(target_endian = "big");
+  let mut j = 0;
+  // SAFETY: each iteration reads/writes 8 u16 lanes at offset `j` with
+  // `j + 8 <= width <= len`, so every access stays in bounds.
+  unsafe {
+    let bmask = bswap16_mask();
+    let mask = _mm_set1_epi16(((1u32 << BITS) - 1) as i16);
+    let norm = |raw: __m128i| {
+      let host = if swap {
+        _mm_shuffle_epi8(raw, bmask)
+      } else {
+        raw
+      };
+      _mm_and_si128(host, mask)
+    };
+    while j + 8 <= width {
+      let p = norm(_mm_loadu_si128(prev.as_ptr().add(j).cast()));
+      let c = norm(_mm_loadu_si128(cur.as_ptr().add(j).cast()));
+      let avg = _mm_avg_epu16(p, c);
+      let enc = if swap {
+        _mm_shuffle_epi8(avg, bmask)
+      } else {
+        avg
+      };
+      _mm_storeu_si128(out.as_mut_ptr().add(j).cast(), enc);
+      j += 8;
+    }
+  }
+  let mask = ((1u32 << BITS) - 1) as u16;
+  let load = |raw: u16| -> u32 {
+    let logical = if big_endian {
+      u16::from_be(raw)
+    } else {
+      u16::from_le(raw)
+    };
+    u32::from(logical & mask)
+  };
+  while j < width {
+    let blended = ((load(prev[j]) + load(cur[j]) + 1) >> 1) as u16;
+    out[j] = if big_endian {
+      blended.to_be()
+    } else {
+      blended.to_le()
+    };
+    j += 1;
+  }
+}
+
+/// Computes the four fixed-weight phase outputs of one 16-sample interior block
+/// of the centered 1→4 upsample, returning `(a, b, c, d)` where, per lane,
+/// `a = (3·left + 5·mid + 4) >> 3`, `b = (left + 7·mid + 4) >> 3`,
+/// `c = (7·mid + right + 4) >> 3`, `d = (5·mid + 3·right + 4) >> 3`.
+///
+/// # Safety
+///
+/// SSE4.1 must be available.
+#[cfg(feature = "yuv-planar")]
+#[inline]
+#[target_feature(enable = "sse4.1")]
+fn blend4_u8x16(
+  left: __m128i,
+  mid: __m128i,
+  right: __m128i,
+) -> (__m128i, __m128i, __m128i, __m128i) {
+  let four = _mm_set1_epi16(4);
+  let widen_lo = |v: __m128i| _mm_cvtepu8_epi16(v);
+  let widen_hi = |v: __m128i| _mm_cvtepu8_epi16(_mm_srli_si128::<8>(v));
+  let ll = widen_lo(left);
+  let lh = widen_hi(left);
+  let ml = widen_lo(mid);
+  let mh = widen_hi(mid);
+  let rl = widen_lo(right);
+  let rh = widen_hi(right);
+  let phase = |l: __m128i, wl: i16, m: __m128i, wm: i16, r: __m128i, wr: i16| {
+    let acc = _mm_add_epi16(
+      _mm_add_epi16(
+        _mm_add_epi16(
+          _mm_mullo_epi16(l, _mm_set1_epi16(wl)),
+          _mm_mullo_epi16(m, _mm_set1_epi16(wm)),
+        ),
+        _mm_mullo_epi16(r, _mm_set1_epi16(wr)),
+      ),
+      four,
+    );
+    _mm_srli_epi16::<3>(acc)
+  };
+  let a = _mm_packus_epi16(phase(ll, 3, ml, 5, rl, 0), phase(lh, 3, mh, 5, rh, 0));
+  let b = _mm_packus_epi16(phase(ll, 1, ml, 7, rl, 0), phase(lh, 1, mh, 7, rh, 0));
+  let c = _mm_packus_epi16(phase(ll, 0, ml, 7, rl, 1), phase(lh, 0, mh, 7, rh, 1));
+  let d = _mm_packus_epi16(phase(ll, 0, ml, 5, rl, 3), phase(lh, 0, mh, 5, rh, 3));
+  (a, b, c, d)
+}
+
+/// SSE4.1 u8 centered 1→4 horizontal chroma upsample — the SIMD twin of
+/// [`chroma_upsample_4to1_center_h`](crate::row::scalar::chroma_upsample_4to1_center_h).
+/// Each quarter-width sample expands to four output columns
+/// `{(3,5),(1,7),(7,1),(5,3)}/8`-weighted blends of the two nearest samples,
+/// stored interleaved via a two-level `unpack` (`epi8` then `epi16`). Boundary
+/// groups (`j = 0`, `j = quarter-1`) and the trailing partial group reuse the
+/// shared scalar per-group reference so the edges stay byte-identical; the
+/// vector loop covers the strict interior. Also the AVX2 / AVX-512 delegate
+/// (the 4-way byte interleave does not widen cleanly past 128-bit lanes).
+///
+/// Block size: 16 quarter samples / iter (→ 64 output columns).
+///
+/// # Safety
+///
+/// SSE4.1 must be available. `c_quarter.len() >= width.div_ceil(4)`;
+/// `c_full.len() >= width`.
+#[cfg(feature = "yuv-planar")]
+#[inline]
+#[target_feature(enable = "sse4.1")]
+pub(crate) unsafe fn chroma_upsample_4to1_center_h_row(
+  c_quarter: &[u8],
+  c_full: &mut [u8],
+  width: usize,
+) {
+  debug_assert!(
+    c_quarter.len() >= width.div_ceil(4),
+    "c_quarter row too short"
+  );
+  debug_assert!(c_full.len() >= width, "c_full row too short");
+
+  let quarter = width.div_ceil(4);
+  if quarter == 0 {
+    return;
+  }
+  scalar::chroma_upsample_4to1_center_h_group(c_quarter, c_full, 0, quarter, width);
+  if quarter == 1 {
+    return;
+  }
+
+  let mut j = 1usize;
+  // SAFETY: `j + 16 < quarter` keeps `left = c[j-1]`, `mid = c[j]`,
+  // `right = c[j+1]` loads inside `c_quarter[0..quarter]` and the 64-byte store
+  // inside `c_full[0..width]` — interior groups have real neighbours and four
+  // full in-width columns.
+  unsafe {
+    while j + 16 < quarter {
+      let left = _mm_loadu_si128(c_quarter.as_ptr().add(j - 1).cast());
+      let mid = _mm_loadu_si128(c_quarter.as_ptr().add(j).cast());
+      let right = _mm_loadu_si128(c_quarter.as_ptr().add(j + 1).cast());
+      let (a, b, c, d) = blend4_u8x16(left, mid, right);
+      // 4-way interleave [a0,b0,c0,d0,a1,…] via two unpack levels.
+      let ab0 = _mm_unpacklo_epi8(a, b);
+      let ab1 = _mm_unpackhi_epi8(a, b);
+      let cd0 = _mm_unpacklo_epi8(c, d);
+      let cd1 = _mm_unpackhi_epi8(c, d);
+      let base = 4 * j;
+      _mm_storeu_si128(
+        c_full.as_mut_ptr().add(base).cast(),
+        _mm_unpacklo_epi16(ab0, cd0),
+      );
+      _mm_storeu_si128(
+        c_full.as_mut_ptr().add(base + 16).cast(),
+        _mm_unpackhi_epi16(ab0, cd0),
+      );
+      _mm_storeu_si128(
+        c_full.as_mut_ptr().add(base + 32).cast(),
+        _mm_unpacklo_epi16(ab1, cd1),
+      );
+      _mm_storeu_si128(
+        c_full.as_mut_ptr().add(base + 48).cast(),
+        _mm_unpackhi_epi16(ab1, cd1),
+      );
+      j += 16;
+    }
+  }
+
+  while j < quarter {
+    scalar::chroma_upsample_4to1_center_h_group(c_quarter, c_full, j, quarter, width);
+    j += 1;
+  }
+}
+
 #[cfg(all(
   test,
   feature = "std",
@@ -1170,5 +1410,99 @@ mod tests {
     check_p0xx_vertical::<12>(true);
     check_p0xx_vertical::<16>(false);
     check_p0xx_vertical::<16>(true);
+  }
+
+  const WIDTHS_440: &[usize] = &[
+    1, 2, 3, 4, 7, 8, 9, 15, 16, 17, 31, 32, 33, 63, 64, 65, 128, 129, 1920,
+  ];
+  const WIDTHS_4TO1: &[usize] = &[
+    1, 2, 3, 4, 5, 6, 7, 8, 16, 20, 63, 64, 65, 66, 67, 68, 69, 72, 73, 128, 129, 130, 131, 260,
+  ];
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn sse41_440_bottom_v_matches_scalar_widths() {
+    if !std::arch::is_x86_feature_detected!("sse4.1") {
+      return;
+    }
+    for &w in WIDTHS_440 {
+      let mut prev = std::vec![0u8; w];
+      let mut cur = std::vec![0u8; w];
+      pseudo_random_u8(&mut prev, 0x440B);
+      pseudo_random_u8(&mut cur, 0x440C);
+      for (prev_row, tag) in [(prev.as_slice(), "interior"), (cur.as_slice(), "topedge")] {
+        let mut simd = std::vec![0u8; w];
+        let mut sc = std::vec![0u8; w];
+        unsafe { super::chroma_upsample_440_bottom_v_row(prev_row, &cur, &mut simd, w) };
+        scalar::chroma_upsample_440_bottom_v(prev_row, &cur, &mut sc, w);
+        assert_eq!(simd, sc, "u8 440 {tag} width={w}");
+      }
+    }
+  }
+
+  fn check_440_u16<const BITS: u32>(big_endian: bool) {
+    for &w in WIDTHS_440 {
+      let mut prev = std::vec![0u16; w];
+      let mut cur = std::vec![0u16; w];
+      pseudo_random_u16(&mut prev, 0x4416 ^ BITS ^ (big_endian as u32));
+      pseudo_random_u16(&mut cur, 0x4417 ^ BITS ^ (big_endian as u32));
+      for (prev_row, tag) in [(prev.as_slice(), "interior"), (cur.as_slice(), "topedge")] {
+        let mut simd = std::vec![0u16; w];
+        let mut sc = std::vec![0u16; w];
+        unsafe {
+          super::chroma_upsample_440_bottom_v_u16_row::<BITS>(
+            prev_row, &cur, &mut simd, w, big_endian,
+          )
+        };
+        scalar::chroma_upsample_440_bottom_v_u16_wire::<BITS>(
+          prev_row, &cur, &mut sc, w, big_endian,
+        );
+        assert_eq!(
+          simd, sc,
+          "u16 440 BITS={BITS} be={big_endian} {tag} width={w}"
+        );
+      }
+    }
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn sse41_440_bottom_v_u16_matches_scalar_widths() {
+    if !std::arch::is_x86_feature_detected!("sse4.1") {
+      return;
+    }
+    check_440_u16::<10>(false);
+    check_440_u16::<10>(true);
+    check_440_u16::<12>(false);
+    check_440_u16::<12>(true);
+    check_440_u16::<16>(false);
+    check_440_u16::<16>(true);
+  }
+
+  #[test]
+  #[cfg_attr(
+    miri,
+    ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
+  )]
+  fn sse41_4to1_center_h_matches_scalar_widths() {
+    if !std::arch::is_x86_feature_detected!("sse4.1") {
+      return;
+    }
+    for &w in WIDTHS_4TO1 {
+      let quarter = w.div_ceil(4);
+      let mut cq = std::vec![0u8; quarter];
+      pseudo_random_u8(&mut cq, 0x4701 ^ w as u32);
+      let mut simd = std::vec![0u8; w];
+      let mut sc = std::vec![0u8; w];
+      unsafe { super::chroma_upsample_4to1_center_h_row(&cq, &mut simd, w) };
+      scalar::chroma_upsample_4to1_center_h(&cq, &mut sc, w);
+      assert_eq!(simd, sc, "u8 4to1 width={w}");
+    }
   }
 }

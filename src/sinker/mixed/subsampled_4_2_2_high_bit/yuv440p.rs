@@ -107,46 +107,6 @@ pub(crate) fn stage_440_chroma_prev_u16(
   *chroma_prev_row = Some(idx / 2);
 }
 
-/// The endian- and depth-aware even-row vertical box blend backing
-/// [`upsample_440_chroma_sited_u16`]: the `u16` bottom-sited (`v = 1`) full-width
-/// average `out[j] = (prev[j] + cur[j] + 1) >> 1` of the host-native scalar kernel
-/// [`chroma_upsample_440_bottom_v_u16`](crate::row::scalar::chroma_upsample_440_bottom_v_u16),
-/// with the wire→host normalization AND low-`BITS` mask that kernel documents its
-/// caller must apply (`& ((1 << BITS) - 1)`, `u16::MAX` / a no-op at `BITS = 16`)
-/// fused in per sample — so `prev` / `cur` / `out` all stay in the source's wire
-/// byte order and the blended full-width chroma feeds the
-/// `yuv444p{10,12}_to_*_row_endian` decode with the SAME `big_endian` flag. The
-/// vertical-only 4:4:0 counterpart of the horizontally-reconstructing 4:2:0
-/// [`chroma_upsample_420_bottom_even_h_u16`], which fuses the identical
-/// normalization; a pure vertical average never mixes one column's bits into a
-/// neighbour's, so no horizontal reconstruction is needed here.
-#[cfg_attr(not(tarpaulin), inline(always))]
-fn blend_440_bottom_v_u16<const BITS: u32>(
-  prev: &[u16],
-  cur: &[u16],
-  out: &mut [u16],
-  width: usize,
-  big_endian: bool,
-) {
-  let mask = ((1u32 << BITS) - 1) as u16;
-  let load = |raw: u16| -> u32 {
-    let logical = if big_endian {
-      u16::from_be(raw)
-    } else {
-      u16::from_le(raw)
-    };
-    u32::from(logical & mask)
-  };
-  for j in 0..width {
-    let blended = ((load(prev[j]) + load(cur[j]) + 1) >> 1) as u16;
-    out[j] = if big_endian {
-      blended.to_be()
-    } else {
-      blended.to_le()
-    };
-  }
-}
-
 /// Siting-aware full-width HIGH-BIT 4:4:0 chroma reconstruction for the
 /// `Yuv440p{10,12}` `Bottom` (`v = 1`) vertical phase (RFC #238 S8c) — the `u16`
 /// twin of the 8-bit
@@ -160,8 +120,10 @@ fn blend_440_bottom_v_u16<const BITS: u32>(
 ///
 /// - On an **even** luma row (`idx & 1 == 0`) with `bottom_v`, each output sample
 ///   is the vertical box average of the previous chroma row (`chroma_prev`) and the
-///   current row via [`blend_440_bottom_v_u16`] (the depth-/endian-aware realization
-///   of [`chroma_upsample_440_bottom_v_u16`](crate::row::scalar::chroma_upsample_440_bottom_v_u16))
+///   current row via the SIMD-dispatched
+///   [`chroma_upsample_440_bottom_v_u16_row`](crate::row::chroma_upsample_440_bottom_v_u16_row)
+///   (the depth-/endian-aware realization of
+///   [`chroma_upsample_440_bottom_v_u16_wire`](crate::row::scalar::chroma_upsample_440_bottom_v_u16_wire))
 ///   — **but only when `chroma_prev` provably holds the wanted predecessor** chroma
 ///   row `idx/2 - 1` (`chroma_prev_row == Some(idx/2 - 1)`). When it does not — the
 ///   top edge (`idx == 0`), a caller that replayed / skipped / reordered rows or
@@ -194,6 +156,7 @@ pub(crate) fn upsample_440_chroma_sited_u16<'s, const BITS: u32>(
   stage: bool,
   width: usize,
   big_endian: bool,
+  use_simd: bool,
 ) -> (&'s [u16], &'s [u16]) {
   debug_assert!(
     chroma_full.len() >= 2 * width,
@@ -214,8 +177,12 @@ pub(crate) fn upsample_440_chroma_sited_u16<'s, const BITS: u32>(
       "chroma_prev must be reserved via reserve_440_chroma_prev_u16 first"
     );
     let (u_prev, v_prev) = chroma_prev[..2 * width].split_at(width);
-    blend_440_bottom_v_u16::<BITS>(u_prev, u, u_full, width, big_endian);
-    blend_440_bottom_v_u16::<BITS>(v_prev, v, v_full, width, big_endian);
+    crate::row::chroma_upsample_440_bottom_v_u16_row::<BITS>(
+      u_prev, u, u_full, width, big_endian, use_simd,
+    );
+    crate::row::chroma_upsample_440_bottom_v_u16_row::<BITS>(
+      v_prev, v, v_full, width, big_endian, use_simd,
+    );
   } else {
     u_full.copy_from_slice(&u[..width]);
     v_full.copy_from_slice(&v[..width]);
@@ -334,6 +301,7 @@ fn yuv440p_top_reconstruct_area<const BITS: u32, const BE: bool>(
         false,
         w,
         BE,
+        use_simd,
       );
       let held_y: &[u16] = &chroma_top_y_u16[..w];
       packed_yuv444_triple_resample::<BITS>(
@@ -538,6 +506,7 @@ fn yuv440p_top_reconstruct_filter<const BITS: u32, const BE: bool>(
         false,
         w,
         BE,
+        use_simd,
       );
       let held_y: &[u16] = &chroma_top_y_u16[..w];
       packed_yuv444_triple_filter_resample::<BITS>(
@@ -926,6 +895,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv440p10<BE>, R> {
             false,
             w,
             BE,
+            use_simd,
           );
           let r = packed_yuv444_triple_filter_resample::<BITS>(
             rgb_filter_stream,
@@ -1214,6 +1184,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv440p10<BE>, R> {
               false,
               w,
               BE,
+              use_simd,
             );
             packed_yuv444_triple_resample::<BITS>(
               rgb_stream,
@@ -1478,6 +1449,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv440p10<BE>, R> {
         true,
         w,
         BE,
+        use_simd,
       ))
     } else {
       None
@@ -1523,6 +1495,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv440p10<BE>, R> {
           false,
           w,
           BE,
+          use_simd,
         );
         yuv444p_top_identity_color_row::<BITS, BE>(
           rgb,
@@ -2002,6 +1975,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv440p12<BE>, R> {
             false,
             w,
             BE,
+            use_simd,
           );
           let r = packed_yuv444_triple_filter_resample::<BITS>(
             rgb_filter_stream,
@@ -2290,6 +2264,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv440p12<BE>, R> {
               false,
               w,
               BE,
+              use_simd,
             );
             packed_yuv444_triple_resample::<BITS>(
               rgb_stream,
@@ -2554,6 +2529,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv440p12<BE>, R> {
         true,
         w,
         BE,
+        use_simd,
       ))
     } else {
       None
@@ -2599,6 +2575,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv440p12<BE>, R> {
           false,
           w,
           BE,
+          use_simd,
         );
         yuv444p_top_identity_color_row::<BITS, BE>(
           rgb,
