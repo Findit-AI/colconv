@@ -71,12 +71,7 @@ fn blend_u16(left: v128, mid: v128, right: v128) -> (v128, v128) {
 ///
 /// simd128 must be enabled at compile time. `width` even;
 /// `c_half.len() >= width / 2`; `c_full.len() >= width`.
-#[cfg(any(
-  feature = "yuv-planar",
-  feature = "yuv-semi-planar",
-  feature = "yuv-packed",
-  feature = "yuva"
-))]
+#[cfg(feature = "yuv-planar")]
 #[inline]
 #[target_feature(enable = "simd128")]
 pub(crate) unsafe fn chroma_upsample_2to1_center_h_row(

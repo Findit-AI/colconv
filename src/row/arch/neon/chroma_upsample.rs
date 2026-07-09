@@ -85,12 +85,7 @@ fn blend_u16x8(left: uint16x8_t, mid: uint16x8_t, right: uint16x8_t) -> (uint16x
 ///
 /// NEON must be available (baseline on aarch64). `width` even;
 /// `c_half.len() >= width / 2`; `c_full.len() >= width`.
-#[cfg(any(
-  feature = "yuv-planar",
-  feature = "yuv-semi-planar",
-  feature = "yuv-packed",
-  feature = "yuva"
-))]
+#[cfg(feature = "yuv-planar")]
 #[inline]
 #[target_feature(enable = "neon")]
 pub(crate) unsafe fn chroma_upsample_2to1_center_h_row(

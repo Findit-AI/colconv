@@ -27,15 +27,7 @@ use crate::row::{avx2_available, avx512_available, sse41_available};
 /// Runtime-dispatched u8 centered 2:1 horizontal chroma upsample —
 /// [`chroma_upsample_2to1_center_h`](crate::row::scalar::chroma_upsample_2to1_center_h)
 /// with a SIMD fast path.
-#[cfg(all(
-  any(feature = "std", feature = "alloc"),
-  any(
-    feature = "yuv-planar",
-    feature = "yuv-semi-planar",
-    feature = "yuv-packed",
-    feature = "yuva"
-  )
-))]
+#[cfg(all(any(feature = "std", feature = "alloc"), feature = "yuv-planar"))]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn chroma_upsample_2to1_center_h_row(
   c_half: &[u8],

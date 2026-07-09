@@ -82,12 +82,7 @@ fn blend_u16x8(left: __m128i, mid: __m128i, right: __m128i) -> (__m128i, __m128i
 ///
 /// SSE4.1 must be available. `width` even; `c_half.len() >= width / 2`;
 /// `c_full.len() >= width`.
-#[cfg(any(
-  feature = "yuv-planar",
-  feature = "yuv-semi-planar",
-  feature = "yuv-packed",
-  feature = "yuva"
-))]
+#[cfg(feature = "yuv-planar")]
 #[inline]
 #[target_feature(enable = "sse4.1")]
 pub(crate) unsafe fn chroma_upsample_2to1_center_h_row(

@@ -1650,6 +1650,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv12, R> {
         }
         return Ok(());
       }
+      #[cfg(feature = "yuv-planar")]
       if (center_sited || bottom_v) && want_color {
         let need_luma = luma.is_some() || luma_u16.is_some();
         let expected = if need_luma {
@@ -4073,6 +4074,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv21, R> {
         }
         return Ok(());
       }
+      #[cfg(feature = "yuv-planar")]
       if (center_sited || bottom_v) && want_color {
         let need_luma = luma.is_some() || luma_u16.is_some();
         let expected = if need_luma {

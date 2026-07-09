@@ -79,12 +79,7 @@ fn zip_u16x16(even: __m256i, odd: __m256i) -> (__m256i, __m256i) {
 ///
 /// AVX-512F + BW must be available. `width` even; `c_half.len() >= width / 2`;
 /// `c_full.len() >= width`.
-#[cfg(any(
-  feature = "yuv-planar",
-  feature = "yuv-semi-planar",
-  feature = "yuv-packed",
-  feature = "yuva"
-))]
+#[cfg(feature = "yuv-planar")]
 #[inline]
 #[target_feature(enable = "avx512f,avx512bw")]
 pub(crate) unsafe fn chroma_upsample_2to1_center_h_row(

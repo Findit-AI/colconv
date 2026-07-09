@@ -93,19 +93,12 @@ pub(crate) mod area_reduce;
 #[cfg(feature = "yuv-444-packed")]
 mod ayuv64;
 // Centered (#302 phase-0.5) 2:1 horizontal chroma-upsample reconstruct
-// kernels. u8 planar serves every 4:2:x centered path (planar / NV /
-// packed / YUVA); the u16 planar and interleaved-UV P-format kernels serve
-// the high-bit families. A union gate keeps the module live wherever any
-// consumer is, with the per-kernel gates below carving the unused ones out.
-#[cfg(all(
-  any(feature = "std", feature = "alloc"),
-  any(
-    feature = "yuv-planar",
-    feature = "yuv-semi-planar",
-    feature = "yuv-packed",
-    feature = "yuva"
-  )
-))]
+// kernels (u8 planar, u16 planar, interleaved-UV P-format). The centered
+// reconstruct is reachable only when `yuv-planar` is present — packed /
+// semi-solo builds stay co-sited and never reconstruct — so the module is
+// gated `yuv-planar`; the per-kernel gates below add `yuv-semi-planar` for
+// the P-format kernel and carve out the u16 / P-format kernels elsewhere.
+#[cfg(all(any(feature = "std", feature = "alloc"), feature = "yuv-planar"))]
 pub(crate) mod chroma_upsample;
 pub(crate) mod endian;
 #[cfg(all(

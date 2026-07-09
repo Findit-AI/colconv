@@ -45,12 +45,7 @@ fn bswap16_mask() -> __m256i {
 ///
 /// AVX2 must be available. `width` even; `c_half.len() >= width / 2`;
 /// `c_full.len() >= width`.
-#[cfg(any(
-  feature = "yuv-planar",
-  feature = "yuv-semi-planar",
-  feature = "yuv-packed",
-  feature = "yuva"
-))]
+#[cfg(feature = "yuv-planar")]
 #[inline]
 #[target_feature(enable = "avx2")]
 pub(crate) unsafe fn chroma_upsample_2to1_center_h_row(
