@@ -261,6 +261,10 @@ pub use mediaframe::{
   source,
 };
 
+// The `Convert` tier assembles a `MixedSinker` internally, so it rides the
+// sinker's `any(std, alloc)` gate.
+#[cfg(any(feature = "std", feature = "alloc"))]
+pub mod convert;
 pub mod raw;
 #[cfg(any(feature = "std", feature = "alloc"))]
 pub mod resample;
@@ -271,6 +275,16 @@ pub mod walker;
 #[cfg(feature = "bayer")]
 pub use walker::BayerOptions;
 pub use walker::{ColorSpec, Walker, Xyz12Options, YuvOptions};
+
+/// The Tier-0 golden entry point ([`Convert`]) and its sealed [`Source`] /
+/// [`FromSpec`] contract.
+#[cfg(any(feature = "std", feature = "alloc"))]
+pub use convert::{Convert, FromSpec, Source};
+/// The canonical crate-level error name for the [`Convert`] tier — an alias of
+/// [`MixedSinkerError`](sinker::MixedSinkerError), which remains available under
+/// its original path.
+#[cfg(any(feature = "std", feature = "alloc"))]
+pub use sinker::MixedSinkerError as Error;
 
 #[cfg(feature = "yuv-444-packed")]
 pub use frame::{Ayuv64Frame, Ayuv64FrameError};
