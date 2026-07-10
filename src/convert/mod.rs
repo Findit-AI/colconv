@@ -25,6 +25,32 @@
 
 #[cfg(all(test, feature = "yuv-planar"))]
 mod tests;
+// Whole-table `Source` coverage — the compile-time exhaustiveness proof plus
+// one byte-parity spot-check per family. Rides the `Source` gate
+// (`any(std, alloc)`) and additionally requires at least one convertible source
+// feature, so the parity helpers and their imports are never dead on a
+// format-free build.
+#[cfg(all(
+  test,
+  any(feature = "std", feature = "alloc"),
+  any(
+    feature = "xyz",
+    feature = "mono",
+    feature = "yuv-planar",
+    feature = "yuv-semi-planar",
+    feature = "yuv-packed",
+    feature = "yuv-444-packed",
+    feature = "y2xx",
+    feature = "v210",
+    feature = "yuva",
+    feature = "rgb",
+    feature = "rgb-float",
+    feature = "rgb-legacy",
+    feature = "gray",
+    feature = "gbr",
+  )
+))]
+mod source_coverage;
 
 use crate::{
   SourceFormat,
@@ -107,6 +133,14 @@ impl FromSpec for () {
 /// frame borrow (`Self`) to its zero-sized [`Marker`](Self::Marker), its walk
 /// [`Options`](Self::Options), and the underlying `{fmt}_to` walker. Sealed: the
 /// contract is not user-implementable.
+///
+/// Every sinker-supported source format implements `Source` **except** the
+/// Bayer CFA sources (`Bayer` / `Bayer16`): their
+/// [`BayerOptions`](crate::walker::BayerOptions) has no [`Default`] (the mosaic
+/// pattern is frame-intrinsic, not colorimetric), so it cannot be a
+/// [`FromSpec`] [`Options`](Self::Options). Decode Bayer through the
+/// [`Walker`](crate::Walker) / [`MixedSinker`] tier instead — it is Tier-1-only
+/// by design.
 pub trait Source: sealed::Sealed {
   /// The zero-sized source-format marker (the `F` on
   /// [`MixedSinker`]).
