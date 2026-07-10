@@ -12,7 +12,7 @@
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;
 
-use colconv::{ColorMatrix, row::v410_to_rgb_row};
+use colconv::{ColorMatrix, bench_internals::v410_to_rgb_row};
 
 fn fill_pseudo_random_u32(buf: &mut [u32], seed: u32) {
   let mut state = seed;

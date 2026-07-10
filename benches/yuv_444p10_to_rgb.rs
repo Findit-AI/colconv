@@ -10,7 +10,7 @@ use std::hint::black_box;
 
 use colconv::{
   ColorMatrix,
-  row::{yuv444p10_to_rgb_row, yuv444p10_to_rgb_u16_row},
+  bench_internals::{yuv444p10_to_rgb_row, yuv444p10_to_rgb_u16_row},
 };
 
 fn fill_pseudo_random_u16(buf: &mut [u16], seed: u32) {

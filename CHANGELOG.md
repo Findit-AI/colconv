@@ -8,6 +8,43 @@ breaking changes bump the `x` in `0.x.y`.
 
 ## Unreleased
 
+## 0.3.0 — 2026-07-10
+
+### Added
+
+- **Tier 0 `Convert` — the golden one-call decode.** `Convert::from(&frame)`
+  decodes a validated source frame to any subset of RGB / RGBA / Luma / HSV
+  outputs with zero redundant parameters: dimensions come from the frame,
+  colorimetry from a single `ColorSpec`, and each per-format walk knob is
+  *derived* from that spec (overridable via `format_options`). Every setter is
+  infallible; `run()` is the only fallible call. Optional area (`resize`) /
+  filtered (`resize_with`) downscale rides the same call. Generic over the
+  source marker — no `dyn`, no allocation beyond what `MixedSinker` already
+  performs; the sealed `Source` / `FromSpec` traits are emitted per format by
+  the same `walker!` table that drives the `Walker` tier, so the two never
+  drift. `no_std` (`alloc`) compatible. (RFC #392, additive in this release.)
+- `colconv::Error` — the canonical crate-level error name, a re-export alias of
+  `sinker::MixedSinkerError` (which remains available under its original path).
+- `unstable-bench-internals` feature — a semver-**exempt**, repository-internal
+  tier that exposes a `#[doc(hidden)]` `colconv::bench_internals` shim over the
+  now-private `row` kernels so this repo's own Criterion benches can measure
+  them. Not public API; carries no stability guarantee.
+
+### Removed
+
+- **The `row` module is now `pub(crate)` (breaking).** The entire per-row
+  kernel free-function surface (531 `pub fn`s, up to 10 positional parameters
+  each) was kernel plumbing consumed internally by `MixedSinker` and the
+  `{fmt}_to` walkers; as public API it was unreviewable and could never be made
+  ergonomic. It is gone from the public surface.
+
+  Migration (≤ 3 lines in the common case): decode through the Tier-0
+  `Convert` builder, or assemble a `MixedSinker` and drive it with the matching
+  `{fmt}_to` walker — both are byte-identical to the old row-kernel path. If you
+  called `row` kernels directly for a use case those tiers do not cover, please
+  open an issue describing it: a curated, struct-parameter row API can return
+  for a real external consumer.
+
 ## 0.2.2 — 2026-06-25
 
 ### Changed

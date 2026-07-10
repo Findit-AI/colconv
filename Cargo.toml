@@ -1,6 +1,6 @@
 [package]
 name = "colconv"
-version = "0.2.2"
+version = "0.3.0"
 edition = "2024"
 repository = "https://github.com/findit-studio/colconv"
 homepage = "https://github.com/findit-studio/colconv"
@@ -320,6 +320,15 @@ harness = false
 default = ["std", "frame"]
 alloc = ["libm", "mediaframe/alloc"]
 std = ["thiserror/default", "mediaframe/std"]
+
+# Semver-EXEMPT, repository-internal tier. Exposes a curated `#[doc(hidden)]`
+# re-export shim (`colconv::bench_internals`) over the crate-private `row`
+# kernels so this repo's own Criterion benches (`benches/*.rs`) can measure them
+# directly after the 0.3 surface cut made `row` `pub(crate)`. It carries NO
+# stability guarantee and is not part of the public API — external consumers
+# must use the `Convert` tier or `MixedSinker` + the `{fmt}_to` walkers. Enable
+# it only for `cargo bench` (see `.github/workflows/benchmark.yml`).
+unstable-bench-internals = []
 
 # Umbrella — enables every per-family sub-feature below (mirrors
 # mediaframe's `frame` umbrella). Activates mediaframe's frame umbrella

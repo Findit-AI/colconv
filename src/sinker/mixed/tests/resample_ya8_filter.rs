@@ -79,7 +79,10 @@ fn ya8_ramp(sw: usize, sh: usize) -> Vec<u8> {
 /// A sharp black -> white horizontal step in Y (left half min-Y, right half
 /// max-Y, opaque), uniform vertically. A signed kernel enlarging the near-max
 /// bright Y plateau overshoots above the 8-bit max — the de-interleaved native
-/// Y the luma path resamples, and the `R = Y` colour channel.
+/// Y the luma path resamples, and the `R = Y` colour channel. Consumed only by
+/// the `rgb`-gated colour equivalence module, so it is dead in a
+/// `gray`-without-`rgb` build.
+#[cfg_attr(not(feature = "rgb"), allow(dead_code))]
 fn step_y(sw: usize, sh: usize) -> Vec<u8> {
   let mut packed = std::vec![0u8; sw * sh * 2];
   for (i, px) in packed.chunks_exact_mut(2).enumerate() {
@@ -91,9 +94,14 @@ fn step_y(sw: usize, sh: usize) -> Vec<u8> {
 
 /// Every resampled output a filter equivalence asserts on.
 struct FilterOutputs {
+  // `rgb` / `rgb_u16` / `rgba_u16` are read only by the `rgb`-gated colour
+  // equivalence module below, so they are dead in a `gray`-without-`rgb` build.
+  #[cfg_attr(not(feature = "rgb"), allow(dead_code))]
   rgb: Vec<u8>,
   rgba: Vec<u8>,
+  #[cfg_attr(not(feature = "rgb"), allow(dead_code))]
   rgb_u16: Vec<u16>,
+  #[cfg_attr(not(feature = "rgb"), allow(dead_code))]
   rgba_u16: Vec<u16>,
   luma: Vec<u8>,
   luma_u16: Vec<u16>,
@@ -149,7 +157,10 @@ fn ya8_filter_outputs<K: FilterKernel + Copy>(
 }
 
 /// Canonical full-res u8 `[Y, Y, Y, A]` of a packed `[Y, A]` plane — the exact
-/// `ya8_to_rgba_row` mapping, the input the filter path resamples.
+/// `ya8_to_rgba_row` mapping, the input the filter path resamples. Consumed only
+/// by the `rgb`-gated colour equivalence module, so it is dead in a
+/// `gray`-without-`rgb` build.
+#[cfg_attr(not(feature = "rgb"), allow(dead_code))]
 fn canonical_rgba_u8(packed: &[u8], n: usize) -> Vec<u8> {
   let mut out = std::vec![0u8; n * 4];
   for (px, src) in out.chunks_exact_mut(4).zip(packed.chunks_exact(2)) {

@@ -80,8 +80,13 @@ fn ya16_ramp(sw: usize, sh: usize) -> Vec<u16> {
 
 /// Every resampled output a filter equivalence asserts on.
 struct FilterOutputs {
+  // `rgb` / `rgba` / `rgb_u16` are read only by the `rgb`-gated colour
+  // equivalence module below, so they are dead in a `gray`-without-`rgb` build.
+  #[cfg_attr(not(feature = "rgb"), allow(dead_code))]
   rgb: Vec<u8>,
+  #[cfg_attr(not(feature = "rgb"), allow(dead_code))]
   rgba: Vec<u8>,
+  #[cfg_attr(not(feature = "rgb"), allow(dead_code))]
   rgb_u16: Vec<u16>,
   rgba_u16: Vec<u16>,
   luma: Vec<u8>,
@@ -139,7 +144,10 @@ fn ya16_filter_outputs<K: FilterKernel + Copy>(
 }
 
 /// Canonical full-res native u16 `[Y, Y, Y, A]` of a host-native packed `[Y, A]`
-/// plane — the `ya16_to_rgba_u16_row` mapping, the u16 filter input.
+/// plane — the `ya16_to_rgba_u16_row` mapping, the u16 filter input. Consumed
+/// only by the `rgb`-gated colour equivalence module, so it is dead in a
+/// `gray`-without-`rgb` build.
+#[cfg_attr(not(feature = "rgb"), allow(dead_code))]
 fn canonical_rgba_u16(packed: &[u16], n: usize) -> Vec<u16> {
   let mut out = std::vec![0u16; n * 4];
   for (px, src) in out.chunks_exact_mut(4).zip(packed.chunks_exact(2)) {
@@ -152,7 +160,9 @@ fn canonical_rgba_u16(packed: &[u16], n: usize) -> Vec<u16> {
 }
 
 /// Canonical full-res u8 `[Y>>8, Y>>8, Y>>8, A>>8]` — the `ya16_to_rgba_row`
-/// mapping, the u8 filter input.
+/// mapping, the u8 filter input. Consumed only by the `rgb`-gated colour
+/// equivalence module, so it is dead in a `gray`-without-`rgb` build.
+#[cfg_attr(not(feature = "rgb"), allow(dead_code))]
 fn canonical_rgba_u8(packed: &[u16], n: usize) -> Vec<u8> {
   let mut out = std::vec![0u8; n * 4];
   for (px, src) in out.chunks_exact_mut(4).zip(packed.chunks_exact(2)) {

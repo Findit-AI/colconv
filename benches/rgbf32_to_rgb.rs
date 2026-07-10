@@ -8,7 +8,7 @@
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;
 
-use colconv::row::rgbf32_to_rgb_row;
+use colconv::bench_internals::rgbf32_to_rgb_row;
 
 /// Fills an `f32` buffer with deterministic pseudo‑random values in the
 /// `[0.0, 1.0]` valid range (the clamp/scale path's hot region).

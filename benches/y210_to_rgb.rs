@@ -12,7 +12,7 @@
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;
 
-use colconv::{ColorMatrix, row::y210_to_rgb_row};
+use colconv::{ColorMatrix, bench_internals::y210_to_rgb_row};
 
 /// Fills a `u16` buffer with deterministic Y210‑packed pseudo‑random
 /// samples — 10‑bit values shifted into the high 10 bits of each

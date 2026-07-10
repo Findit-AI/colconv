@@ -38,12 +38,12 @@ use std::hint::black_box;
 
 use colconv::{
   ColorMatrix,
-  frame::{Yuva444pFrame, Yuva444pFrame16},
-  row::{
+  bench_internals::{
     yuv_444_to_rgb_row, yuv444p10_to_rgb_row, yuv444p10_to_rgb_u16_row, yuv444p16_to_rgb_row,
     yuv444p16_to_rgb_u16_row, yuva444p_to_rgba_row, yuva444p10_to_rgba_row,
     yuva444p10_to_rgba_u16_row, yuva444p16_to_rgba_row, yuva444p16_to_rgba_u16_row,
   },
+  frame::{Yuva444pFrame, Yuva444pFrame16},
   sinker::MixedSinker,
   source::{Yuva444p, Yuva444p10, Yuva444p16, yuva444p_to, yuva444p10_to, yuva444p16_to},
 };

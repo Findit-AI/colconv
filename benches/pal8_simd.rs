@@ -17,7 +17,9 @@
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;
 
-use colconv::row::{pal8_to_rgb_row, pal8_to_rgb_u16_row, pal8_to_rgba_row, pal8_to_rgba_u16_row};
+use colconv::bench_internals::{
+  pal8_to_rgb_row, pal8_to_rgb_u16_row, pal8_to_rgba_row, pal8_to_rgba_u16_row,
+};
 
 /// Fills `buf` with pseudo-random bytes using a simple LCG.
 fn fill_lcg(buf: &mut [u8], seed: u32) {

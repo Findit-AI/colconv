@@ -6,7 +6,7 @@ use std::hint::black_box;
 
 use colconv::{
   ColorMatrix,
-  row::{p012_to_rgb_row, p012_to_rgb_u16_row},
+  bench_internals::{p012_to_rgb_row, p012_to_rgb_u16_row},
 };
 
 fn fill_pseudo_random_p212(buf: &mut [u16], seed: u32) {

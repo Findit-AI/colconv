@@ -33,7 +33,9 @@ use std::hint::black_box;
 
 use colconv::{
   Ayuv64, Ayuv64Frame, ColorMatrix, ayuv64_to,
-  row::{ayuv64_to_rgb_row, ayuv64_to_rgb_u16_row, ayuv64_to_rgba_row, ayuv64_to_rgba_u16_row},
+  bench_internals::{
+    ayuv64_to_rgb_row, ayuv64_to_rgb_u16_row, ayuv64_to_rgba_row, ayuv64_to_rgba_u16_row,
+  },
   sinker::MixedSinker,
 };
 

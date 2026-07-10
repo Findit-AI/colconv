@@ -4748,24 +4748,20 @@ impl<F: SourceFormat, R> MixedSinker<'_, F, R> {
   /// created — the alpha-aware twin of [`Self::rgb_stream_u16_allocated`], a
   /// white-box probe for the RFC #238 tail-collapse packed-RGBA `u16` / `Gbrap`
   /// resample atomicity tests (a first-row allocation failure must leave the
-  /// field `None`, never a partial commit). Gated on `std` + the families that
-  /// bin through the shared 4-channel `rgba_stream_u16`.
-  #[cfg(all(
-    test,
-    feature = "std",
-    any(feature = "rgb", feature = "gbr", feature = "gray")
-  ))]
+  /// field `None`, never a partial commit). Gated on `std` + the `rgb` family
+  /// whose packed-RGBA `u16` resample atomicity test probes it.
+  #[cfg(all(test, feature = "std", feature = "rgb"))]
   pub(crate) fn rgba_stream_u16_allocated(&self) -> bool {
     self.rgba_stream_u16.is_some()
   }
 
   /// Whether the **3-channel** native-`u32` packed-RGB area stream has been
   /// created — the `u32` twin of [`Self::rgb_stream_u16_allocated`], a white-box
-  /// probe for the RFC #238 tail-collapse native-`u32` packed-RGB / GBR resample
+  /// probe for the RFC #238 tail-collapse native-`u32` packed-RGB resample
   /// atomicity tests (a first-row allocation failure must leave the field `None`,
-  /// never a partial commit). Gated on `std` + the `rgb` / `gbr` families that
-  /// bin through the shared 3-channel `rgb_stream_u32`.
-  #[cfg(all(test, feature = "std", any(feature = "rgb", feature = "gbr")))]
+  /// never a partial commit). Gated on `std` + the `rgb` family whose packed-RGB
+  /// `u32` resample atomicity test probes it.
+  #[cfg(all(test, feature = "std", feature = "rgb"))]
   pub(crate) fn rgb_stream_u32_allocated(&self) -> bool {
     self.rgb_stream_u32.is_some()
   }
@@ -4774,9 +4770,9 @@ impl<F: SourceFormat, R> MixedSinker<'_, F, R> {
   /// created — the alpha-aware `u32` twin of [`Self::rgb_stream_u32_allocated`], a
   /// white-box probe for the RFC #238 tail-collapse native-`u32` packed-RGBA /
   /// `Gbrap32` resample atomicity tests (a first-row allocation failure must leave
-  /// the field `None`, never a partial commit). Gated on `std` + the `rgb` / `gbr`
-  /// families that bin through the shared 4-channel `rgba_stream_u32`.
-  #[cfg(all(test, feature = "std", any(feature = "rgb", feature = "gbr")))]
+  /// the field `None`, never a partial commit). Gated on `std` + the `rgb` family
+  /// whose packed-RGBA `u32` resample atomicity test probes it.
+  #[cfg(all(test, feature = "std", feature = "rgb"))]
   pub(crate) fn rgba_stream_u32_allocated(&self) -> bool {
     self.rgba_stream_u32.is_some()
   }
@@ -4944,7 +4940,6 @@ impl<F: SourceFormat, R> MixedSinker<'_, F, R> {
       feature = "yuv-planar",
       feature = "yuv-semi-planar",
       feature = "rgb",
-      feature = "gbr",
       feature = "bayer"
     )
   ))]
@@ -4956,13 +4951,9 @@ impl<F: SourceFormat, R> MixedSinker<'_, F, R> {
   /// the alpha-aware twin of [`Self::rgb_stream_allocated`], a white-box
   /// probe for the RFC #238 tail-collapse packed-RGBA / `Gbrap` / `Pal8`
   /// resample atomicity tests (a first-row allocation failure must leave the
-  /// field `None`, never a partial commit). Gated on `std` + the families that
-  /// bin through the shared 4-channel `rgba_stream`.
-  #[cfg(all(
-    test,
-    feature = "std",
-    any(feature = "rgb", feature = "gbr", feature = "gray", feature = "mono")
-  ))]
+  /// field `None`, never a partial commit). Gated on `std` + the `rgb` / `mono`
+  /// families whose packed-RGBA / `Pal8` resample atomicity tests probe it.
+  #[cfg(all(test, feature = "std", any(feature = "rgb", feature = "mono")))]
   pub(crate) fn rgba_stream_allocated(&self) -> bool {
     self.rgba_stream.is_some()
   }
@@ -6205,7 +6196,6 @@ std::thread_local! {
   feature = "std",
   any(
     feature = "rgb",
-    feature = "gbr",
     feature = "bayer",
     feature = "mono",
     feature = "xyz",
@@ -7621,7 +7611,7 @@ std::thread_local! {
 /// commit-together atomic shape of [`packed_rgb_u16_resample`] (a source-staging
 /// OOM after a successful stream build leaves the stream field `None` AND
 /// `resample_outputs` uncommitted, so the row is retryable). Test-only.
-#[cfg(all(test, feature = "std", any(feature = "rgb", feature = "gbr")))]
+#[cfg(all(test, feature = "std", feature = "rgb"))]
 pub(crate) fn arm_source_rgb_u16_scratch_failure() {
   FORCE_SOURCE_RGB_U16_SCRATCH_FAILURE.with(|f| f.set(true));
 }
@@ -8208,7 +8198,7 @@ std::thread_local! {
 /// commit-together atomic shape of [`packed_rgb_u32_resample`] (a source-staging
 /// OOM after a successful stream build leaves the stream field `None` AND
 /// `resample_outputs` uncommitted, so the row is retryable). Test-only.
-#[cfg(all(test, feature = "std", any(feature = "rgb", feature = "gbr")))]
+#[cfg(all(test, feature = "std", feature = "rgb"))]
 pub(crate) fn arm_source_rgb_u32_scratch_failure() {
   FORCE_SOURCE_RGB_U32_SCRATCH_FAILURE.with(|f| f.set(true));
 }
@@ -8275,7 +8265,7 @@ std::thread_local! {
 /// commit-together atomic shape of [`packed_rgba_u32_resample`] (a source-staging
 /// OOM after a successful stream build leaves the stream field `None` AND
 /// `resample_outputs` uncommitted, so the row is retryable). Test-only.
-#[cfg(all(test, feature = "std", any(feature = "rgb", feature = "gbr")))]
+#[cfg(all(test, feature = "std", feature = "rgb"))]
 pub(crate) fn arm_source_rgba_u32_scratch_failure() {
   FORCE_SOURCE_RGBA_U32_SCRATCH_FAILURE.with(|f| f.set(true));
 }
@@ -9378,11 +9368,7 @@ std::thread_local! {
 /// commit-together atomic shape of [`packed_rgba_u16_resample`] (a source-staging
 /// OOM after a successful stream build leaves the stream fields `None` AND
 /// `resample_outputs` uncommitted, so the row is retryable). Test-only.
-#[cfg(all(
-  test,
-  feature = "std",
-  any(feature = "rgb", feature = "gbr", feature = "gray")
-))]
+#[cfg(all(test, feature = "std", feature = "rgb"))]
 pub(crate) fn arm_source_rgba_u16_scratch_failure() {
   FORCE_SOURCE_RGBA_U16_SCRATCH_FAILURE.with(|f| f.set(true));
 }
@@ -14345,10 +14331,7 @@ std::thread_local! {
 #[cfg(all(
   test,
   feature = "std",
-  any(
-    all(feature = "rgb-float", any(feature = "yuv-planar", feature = "rgb")),
-    feature = "gbr"
-  )
+  all(feature = "rgb-float", any(feature = "yuv-planar", feature = "rgb"))
 ))]
 pub(crate) fn arm_source_rgb_f32_scratch_failure() {
   FORCE_SOURCE_RGB_F32_SCRATCH_FAILURE.with(|f| f.set(true));
@@ -16498,10 +16481,7 @@ std::thread_local! {
 #[cfg(all(
   test,
   feature = "std",
-  any(
-    feature = "gbr",
-    all(feature = "rgb-float", any(feature = "yuv-planar", feature = "rgb"))
-  )
+  all(feature = "rgb-float", any(feature = "yuv-planar", feature = "rgb"))
 ))]
 pub(crate) fn arm_source_rgba_f32_scratch_failure() {
   FORCE_SOURCE_RGBA_F32_SCRATCH_FAILURE.with(|f| f.set(true));

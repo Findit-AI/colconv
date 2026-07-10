@@ -1,29 +1,71 @@
-//! SIMD-dispatched per-row color-conversion kernels for the FFmpeg
-//! `AVPixelFormat` space.
+//! SIMD-dispatched color-conversion kernels for the FFmpeg `AVPixelFormat`
+//! space, exposed through honest, independently-usable tiers.
 //!
-//! # Design
+//! # Tier 0: [`Convert`] — the golden one-call decode
 //!
-//! Every source pixel format has its own kernel (`yuv420p_to`,
-//! `nv12_to`, `bgr24_to`, …) that walks the source row by row and hands
-//! each row to a caller-supplied [`PixelSink`]. The Sink decides what
-//! to derive — luma only, RGB only, HSV only, all three, or something
-//! custom — and writes into whatever buffers it owns.
+//! `Convert::from(&frame)` decodes a validated source frame to one or more
+//! output buffers with zero redundant parameters: the dimensions come from the
+//! frame, the colorimetry from a single [`ColorSpec`], and each per-format walk
+//! knob is *derived* from that spec (overridable). Attach outputs —
+//! [`rgb`](Convert::rgb) / [`rgba`](Convert::rgba) / [`luma`](Convert::luma) /
+//! [`hsv`](Convert::hsv) — plus an optional area or filtered
+//! [`resize`](Convert::resize) with infallible consuming setters;
+//! [`Convert::run`] is the only fallible call. Failures surface as [`Error`], an
+//! alias of [`MixedSinkerError`](sinker::MixedSinkerError).
 //!
-//! The row the Sink receives (`Self::Input<'_>`) has a shape that
-//! reflects the source format: [`source::Yuv420pRow`] carries Y / U / V
-//! slices plus matrix / range metadata; packed‑RGB row types
-//! (e.g. [`source::Rgb24Row`], [`source::Bgr24Row`]) carry a single
-//! packed slice; etc.
-//! Each source family declares a subtrait
-//! (`Yuv420pSink: PixelSink<Input<'_> = Yuv420pRow<'_>>`) so kernel
-//! signatures stay sharp.
+//! ```
+//! # #[cfg(all(any(feature = "std", feature = "alloc"), feature = "yuv-planar"))]
+//! # fn golden() -> Result<(), colconv::Error> {
+//! use colconv::{Convert, ColorMatrix, ColorSpec, DynamicRange, PixelFormat};
+//! use colconv::frame::Yuv420pFrame;
 //!
-//! For the common case — "give me RGB / Luma / HSV or any subset" —
-//! the crate ships [`sinker::MixedSinker`], configured via
+//! let (w, h) = (8u32, 8u32);
+//! let y = [16u8; 64];
+//! let (u, v) = ([128u8; 16], [128u8; 16]);
+//! let frame = Yuv420pFrame::new(&y, &u, &v, w, h, w, w / 2, w / 2);
+//! let spec = ColorSpec::resolve(PixelFormat::Yuv420p, DynamicRange::Limited, ColorMatrix::Bt709);
+//!
+//! let mut rgb = [0u8; 4 * 4 * 3];
+//! let mut luma = [0u8; 4 * 4];
+//! Convert::from(&frame)
+//!     .spec(spec)
+//!     .resize(4, 4)
+//!     .rgb(&mut rgb)
+//!     .luma(&mut luma)
+//!     .run()?;
+//! # Ok(())
+//! # }
+//! # #[cfg(all(any(feature = "std", feature = "alloc"), feature = "yuv-planar"))]
+//! # golden().unwrap();
+//! ```
+//!
+//! # Tier 1: [`Walker`] / [`MixedSinker`](sinker::MixedSinker) / `{fmt}_to` — streaming & custom sinks
+//!
+//! Every source pixel format also has a per-format walker (`yuv420p_to`,
+//! `nv12_to`, `bgr24_to`, …) that walks the source row by row and hands each row
+//! to a caller-supplied [`PixelSink`]. The Sink decides what to derive — luma
+//! only, RGB only, HSV only, all three, or something custom — and writes into
+//! whatever buffers it owns. Reach for this tier when Tier 0's fixed shape is
+//! too rigid: custom output geometry / strides, partial-frame feeding, a bespoke
+//! sink, or a Bayer CFA source (whose mosaic pattern is frame-intrinsic rather
+//! than spec-derivable, so it is Tier-1-only — see [`raw::bayer_to`] /
+//! [`raw::bayer16_to`]).
+//!
+//! The row the Sink receives (`Self::Input<'_>`) has a shape that reflects the
+//! source format: [`source::Yuv420pRow`] carries Y / U / V slices plus matrix /
+//! range metadata; packed‑RGB row types (e.g. [`source::Rgb24Row`],
+//! [`source::Bgr24Row`]) carry a single packed slice; etc. Each source family
+//! declares a subtrait (`Yuv420pSink: PixelSink<Input<'_> = Yuv420pRow<'_>>`) so
+//! kernel signatures stay sharp. For the common "give me RGB / Luma / HSV or any
+//! subset" case the crate ships [`sinker::MixedSinker`], configured via
 //! [`with_rgb`](sinker::MixedSinker::with_rgb) /
 //! [`with_luma`](sinker::MixedSinker::with_luma) /
-//! [`with_hsv`](sinker::MixedSinker::with_hsv) to select which channels
-//! to derive.
+//! [`with_hsv`](sinker::MixedSinker::with_hsv) to select which channels to
+//! derive; the generic [`Walker`] plus per-format `Options` ([`YuvOptions`], …)
+//! give the same walk a uniform, spec-configurable shape.
+//!
+//! As of 0.3 the per-row SIMD kernels (`row::*`) are crate-internal plumbing
+//! consumed by the sinker and walkers — they are no longer public API.
 //!
 //! # Supported source formats
 //!
@@ -184,6 +226,7 @@
 //! generic on the high-bit-depth families (`Yuv420pFrame16<BITS>`
 //! and `PnFrame<BITS>`).
 //!
+//! [`Yuv411p`]: crate::source::Yuv411p
 //! [`Yuv420p`]: crate::source::Yuv420p
 //! [`Yuv422p`]: crate::source::Yuv422p
 //! [`Yuv440p`]: crate::source::Yuv440p
@@ -268,9 +311,24 @@ pub mod convert;
 pub mod raw;
 #[cfg(any(feature = "std", feature = "alloc"))]
 pub mod resample;
-pub mod row;
+// The per-row SIMD kernels are crate-internal plumbing as of 0.3 (they are
+// consumed only by `MixedSinker` / the `{fmt}_to` walkers). The crate's own
+// benches reach a curated subset through the semver-exempt
+// `unstable-bench-internals` shim (`bench_internals`), never `row` directly.
+pub(crate) mod row;
 pub mod sinker;
 pub mod walker;
+
+/// Semver-EXEMPT re-export shim exposing the exact crate-internal
+/// [`row`](crate::row) kernels the repository's own Criterion benches measure.
+///
+/// Gated behind the `unstable-bench-internals` feature, which carries **no**
+/// stability guarantee and is intended solely for `cargo bench` inside this
+/// repository — external code must use [`Convert`] or
+/// [`MixedSinker`](sinker::MixedSinker) plus the `{fmt}_to` walkers instead.
+#[cfg(feature = "unstable-bench-internals")]
+#[doc(hidden)]
+pub mod bench_internals;
 
 #[cfg(feature = "bayer")]
 pub use walker::BayerOptions;

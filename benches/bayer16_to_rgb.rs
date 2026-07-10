@@ -12,8 +12,8 @@ use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_m
 use std::hint::black_box;
 
 use colconv::{
+  bench_internals::bayer16_to_rgb_row,
   raw::{BayerDemosaic, BayerPattern},
-  row::bayer16_to_rgb_row,
 };
 
 /// Fills a `u16` buffer with deterministic low-packed 12-bit pseudo-random
