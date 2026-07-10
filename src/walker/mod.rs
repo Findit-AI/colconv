@@ -423,6 +423,57 @@ macro_rules! walker {
       }
     }
   };
+  // Convert-tier rows: emit the plain-arm [`Walker`] impl *plus* the sealed
+  // [`crate::convert::Source`] impl (frame -> marker -> options -> walker) and
+  // its RGBA attach hook, so the frame decodes through the golden `Convert`
+  // builder. The `Source` half names `MixedSinker`, so it rides the sinker's
+  // `any(std, alloc)` gate; the `Walker` half stays as-is (generic over the
+  // sink type). `walk_mixed` is generic over the resampler `R`: a Convert-tier
+  // format's per-format sink implements its sink trait for every `R` (the
+  // blanket `impl<R> …Sink for MixedSinker<'_, $marker, R>`), so the direct
+  // `{fmt}_to` body type-checks for all `R` with no extra bound.
+  (@convert $marker:ty, $sink:path, $frame:ident, $opts:ty, |$s:ident, $o:ident, $k:ident| $body:expr) => {
+    walker!($marker, $sink, $frame, $opts, |$s, $o, $k| $body);
+
+    #[cfg(any(feature = "std", feature = "alloc"))]
+    impl $crate::convert::sealed::Sealed for $frame<'_> {}
+
+    #[cfg(any(feature = "std", feature = "alloc"))]
+    impl $crate::convert::Source for $frame<'_> {
+      type Marker = $marker;
+      type Options = $opts;
+
+      #[inline]
+      fn dimensions(&self) -> (usize, usize) {
+        (self.width() as usize, self.height() as usize)
+      }
+
+      #[inline]
+      fn walk_mixed<R>(
+        &self,
+        $o: &$opts,
+        $k: &mut $crate::sinker::MixedSinker<'_, $marker, R>,
+      ) -> Result<(), $crate::sinker::MixedSinkerError>
+      where
+        R: $crate::resample::Resampler,
+      {
+        let $s = self;
+        $body
+      }
+
+      #[inline]
+      fn attach_rgba<'sink, R>(
+        sink: &mut $crate::sinker::MixedSinker<'sink, $marker, R>,
+        buf: &'sink mut [u8],
+      ) -> Result<(), $crate::sinker::MixedSinkerError>
+      where
+        R: $crate::resample::Resampler,
+      {
+        sink.set_rgba(buf)?;
+        Ok(())
+      }
+    }
+  };
   (@const $c:ident: $cty:ty; $marker:ty, $sink:ident, $frame:ident, $opts:ty, |$s:ident, $o:ident, $k:ident| $body:expr) => {
     impl<const $c: $cty, S> Walker<S> for $marker
     where
@@ -1057,7 +1108,7 @@ walker!(
 // ---- Planar YUV, 8-bit -------------------------------------------------
 #[cfg(feature = "yuv-planar")]
 #[cfg_attr(docsrs, doc(cfg(feature = "yuv-planar")))]
-walker!(
+walker!(@convert
   Yuv420p,
   Yuv420pSink,
   Yuv420pFrame,
@@ -1075,7 +1126,7 @@ walker!(
 );
 #[cfg(feature = "yuv-planar")]
 #[cfg_attr(docsrs, doc(cfg(feature = "yuv-planar")))]
-walker!(
+walker!(@convert
   Yuv444p,
   Yuv444pSink,
   Yuv444pFrame,
