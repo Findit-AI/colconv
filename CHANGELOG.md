@@ -29,6 +29,44 @@ breaking changes bump the `x` in `0.x.y`.
   tier that exposes a `#[doc(hidden)]` `colconv::bench_internals` shim over the
   now-private `row` kernels so this repo's own Criterion benches can measure
   them. Not public API; carries no stability guarantee.
+- **Chroma-siting-aware upsampling — every `ChromaLocation` is now honored**
+  (#302). Horizontal center vs. co-sited reconstruction lands for the packed
+  4:2:2 Y-series (Y210 / Y212 / Y216) and V210 and for the 4:1:1 / 4:1:0
+  families (a new 1→4 centered kernel); vertical `Bottom` / `BottomLeft` for
+  4:2:0; and `Top` / `TopLeft` — previously rejected — across Yuv420p
+  (8-bit and 9–16-bit), NV12 / NV21, P010 / P012 / P016, Yuv440p (4:4:0) and
+  Yuva420p, via a new forward-lookahead one-row delay in the streaming sink
+  (the final `process` call flushes the held row retry-atomically). Siting is
+  frozen per frame: flipping `set_chroma_location` mid-frame now returns the
+  typed `ChromaSitingChanged` instead of silently mixing phases.
+- `ColorMatrix::IptC2` and `ColorMatrix::Smpte2085` decode support (ITU-T
+  H.273 codes 15 and 11, spec-exact coefficients; scalar tier like the other
+  non-affine PQ matrices), completing the H.273 matrix coverage (#303).
+- `St428Interpretation` on `MixedSinker` (#310): SMPTE ST 428-1 primaries
+  decode per FFmpeg's tabulated D-Cinema values (`FfmpegTabulated`, the
+  default — byte-identical to before) or as true CIE XYZ (`CieXyz`, opt-in),
+  where a `ChromaDerivedNcl` matrix over ST 428-1 is rejected with the typed
+  `St428CieXyzUnsupported` rather than deriving a colorimetrically meaningless
+  YCbCr matrix from RGB-tabulated primaries. Consumes mediaframe 0.1.9's
+  `Primaries::is_cie_xyz()`.
+
+### Changed
+
+- **The chroma-upsample reconstruct kernels are now SIMD** across all five
+  backends (NEON / SSE4.1 / AVX2 / AVX-512 / wasm-simd128): the 1→2 centered
+  horizontal, the 4:2:0 bottom-sited vertical, the 4:4:0 vertical and the new
+  1→4 centered families, for u8 / u16 / semi-planar element types — closing
+  the last scalar hot-spot in siting-aware RGB decode. Byte-identical to the
+  scalar reference per backend; `with_simd(false)` still forces scalar.
+
+### Fixed
+
+- Direct (identity) decode paths across the sited formats now enforce the
+  same per-frame chroma-siting freeze the resample tiers always had. Before,
+  a mid-frame `set_chroma_location` flip on ~30 identity paths (packed 4:2:2,
+  planar and high-bit 4:2:0 / 4:2:2, NV, P0xx / P2xx, YUVA) silently mixed
+  centered and co-sited phases in one frame — with a stale vertical-lookback
+  in the 4:2:0 cases — instead of rejecting with `ChromaSitingChanged`.
 
 ### Removed
 

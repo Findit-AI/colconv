@@ -15,8 +15,6 @@ SIMD-dispatched color-conversion kernels covering the FFmpeg `AVPixelFormat` spa
 [<img alt="crates.io" src="https://img.shields.io/crates/d/colconv?color=critical&logo=data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBzdGFuZGFsb25lPSJubyI/PjwhRE9DVFlQRSBzdmcgUFVCTElDICItLy9XM0MvL0RURCBTVkcgMS4xLy9FTiIgImh0dHA6Ly93d3cudzMub3JnL0dyYXBoaWNzL1NWRy8xLjEvRFREL3N2ZzExLmR0ZCI+PHN2ZyB0PSIxNjQ1MTE3MzMyOTU5IiBjbGFzcz0iaWNvbiIgdmlld0JveD0iMCAwIDEwMjQgMTAyNCIgdmVyc2lvbj0iMS4xIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHAtaWQ9IjM0MjEiIGRhdGEtc3BtLWFuY2hvci1pZD0iYTMxM3guNzc4MTA2OS4wLmkzIiB3aWR0aD0iNDgiIGhlaWdodD0iNDgiIHhtbG5zOnhsaW5rPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5L3hsaW5rIj48ZGVmcz48c3R5bGUgdHlwZT0idGV4dC9jc3MiPjwvc3R5bGU+PC9kZWZzPjxwYXRoIGQ9Ik00NjkuMzEyIDU3MC4yNHYtMjU2aDg1LjM3NnYyNTZoMTI4TDUxMiA3NTYuMjg4IDM0MS4zMTIgNTcwLjI0aDEyOHpNMTAyNCA2NDAuMTI4QzEwMjQgNzgyLjkxMiA5MTkuODcyIDg5NiA3ODcuNjQ4IDg5NmgtNTEyQzEyMy45MDQgODk2IDAgNzYxLjYgMCA1OTcuNTA0IDAgNDUxLjk2OCA5NC42NTYgMzMxLjUyIDIyNi40MzIgMzAyLjk3NiAyODQuMTYgMTk1LjQ1NiAzOTEuODA4IDEyOCA1MTIgMTI4YzE1Mi4zMiAwIDI4Mi4xMTIgMTA4LjQxNiAzMjMuMzkyIDI2MS4xMkM5NDEuODg4IDQxMy40NCAxMDI0IDUxOS4wNCAxMDI0IDY0MC4xOTJ6IG0tMjU5LjItMjA1LjMxMmMtMjQuNDQ4LTEyOS4wMjQtMTI4Ljg5Ni0yMjIuNzItMjUyLjgtMjIyLjcyLTk3LjI4IDAtMTgzLjA0IDU3LjM0NC0yMjQuNjQgMTQ3LjQ1NmwtOS4yOCAyMC4yMjQtMjAuOTI4IDIuOTQ0Yy0xMDMuMzYgMTQuNC0xNzguMzY4IDEwNC4zMi0xNzguMzY4IDIxNC43MiAwIDExNy45NTIgODguODMyIDIxNC40IDE5Ni45MjggMjE0LjRoNTEyYzg4LjMyIDAgMTU3LjUwNC03NS4xMzYgMTU3LjUwNC0xNzEuNzEyIDAtODguMDY0LTY1LjkyLTE2NC45MjgtMTQ0Ljk2LTE3MS43NzZsLTI5LjUwNC0yLjU2LTUuODg4LTMwLjk3NnoiIGZpbGw9IiNmZmZmZmYiIHAtaWQ9IjM0MjIiIGRhdGEtc3BtLWFuY2hvci1pZD0iYTMxM3guNzc4MTA2OS4wLmkwIiBjbGFzcz0iIj48L3BhdGg+PC9zdmc+&style=for-the-badge" height="22">][crates-url]
 <img alt="license" src="https://img.shields.io/badge/License-GPL--3.0--or--later-blue.svg?style=for-the-badge&fontColor=white&logoColor=f5c076&logo=data:image/svg+xml;base64,PCFET0NUWVBFIHN2ZyBQVUJMSUMgIi0vL1czQy8vRFREIFNWRyAxLjEvL0VOIiAiaHR0cDovL3d3dy53My5vcmcvR3JhcGhpY3MvU1ZHLzEuMS9EVEQvc3ZnMTEuZHRkIj4KDTwhLS0gVXBsb2FkZWQgdG86IFNWRyBSZXBvLCB3d3cuc3ZncmVwby5jb20sIFRyYW5zZm9ybWVkIGJ5OiBTVkcgUmVwbyBNaXhlciBUb29scyAtLT4KPHN2ZyBmaWxsPSIjZmZmZmZmIiBoZWlnaHQ9IjgwMHB4IiB3aWR0aD0iODAwcHgiIHZlcnNpb249IjEuMSIgaWQ9IkNhcGFfMSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiB4bWxuczp4bGluaz0iaHR0cDovL3d3dy53My5vcmcvMTk5OS94bGluayIgdmlld0JveD0iMCAwIDI3Ni43MTUgMjc2LjcxNSIgeG1sOnNwYWNlPSJwcmVzZXJ2ZSIgc3Ryb2tlPSIjZmZmZmZmIj4KDTxnIGlkPSJTVkdSZXBvX2JnQ2FycmllciIgc3Ryb2tlLXdpZHRoPSIwIi8+Cg08ZyBpZD0iU1ZHUmVwb190cmFjZXJDYXJyaWVyIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz4KDTxnIGlkPSJTVkdSZXBvX2ljb25DYXJyaWVyIj4gPGc+IDxwYXRoIGQ9Ik0xMzguMzU3LDBDNjIuMDY2LDAsMCw2Mi4wNjYsMCwxMzguMzU3czYyLjA2NiwxMzguMzU3LDEzOC4zNTcsMTM4LjM1N3MxMzguMzU3LTYyLjA2NiwxMzguMzU3LTEzOC4zNTcgUzIxNC42NDgsMCwxMzguMzU3LDB6IE0xMzguMzU3LDI1OC43MTVDNzEuOTkyLDI1OC43MTUsMTgsMjA0LjcyMywxOCwxMzguMzU3UzcxLjk5MiwxOCwxMzguMzU3LDE4IHMxMjAuMzU3LDUzLjk5MiwxMjAuMzU3LDEyMC4zNTdTMjA0LjcyMywyNTguNzE1LDEzOC4zNTcsMjU4LjcxNXoiLz4gPHBhdGggZD0iTTE5NC43OTgsMTYwLjkwM2MtNC4xODgtMi42NzctOS43NTMtMS40NTQtMTIuNDMyLDIuNzMyYy04LjY5NCwxMy41OTMtMjMuNTAzLDIxLjcwOC0zOS42MTQsMjEuNzA4IGMtMjUuOTA4LDAtNDYuOTg1LTIxLjA3OC00Ni45ODUtNDYuOTg2czIxLjA3Ny00Ni45ODYsNDYuOTg1LTQ2Ljk4NmMxNS42MzMsMCwzMC4yLDcuNzQ3LDM4Ljk2OCwyMC43MjMgYzIuNzgyLDQuMTE3LDguMzc1LDUuMjAxLDEyLjQ5NiwyLjQxOGM0LjExOC0yLjc4Miw1LjIwMS04LjM3NywyLjQxOC0xMi40OTZjLTEyLjExOC0xNy45MzctMzIuMjYyLTI4LjY0NS01My44ODItMjguNjQ1IGMtMzUuODMzLDAtNjQuOTg1LDI5LjE1Mi02NC45ODUsNjQuOTg2czI5LjE1Miw2NC45ODYsNjQuOTg1LDY0Ljk4NmMyMi4yODEsMCw0Mi43NTktMTEuMjE4LDU0Ljc3OC0zMC4wMDkgQzIwMC4yMDgsMTY5LjE0NywxOTguOTg1LDE2My41ODIsMTk0Ljc5OCwxNjAuOTAzeiIvPiA8L2c+IDwvZz4KDTwvc3ZnPg==" height="22">
 
-English | [简体中文][zh-cn-url]
-
 </div>
 
 ## What it is
@@ -24,11 +22,14 @@ English | [简体中文][zh-cn-url]
 colconv is a header-light, `no_std`-friendly color-conversion library for
 video pipelines:
 
-- **SIMD-dispatched** — every kernel ships AVX-512, AVX2, SSE4.1, and a
-  scalar fallback, selected once at startup via
-  `is_x86_feature_detected!` (no per-row branching). The scalar path is
-  the reference implementation every other tier is equivalence-tested
-  against.
+- **One-call decode** — the `Convert` builder turns a validated source
+  frame into any subset of RGB / RGBA / Luma / HSV with zero redundant
+  parameters, an optional fused resize, and a single fallible call. See
+  [Quick start](#quick-start).
+- **SIMD-dispatched** — every kernel ships NEON, SSE4.1, AVX2, AVX-512,
+  and wasm-simd128 backends plus a scalar fallback, selected once at
+  startup (no per-row branching). The scalar path is the reference
+  implementation every other tier is equivalence-tested against.
 - **Sink-based output** — pick exactly which derived outputs a frame
   produces (`RGB`, `RGBA`, `Luma`, `HSV`, …); unused kernels don't
   compile, so binaries don't carry dead code.
@@ -37,6 +38,12 @@ video pipelines:
   packed, Y-series, V210, RGB 8/10/16/F16/F32, GBR, Gray, XYZ, Bayer,
   PAL8 / Mono). Pair colconv with [mediaframe][mediaframe-url] for the
   pixel-data + `SourceFormat` traits the kernels are generic over.
+- **Colorimetry-honest** — every H.273 `ColorMatrix` decodes (including
+  the non-affine ICtCp, IPT-C2, SMPTE ST 2085 and chroma-derived
+  variants), `ChromaLocation` drives siting-aware chroma upsampling
+  (center / co-sited, top / bottom variants included), and SMPTE ST 428-1
+  primaries can be interpreted per FFmpeg's tabulated values or as true
+  CIE XYZ.
 - **Fused resampling** — downscale *while* converting in a single pass:
   a resampler splices into the convert pipeline at the earliest stage
   that realizes its averaging domain, so the frame is binned once and
@@ -44,6 +51,32 @@ video pipelines:
   kernels (PIL-byte-exact for `u8`), and swscale `BICUBLIN` are all
   available, with optional gamma-correct (linear-light) and
   scene-referred averaging. See [Resampling](#resampling).
+
+## Quick start
+
+```rust
+use colconv::{ColorMatrix, ColorSpec, Convert, DynamicRange, PixelFormat};
+use colconv::frame::Yuv420pFrame;
+
+fn decode(y: &[u8], u: &[u8], v: &[u8], w: u32, h: u32) -> Result<Vec<u8>, colconv::Error> {
+    let frame = Yuv420pFrame::new(y, u, v, w, h, w, w / 2, w / 2);
+    let spec = ColorSpec::resolve(PixelFormat::Yuv420p, DynamicRange::Limited, ColorMatrix::Bt709);
+
+    let mut rgb = vec![0u8; 1280 * 720 * 3];
+    Convert::from(&frame)      // dimensions + format come from the frame
+        .spec(spec)            // one colorimetric truth; per-format knobs derive from it
+        .resize(1280, 720)     // optional fused downscale
+        .rgb(&mut rgb)         // attach any subset of outputs
+        .run()?;               // the only fallible call
+    Ok(rgb)
+}
+```
+
+`Convert` is the golden path for every supported source format. When you
+need streaming, a custom sink, custom output geometry, or Bayer, drop one
+tier down: assemble a [`MixedSinker`][doc-url] and drive it with the
+matching `{format}_to` walker — the same machinery `Convert` runs on. (The
+per-row kernel functions are internal as of 0.3.)
 
 ## Resampling
 
@@ -83,7 +116,7 @@ happens, trading speed for colorimetric correctness:
 
 ```toml
 [dependencies]
-colconv = "0.2"
+colconv = "0.3"
 ```
 
 ## Feature flags
@@ -135,5 +168,4 @@ Copyright (C) 2026 FinDIT Studio authors.
 [doc-url]: https://docs.rs/colconv
 [crates-url]: https://crates.io/crates/colconv
 [codecov-url]: https://app.codecov.io/gh/findit-studio/colconv/
-[zh-cn-url]: https://github.com/findit-studio/colconv/tree/main/README-zh_CN.md
 [mediaframe-url]: https://crates.io/crates/mediaframe
