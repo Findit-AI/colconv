@@ -10,7 +10,7 @@
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;
 
-use colconv::{ColorMatrix, row::v30x_to_rgb_row};
+use colconv::{ColorMatrix, bench_internals::v30x_to_rgb_row};
 
 /// Fills a `u32` buffer with deterministic v30x‑packed pseudo‑random
 /// values. The kernel masks each 10‑bit field at load time, so any

@@ -40,6 +40,29 @@
 //! `crate::row::*` (e.g. `crate::row::yuv_420_to_rgb_row`). Callers
 //! see no API change from the split.
 
+// As of 0.3 (RFC #392) `row` is `pub(crate)`: these per-row kernels are internal
+// plumbing, invoked by `MixedSinker` and the `{fmt}_to` walkers. Each source
+// family ships a *complete* kernel matrix (every output channel x endianness x
+// bit-depth variant), but `MixedSinker` reaches most families through the
+// endianness-generic `*_row_endian` entries, so the byte-order-convenience
+// wrappers and a handful of output variants have no in-crate caller. They are
+// retained deliberately — the curated struct-parameter row API that RFC #392
+// leaves the door open to would re-export exactly these — and the repo's own
+// benches measure a subset through the `unstable-bench-internals` shim. Which
+// kernels (and which `crate::row::*` re-exports of them) have an in-crate caller
+// varies by feature powerset, so allow the unused ones module-wide rather than
+// delete a validated, SIMD-symmetric kernel family or chase per-powerset gates.
+#![allow(dead_code, unused_imports)]
+// The kernels cross-reference their sibling internal impls (`*_row_endian`,
+// `scalar::*`, `yuv_420_to_rgb_row`, …) in their doc comments. Those siblings
+// are `pub(crate)` (and not all in scope for the intra-doc resolver), so when
+// the doc-hidden `bench_internals` shim surfaces a kernel, rustdoc flags each
+// link as public→private or unresolved. These are internal-to-internal
+// references, not public API docs — `row`'s doc-comment link hygiene is not part
+// of the `-D warnings` public doc contract — so allow the lints here rather than
+// rewrite the cross-references.
+#![allow(rustdoc::private_intra_doc_links, rustdoc::broken_intra_doc_links)]
+
 pub(crate) mod arch;
 pub(crate) mod dispatch;
 pub(crate) mod scalar;

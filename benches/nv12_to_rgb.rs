@@ -13,7 +13,7 @@
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;
 
-use colconv::{ColorMatrix, row::nv12_to_rgb_row};
+use colconv::{ColorMatrix, bench_internals::nv12_to_rgb_row};
 
 /// Fills a buffer with a deterministic pseudo‑random byte sequence so
 /// the measurement isn't inflated by cache‑friendly uniform data.

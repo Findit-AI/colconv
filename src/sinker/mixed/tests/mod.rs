@@ -192,7 +192,10 @@ mod resample_bayer8;
 mod resample_bgr24;
 #[cfg(feature = "gbr")]
 mod resample_gbr_high_bit;
-#[cfg(feature = "gbr")]
+// The 32-bit planar GBR + alpha resample coverage is anchored on an `Rgb48`
+// filter/luma/hsv reference oracle, so it needs the `rgb` family alongside
+// `gbr` (a `gbr`-solo build cannot resolve `Rgb48` / `rgb48_to` / `Rgb48Frame`).
+#[cfg(all(feature = "gbr", feature = "rgb"))]
 mod resample_gbrap_32bit;
 #[cfg(feature = "gbr")]
 mod resample_gbrap_8bit;

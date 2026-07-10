@@ -14,8 +14,8 @@ use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_m
 use std::hint::black_box;
 
 use colconv::{
+  bench_internals::bayer_to_rgb_row,
   raw::{BayerDemosaic, BayerPattern},
-  row::bayer_to_rgb_row,
 };
 
 fn fill_pseudo_random(buf: &mut [u8], seed: u32) {

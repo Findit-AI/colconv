@@ -10,7 +10,7 @@ use std::hint::black_box;
 
 use colconv::{
   ColorMatrix,
-  row::{yuv420p12_to_rgb_row, yuv420p12_to_rgb_u16_row},
+  bench_internals::{yuv420p12_to_rgb_row, yuv420p12_to_rgb_u16_row},
 };
 
 /// Fills a `u16` buffer with a deterministic 12‑bit pseudo‑random

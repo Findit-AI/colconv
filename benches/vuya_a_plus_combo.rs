@@ -29,8 +29,8 @@ use std::hint::black_box;
 
 use colconv::{
   ColorMatrix,
+  bench_internals::{vuya_to_rgb_row, vuya_to_rgba_row},
   frame::VuyaFrame,
-  row::{vuya_to_rgb_row, vuya_to_rgba_row},
   sinker::MixedSinker,
   source::{Vuya, vuya_to},
 };

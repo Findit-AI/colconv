@@ -8,7 +8,7 @@
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;
 
-use colconv::{ColorMatrix, row::rgb_to_luma_row};
+use colconv::{ColorMatrix, bench_internals::rgb_to_luma_row};
 
 fn fill_pseudo_random(buf: &mut [u8], seed: u32) {
   let mut state = seed;

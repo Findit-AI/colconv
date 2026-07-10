@@ -8,7 +8,7 @@ use std::hint::black_box;
 
 use colconv::{
   ColorMatrix,
-  row::{p410_to_rgb_row, p410_to_rgb_u16_row},
+  bench_internals::{p410_to_rgb_row, p410_to_rgb_u16_row},
 };
 
 fn fill_pseudo_random_p410(buf: &mut [u16], seed: u32) {

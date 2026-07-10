@@ -183,11 +183,14 @@ jobs:
         shell: bash
         # `--benches` limits cargo to the registered bench targets.
         # Without it, `cargo bench` also runs the library's `#[test]`
-        # harness in release mode. Uses Criterion's native output
-        # format (per-bench `time:` / `thrpt:` blocks with confidence
+        # harness in release mode. `--features unstable-bench-internals`
+        # exposes the crate-private `row` kernels (via the semver-exempt
+        # `bench_internals` shim) that the row-level benches measure — the
+        # 0.3 surface cut made `row` `pub(crate)`. Uses Criterion's native
+        # output format (per-bench `time:` / `thrpt:` blocks with confidence
         # intervals) — the full HTML report lives in `target/criterion/`
         # and is uploaded separately below.
-        run: cargo bench --benches | tee benchmark-all-${{ matrix.label }}.txt
+        run: cargo bench --benches --features unstable-bench-internals | tee benchmark-all-${{ matrix.label }}.txt
         continue-on-error: false
 
       - name: Write run metadata
