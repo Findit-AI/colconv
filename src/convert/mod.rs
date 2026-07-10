@@ -154,6 +154,8 @@ pub trait Source: sealed::Sealed {
 /// [`resize_with`](Self::resize_with) transition it.
 ///
 /// ```
+/// # #[cfg(all(any(feature = "std", feature = "alloc"), feature = "yuv-planar"))]
+/// # fn golden() -> Result<(), colconv::Error> {
 /// use colconv::{Convert, ColorMatrix, ColorSpec, DynamicRange, PixelFormat};
 /// use colconv::frame::Yuv420pFrame;
 ///
@@ -171,7 +173,10 @@ pub trait Source: sealed::Sealed {
 ///     .rgb(&mut rgb)
 ///     .luma(&mut luma)
 ///     .run()?;
-/// # Ok::<(), colconv::Error>(())
+/// # Ok(())
+/// # }
+/// # #[cfg(all(any(feature = "std", feature = "alloc"), feature = "yuv-planar"))]
+/// # golden().unwrap();
 /// ```
 pub struct Convert<'a, Fr: Source, R = NoopResampler> {
   frame: &'a Fr,
