@@ -22,6 +22,7 @@ use crate::{
 
 /// Compile-time assertion that `F: Source`; monomorphising the call is what
 /// forces the bound. A no-op at run time.
+#[allow(dead_code)] // zero-active-block configs (e.g. `rgb-float` alone) have no caller
 fn assert_source<F: crate::convert::Source>() {}
 
 /// Names every frame type in a comma-separated list and asserts each is a
@@ -481,8 +482,11 @@ fn pal8_parity() {
   {
     let mut sink = MixedSinker::<crate::source::Pal8>::new(2, 2)
       .with_rgb(&mut manual_rgb)
-      .unwrap()
-      .with_color_spec(spec);
+      .unwrap();
+    // Mirror `Convert::run`: the sink-side spec applies only under
+    // `yuv-planar` (see `assert_rgb_luma_parity`).
+    #[cfg(feature = "yuv-planar")]
+    sink.set_color_spec(spec);
     crate::source::pal8_to(&make(), &mut sink).unwrap();
   }
   assert_eq!(convert_rgb, manual_rgb, "pal8 rgb");
@@ -544,8 +548,11 @@ fn xyz12_parity() {
   {
     let mut sink = MixedSinker::<crate::source::Xyz12>::new(2, 2)
       .with_rgb(&mut manual_rgb)
-      .unwrap()
-      .with_color_spec(spec);
+      .unwrap();
+    // Mirror `Convert::run`: the sink-side spec applies only under
+    // `yuv-planar` (see `assert_rgb_luma_parity`).
+    #[cfg(feature = "yuv-planar")]
+    sink.set_color_spec(spec);
     crate::source::xyz12_to::<false, _>(&make(), gamut, &mut sink).unwrap();
   }
   assert_eq!(convert_rgb, manual_rgb, "xyz12 rgb");
