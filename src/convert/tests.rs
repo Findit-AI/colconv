@@ -480,6 +480,219 @@ fn yuv444p_output_kinds_match_manual() {
   assert_eq!((ha, sa, va), (hb, sb, vb), "Yuv444p hsv");
 }
 
+/// `.spec(spec)` alone derives the walk range + matrix — the same bytes as
+/// passing them manually.
+#[test]
+fn yuv444p_spec_derivation_matches_manual_matrix_range() {
+  let (y, u, v) = y444();
+  let spec = spec_601();
+  let (w, h) = (4usize, 2usize);
+
+  let mut a = std::vec![0u8; w * h * 3];
+  Convert::from(&frame444(&y, &u, &v))
+    .spec(spec)
+    .rgb(&mut a)
+    .run()
+    .unwrap();
+
+  let mut b = std::vec![0u8; w * h * 3];
+  {
+    let mut sink = MixedSinker::<Yuv444p>::new(w, h)
+      .with_rgb(&mut b)
+      .unwrap()
+      .with_color_spec(spec);
+    yuv444p_to(
+      &frame444(&y, &u, &v),
+      spec.full_range(),
+      spec.matrix(),
+      &mut sink,
+    )
+    .unwrap();
+  }
+  assert_eq!(a, b);
+}
+
+/// No spec == the manual path driven by `YuvOptions::default()`.
+#[test]
+fn yuv444p_no_spec_matches_default_options() {
+  let (y, u, v) = y444();
+  let (w, h) = (4usize, 2usize);
+  let def = YuvOptions::default();
+
+  let mut a = std::vec![0u8; w * h * 3];
+  Convert::from(&frame444(&y, &u, &v))
+    .rgb(&mut a)
+    .run()
+    .unwrap();
+
+  let mut b = std::vec![0u8; w * h * 3];
+  {
+    // No `with_color_spec`: the no-spec Convert path never touches it either.
+    let mut sink = MixedSinker::<Yuv444p>::new(w, h).with_rgb(&mut b).unwrap();
+    yuv444p_to(
+      &frame444(&y, &u, &v),
+      def.full_range(),
+      def.matrix(),
+      &mut sink,
+    )
+    .unwrap();
+  }
+  assert_eq!(a, b);
+}
+
+/// `.format_options` overrides the spec-derived matrix.
+#[test]
+fn yuv444p_format_options_override_wins() {
+  let (y, u, v) = y444();
+  let spec = spec_601(); // matrix = Bt601
+  let (w, h) = (4usize, 2usize);
+  let override_opts = YuvOptions::new().with_matrix(ColorMatrix::Bt2020Ncl);
+  assert_ne!(override_opts.matrix(), spec.matrix());
+
+  let mut a = std::vec![0u8; w * h * 3];
+  Convert::from(&frame444(&y, &u, &v))
+    .spec(spec)
+    .format_options(override_opts)
+    .rgb(&mut a)
+    .run()
+    .unwrap();
+
+  let mut b = std::vec![0u8; w * h * 3];
+  {
+    // Sink still carries the spec (siting/primaries), but the walk uses the
+    // override's range + matrix.
+    let mut sink = MixedSinker::<Yuv444p>::new(w, h)
+      .with_rgb(&mut b)
+      .unwrap()
+      .with_color_spec(spec);
+    yuv444p_to(
+      &frame444(&y, &u, &v),
+      override_opts.full_range(),
+      override_opts.matrix(),
+      &mut sink,
+    )
+    .unwrap();
+  }
+  assert_eq!(a, b);
+}
+
+/// `.simd(false)` == the manual `with_simd(false)` scalar path (no resize).
+#[test]
+fn yuv444p_simd_false_matches_manual() {
+  let (y, u, v) = y444();
+  let spec = spec_601();
+  let (w, h) = (4usize, 2usize);
+
+  let mut a = std::vec![0u8; w * h * 3];
+  Convert::from(&frame444(&y, &u, &v))
+    .spec(spec)
+    .simd(false)
+    .rgb(&mut a)
+    .run()
+    .unwrap();
+
+  let mut b = std::vec![0u8; w * h * 3];
+  {
+    let mut sink = MixedSinker::<Yuv444p>::new(w, h)
+      .with_rgb(&mut b)
+      .unwrap()
+      .with_color_spec(spec)
+      .with_simd(false);
+    yuv444p_to(
+      &frame444(&y, &u, &v),
+      spec.full_range(),
+      spec.matrix(),
+      &mut sink,
+    )
+    .unwrap();
+  }
+  assert_eq!(a, b);
+}
+
+/// Multiple outputs (rgb + luma) attach together and both match.
+#[test]
+fn yuv444p_multi_output_matches_manual() {
+  let (y, u, v) = y444();
+  let spec = spec_601();
+  let (w, h) = (4usize, 2usize);
+
+  let (mut rgb_a, mut luma_a) = (std::vec![0u8; w * h * 3], std::vec![0u8; w * h]);
+  Convert::from(&frame444(&y, &u, &v))
+    .spec(spec)
+    .rgb(&mut rgb_a)
+    .luma(&mut luma_a)
+    .run()
+    .unwrap();
+
+  let (mut rgb_b, mut luma_b) = (std::vec![0u8; w * h * 3], std::vec![0u8; w * h]);
+  {
+    let mut sink = MixedSinker::<Yuv444p>::new(w, h)
+      .with_rgb(&mut rgb_b)
+      .unwrap()
+      .with_luma(&mut luma_b)
+      .unwrap()
+      .with_color_spec(spec);
+    yuv444p_to(
+      &frame444(&y, &u, &v),
+      spec.full_range(),
+      spec.matrix(),
+      &mut sink,
+    )
+    .unwrap();
+  }
+  assert_eq!(rgb_a, rgb_b, "rgb");
+  assert_eq!(luma_a, luma_b, "luma");
+}
+
+/// `.resize(w/2, h/2)` == the manual `AreaResampler` downscale path (default
+/// simd).
+#[test]
+fn yuv444p_resize_area_matches_manual() {
+  // 8x4 source, downscale to 4x2.
+  let y: std::vec::Vec<u8> = (0..32u16).map(|i| (i * 7) as u8).collect();
+  let u: std::vec::Vec<u8> = (0..32u16).map(|i| (i * 3 + 20) as u8).collect();
+  let v: std::vec::Vec<u8> = (0..32u16).map(|i| (i * 5 + 10) as u8).collect();
+  let make = || Yuv444pFrame::new(&y, &u, &v, 8, 4, 8, 8, 8);
+  let spec = spec_601();
+  let (ow, oh) = (4usize, 2usize);
+
+  let mut a = std::vec![0u8; ow * oh * 3];
+  Convert::from(&make())
+    .spec(spec)
+    .resize(ow, oh)
+    .rgb(&mut a)
+    .run()
+    .unwrap();
+
+  let mut b = std::vec![0u8; ow * oh * 3];
+  {
+    let mut sink =
+      MixedSinker::<Yuv444p, AreaResampler>::with_resampler(8, 4, AreaResampler::to(ow, oh))
+        .unwrap()
+        .with_rgb(&mut b)
+        .unwrap()
+        .with_color_spec(spec);
+    yuv444p_to(&make(), spec.full_range(), spec.matrix(), &mut sink).unwrap();
+  }
+  assert_eq!(a, b);
+}
+
+/// `.resize` upscale surfaces the resampler's upscale error from `run()`.
+#[test]
+fn yuv444p_resize_upscale_errors() {
+  let (y, u, v) = y444();
+  let mut rgb = std::vec![0u8; 8 * 4 * 3];
+  let err = Convert::from(&frame444(&y, &u, &v))
+    .resize(8, 4) // 4x2 -> 8x4 is an upscale
+    .rgb(&mut rgb)
+    .run()
+    .expect_err("upscale must be rejected");
+  assert!(
+    matches!(err, MixedSinkerError::Resample(_)),
+    "unexpected error: {err:?}"
+  );
+}
+
 /// `.resize` + `.simd(false)` both match the manual path for Yuv444p.
 #[test]
 fn yuv444p_resize_and_scalar_match_manual() {

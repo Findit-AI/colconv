@@ -27,20 +27,28 @@
 mod tests;
 
 use crate::{
-  ChromaLocation, SourceFormat,
+  SourceFormat,
   resample::{AreaResampler, FilterKernel, FilteredResampler, NoopResampler, Resampler},
   sinker::{MixedSinker, MixedSinkerError},
   walker::{ColorSpec, Xyz12Options, YuvOptions},
 };
 
+// `ChromaLocation` and `St428Interpretation` feed only the `yuv-planar`
+// sink-knob setters and their fields, so their imports must ride the same gate
+// or they warn `unused_imports` under the other feature powersets (CI builds
+// those with `-Dwarnings`).
 #[cfg(feature = "yuv-planar")]
-use crate::sinker::St428Interpretation;
+use crate::{ChromaLocation, sinker::St428Interpretation};
 
-/// Seals [`Source`]: only the crate's own `walker!` table rows implement it,
-/// so the frame ↔ [`Convert`] contract is not user-extensible.
+/// Seals [`Source`] and [`FromSpec`]: only the crate's own types implement
+/// them, so neither the frame ↔ [`Convert`] contract nor the set of
+/// spec-derivable walk options is user-extensible.
 pub(crate) mod sealed {
   /// The sealing supertrait of [`Source`](super::Source).
   pub trait Sealed {}
+
+  /// The sealing supertrait of [`FromSpec`](super::FromSpec).
+  pub trait SealedOptions {}
 }
 
 /// Derives a source family's walk [`Options`](Source::Options) from the single
@@ -55,12 +63,17 @@ pub(crate) mod sealed {
 /// intrinsic* rather than colorimetric — the Bayer mosaic pattern of
 /// [`BayerOptions`](crate::walker::BayerOptions), which has no [`Default`]
 /// because it cannot be guessed — is excluded by construction.
-pub trait FromSpec: Default {
+///
+/// Sealed: only the crate's own walk-option types
+/// ([`YuvOptions`], [`Xyz12Options`], and the knob-free `()`) implement it, so
+/// the set of spec-derivable options is not user-extensible.
+pub trait FromSpec: Default + sealed::SealedOptions {
   /// Builds the walk options carried by `spec`, defaulting any knob the spec
   /// does not describe.
   fn from_spec(spec: &ColorSpec) -> Self;
 }
 
+impl sealed::SealedOptions for YuvOptions {}
 impl FromSpec for YuvOptions {
   /// The spec's resolved range + matrix become the YUV walk options; the rest
   /// of the spec is sink-consumed, not walker-consumed.
@@ -70,6 +83,7 @@ impl FromSpec for YuvOptions {
   }
 }
 
+impl sealed::SealedOptions for Xyz12Options {}
 impl FromSpec for Xyz12Options {
   /// A [`ColorSpec`] carries no target RGB gamut, so the XYZ decode keeps its
   /// default target; the spec's other fields are not consumed by the XYZ path.
@@ -79,6 +93,7 @@ impl FromSpec for Xyz12Options {
   }
 }
 
+impl sealed::SealedOptions for () {}
 impl FromSpec for () {
   /// The knob-free sources (a frame-intrinsic palette / conversion) have no
   /// spec-derived state.
