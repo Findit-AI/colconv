@@ -3155,8 +3155,9 @@ pub struct MixedSinker<'a, F: SourceFormat, R = NoopResampler> {
   /// `Yuva420p` carries a full-resolution `u8` alpha plane; the Top forward delay
   /// defers the odd row's whole decode, so its alpha is held here alongside its
   /// luma until the following even row flushes it. Lazily grown to `width` `u8`
-  /// on the first deferred `Top` row; empty otherwise. Gated to `yuv-planar`.
-  #[cfg(feature = "yuv-planar")]
+  /// on the first deferred `Top` row; empty otherwise. Gated to `yuva` — its
+  /// only reader is the `Yuva420p` sink.
+  #[cfg(feature = "yuva")]
   chroma_top_a: Vec<u8>,
   /// Lazily grown to `3 * width` bytes when HSV is requested without a
   /// user RGB buffer. Empty otherwise.
@@ -3284,9 +3285,9 @@ pub struct MixedSinker<'a, F: SourceFormat, R = NoopResampler> {
   /// `process` returns). Holds a copy of the odd row's `width` `u16` alpha in the
   /// source's wire byte order. Only a `Yuva420p9` … `Yuva420p16` sink under
   /// `Top` / `TopLeft` touches it; lazily grown to `width` `u16` on the first
-  /// deferred `Top` row, empty otherwise. Gated to `yuv-planar`, like
-  /// [`Self::chroma_top_y_u16`].
-  #[cfg(feature = "yuv-planar")]
+  /// deferred `Top` row, empty otherwise. Gated to `yuva` — its only readers
+  /// are the high-bit `Yuva420p` sinks.
+  #[cfg(feature = "yuva")]
   chroma_top_a_u16: Vec<u16>,
   /// Source-width `u8` luma staging for the **packed YUV 4:2:2** resample
   /// path (the interleaved Y bytes are de-interleaved here via the format's
@@ -4361,7 +4362,7 @@ impl<F: SourceFormat, R> MixedSinker<'_, F, R> {
       chroma_top_st428: None,
       #[cfg(feature = "yuv-planar")]
       chroma_top_y: Vec::new(),
-      #[cfg(feature = "yuv-planar")]
+      #[cfg(feature = "yuva")]
       chroma_top_a: Vec::new(),
       #[cfg(any(
         feature = "bayer",
@@ -4393,7 +4394,7 @@ impl<F: SourceFormat, R> MixedSinker<'_, F, R> {
       chroma_prev_u16: Vec::new(),
       #[cfg(feature = "yuv-planar")]
       chroma_top_y_u16: Vec::new(),
-      #[cfg(feature = "yuv-planar")]
+      #[cfg(feature = "yuva")]
       chroma_top_a_u16: Vec::new(),
       #[cfg(any(feature = "yuv-packed", feature = "gray"))]
       luma_scratch: Vec::new(),
