@@ -312,8 +312,12 @@ where
   {
     let mut sink = MixedSinker::<Fr::Marker>::new(w, h)
       .with_rgb(&mut manual_rgb)
-      .unwrap()
-      .with_color_spec(spec);
+      .unwrap();
+    // Mirror `Convert::run`: the sink-side spec is a planar-decode concern, so
+    // `run` applies it only under `yuv-planar`; elsewhere the spec reaches the
+    // walk solely through the derived `full_range` / `matrix` arguments.
+    #[cfg(feature = "yuv-planar")]
+    sink.set_color_spec(spec);
     walk(&make(), spec.full_range(), spec.matrix(), &mut sink).unwrap();
   }
   assert_eq!(convert_rgb, manual_rgb, "rgb");
@@ -328,8 +332,10 @@ where
   {
     let mut sink = MixedSinker::<Fr::Marker>::new(w, h)
       .with_luma(&mut manual_luma)
-      .unwrap()
-      .with_color_spec(spec);
+      .unwrap();
+    // Mirror `Convert::run` (see the rgb arm above).
+    #[cfg(feature = "yuv-planar")]
+    sink.set_color_spec(spec);
     walk(&make(), spec.full_range(), spec.matrix(), &mut sink).unwrap();
   }
   assert_eq!(convert_luma, manual_luma, "luma");
