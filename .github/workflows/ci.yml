@@ -242,21 +242,35 @@ jobs:
   # `wasm32-wasip1` is the wasi preview‑1 target (libstd + file/env
   # APIs that the test harness needs). Criterion is gated out of the
   # wasm dev‑deps in Cargo.toml because rayon doesn't build for wasi.
+  # Sharded like the asan job, purely for DURATION: the single
+  # `--all-features` job's cold compile sat squarely inside the runner
+  # pool's reclamation window — exit 143 on the first attempt of every
+  # recent run, green only via re-runs. Each of the two WIDE shards
+  # jointly enables every feature conjunction the full `--lib` inventory
+  # needs; verified empirically — the two shards' `--lib -- --list`
+  # outputs union to the entire `--all-features` list. The cache is
+  # registry/git-only so the two shards share one entry instead of
+  # racing a `target` save (see the asan cache note).
   test-wasm-simd128:
-    name: test-wasm-simd128
+    name: test-wasm-simd128 [${{ matrix.feature-group }}]
+    strategy:
+      fail-fast: false
+      matrix:
+        feature-group:
+          - yuv-planar yuv-semi-planar yuva yuv-packed yuv-444-packed y2xx v210 rgb
+          - yuv-planar yuva rgb rgb-float gbr gray rgb-legacy mono xyz bayer
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Cache cargo build and registry
+      - name: Cache cargo registry
         uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
-          key: ${{ runner.os }}-test-wasm-simd128-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-test-wasm-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-test-wasm-simd128-
+            ${{ runner.os }}-test-wasm-cargo-
       - name: Install Rust + wasm32-wasip1
         run: |
           rustup update stable --no-self-update
@@ -283,7 +297,7 @@ jobs:
           # or env access — the tests are pure compute.
           CARGO_TARGET_WASM32_WASIP1_RUNNER: wasmtime run --
           RUSTFLAGS: -C target-feature=+simd128
-        run: cargo test --lib --target wasm32-wasip1
+        run: cargo test --lib --target wasm32-wasip1 --no-default-features --features "std ${{ matrix.feature-group }}"
 
   # ASan + LSan instrument only the crate (no `-Zbuild-std`), so — unlike
   # MSan/TSan — they have no instrumented-std memory ceiling and do NOT need the
@@ -343,12 +357,12 @@ jobs:
   # The first five groups each carry yuv-planar (the conversion hub most of the
   # crate's cross-format cfg(all(...)) paths pair with), so a path gated on
   # yuv-planar plus family X is instrumented in the shard carrying X. A bare
-  # partition still leaves combination-gated tests in zero shards, so three
+  # partition still leaves combination-gated tests in zero shards, so four
   # supplementary shards follow — each kept memory-comparable to the residual
   # `...yuv-packed rgb` group — to close the specific conjunctions the inventory
   # flags: yuv-444-packed/v210/y2xx crossed with rgb or the yuva RGB-scratch
   # failpoints, the mono+rgb pal8 paths, and the 6-family `strategy_a` fan-out.
-  # The eight shards' `--tests` lists union to the full `--all-features`
+  # The nine shards' `--tests` lists union to the full `--all-features`
   # inventory (verified empirically, same as the asan job).
   sanitizer-msan:
     name: sanitizer-msan [${{ matrix.feature-group }}]
@@ -363,9 +377,14 @@ jobs:
           # Residual cross-format shard: the YUV-to-RGB combos whose two
           # non-yuv-planar sides fall in different groups above.
           - yuv-planar yuv-semi-planar yuva yuv-packed rgb
-          # Supplementary conjunction-closers (yuva pulls in yuv-planar):
-          # yuv-444-packed × {rgb, yuva RGB-scratch} + mono+rgb pal8 + gbr/gray.
-          - yuva yuv-444-packed gray gbr mono rgb
+          # Supplementary conjunction-closers (yuva pulls in yuv-planar),
+          # split so each shard's cold compile stays below the runner pool's
+          # reclamation horizon — the original six-family shard was the
+          # longest msan compile and was exit-143'd on consecutive runs:
+          # yuv-444-packed × {rgb, yuva RGB-scratch} …
+          - yuva yuv-444-packed rgb
+          # … and mono+rgb pal8 + gbr/gray × {yuva, rgb}.
+          - yuva gray gbr mono rgb
           # v210/y2xx × {rgb, yuva} — the packed 4:2:2 chroma-siting resamples.
           - yuva y2xx v210 rgb
           # The 6-family `strategy_a` fan-out needs all these families at once.
