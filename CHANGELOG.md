@@ -8,7 +8,7 @@ breaking changes bump the `x` in `0.x.y`.
 
 ## Unreleased
 
-## 0.2.0 — 2026-07-11
+## 0.2.0 & 0.2.1 — 2026-07-11
 
 ### Added
 
