@@ -119,6 +119,24 @@ happens, trading speed for colorimetric correctness:
 colconv = "0.2"
 ```
 
+## Examples
+
+Runnable, self-contained walkthroughs of every functional area live in
+[`examples/`](examples/):
+
+```sh
+cargo run --example quickstart        # the Tier-0 golden call
+cargo run --example formats_tour      # one call, every source family
+cargo run --example multi_output      # rgb + rgba + luma + hsv in one pass
+cargo run --example colorimetry       # matrices, ranges, ST 428-1
+cargo run --example chroma_siting     # every ChromaLocation honored
+cargo run --example resize_area       # fused INTER_AREA downscale
+cargo run --example resize_filtered   # filter kernels, upscale included
+cargo run --example tier1_resampling  # linear-light averaging + BICUBLIN
+cargo run --example tier1_sinker      # manual MixedSinker + walker
+cargo run --example bayer_demosaic    # raw pipeline: WB + CCM + demosaic
+```
+
 ## Feature flags
 
 Capability tiers (additive):

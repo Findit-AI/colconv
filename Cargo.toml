@@ -316,6 +316,49 @@ harness = false
 name = "monoblack_to_rgb"
 harness = false
 
+# Usage examples (`cargo run --example <name>`). Each declares the feature
+# set it decodes with so the CI feature ladder only compiles it where those
+# features are enabled; the default feature set enables all of them.
+[[example]]
+name = "quickstart"
+required-features = ["std", "yuv-planar"]
+
+[[example]]
+name = "multi_output"
+required-features = ["std", "yuv-planar"]
+
+[[example]]
+name = "colorimetry"
+required-features = ["std", "yuv-planar"]
+
+[[example]]
+name = "chroma_siting"
+required-features = ["std", "yuv-planar"]
+
+[[example]]
+name = "resize_area"
+required-features = ["std", "yuv-planar"]
+
+[[example]]
+name = "resize_filtered"
+required-features = ["std", "yuv-planar"]
+
+[[example]]
+name = "tier1_resampling"
+required-features = ["std", "yuv-planar", "rgb"]
+
+[[example]]
+name = "tier1_sinker"
+required-features = ["std", "yuva"]
+
+[[example]]
+name = "formats_tour"
+required-features = ["std", "frame"]
+
+[[example]]
+name = "bayer_demosaic"
+required-features = ["std", "bayer"]
+
 [features]
 default = ["std", "frame"]
 alloc = ["libm", "mediaframe/alloc"]
