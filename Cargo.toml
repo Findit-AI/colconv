@@ -1,6 +1,6 @@
 [package]
 name = "colconv"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 repository = "https://github.com/findit-studio/colconv"
 homepage = "https://github.com/findit-studio/colconv"
@@ -18,10 +18,6 @@ rust-version = "1.95.0"
 exclude = ["src/resample/pil_goldens.rs"]
 
 [lib]
-# `cargo bench` without this setting builds and runs the lib's `#[test]`
-# harness alongside the real bench targets; that harness rejects
-# `--output-format bencher` and breaks CI. We don't have any `#[bench]`
-# attributes in the lib anyway, so opt out of benchmarking it.
 bench = false
 
 [[bench]]
@@ -404,19 +400,8 @@ frame = [
   "mono",
 ]
 
-# Per-family pass-throughs. Each colconv feature activates the
-# matching mediaframe feature so frame types and source markers for
-# that family are available, AND gates colconv's internal sinker /
-# row / dispatch / SIMD-backend modules for the format-specific code.
-# Cross-format helpers (Q15 ranges, rgb_expand, hsv, raw::types,
-# alpha_extract, y_plane_to_luma_u16) stay always-available.
 yuv-planar      = ["mediaframe/yuv-planar"]
 yuv-semi-planar = ["mediaframe/yuv-semi-planar"]
-# YUVA shares 4:2:0 / 4:2:2 / 4:4:4 planar kernels with the
-# `yuv-planar` family (4-plane buffers, drop or pass the alpha
-# plane through the same `yuv_*p*_to_rgba_with_alpha_src_row`
-# kernels). Auto-enable `yuv-planar` so the underlying SIMD /
-# scalar primitives compile.
 yuva            = ["mediaframe/yuva", "yuv-planar"]
 yuv-packed      = ["mediaframe/yuv-packed"]
 yuv-444-packed  = ["mediaframe/yuv-444-packed"]
