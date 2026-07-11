@@ -76,7 +76,7 @@ fn decode(y: &[u8], u: &[u8], v: &[u8], w: u32, h: u32) -> Result<Vec<u8>, colco
 need streaming, a custom sink, custom output geometry, or Bayer, drop one
 tier down: assemble a [`MixedSinker`][doc-url] and drive it with the
 matching `{format}_to` walker — the same machinery `Convert` runs on. (The
-per-row kernel functions are internal as of 0.3.)
+per-row kernel functions are internal as of 0.2.)
 
 ## Resampling
 
@@ -116,7 +116,7 @@ happens, trading speed for colorimetric correctness:
 
 ```toml
 [dependencies]
-colconv = "0.3"
+colconv = "0.2"
 ```
 
 ## Feature flags

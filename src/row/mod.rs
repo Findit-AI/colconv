@@ -40,7 +40,7 @@
 //! `crate::row::*` (e.g. `crate::row::yuv_420_to_rgb_row`). Callers
 //! see no API change from the split.
 
-// As of 0.3 (RFC #392) `row` is `pub(crate)`: these per-row kernels are internal
+// As of 0.2 (RFC #392) `row` is `pub(crate)`: these per-row kernels are internal
 // plumbing, invoked by `MixedSinker` and the `{fmt}_to` walkers. Each source
 // family ships a *complete* kernel matrix (every output channel x endianness x
 // bit-depth variant), but `MixedSinker` reaches most families through the
