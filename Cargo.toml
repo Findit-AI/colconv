@@ -5,7 +5,10 @@ edition = "2024"
 repository = "https://github.com/findit-studio/colconv"
 homepage = "https://github.com/findit-studio/colconv"
 documentation = "https://docs.rs/colconv"
-description = "SIMD-dispatched color-conversion kernels covering the FFmpeg AVPixelFormat space, with a Sink-based API so consumers pick which derived outputs (RGB / Luma / HSV / custom) they want without paying for the ones they don't."
+readme = "README.md"
+description = "SIMD-dispatched color conversion for the FFmpeg AVPixelFormat space: one-call decode of validated source frames to RGB / RGBA / Luma / HSV, fused resampling while converting, colorimetry-honest matrices and chroma siting, no_std-friendly."
+keywords = ["color-conversion", "yuv", "rgb", "simd", "video"]
+categories = ["multimedia", "multimedia::video", "multimedia::images", "no-std", "no-std::no-alloc"]
 license = "GPL-3.0-or-later"
 rust-version = "1.95.0"
 # The PIL golden-fixture table is 55 MB of generated high-entropy data that
