@@ -25,6 +25,11 @@ env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -Dwarnings
   RUST_BACKTRACE: 1
+  # Pinned nightly for the sanitizer jobs (they need -Z flags). A floating
+  # `rustup update nightly` moves near-daily, so sanitizer behavior (and any
+  # breakage) could change with no repo change; the pin keeps the jobs
+  # reproducible and their toolchain download stable. Bump deliberately.
+  SANITIZER_NIGHTLY: nightly-2026-07-08
 
 jobs:
   # Check formatting (platform-independent, one OS is enough)
@@ -280,76 +285,119 @@ jobs:
           RUSTFLAGS: -C target-feature=+simd128
         run: cargo test --lib --target wasm32-wasip1
 
-  # ASan + LSan instrument only the crate (no `-Zbuild-std`), so the whole
-  # `--all-features` suite fits in one job.
+  # ASan + LSan instrument only the crate (no `-Zbuild-std`), so — unlike
+  # MSan/TSan — they have no instrumented-std memory ceiling and do NOT need the
+  # OOM-avoidance sharding. One `--all-features` job would fit memory-wise, but
+  # its single long compile spends minutes in exactly the window the runner
+  # pool's reclamation keeps killing (exit 143). So ASan shards purely for
+  # DURATION: two WIDE shards, each short enough to slip between reclamations,
+  # that between them jointly enable every feature conjunction the full
+  # `--all-features` test inventory needs. This is verified empirically — the
+  # two shards' `cargo test --tests -- --list` outputs union to the entire
+  # `--all-features` list — so no combination-gated test is silently dropped
+  # (e.g. `v210`/`y2xx` + `yuv-planar` + `rgb` chroma-siting resamples, the
+  # `<family>` + `yuva` RGB-scratch failpoints, or the 6-family `strategy_a`
+  # fan-out). A killed shard re-runs cheaply.
   sanitizer:
-    name: sanitizer-asan-lsan
+    name: sanitizer-asan-lsan [${{ matrix.feature-group }}]
+    strategy:
+      fail-fast: false
+      matrix:
+        feature-group:
+          # Every YUV family (planar / semi-planar / yuva / packed / 4:4:4
+          # packed / y2xx / v210) plus rgb: covers all YUV×YUV and YUV×rgb
+          # conjunctions, including the 6-family `strategy_a` fan-out.
+          - yuv-planar yuv-semi-planar yuva yuv-packed yuv-444-packed y2xx v210 rgb
+          # The rgb / rgb-float / rgb-legacy / gbr / gray / mono / xyz / bayer
+          # families, carrying yuv-planar + yuva for the conversion-hub and
+          # alpha RGB-scratch paths: covers every remaining family conjunction.
+          - yuv-planar yuva rgb rgb-float gbr gray rgb-legacy mono xyz bayer
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Cache cargo build and registry
+      # Cache only the cargo registry/git downloads — shard-independent and a
+      # few hundred MB, shared by every sanitizer shard. The instrumented
+      # `target` trees are deliberately NOT cached: 18 multi-GB archives would
+      # blow the repository's 10 GB actions-cache budget and LRU-thrash (the
+      # pre-shard family caches already did, which is why sanitizer runs
+      # always recompiled from cold). The exit-143 mitigation is the shard
+      # DURATION, not cache luck.
+      - name: Cache cargo registry
         uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
-          key: ${{ runner.os }}-sanitizer-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-sanitizer-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-sanitizer-
+            ${{ runner.os }}-sanitizer-cargo-
       - name: Install Rust
-        run: rustup update nightly && rustup default nightly
-      - name: Install rust-src
-        run: rustup component add rust-src
+        run: rustup toolchain install ${{ env.SANITIZER_NIGHTLY }} --component rust-src && rustup default ${{ env.SANITIZER_NIGHTLY }}
       - name: ASan / LSan
-        run: bash ci/sanitizer.sh asan-lsan
+        run: bash ci/sanitizer.sh asan-lsan "${{ matrix.feature-group }}"
 
   # MSan / TSan additionally recompile an instrumented `std` via `-Zbuild-std`.
   # Instrumenting std *and* the whole feature set at once OOM-kills the crate
-  # compile on the runner, so they are sharded by the same feature groups as
-  # the miri jobs — each shard compiles std plus one group, keeping the peak
-  # under the runner's memory. MSan shards additionally carry yuv-planar so
-  # cross-format conversion paths stay instrumented (see the matrix note); TSan
-  # stays one-group-per-shard, which its single-threaded code makes lossless.
+  # compile on the runner, so — unlike ASan — they MUST stay sharded into
+  # memory-bounded feature groups (each shard compiles std plus one group).
+  # The first five groups each carry yuv-planar (the conversion hub most of the
+  # crate's cross-format cfg(all(...)) paths pair with), so a path gated on
+  # yuv-planar plus family X is instrumented in the shard carrying X. A bare
+  # partition still leaves combination-gated tests in zero shards, so three
+  # supplementary shards follow — each kept memory-comparable to the residual
+  # `...yuv-packed rgb` group — to close the specific conjunctions the inventory
+  # flags: yuv-444-packed/v210/y2xx crossed with rgb or the yuva RGB-scratch
+  # failpoints, the mono+rgb pal8 paths, and the 6-family `strategy_a` fan-out.
+  # The eight shards' `--tests` lists union to the full `--all-features`
+  # inventory (verified empirically, same as the asan job).
   sanitizer-msan:
     name: sanitizer-msan [${{ matrix.feature-group }}]
     strategy:
       fail-fast: false
       matrix:
-        # Every MSan shard enables yuv-planar, the conversion hub that most of
-        # the crate's cross-format cfg(all(...)) paths pair with, so a path
-        # gated on yuv-planar plus family X is MSan-instrumented in the shard
-        # carrying X. The final residual shard adds the YUV-to-RGB conversion
-        # combos whose two non-yuv-planar sides fall in different groups
-        # (semi-planar / yuva / packed-YUV crossed with rgb); together the shards
-        # leave no cross-format conversion path uninstrumented by MSan. TSan
-        # stays one-group-per-shard (single-threaded code misses no race).
         feature-group:
           - yuv-planar yuv-semi-planar yuva
           - yuv-planar yuv-packed yuv-444-packed y2xx v210
           - yuv-planar rgb rgb-float gbr gray rgb-legacy
           - yuv-planar xyz bayer mono
+          # Residual cross-format shard: the YUV-to-RGB combos whose two
+          # non-yuv-planar sides fall in different groups above.
           - yuv-planar yuv-semi-planar yuva yuv-packed rgb
+          # Supplementary conjunction-closers (yuva pulls in yuv-planar):
+          # yuv-444-packed × {rgb, yuva RGB-scratch} + mono+rgb pal8 + gbr/gray.
+          - yuva yuv-444-packed gray gbr mono rgb
+          # v210/y2xx × {rgb, yuva} — the packed 4:2:2 chroma-siting resamples.
+          - yuva y2xx v210 rgb
+          # The 6-family `strategy_a` fan-out needs all these families at once.
+          - yuv-planar yuv-semi-planar yuv-packed yuv-444-packed v210 y2xx
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Cache cargo build and registry
+      # Registry/git only — see the asan cache note (18 instrumented `target`
+      # trees would thrash the 10 GB actions-cache budget).
+      - name: Cache cargo registry
         uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
-          key: ${{ runner.os }}-sanitizer-msan-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-sanitizer-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-sanitizer-msan-
+            ${{ runner.os }}-sanitizer-cargo-
       - name: Install Rust
-        run: rustup update nightly && rustup default nightly
-      - name: Install rust-src
-        run: rustup component add rust-src
+        run: rustup toolchain install ${{ env.SANITIZER_NIGHTLY }} --component rust-src && rustup default ${{ env.SANITIZER_NIGHTLY }}
       - name: MSan
         run: bash ci/sanitizer.sh msan "${{ matrix.feature-group }}"
 
+  # TSan also recompiles instrumented std via -Zbuild-std, so it shares MSan's
+  # memory ceiling and stays sharded. The first four groups are one family-set
+  # per shard (single-threaded pure-compute conversions miss no race however
+  # they are grouped), but a bare one-family-set-per-shard split never
+  # co-compiles yuv-planar with rgb (or with another YUV family), so the
+  # cross-format cfg(all(...)) tests would compile in zero shards. The last four
+  # shards restore those conjunctions — each memory-comparable to the residual
+  # group — so the eight shards' `--tests` lists union to the full
+  # `--all-features` inventory (verified empirically, same as the asan job).
   sanitizer-tsan:
     name: sanitizer-tsan [${{ matrix.feature-group }}]
     strategy:
@@ -360,23 +408,29 @@ jobs:
           - yuv-packed yuv-444-packed y2xx v210
           - rgb rgb-float gbr gray rgb-legacy
           - xyz bayer mono
+          # Conjunction-closers (yuva pulls in yuv-planar): semi-planar/yuva/
+          # packed × rgb; yuv-444-packed × {rgb, yuva} + mono+rgb pal8 + gbr/gray;
+          # v210/y2xx × {rgb, yuva}; and the 6-family `strategy_a` fan-out.
+          - yuv-planar yuv-semi-planar yuva yuv-packed rgb
+          - yuva yuv-444-packed gray gbr mono rgb
+          - yuva y2xx v210 rgb
+          - yuv-planar yuv-semi-planar yuv-packed yuv-444-packed v210 y2xx
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Cache cargo build and registry
+      # Registry/git only — see the asan cache note (18 instrumented `target`
+      # trees would thrash the 10 GB actions-cache budget).
+      - name: Cache cargo registry
         uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
-          key: ${{ runner.os }}-sanitizer-tsan-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-sanitizer-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-sanitizer-tsan-
+            ${{ runner.os }}-sanitizer-cargo-
       - name: Install Rust
-        run: rustup update nightly && rustup default nightly
-      - name: Install rust-src
-        run: rustup component add rust-src
+        run: rustup toolchain install ${{ env.SANITIZER_NIGHTLY }} --component rust-src && rustup default ${{ env.SANITIZER_NIGHTLY }}
       - name: TSan
         run: bash ci/sanitizer.sh tsan "${{ matrix.feature-group }}"
 

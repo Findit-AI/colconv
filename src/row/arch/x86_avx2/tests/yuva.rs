@@ -1,4 +1,8 @@
-use super::{super::*, high_bit_plane_avx2, interleave_uv_avx2, p16_plane_avx2, planar_n_plane};
+use super::{super::*, p16_plane_avx2, planar_n_plane};
+// Semi-planar (`p_n_444`) plane / UV-interleave builders — used only by
+// the `yuv-semi-planar`-gated 4:4:4 semi-planar equivalence helpers below.
+#[cfg(feature = "yuv-semi-planar")]
+use super::{high_bit_plane_avx2, interleave_uv_avx2};
 
 // ---- YUVA 4:4:4 u8 RGBA equivalence (Ship 8b‑1b) --------------------
 //
@@ -403,6 +407,7 @@ fn check_yuv444p_n_u16_avx2_rgba_equivalence<const BITS: u32>(
   );
 }
 
+#[cfg(feature = "yuv-semi-planar")]
 fn check_pn_444_u16_avx2_rgba_equivalence<const BITS: u32>(
   width: usize,
   matrix: ColorMatrix,
@@ -455,6 +460,7 @@ fn check_yuv444p16_u16_avx2_rgba_equivalence(width: usize, matrix: ColorMatrix, 
   );
 }
 
+#[cfg(feature = "yuv-semi-planar")]
 fn check_p_n_444_16_u16_avx2_rgba_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
   let y = p16_plane_avx2(width, 37);
   let u = p16_plane_avx2(width, 53);
@@ -507,6 +513,7 @@ fn avx2_yuv444p_n_rgba_u16_matches_scalar_tail_and_widths() {
   }
 }
 
+#[cfg(feature = "yuv-semi-planar")]
 #[test]
 fn avx2_pn_444_rgba_u16_matches_scalar_all_bits() {
   if !std::arch::is_x86_feature_detected!("avx2") {
@@ -527,6 +534,7 @@ fn avx2_pn_444_rgba_u16_matches_scalar_all_bits() {
   }
 }
 
+#[cfg(feature = "yuv-semi-planar")]
 #[test]
 fn avx2_pn_444_rgba_u16_matches_scalar_tail_and_widths() {
   if !std::arch::is_x86_feature_detected!("avx2") {
@@ -632,6 +640,7 @@ fn avx2_yuva444p16_rgba_u16_matches_scalar_widths_and_alpha() {
   }
 }
 
+#[cfg(feature = "yuv-semi-planar")]
 #[test]
 fn avx2_p416_rgba_u16_matches_scalar_all_matrices() {
   if !std::arch::is_x86_feature_detected!("avx2") {

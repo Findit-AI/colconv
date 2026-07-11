@@ -1,4 +1,8 @@
-use super::{super::*, high_bit_plane_wasm, interleave_uv_wasm, p16_plane_wasm, planar_n_plane};
+use super::{super::*, p16_plane_wasm, planar_n_plane};
+// Semi-planar (`p_n_444`) plane / UV-interleave builders — used only by
+// the `yuv-semi-planar`-gated 4:4:4 semi-planar equivalence helpers below.
+#[cfg(feature = "yuv-semi-planar")]
+use super::{high_bit_plane_wasm, interleave_uv_wasm};
 
 // ---- YUVA 4:4:4 u8 RGBA equivalence (Ship 8b‑1b) --------------------
 //
@@ -406,6 +410,7 @@ fn check_yuv444p_n_u16_simd128_rgba_equivalence<const BITS: u32>(
   );
 }
 
+#[cfg(feature = "yuv-semi-planar")]
 fn check_pn_444_u16_simd128_rgba_equivalence<const BITS: u32>(
   width: usize,
   matrix: ColorMatrix,
@@ -462,6 +467,7 @@ fn check_yuv444p16_u16_simd128_rgba_equivalence(
   );
 }
 
+#[cfg(feature = "yuv-semi-planar")]
 fn check_p_n_444_16_u16_simd128_rgba_equivalence(
   width: usize,
   matrix: ColorMatrix,
@@ -512,6 +518,7 @@ fn simd128_yuv444p_n_rgba_u16_matches_scalar_tail_and_widths() {
   }
 }
 
+#[cfg(feature = "yuv-semi-planar")]
 #[test]
 fn simd128_pn_444_rgba_u16_matches_scalar_all_bits() {
   for m in [
@@ -529,6 +536,7 @@ fn simd128_pn_444_rgba_u16_matches_scalar_all_bits() {
   }
 }
 
+#[cfg(feature = "yuv-semi-planar")]
 #[test]
 fn simd128_pn_444_rgba_u16_matches_scalar_tail_and_widths() {
   for w in [17usize, 31, 47, 63, 1920, 1922] {
@@ -622,6 +630,7 @@ fn simd128_yuva444p16_rgba_u16_matches_scalar_widths_and_alpha() {
   }
 }
 
+#[cfg(feature = "yuv-semi-planar")]
 #[test]
 fn simd128_p416_rgba_u16_matches_scalar_all_matrices() {
   for m in [
