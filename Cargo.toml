@@ -8,6 +8,11 @@ documentation = "https://docs.rs/colconv"
 description = "SIMD-dispatched color-conversion kernels covering the FFmpeg AVPixelFormat space, with a Sink-based API so consumers pick which derived outputs (RGB / Luma / HSV / custom) they want without paying for the ones they don't."
 license = "GPL-3.0-or-later"
 rust-version = "1.95.0"
+# The PIL golden-fixture table is 55 MB of generated high-entropy data that
+# alone blows the crates.io 10 MB package cap. Its module is
+# `#[cfg(all(test, ...))]`-gated, so the packaged crate builds without the
+# file; running the test suite requires the repository checkout.
+exclude = ["src/resample/pil_goldens.rs"]
 
 [lib]
 # `cargo bench` without this setting builds and runs the lib's `#[test]`
