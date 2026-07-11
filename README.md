@@ -76,7 +76,7 @@ fn decode(y: &[u8], u: &[u8], v: &[u8], w: u32, h: u32) -> Result<Vec<u8>, colco
 need streaming, a custom sink, custom output geometry, or Bayer, drop one
 tier down: assemble a [`MixedSinker`][doc-url] and drive it with the
 matching `{format}_to` walker — the same machinery `Convert` runs on. (The
-per-row kernel functions are internal as of 0.3.)
+per-row kernel functions are internal as of 0.2.)
 
 ## Resampling
 
@@ -116,7 +116,25 @@ happens, trading speed for colorimetric correctness:
 
 ```toml
 [dependencies]
-colconv = "0.3"
+colconv = "0.2"
+```
+
+## Examples
+
+Runnable, self-contained walkthroughs of every functional area live in
+[`examples/`](examples/):
+
+```sh
+cargo run --example quickstart        # the Tier-0 golden call
+cargo run --example formats_tour      # one call, every source family
+cargo run --example multi_output      # rgb + rgba + luma + hsv in one pass
+cargo run --example colorimetry       # matrices, ranges, ST 428-1
+cargo run --example chroma_siting     # every ChromaLocation honored
+cargo run --example resize_area       # fused INTER_AREA downscale
+cargo run --example resize_filtered   # filter kernels, upscale included
+cargo run --example tier1_resampling  # linear-light averaging + BICUBLIN
+cargo run --example tier1_sinker      # manual MixedSinker + walker
+cargo run --example bayer_demosaic    # raw pipeline: WB + CCM + demosaic
 ```
 
 ## Feature flags

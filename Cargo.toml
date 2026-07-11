@@ -1,6 +1,6 @@
 [package]
 name = "colconv"
-version = "0.3.0"
+version = "0.2.0"
 edition = "2024"
 repository = "https://github.com/findit-studio/colconv"
 homepage = "https://github.com/findit-studio/colconv"
@@ -316,6 +316,49 @@ harness = false
 name = "monoblack_to_rgb"
 harness = false
 
+# Usage examples (`cargo run --example <name>`). Each declares the feature
+# set it decodes with so the CI feature ladder only compiles it where those
+# features are enabled; the default feature set enables all of them.
+[[example]]
+name = "quickstart"
+required-features = ["std", "yuv-planar"]
+
+[[example]]
+name = "multi_output"
+required-features = ["std", "yuv-planar"]
+
+[[example]]
+name = "colorimetry"
+required-features = ["std", "yuv-planar"]
+
+[[example]]
+name = "chroma_siting"
+required-features = ["std", "yuv-planar"]
+
+[[example]]
+name = "resize_area"
+required-features = ["std", "yuv-planar"]
+
+[[example]]
+name = "resize_filtered"
+required-features = ["std", "yuv-planar"]
+
+[[example]]
+name = "tier1_resampling"
+required-features = ["std", "yuv-planar", "rgb"]
+
+[[example]]
+name = "tier1_sinker"
+required-features = ["std", "yuva"]
+
+[[example]]
+name = "formats_tour"
+required-features = ["std", "frame"]
+
+[[example]]
+name = "bayer_demosaic"
+required-features = ["std", "bayer"]
+
 [features]
 default = ["std", "frame"]
 alloc = ["libm", "mediaframe/alloc"]
@@ -324,7 +367,7 @@ std = ["thiserror/default", "mediaframe/std"]
 # Semver-EXEMPT, repository-internal tier. Exposes a curated `#[doc(hidden)]`
 # re-export shim (`colconv::bench_internals`) over the crate-private `row`
 # kernels so this repo's own Criterion benches (`benches/*.rs`) can measure them
-# directly after the 0.3 surface cut made `row` `pub(crate)`. It carries NO
+# directly after the 0.2 surface cut made `row` `pub(crate)`. It carries NO
 # stability guarantee and is not part of the public API — external consumers
 # must use the `Convert` tier or `MixedSinker` + the `{fmt}_to` walkers. Enable
 # it only for `cargo bench` (see `.github/workflows/benchmark.yml`).

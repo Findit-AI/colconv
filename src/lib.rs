@@ -64,7 +64,7 @@
 //! derive; the generic [`Walker`] plus per-format `Options` ([`YuvOptions`], …)
 //! give the same walk a uniform, spec-configurable shape.
 //!
-//! As of 0.3 the per-row SIMD kernels (`row::*`) are crate-internal plumbing
+//! As of 0.2 the per-row SIMD kernels (`row::*`) are crate-internal plumbing
 //! consumed by the sinker and walkers — they are no longer public API.
 //!
 //! # Supported source formats
@@ -311,7 +311,7 @@ pub mod convert;
 pub mod raw;
 #[cfg(any(feature = "std", feature = "alloc"))]
 pub mod resample;
-// The per-row SIMD kernels are crate-internal plumbing as of 0.3 (they are
+// The per-row SIMD kernels are crate-internal plumbing as of 0.2 (they are
 // consumed only by `MixedSinker` / the `{fmt}_to` walkers). The crate's own
 // benches reach a curated subset through the semver-exempt
 // `unstable-bench-internals` shim (`bench_internals`), never `row` directly.
