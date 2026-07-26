@@ -20,10 +20,10 @@
 //!
 //! # Why this exists separately from the matrix
 //!
-//! colconv's [`ColorMatrix`] (the mediaframe `Matrix`) is an H.273
+//! pixon's [`ColorMatrix`] (the mediaframe `Matrix`) is an H.273
 //! *MatrixCoefficients* value — it fixes the YCbCr→RGB matrix, not the
 //! transfer characteristics. The transfer (H.273 *TransferCharacteristics*)
-//! is an independent axis colconv's YUV row stage does not carry, because
+//! is an independent axis pixon's YUV row stage does not carry, because
 //! the convert is purely affine. The Linear domain is the first consumer
 //! that needs it, so this module supplies the curves and a per-matrix
 //! [default resolution](TransferFunction::for_matrix).
@@ -466,7 +466,7 @@ impl TransferFunction {
   /// symmetrically rather than folding. The integer narrow downstream
   /// clamps the re-encoded result.
   ///
-  /// The current colconv Linear path feeds only clamped 8-bit RGB in
+  /// The current pixon Linear path feeds only clamped 8-bit RGB in
   /// `[0, 1]`, so this out-of-range extrapolation is dormant there; it is
   /// part of the public contract for any (future) scene-linear consumer
   /// that decodes the unclamped affine `YUV→RGB`, where super-black /

@@ -499,7 +499,7 @@ fn accepts_alpha_mode_change_across_frames() {
 // (`check_frozen_alpha_mode`, `packed_rgba_resample`,
 // `packed_rgba_u16_resample`, `packed_rgb_resample_*`). A `GbrapRow` can
 // only be constructed by `mediaframe`'s in-order `gbrap_to` walker
-// (`GbrapRow::new` is `pub(crate)`), so a colconv test cannot inject an
+// (`GbrapRow::new` is `pub(crate)`), so a pixon test cannot inject an
 // out-of-sequence row or a mid-frame mutation here. The cross-frame
 // re-arm above is the part observable through the walker; the mid-frame
 // rejections are covered by the shared-tail packed-RGBA suites (mirroring

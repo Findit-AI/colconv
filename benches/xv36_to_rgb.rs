@@ -11,7 +11,7 @@
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;
 
-use colconv::{ColorMatrix, bench_internals::xv36_to_rgb_row};
+use pixon::{ColorMatrix, bench_internals::xv36_to_rgb_row};
 
 /// Fills a `u16` buffer with deterministic XV36‑packed pseudo‑random
 /// 12‑bit samples (low 12 bits set, high 4 bits zero — kernel masks

@@ -132,7 +132,7 @@ pub use mediaframe::{
 /// Whether `loc` places 4:2:0 chroma at the **horizontal center** between
 /// its two luma columns — the MPEG-1 / JPEG phase that needs phase-0.5
 /// reconstruction ([`chroma_upsample_2to1_center_h`](crate::row::scalar::chroma_upsample_2to1_center_h))
-/// rather than colconv's default nearest-neighbor decode (#302).
+/// rather than pixon's default nearest-neighbor decode (#302).
 ///
 /// The full [`ChromaLocation`](crate::ChromaLocation) → 4:2:0 sample-phase
 /// map (FFmpeg `AVChromaLocation` semantics — horizontal phase in
@@ -154,7 +154,7 @@ pub use mediaframe::{
 /// for the centered group (`Center` / `Top` / `Bottom`) and `false` for the
 /// co-sited group (`Left` / `TopLeft` / `BottomLeft`) and the
 /// unspecified/unknown codes. The co-sited and unspecified sitings all keep
-/// the byte-identical default path — colconv's existing nearest-neighbor
+/// the byte-identical default path — pixon's existing nearest-neighbor
 /// decode already places chroma at the left-column (phase-0) position, so
 /// they need no new interpolation.
 ///
@@ -322,7 +322,7 @@ pub(super) const fn chroma_440_top_sited_v(loc: crate::ChromaLocation) -> bool {
 /// two luma columns — the MPEG-1 / JPEG horizontal phase that needs phase-0.5
 /// reconstruction
 /// ([`chroma_upsample_2to1_center_h`](crate::row::scalar::chroma_upsample_2to1_center_h),
-/// the SAME 2:1 horizontal upsample 4:2:0 uses) rather than colconv's default
+/// the SAME 2:1 horizontal upsample 4:2:0 uses) rather than pixon's default
 /// nearest-neighbor decode (#302).
 ///
 /// 4:2:2 subsamples chroma 2:1 **horizontally only** — one chroma row per luma
@@ -347,7 +347,7 @@ pub(super) const fn chroma_422_center_sited_h(loc: crate::ChromaLocation) -> boo
 /// luma columns it covers — the MPEG-1 / JPEG horizontal phase that needs the
 /// `1→4` phase reconstruction
 /// ([`chroma_upsample_4to1_center_h`](crate::row::scalar::chroma_upsample_4to1_center_h))
-/// rather than colconv's default nearest-neighbor decode (#302).
+/// rather than pixon's default nearest-neighbor decode (#302).
 ///
 /// 4:1:1 subsamples chroma 4:1 **horizontally only** — one chroma row per luma
 /// row, no vertical subsampling — so the siting reduces to its horizontal axis
@@ -1993,7 +1993,7 @@ pub enum RowSlice {
 /// straight RGB of a premultiplied source would let fully-transparent
 /// pixels (whose stored RGB is arbitrary) bleed into the result.
 ///
-/// Every packed-RGBA source format colconv ships today is straight (see
+/// Every packed-RGBA source format pixon ships today is straight (see
 /// [`DefaultAlphaMode`]); the mode only matters on the resample path and
 /// is a no-op for the direct (identity-plan) conversions, which copy
 /// alpha through untouched.
@@ -2026,7 +2026,7 @@ impl AlphaMode {
 /// [`MixedSinker::with_alpha_mode`] override.
 ///
 /// The blanket impl below makes every [`SourceFormat`] default to
-/// [`AlphaMode::Straight`] — true of every packed-RGBA source colconv
+/// [`AlphaMode::Straight`] — true of every packed-RGBA source pixon
 /// ships today (`Rgba` / `Bgra` / `Argb` / `Abgr` / `Rgba64` /
 /// `Bgra64`). A future source format whose wire alpha is associated
 /// would carry its premultiplied default here (replacing the blanket
@@ -2070,7 +2070,7 @@ impl<F: SourceFormat> DefaultAlphaMode for F {}
 /// A full XYZ↔RGB *matrix* derivation — tabulated primaries → the real
 /// D-Cinema RGB matrix under [`Self::FfmpegTabulated`], versus the XYZ
 /// identity under [`Self::CieXyz`] — is a later enhancement with no consumer
-/// today (colconv has no primaries-driven RGB↔XYZ matrix path; XYZ sources go
+/// today (pixon has no primaries-driven RGB↔XYZ matrix path; XYZ sources go
 /// through the separate `xyz12` colorimetry). This toggle reserves the
 /// caller-facing switch so that derivation has a home when a consumer arrives.
 ///
@@ -2134,7 +2134,7 @@ impl St428CieXyzUnsupported {
 /// Whether `primaries` denote data that is *already* CIE XYZ under the
 /// [CIE-XYZ interpretation](St428Interpretation::CieXyz).
 ///
-/// Self-contained colconv knowledge, independent of the mediaframe version:
+/// Self-contained pixon knowledge, independent of the mediaframe version:
 /// Enforces the [`St428Interpretation`] contract at the single
 /// primaries-driven luma-weight derivation
 /// ([`ChromaDerivedNcl`](crate::ColorMatrix::ChromaDerivedNcl), resolved by
@@ -3640,7 +3640,7 @@ pub struct MixedSinker<'a, F: SourceFormat, R = NoopResampler> {
   transfer_function: Option<TransferFunction>,
   /// Chroma sample location driving siting-aware 4:2:0 chroma upsampling
   /// (#302). Defaults to [`ChromaLocation::Unspecified`](crate::ChromaLocation::Unspecified)
-  /// — colconv's nearest-neighbor decode, byte-identical to the pre-#302
+  /// — pixon's nearest-neighbor decode, byte-identical to the pre-#302
   /// behaviour. Set via [`Self::with_chroma_location`] /
   /// [`Self::set_chroma_location`]; the centered horizontal sitings
   /// (`Center` / `Top` / `Bottom`, per `chroma_420_center_sited_h`) route
@@ -5148,7 +5148,7 @@ impl<F: SourceFormat, R> MixedSinker<'_, F, R> {
   /// Sets how the source's packed alpha relates to its color channels
   /// when the frame is **area-resampled**, overriding the per-format
   /// default ([`DefaultAlphaMode`], [`AlphaMode::Straight`] for every
-  /// packed-RGBA source colconv ships). Mirrors the [`Self::with_simd`]
+  /// packed-RGBA source pixon ships). Mirrors the [`Self::with_simd`]
   /// builder pattern.
   ///
   /// [`AlphaMode::Premultiplied`] makes the packed-RGBA resample tail
@@ -5232,7 +5232,7 @@ impl<F: SourceFormat, R> MixedSinker<'_, F, R> {
   /// [`TransferFunction::Bt1886`]).
   ///
   /// Use this when the source's transfer characteristics are known out of
-  /// band (colconv's YUV row stage carries the matrix but not the
+  /// band (pixon's YUV row stage carries the matrix but not the
   /// transfer). The override is consulted only on the linear-light path;
   /// the encoded and direct paths ignore it. See
   /// [`Self::set_transfer_function`] for the in-place variant.
@@ -5301,7 +5301,7 @@ impl<F: SourceFormat, R> MixedSinker<'_, F, R> {
   ///
   /// The default [`ChromaLocation::Unspecified`](crate::ChromaLocation::Unspecified)
   /// — and every horizontally co-sited value (`Left` / `TopLeft` /
-  /// `BottomLeft`) — keeps colconv's nearest-neighbor decode, byte-identical
+  /// `BottomLeft`) — keeps pixon's nearest-neighbor decode, byte-identical
   /// to the pre-#302 output. The horizontally **centered** sitings (`Center`
   /// / `Top` / `Bottom`, the MPEG-1 / JPEG phase) route the identity-plan
   /// 4:2:0 decode through a phase-0.5 chroma upsample + the 4:4:4 kernels,
@@ -5348,7 +5348,7 @@ impl<F: SourceFormat, R> MixedSinker<'_, F, R> {
   ///
   /// ```
   /// # #[cfg(all(feature = "yuv-planar", feature = "rgb"))] {
-  /// use colconv::{
+  /// use pixon::{
   ///   ChromaLocation, ColorInfo, ColorMatrix, ColorSpec, DynamicRange, PixelFormat,
   ///   Primaries, Transfer, YuvOptions, sinker::MixedSinker, source::Yuv420p,
   /// };

@@ -7,7 +7,7 @@
 //! cargo run --example tier1_sinker
 //! ```
 
-use colconv::{
+use pixon::{
   ColorMatrix, ColorSpec, Convert, DynamicRange, PixelFormat,
   frame::{Yuv420pFrame, Yuva420pFrame},
   resample::AreaResampler,

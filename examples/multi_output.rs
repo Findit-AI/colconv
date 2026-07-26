@@ -8,9 +8,9 @@
 //! cargo run --example multi_output
 //! ```
 
-use colconv::{ColorMatrix, ColorSpec, Convert, DynamicRange, PixelFormat, frame::Yuv420pFrame};
+use pixon::{ColorMatrix, ColorSpec, Convert, DynamicRange, PixelFormat, frame::Yuv420pFrame};
 
-fn main() -> Result<(), colconv::Error> {
+fn main() -> Result<(), pixon::Error> {
   let y = [40u8, 80, 120, 160, 200, 240, 30, 70];
   let u = [100u8, 150];
   let v = [150u8, 100];

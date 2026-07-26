@@ -6,12 +6,12 @@
 //! cargo run --example chroma_siting
 //! ```
 
-use colconv::{
+use pixon::{
   ChromaLocation, ColorInfo, ColorMatrix, ColorSpec, Convert, DynamicRange, PixelFormat, Primaries,
   Transfer, frame::Yuv420pFrame,
 };
 
-fn main() -> Result<(), colconv::Error> {
+fn main() -> Result<(), pixon::Error> {
   // 4x4 YUV 4:2:0 with a strong chroma gradient, so the siting phase is
   // visible in the reconstructed pixels.
   let y = [128u8; 16];

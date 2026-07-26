@@ -22,7 +22,7 @@
 ///
 /// `f32::round` would round half-away-from-zero (e.g. `0.5 → 1`),
 /// which diverges from SIMD on exact `.5` inputs. `f32::round_ties_even`
-/// matches SIMD but is `std`-only on f32 — `colconv` is `no_std`-capable,
+/// matches SIMD but is `std`-only on f32 — `pixon` is `no_std`-capable,
 /// so we implement the rule manually using integer arithmetic.
 #[cfg_attr(not(tarpaulin), inline(always))]
 fn round_ties_even_nonneg(x: f32) -> f32 {

@@ -37,7 +37,7 @@ use crate::{
 // hand-built `Xyz12Row` at a non-sequential index via
 // `sink.process(...)` (the pattern the `resample_rgbf32` /
 // `resample_rgb48` tests use). `Xyz12Row::new` is `pub(crate)` in the
-// upstream `mediaframe` crate, so colconv cannot construct one — there
+// upstream `mediaframe` crate, so pixon cannot construct one — there
 // is no public Row constructor or `From` impl. The sequence-check and
 // the conditional-ordered frozen-output snapshot (the sink's resample
 // route calls the shared compare-only `resample_preflight_check_only`,

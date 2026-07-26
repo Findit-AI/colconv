@@ -16,7 +16,7 @@
 //! This module is **purely additive** — it sits on top of the existing
 //! walkers and sinks and changes none of their behaviour. The marker
 //! types it implements [`Walker`] for are mediaframe's foreign
-//! `crate::source::*` ZSTs; [`Walker`] is colconv's own local trait, so
+//! `crate::source::*` ZSTs; [`Walker`] is pixon's own local trait, so
 //! the impls satisfy the orphan rule (a local trait for a foreign
 //! type).
 
@@ -880,7 +880,7 @@ impl Default for YuvOptions {
 /// [`resolve`](Self::resolve) leaves the three `Unspecified`.
 ///
 /// ```
-/// use colconv::{ColorMatrix, ColorSpec, DynamicRange, PixelFormat, YuvOptions};
+/// use pixon::{ColorMatrix, ColorSpec, DynamicRange, PixelFormat, YuvOptions};
 ///
 /// // A `yuvj420p` source pins full-range: the stream's claimed range loses.
 /// let spec = ColorSpec::resolve(PixelFormat::Yuvj420p, DynamicRange::Limited, ColorMatrix::Bt601);
@@ -900,7 +900,7 @@ impl Default for YuvOptions {
 /// while carrying the full colour description:
 ///
 /// ```
-/// use colconv::{ChromaLocation, ColorInfo, ColorMatrix, ColorSpec, DynamicRange, Primaries, PixelFormat, Transfer};
+/// use pixon::{ChromaLocation, ColorInfo, ColorMatrix, ColorSpec, DynamicRange, Primaries, PixelFormat, Transfer};
 ///
 /// // The stream claims limited range, but a `yuvj420p` source still pins full.
 /// let info = ColorInfo::new(
@@ -938,7 +938,7 @@ impl ColorSpec {
   /// `stream_range`. `matrix` always passes through unchanged (a format's
   /// identity pins no matrix).
   ///
-  /// The resolved [`DynamicRange`] maps to colconv's internal `full_range`
+  /// The resolved [`DynamicRange`] maps to pixon's internal `full_range`
   /// flag as: [`Full`](DynamicRange::Full) → `true`;
   /// [`Limited`](DynamicRange::Limited) /
   /// [`Unspecified`](DynamicRange::Unspecified) → `false`. An
@@ -1139,7 +1139,7 @@ impl BayerOptions {
   }
 }
 
-// Every impl below pairs colconv's local [`Walker`] trait with a
+// Every impl below pairs pixon's local [`Walker`] trait with a
 // foreign `crate::source::*` marker, so each satisfies the orphan rule
 // (local trait, foreign type). The single per-impl `where S: …Sink`
 // bound is the one its `{fmt}_to` fn requires; the trait's

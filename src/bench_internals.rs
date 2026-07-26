@@ -1,7 +1,7 @@
 //! Semver-exempt bench-only re-exports of internal `row` kernels.
 //!
 //! The 0.2 surface cut made `row` `pub(crate)` (RFC
-//! [#392](https://github.com/findit-studio/colconv/issues/392)). This module,
+//! [#392](https://github.com/findit-studio/pixon/issues/392)). This module,
 //! gated behind the `unstable-bench-internals` feature and hidden from the docs,
 //! re-exposes exactly the per-row dispatchers the repository's Criterion benches
 //! (`benches/*.rs`) call directly, and nothing else. It is **not** public API:

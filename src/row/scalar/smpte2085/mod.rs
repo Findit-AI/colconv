@@ -33,7 +33,7 @@
 //!
 //! 1. **Dequantize** the integer `Y',D'z,D'x` samples to the normalized
 //!    domain (`Y' ∈ [0,1]` luma-like, `D'z,D'x` signed chroma-like), using the
-//!    identical studio/full-range scaling colconv's affine YCbCr decode uses
+//!    identical studio/full-range scaling pixon's affine YCbCr decode uses
 //!    ([`super::range_params_n`]) — `Y'D'zD'x` is carried in a YCbCr container
 //!    and shares its H.273 quantization (the same encoding as [`super::ictcp`]
 //!    / [`super::iptc2`], `Y'` in the Y-slot, `D'z`/`D'x` in the Cb/Cr slots).
@@ -44,7 +44,7 @@
 //! 4. **[`M_XYZ_TO_RGB_REC2020`]** maps linear `XYZ → RGB` in the BT.2020
 //!    output gamut.
 //! 5. **PQ OETF** re-encodes linear `RGB → R'G'B'` per channel, yielding the
-//!    `R'G'B'` display signal. This matches colconv's transfer-preserving
+//!    `R'G'B'` display signal. This matches pixon's transfer-preserving
 //!    convention (the affine YCbCr decode likewise emits `R'G'B'` in the
 //!    source's transfer domain). The integer-output kernels narrow `R'G'B'`;
 //!    out-of-gamut excursions clamp at the narrow.

@@ -621,7 +621,7 @@ pub fn xyz12_rgb_to_luma_row(
 ///
 /// `u16` carrier preserves the `[0, 255]` dynamic range from the u8
 /// luma path (zero-extended), matching every other `*_to_luma_u16_row`
-/// kernel in colconv. `use_simd` is currently a no-op (see
+/// kernel in pixon. `use_simd` is currently a no-op (see
 /// [`xyz12_rgb_to_luma_row`] for rationale).
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub fn xyz12_rgb_to_luma_u16_row(

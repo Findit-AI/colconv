@@ -27,7 +27,7 @@
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;
 
-use colconv::{
+use pixon::{
   ColorMatrix,
   bench_internals::{vuya_to_rgb_row, vuya_to_rgba_row},
   frame::VuyaFrame,

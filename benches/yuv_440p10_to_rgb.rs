@@ -15,7 +15,7 @@
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;
 
-use colconv::{
+use pixon::{
   ColorMatrix,
   frame::Yuv440p10Frame,
   sinker::MixedSinker,

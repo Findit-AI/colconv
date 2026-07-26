@@ -14,7 +14,7 @@
 use criterion::{Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
 
-use colconv::{
+use pixon::{
   ColorMatrix,
   frame::{Nv12Frame, Nv21Frame, P010LeFrame, Rgb24Frame, Yuv420p16LeFrame, Yuv420pFrame},
   resample::AreaResampler,

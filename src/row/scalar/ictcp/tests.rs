@@ -4,9 +4,9 @@
 //! BT.2100 ICtCp implementation (`colour.ICtCp_to_RGB`, PQ and HLG) — plus
 //! BT.2100-2 structural anchors that hold independently of any library.
 //!
-//! Domain convention (matching colconv's normalized transfer, where signal
+//! Domain convention (matching pixon's normalized transfer, where signal
 //! `1.0` = 10 000 cd/m² for PQ): a `colour-science` PQ result is in absolute
-//! `cd/m²` with `L_p = 10000`, so `colconv linear RGB = colour / 10000`; HLG
+//! `cd/m²` with `L_p = 10000`, so `pixon linear RGB = colour / 10000`; HLG
 //! has no `L_p` (scene-linear `[0, 1]`), so they coincide directly. This is
 //! the same `÷10000` relationship the #313 transfer tests already establish
 //! (`pq_oetf(0.01)` = `colour eotf_inverse_ST2084(100)`).
@@ -160,7 +160,7 @@ fn pq_decode_matches_colour_science() {
 }
 
 /// HLG decode pinned against `colour.ICtCp_to_RGB(method="ITU-R BT.2100-2
-/// HLG")`. No `L_p`; colconv linear RGB equals the `colour` result directly.
+/// HLG")`. No `L_p`; pixon linear RGB equals the `colour` result directly.
 #[test]
 fn hlg_decode_matches_colour_science() {
   let tf = IctcpTransfer::Hlg;

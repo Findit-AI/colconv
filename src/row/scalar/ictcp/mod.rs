@@ -22,7 +22,7 @@
 //!
 //! 1. **Dequantize** the integer `I,Ct,Cp` samples to the normalized
 //!    domain (`I ∈ [0,1]` luma-like, `Ct,Cp` signed chroma-like), using the
-//!    identical studio/full-range scaling colconv's affine YCbCr decode uses
+//!    identical studio/full-range scaling pixon's affine YCbCr decode uses
 //!    ([`super::range_params_n`]) — ICtCp is carried in a YCbCr container
 //!    and shares its H.273 quantization.
 //! 2. **Inverse ICtCp matrix** `M⁻¹` maps `I,Ct,Cp → L'M'S'`. The matrix
@@ -34,7 +34,7 @@
 //! 4. **`M_LMS→RGB`** (the inverse of the BT.2020 `RGB→LMS` crosstalk
 //!    matrix) maps linear `LMS → RGB`.
 //! 5. **OETF** re-encodes linear `RGB → R'G'B'` per channel (PQ or HLG),
-//!    yielding the BT.2100 `R'G'B'` display signal. This matches colconv's
+//!    yielding the BT.2100 `R'G'B'` display signal. This matches pixon's
 //!    transfer-preserving convention (the affine YCbCr decode likewise
 //!    emits `R'G'B'` in the source's transfer domain) and BT.2100's own
 //!    definition of `R'G'B'` as the PQ/HLG-encoded RGB. The integer-output

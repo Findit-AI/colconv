@@ -7,7 +7,7 @@
 //! cargo run --example tier1_resampling
 //! ```
 
-use colconv::{
+use pixon::{
   ColorMatrix, ColorSpec, DynamicRange, PixelFormat,
   frame::Yuv420pFrame,
   resample::{AreaResampler, AveragingDomain, Bicublin, LinearMode, TransferFunction},
@@ -35,7 +35,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   let decode = |domain: AveragingDomain,
                 tf: Option<TransferFunction>,
                 mode: LinearMode|
-   -> Result<Vec<u8>, colconv::Error> {
+   -> Result<Vec<u8>, pixon::Error> {
     let mut rgb = vec![0u8; ow * oh * 3];
     {
       let mut sink =

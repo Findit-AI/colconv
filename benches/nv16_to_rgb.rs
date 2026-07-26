@@ -4,7 +4,7 @@
 //! difference is purely in the vertical walker (one UV row per Y
 //! row for NV16 vs one per two Y rows for NV12). This bench calls
 //! [`nv12_to_rgb_row`] directly, which is what
-//! [`MixedSinker<Nv16>`](colconv::sinker::MixedSinker) does as well.
+//! [`MixedSinker<Nv16>`](pixon::sinker::MixedSinker) does as well.
 //! Numerically identical output to the NV12 bench at the same width.
 //!
 //! Two variants per width — `simd=true` (best available backend) and
@@ -14,7 +14,7 @@
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;
 
-use colconv::{ColorMatrix, bench_internals::nv12_to_rgb_row};
+use pixon::{ColorMatrix, bench_internals::nv12_to_rgb_row};
 
 fn fill_pseudo_random(buf: &mut [u8], seed: u32) {
   let mut state = seed;

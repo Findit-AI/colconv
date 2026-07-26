@@ -11,7 +11,7 @@
 //! cargo run --example formats_tour
 //! ```
 
-use colconv::{ColorMatrix, ColorSpec, Convert, DynamicRange, PixelFormat, Source};
+use pixon::{ColorMatrix, ColorSpec, Convert, DynamicRange, PixelFormat, Source};
 
 /// Decodes `frame` to RGB and prints the first pixel. The spec is resolved
 /// against each source's **actual** pixel format — never reuse a spec
@@ -52,7 +52,7 @@ fn pack_v210_row(samples: [u16; 12]) -> [u8; 16] {
 }
 
 fn main() {
-  use colconv::frame::{
+  use pixon::frame::{
     Ayuv64LeFrame, GbrpFrame, Gray8Frame, MonoblackFrame, Nv12Frame, Pal8Frame, Rgb24Frame,
     Rgb48LeFrame, Rgb565Frame, Rgbaf32LeFrame, V210LeFrame, VuyxFrame, Xyz12LeFrame, Y210LeFrame,
     Ya8Frame, Yuv420p10Frame, Yuv444pFrame, Yuva420pFrame, Yuyv422Frame,

@@ -9,8 +9,8 @@
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;
 
-use colconv::bench_internals::rgbf16_to_rgb_row;
 use half::f16;
+use pixon::bench_internals::rgbf16_to_rgb_row;
 
 /// Fills an `f16` buffer with deterministic pseudo‑random values in the
 /// `[0.0, 1.0]` valid range.

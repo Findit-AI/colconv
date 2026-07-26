@@ -1,10 +1,10 @@
 [package]
-name = "colconv"
+name = "pixon"
 version = "0.2.1"
 edition = "2024"
-repository = "https://github.com/findit-studio/colconv"
-homepage = "https://github.com/findit-studio/colconv"
-documentation = "https://docs.rs/colconv"
+repository = "https://github.com/findit-studio/pixon"
+homepage = "https://github.com/findit-studio/pixon"
+documentation = "https://docs.rs/pixon"
 readme = "README.md"
 description = "SIMD-dispatched color conversion for the FFmpeg AVPixelFormat space: one-call decode of validated source frames to RGB / RGBA / Luma / HSV, fused resampling while converting, colorimetry-honest matrices and chroma siting, no_std-friendly."
 keywords = ["color-conversion", "yuv", "rgb", "simd", "video"]
@@ -369,7 +369,7 @@ alloc = ["libm", "mediaframe/alloc"]
 std = ["thiserror/default", "mediaframe/std"]
 
 # Semver-EXEMPT, repository-internal tier. Exposes a curated `#[doc(hidden)]`
-# re-export shim (`colconv::bench_internals`) over the crate-private `row`
+# re-export shim (`pixon::bench_internals`) over the crate-private `row`
 # kernels so this repo's own Criterion benches (`benches/*.rs`) can measure them
 # directly after the 0.2 surface cut made `row` `pub(crate)`. It carries NO
 # stability guarantee and is not part of the public API — external consumers
@@ -379,7 +379,7 @@ unstable-bench-internals = []
 
 # Umbrella — enables every per-family sub-feature below (mirrors
 # mediaframe's `frame` umbrella). Activates mediaframe's frame umbrella
-# and every colconv per-family feature so the internal sinker / row /
+# and every pixon per-family feature so the internal sinker / row /
 # dispatch / SIMD-backend modules for every format are compiled in.
 frame = [
   "mediaframe/frame",

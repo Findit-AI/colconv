@@ -681,7 +681,7 @@ impl Coefficients {
         b_v: -32768,
       },
       // ColorMatrix is #[non_exhaustive] in mediaframe; fall back to BT.709
-      // for any future variants added there before colconv is updated.
+      // for any future variants added there before pixon is updated.
       _ => Self {
         r_u: 0,
         r_v: 51606,

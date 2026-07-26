@@ -36,7 +36,7 @@
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;
 
-use colconv::{
+use pixon::{
   ColorMatrix,
   bench_internals::{
     yuv_444_to_rgb_row, yuv444p10_to_rgb_row, yuv444p10_to_rgb_u16_row, yuv444p16_to_rgb_row,
