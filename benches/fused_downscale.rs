@@ -7,6 +7,7 @@
 //! - the ROW-STAGE tier (convert each row at source res, then bin),
 //! - the full-res conversion baseline (what convert-then-resize
 //!   pipelines pay before they even start resizing),
+//!
 //! plus the packed-RGB fused path, and luma-only variants (which
 //! never read chroma).
 
