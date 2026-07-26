@@ -148,7 +148,7 @@ pub(crate) const fn xyz_to_rgb_matrix(g: DcpTargetGamut) -> [[f32; 3]; 3] {
     DcpTargetGamut::Rec709 => M_XYZ_TO_RGB_REC709,
     DcpTargetGamut::Rec2020 => M_XYZ_TO_RGB_REC2020,
     // DcpTargetGamut is #[non_exhaustive] in mediaframe; fall back to DciP3
-    // for any future variants added there before colconv is updated.
+    // for any future variants added there before pixon is updated.
     _ => M_XYZ_TO_RGB_DCI_P3,
   }
 }

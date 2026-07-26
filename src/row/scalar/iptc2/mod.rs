@@ -23,7 +23,7 @@
 //!
 //! 1. **Dequantize** the integer `I,P,T` samples to the normalized domain
 //!    (`I ∈ [0,1]` luma-like, `P,T` signed chroma-like), using the identical
-//!    studio/full-range scaling colconv's affine YCbCr decode uses
+//!    studio/full-range scaling pixon's affine YCbCr decode uses
 //!    ([`super::range_params_n`]) — IPT-C2 is carried in a YCbCr container and
 //!    shares its H.273 quantization (the same encoding as [`super::ictcp`]).
 //! 2. **Inverse IPT-C2 rotation** [`IPTC2_IPT_TO_LMSP`] maps `I,P,T → L'M'S'`.
@@ -34,7 +34,7 @@
 //! 4. **[`IPTC2_LMS_TO_RGB`]** (the inverse of IPT-C2's own `RGB→LMS`
 //!    crosstalk matrix) maps linear `LMS → RGB`.
 //! 5. **PQ OETF** re-encodes linear `RGB → R'G'B'` per channel, yielding the
-//!    `R'G'B'` display signal. This matches colconv's transfer-preserving
+//!    `R'G'B'` display signal. This matches pixon's transfer-preserving
 //!    convention (the affine YCbCr decode likewise emits `R'G'B'` in the
 //!    source's transfer domain). The integer-output kernels narrow `R'G'B'`;
 //!    out-of-gamut excursions clamp at the narrow.

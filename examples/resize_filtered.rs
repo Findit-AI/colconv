@@ -7,7 +7,7 @@
 //! cargo run --example resize_filtered
 //! ```
 
-use colconv::{
+use pixon::{
   ColorMatrix, ColorSpec, Convert, DynamicRange, PixelFormat,
   frame::Yuv420pFrame,
   resample::{CatmullRom, FilterKernel, Lanczos3, Mitchell, Triangle},
@@ -19,7 +19,7 @@ fn downscale<K: FilterKernel>(
   frame: &Yuv420pFrame<'_>,
   spec: ColorSpec,
   kernel: K,
-) -> Result<(), colconv::Error> {
+) -> Result<(), pixon::Error> {
   let mut rgb = vec![0u8; 3 * 3 * 3];
   Convert::from(frame)
     .spec(spec)
@@ -30,7 +30,7 @@ fn downscale<K: FilterKernel>(
   Ok(())
 }
 
-fn main() -> Result<(), colconv::Error> {
+fn main() -> Result<(), pixon::Error> {
   let (w, h) = (8usize, 8usize);
   let y: Vec<u8> = (0..w * h).map(|i| ((i % w) * 32) as u8).collect();
   let u: Vec<u8> = (0..(w / 2) * (h / 2)).map(|i| (i * 14) as u8).collect();

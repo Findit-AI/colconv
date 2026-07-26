@@ -722,12 +722,12 @@ pub(crate) fn y2xx_row_elems(width: usize) -> usize {
 // which is resolved at compile time. Helpers are only compiled for
 // targets where the corresponding feature exists.
 
-// The `colconv_force_scalar` cfg, when set, short‑circuits every
+// The `pixon_force_scalar` cfg, when set, short‑circuits every
 // `*_available()` helper to `false` so the dispatcher always falls
 // through to the scalar reference path. CI uses this via
-// `RUSTFLAGS='--cfg colconv_force_scalar'` to benchmark / measure
-// coverage of the scalar baseline. `colconv_disable_avx512` /
-// `colconv_disable_avx2` similarly force lower‑tier x86 paths for
+// `RUSTFLAGS='--cfg pixon_force_scalar'` to benchmark / measure
+// coverage of the scalar baseline. `pixon_disable_avx512` /
+// `pixon_disable_avx2` similarly force lower‑tier x86 paths for
 // per‑tier coverage on runners that would otherwise always pick
 // AVX‑512.
 
@@ -739,7 +739,7 @@ pub(crate) fn neon_available() -> bool {
   // `vld3q_u16`), so force every dispatcher onto the scalar reference under
   // Miri — the runtime `is_*_feature_detected!` macros otherwise report the
   // host's real features and route into unsupported intrinsics.
-  if cfg!(colconv_force_scalar) || cfg!(miri) {
+  if cfg!(pixon_force_scalar) || cfg!(miri) {
     return false;
   }
   std::arch::is_aarch64_feature_detected!("neon")
@@ -749,7 +749,7 @@ pub(crate) fn neon_available() -> bool {
 #[cfg(all(target_arch = "aarch64", not(feature = "std")))]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) const fn neon_available() -> bool {
-  !cfg!(colconv_force_scalar) && !cfg!(miri) && cfg!(target_feature = "neon")
+  !cfg!(pixon_force_scalar) && !cfg!(miri) && cfg!(target_feature = "neon")
 }
 
 /// FP16 conversion-instruction availability on aarch64. Required for
@@ -769,7 +769,7 @@ pub(crate) const fn neon_available() -> bool {
 ))]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn fp16_available() -> bool {
-  if cfg!(colconv_force_scalar) {
+  if cfg!(pixon_force_scalar) {
     return false;
   }
   std::arch::is_aarch64_feature_detected!("fp16")
@@ -783,14 +783,14 @@ pub(crate) fn fp16_available() -> bool {
 ))]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) const fn fp16_available() -> bool {
-  !cfg!(colconv_force_scalar) && cfg!(target_feature = "fp16")
+  !cfg!(pixon_force_scalar) && cfg!(target_feature = "fp16")
 }
 
 /// AVX2 availability on x86_64.
 #[cfg(all(target_arch = "x86_64", feature = "std"))]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn avx2_available() -> bool {
-  if cfg!(colconv_force_scalar) || cfg!(colconv_disable_avx2) || cfg!(miri) {
+  if cfg!(pixon_force_scalar) || cfg!(pixon_disable_avx2) || cfg!(miri) {
     return false;
   }
   std::arch::is_x86_feature_detected!("avx2")
@@ -800,8 +800,8 @@ pub(crate) fn avx2_available() -> bool {
 #[cfg(all(target_arch = "x86_64", not(feature = "std")))]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) const fn avx2_available() -> bool {
-  !cfg!(colconv_force_scalar)
-    && !cfg!(colconv_disable_avx2)
+  !cfg!(pixon_force_scalar)
+    && !cfg!(pixon_disable_avx2)
     && !cfg!(miri)
     && cfg!(target_feature = "avx2")
 }
@@ -810,7 +810,7 @@ pub(crate) const fn avx2_available() -> bool {
 #[cfg(all(target_arch = "x86_64", feature = "std"))]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn sse41_available() -> bool {
-  if cfg!(colconv_force_scalar) || cfg!(miri) {
+  if cfg!(pixon_force_scalar) || cfg!(miri) {
     return false;
   }
   std::arch::is_x86_feature_detected!("sse4.1")
@@ -820,14 +820,14 @@ pub(crate) fn sse41_available() -> bool {
 #[cfg(all(target_arch = "x86_64", not(feature = "std")))]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) const fn sse41_available() -> bool {
-  !cfg!(colconv_force_scalar) && !cfg!(miri) && cfg!(target_feature = "sse4.1")
+  !cfg!(pixon_force_scalar) && !cfg!(miri) && cfg!(target_feature = "sse4.1")
 }
 
 /// AVX‑512 (F + BW) availability on x86_64.
 #[cfg(all(target_arch = "x86_64", feature = "std"))]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn avx512_available() -> bool {
-  if cfg!(colconv_force_scalar) || cfg!(colconv_disable_avx512) || cfg!(miri) {
+  if cfg!(pixon_force_scalar) || cfg!(pixon_disable_avx512) || cfg!(miri) {
     return false;
   }
   std::arch::is_x86_feature_detected!("avx512bw")
@@ -838,8 +838,8 @@ pub(crate) fn avx512_available() -> bool {
 #[cfg(all(target_arch = "x86_64", not(feature = "std")))]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) const fn avx512_available() -> bool {
-  !cfg!(colconv_force_scalar)
-    && !cfg!(colconv_disable_avx512)
+  !cfg!(pixon_force_scalar)
+    && !cfg!(pixon_disable_avx512)
     && !cfg!(miri)
     && cfg!(target_feature = "avx512bw")
 }
@@ -855,7 +855,7 @@ pub(crate) const fn avx512_available() -> bool {
 ))]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn f16c_available() -> bool {
-  if cfg!(colconv_force_scalar) {
+  if cfg!(pixon_force_scalar) {
     return false;
   }
   std::arch::is_x86_feature_detected!("f16c")
@@ -869,7 +869,7 @@ pub(crate) fn f16c_available() -> bool {
 ))]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) const fn f16c_available() -> bool {
-  !cfg!(colconv_force_scalar) && cfg!(target_feature = "f16c")
+  !cfg!(pixon_force_scalar) && cfg!(target_feature = "f16c")
 }
 
 /// simd128 availability on wasm32. WASM has no runtime CPU detection
@@ -878,7 +878,7 @@ pub(crate) const fn f16c_available() -> bool {
 #[cfg(target_arch = "wasm32")]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) const fn simd128_available() -> bool {
-  !cfg!(colconv_force_scalar) && !cfg!(miri) && cfg!(target_feature = "simd128")
+  !cfg!(pixon_force_scalar) && !cfg!(miri) && cfg!(target_feature = "simd128")
 }
 #[cfg(all(test, feature = "std"))]
 mod overflow_tests {

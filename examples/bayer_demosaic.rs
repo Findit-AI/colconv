@@ -8,7 +8,7 @@
 //! cargo run --example bayer_demosaic
 //! ```
 
-use colconv::{
+use pixon::{
   frame::BayerFrame,
   raw::{BayerDemosaic, BayerPattern, ColorCorrectionMatrix, WhiteBalance, bayer_to},
   sinker::{LumaCoefficients, MixedSinker},

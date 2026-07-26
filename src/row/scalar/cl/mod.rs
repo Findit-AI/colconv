@@ -44,7 +44,7 @@
 //!
 //! 1. **Dequantize** the integer `Y'c,Cbc,Crc` to the normalized domain
 //!    (`Y'c ∈ [0,1]`, `Cbc/Crc` signed, centred on `0`), using the **same**
-//!    H.273 studio/full-range scaling colconv's affine YCbCr decode applies
+//!    H.273 studio/full-range scaling pixon's affine YCbCr decode applies
 //!    (the unscaled form of [`super::range_params_n`]); CL shares the YCbCr
 //!    integer encoding. Verified against `colour-science`'s `ranges_YCbCr`.
 //! 2. **Chroma recovery** maps `Cbc → B'` and `Crc → R'` about `Y'c` with the
@@ -57,12 +57,12 @@
 //!    `Yc = Kr·R + Kg·G + Kb·B` → `G = (Yc − Kb·B − Kr·R) / Kg` (linear light;
 //!    the defining property of the constant-luminance system).
 //! 5. **OETF** re-encodes linear `R, G, B → R'G'B'` (the BT.2020 display
-//!    signal). This matches colconv's transfer-preserving convention — the
+//!    signal). This matches pixon's transfer-preserving convention — the
 //!    affine YCbCr decode likewise emits `R'G'B'` in the source's transfer
 //!    domain — and BT.2020's definition of `R'G'B'` as the OETF-encoded RGB.
 //!    The integer-output kernels narrow `R'G'B'`; out-of-gamut excursions
 //!    clamp at the narrow. (`colour-science`'s `YcCbcCrc_to_RGB` stops at the
-//!    *linear* RGB of step 4; [`tests`] pin colconv against that stage, then
+//!    *linear* RGB of step 4; [`tests`] pin pixon against that stage, then
 //!    re-encode, exactly as the ICtCp tests do.)
 //!
 //! # Verification

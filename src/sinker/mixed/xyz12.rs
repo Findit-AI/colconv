@@ -2,7 +2,7 @@
 //!
 //! Each pixel is `3 x u16` in `X, Y, Z` order, **high-bit-packed** per
 //! FFmpeg `AV_PIX_FMT_XYZ12LE/BE` (active 12 bits in `[15:4]`, low 4
-//! bits zero). The conversion chain is the heaviest in colconv: SMPTE
+//! bits zero). The conversion chain is the heaviest in pixon: SMPTE
 //! ST 428-1 §8 inverse OETF → 3x3 matrix to one of three target gamuts
 //! → sRGB-shape OETF → integer narrow.
 //!

@@ -648,7 +648,7 @@ pub(crate) fn gray16_to_hsv_row<const BE: bool>(
 // ---- Gray32 (u32, all 32 bits active) ---------------------------------------
 //
 // Full-bit integer twin of Gray16, widened u16 → u32. The widest output
-// broadcast colconv emits is u16, so the depth narrows are `>> 24` (u8) and
+// broadcast pixon emits is u16, so the depth narrows are `>> 24` (u8) and
 // `>> 16` (native u16); luma_u16 / native carry the `>> 16` sample. The
 // limited-range rescale operates on the raw u32 sample (black = 16 << 24,
 // range = 219 << 24) in i64.

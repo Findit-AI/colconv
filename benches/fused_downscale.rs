@@ -7,13 +7,14 @@
 //! - the ROW-STAGE tier (convert each row at source res, then bin),
 //! - the full-res conversion baseline (what convert-then-resize
 //!   pipelines pay before they even start resizing),
+//!
 //! plus the packed-RGB fused path, and luma-only variants (which
 //! never read chroma).
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
 
-use colconv::{
+use pixon::{
   ColorMatrix,
   frame::{Nv12Frame, Nv21Frame, P010LeFrame, Rgb24Frame, Yuv420p16LeFrame, Yuv420pFrame},
   resample::AreaResampler,

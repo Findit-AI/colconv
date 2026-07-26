@@ -11,7 +11,7 @@
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;
 
-use colconv::{
+use pixon::{
   bench_internals::bayer16_to_rgb_row,
   raw::{BayerDemosaic, BayerPattern},
 };

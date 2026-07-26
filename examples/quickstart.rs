@@ -5,9 +5,9 @@
 //! cargo run --example quickstart
 //! ```
 
-use colconv::{ColorMatrix, ColorSpec, Convert, DynamicRange, PixelFormat, frame::Yuv420pFrame};
+use pixon::{ColorMatrix, ColorSpec, Convert, DynamicRange, PixelFormat, frame::Yuv420pFrame};
 
-fn main() -> Result<(), colconv::Error> {
+fn main() -> Result<(), pixon::Error> {
   // A 4x2 YUV 4:2:0 frame: three borrowed planes plus per-plane strides.
   let y = [16u8, 60, 110, 160, 200, 240, 32, 90];
   let u = [128u8, 96];

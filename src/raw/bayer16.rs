@@ -22,8 +22,8 @@
 //! [`BayerFrame16`](crate::frame::BayerFrame16).
 
 // The Bayer16 marker family now lives in mediaframe::source. Re-export
-// everything so downstream code that uses `colconv::raw::Bayer16<BITS>`,
-// `colconv::raw::Bayer10`, etc. keeps compiling unchanged. The
+// everything so downstream code that uses `pixon::raw::Bayer16<BITS>`,
+// `pixon::raw::Bayer10`, etc. keeps compiling unchanged. The
 // big-endian set (`Bayer*Be` markers, `Bayer*BeFrame` aliases, and the
 // byte-order-generic `bayer16_to_endian` walker) is exported alongside
 // the little-endian set so BE callers reach it from the same umbrella —

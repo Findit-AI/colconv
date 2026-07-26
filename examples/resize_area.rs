@@ -6,9 +6,9 @@
 //! cargo run --example resize_area
 //! ```
 
-use colconv::{ColorMatrix, ColorSpec, Convert, DynamicRange, PixelFormat, frame::Yuv420pFrame};
+use pixon::{ColorMatrix, ColorSpec, Convert, DynamicRange, PixelFormat, frame::Yuv420pFrame};
 
-fn main() -> Result<(), colconv::Error> {
+fn main() -> Result<(), pixon::Error> {
   // An 8x8 4:2:0 frame with a left-to-right luma ramp and saturated chroma.
   let (w, h) = (8usize, 8usize);
   let y: Vec<u8> = (0..w * h).map(|i| ((i % w) * 32) as u8).collect();

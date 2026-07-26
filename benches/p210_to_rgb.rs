@@ -5,7 +5,7 @@
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;
 
-use colconv::{
+use pixon::{
   ColorMatrix,
   bench_internals::{p010_to_rgb_row, p010_to_rgb_u16_row},
 };

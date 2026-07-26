@@ -1,7 +1,7 @@
 //! Tier-0 [`Convert`] — the golden one-call decode entry point.
 //!
-//! [`Convert`] is the top of colconv's tier stack (issue
-//! [#392](https://github.com/findit-studio/colconv/issues/392)): a single
+//! [`Convert`] is the top of pixon's tier stack (issue
+//! [#392](https://github.com/findit-studio/pixon/issues/392)): a single
 //! generic builder that decodes a validated source frame to one or more
 //! output buffers with zero redundant parameters. Dimensions come from the
 //! frame, colorimetry comes from a single [`ColorSpec`], and the per-format
@@ -179,7 +179,7 @@ pub trait Source: sealed::Sealed {
     R: Resampler;
 }
 
-/// The golden one-call decode builder — Tier 0 of colconv's API.
+/// The golden one-call decode builder — Tier 0 of pixon's API.
 ///
 /// Construct with [`Convert::from`]`(&frame)`, attach outputs and (optional)
 /// colorimetry / resize / tuning with the infallible consuming setters, then
@@ -189,9 +189,9 @@ pub trait Source: sealed::Sealed {
 ///
 /// ```
 /// # #[cfg(all(any(feature = "std", feature = "alloc"), feature = "yuv-planar"))]
-/// # fn golden() -> Result<(), colconv::Error> {
-/// use colconv::{Convert, ColorMatrix, ColorSpec, DynamicRange, PixelFormat};
-/// use colconv::frame::Yuv420pFrame;
+/// # fn golden() -> Result<(), pixon::Error> {
+/// use pixon::{Convert, ColorMatrix, ColorSpec, DynamicRange, PixelFormat};
+/// use pixon::frame::Yuv420pFrame;
 ///
 /// let (w, h) = (8u32, 8u32);
 /// let y = [16u8; 64];

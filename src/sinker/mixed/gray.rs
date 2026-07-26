@@ -1630,7 +1630,7 @@ impl<'a, R, const BE: bool> MixedSinker<'a, Gray32<BE>, R> {
   }
 
   /// Attaches a u16 RGB output buffer (native `>> 16` broadcast — the widest
-  /// depth colconv emits). Length in `u16` elements (`width x height x 3`).
+  /// depth pixon emits). Length in `u16` elements (`width x height x 3`).
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub fn with_rgb_u16(mut self, buf: &'a mut [u16]) -> Result<Self, MixedSinkerError> {
     self.set_rgb_u16(buf)?;

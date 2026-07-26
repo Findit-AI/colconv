@@ -771,7 +771,7 @@ impl<'a, R> MixedSinker<'a, Yuv420p, R> {
   /// // there's no inherent alpha channel and the format demosaics to
   /// // RGB only. Once / if a future PR adds RGBA, the negative example
   /// // here moves to the next not‑yet‑wired format.
-  /// use colconv::{sinker::MixedSinker, raw::Bayer};
+  /// use pixon::{sinker::MixedSinker, raw::Bayer};
   /// let mut buf = vec![0u8; 16 * 8 * 4];
   /// let _ = MixedSinker::<Bayer>::new(16, 8).with_rgba(&mut buf);
   /// ```

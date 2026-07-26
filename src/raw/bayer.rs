@@ -9,7 +9,7 @@
 
 // The Bayer marker now lives in mediaframe::source and implements
 // mediaframe::SourceFormat via its own sealed impl.  Re-export it at
-// this path so downstream code that uses `colconv::raw::Bayer` keeps
+// this path so downstream code that uses `pixon::raw::Bayer` keeps
 // working without changes.
 pub use mediaframe::{
   frame::{BayerFrameError, BayerRow, BayerSink, bayer_to},

@@ -10,7 +10,7 @@
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;
 
-use colconv::bench_internals::gbr_to_rgb_high_bit_row;
+use pixon::bench_internals::gbr_to_rgb_high_bit_row;
 
 /// Fills a `u16` buffer with deterministic pseudo‑random 12-bit samples
 /// (low 12 bits set, high 4 bits zero — matches `gbrp12le`).

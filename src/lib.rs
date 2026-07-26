@@ -15,9 +15,9 @@
 //!
 //! ```
 //! # #[cfg(all(any(feature = "std", feature = "alloc"), feature = "yuv-planar"))]
-//! # fn golden() -> Result<(), colconv::Error> {
-//! use colconv::{Convert, ColorMatrix, ColorSpec, DynamicRange, PixelFormat};
-//! use colconv::frame::Yuv420pFrame;
+//! # fn golden() -> Result<(), pixon::Error> {
+//! use pixon::{Convert, ColorMatrix, ColorSpec, DynamicRange, PixelFormat};
+//! use pixon::frame::Yuv420pFrame;
 //!
 //! let (w, h) = (8u32, 8u32);
 //! let y = [16u8; 64];
@@ -141,7 +141,7 @@
 //! [`raw::WhiteBalance`] gains, and a [`raw::ColorCorrectionMatrix`].
 //! See [`raw`] for the full design and parameter docs.
 //!
-//! Scope: `colconv` covers demosaic onwards. Producing the Bayer
+//! Scope: `pixon` covers demosaic onwards. Producing the Bayer
 //! plane itself is the upstream pipeline's job — vendor-SDK
 //! camera-RAW decoders (R3D / BRAW / NRAW) for compressed
 //! camera bitstreams, or FFmpeg's `AV_PIX_FMT_BAYER_*` pixel
@@ -289,12 +289,12 @@ extern crate std;
 pub use mediaframe::{
   PixelSink,
   SourceFormat,
-  // `mediaframe::color::Matrix` is re-exported as `ColorMatrix` so colconv's
+  // `mediaframe::color::Matrix` is re-exported as `ColorMatrix` so pixon's
   // public surface and every internal `crate::ColorMatrix` reference keep
   // the disambiguated name (`videoframe::color::ColorMatrix` was renamed to
   // `Matrix` upstream during the videoframe → mediaframe rename). `Info` is
   // likewise re-exported as `ColorInfo` so the generic `Info` name stays out
-  // of colconv's root while `ColorSpec::from_info` can name it.
+  // of pixon's root while `ColorSpec::from_info` can name it.
   color::{
     ChromaLocation, DcpTargetGamut, DynamicRange, Info as ColorInfo, Matrix as ColorMatrix,
     Primaries, Transfer,

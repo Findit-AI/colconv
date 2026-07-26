@@ -10,20 +10,20 @@
 //! cargo run --example colorimetry
 //! ```
 
-use colconv::{
+use pixon::{
   ChromaLocation, ColorInfo, ColorMatrix, ColorSpec, Convert, DynamicRange, PixelFormat, Primaries,
   Transfer,
   frame::{Yuv420pFrame, Yuv444p12LeFrame, Yuv444pFrame},
   sinker::St428Interpretation,
 };
 
-fn decode(frame: &Yuv444pFrame<'_>, spec: ColorSpec) -> Result<Vec<u8>, colconv::Error> {
+fn decode(frame: &Yuv444pFrame<'_>, spec: ColorSpec) -> Result<Vec<u8>, pixon::Error> {
   let mut rgb = vec![0u8; 2 * 2 * 3];
   Convert::from(frame).spec(spec).rgb(&mut rgb).run()?;
   Ok(rgb)
 }
 
-fn main() -> Result<(), colconv::Error> {
+fn main() -> Result<(), pixon::Error> {
   // 2x2 YUV 4:4:4 (full-resolution chroma, so the matrix is the whole story).
   let y = [81u8, 145, 41, 210];
   let u = [90u8, 54, 240, 16];

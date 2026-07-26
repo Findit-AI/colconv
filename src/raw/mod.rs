@@ -1,15 +1,15 @@
 //! RAW (Bayer) source kernels.
 //!
-//! `colconv` ingests Bayer-mosaic frames produced by upstream
+//! `pixon` ingests Bayer-mosaic frames produced by upstream
 //! camera-RAW pipelines (RED REDline / R3D, Blackmagic RAW / BRAW,
 //! Nikon NRAW SDK, FFmpeg's `bayer_*` decoders) and runs demosaic +
 //! white balance + 3x3 color-correction in a single per-row kernel.
 //!
 //! # Scope
 //!
-//! `colconv` covers **demosaic onwards**. Decoding the camera's
+//! `pixon` covers **demosaic onwards**. Decoding the camera's
 //! compressed bitstream into a Bayer plane is the vendor SDK's job
-//! (RED SDK / BRAW SDK / Nikon Decoder); `colconv` consumes the
+//! (RED SDK / BRAW SDK / Nikon Decoder); `pixon` consumes the
 //! resulting [`crate::frame::BayerFrame`] /
 //! [`crate::frame::BayerFrame16`] and produces RGB rows.
 //!

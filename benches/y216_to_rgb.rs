@@ -7,7 +7,7 @@
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;
 
-use colconv::{ColorMatrix, bench_internals::y216_to_rgb_row};
+use pixon::{ColorMatrix, bench_internals::y216_to_rgb_row};
 
 fn fill_pseudo_random_u16(buf: &mut [u16], seed: u32) {
   let mut state = seed;

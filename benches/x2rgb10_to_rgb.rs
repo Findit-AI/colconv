@@ -10,7 +10,7 @@
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;
 
-use colconv::bench_internals::x2rgb10_to_rgb_row;
+use pixon::bench_internals::x2rgb10_to_rgb_row;
 
 fn fill_pseudo_random(buf: &mut [u8], seed: u32) {
   let mut state = seed;

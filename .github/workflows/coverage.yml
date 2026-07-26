@@ -30,18 +30,18 @@ env:
 # - aarch64 NEON (macOS): covers src/row/arch/neon.rs plus the
 #   `neon_available()` branch of the dispatcher.
 # - aarch64 scalar-forced: covers the scalar fallback branch of the
-#   dispatcher on aarch64 (reached only when `colconv_force_scalar` is
+#   dispatcher on aarch64 (reached only when `pixon_force_scalar` is
 #   set, since NEON is mandatory otherwise).
 # - x86_64 default (Linux): covers whichever top tier the runner CPU
 #   supports (AVX-512BW on Ice/Cascade Lake Azure VMs, else AVX2). Per-
 #   tier kernels are reached by the in-kernel equivalence tests that
 #   self-gate on `is_x86_feature_detected!`.
-# - x86_64 AVX2-max: `--cfg colconv_disable_avx512` forces the AVX2
+# - x86_64 AVX2-max: `--cfg pixon_disable_avx512` forces the AVX2
 #   dispatcher branch to run regardless of runner CPU. Covers the AVX2
 #   branch on runners that would otherwise always pick AVX-512.
-# - x86_64 SSE4.1-max: `--cfg colconv_disable_avx512 --cfg
-#   colconv_disable_avx2` forces the SSE4.1 dispatcher branch.
-# - x86_64 scalar-forced: `--cfg colconv_force_scalar` forces the scalar
+# - x86_64 SSE4.1-max: `--cfg pixon_disable_avx512 --cfg
+#   pixon_disable_avx2` forces the SSE4.1 dispatcher branch.
+# - x86_64 scalar-forced: `--cfg pixon_force_scalar` forces the scalar
 #   dispatcher branch on x86_64.
 # - x86_64 Windows: validates the MSVC toolchain compiles the intrinsic-
 #   heavy modules and reports coverage of their default runtime path.
@@ -72,7 +72,7 @@ jobs:
             ignore_regex: 'src/.*arch/x86_|src/.*arch/wasm_'
           - os: macos-latest
             label: macos-aarch64-scalar
-            rustflags: '--cfg colconv_force_scalar'
+            rustflags: '--cfg pixon_force_scalar'
             sde_cpu: ''
             ignore_regex: 'src/.*arch/x86_|src/.*arch/wasm_'
 
@@ -89,17 +89,17 @@ jobs:
             ignore_regex: 'src/.*arch/neon|src/.*arch/wasm_'
           - os: ubuntu-latest
             label: linux-x86_64-avx2-max
-            rustflags: '--cfg colconv_disable_avx512'
+            rustflags: '--cfg pixon_disable_avx512'
             sde_cpu: ''
             ignore_regex: 'src/.*arch/neon|src/.*arch/wasm_'
           - os: ubuntu-latest
             label: linux-x86_64-sse41-max
-            rustflags: '--cfg colconv_disable_avx512 --cfg colconv_disable_avx2'
+            rustflags: '--cfg pixon_disable_avx512 --cfg pixon_disable_avx2'
             sde_cpu: ''
             ignore_regex: 'src/.*arch/neon|src/.*arch/wasm_'
           - os: ubuntu-latest
             label: linux-x86_64-scalar
-            rustflags: '--cfg colconv_force_scalar'
+            rustflags: '--cfg pixon_force_scalar'
             sde_cpu: ''
             ignore_regex: 'src/.*arch/neon|src/.*arch/wasm_'
 

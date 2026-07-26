@@ -439,7 +439,7 @@ pub(crate) fn xyz12_rgb_to_luma_row(
 /// XYZ12 luma kernel (u16 output). Y' is computed at u8 precision
 /// (matches the `with_luma` u8 path) and zero-extended to `u16`,
 /// preserving the same `[0, 255]` dynamic range — same convention as
-/// every other `*_to_luma_u16_row` kernel in colconv.
+/// every other `*_to_luma_u16_row` kernel in pixon.
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn xyz12_rgb_to_luma_u16_row(
   rgb: &[u8],

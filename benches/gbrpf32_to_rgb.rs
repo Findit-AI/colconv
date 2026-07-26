@@ -12,7 +12,7 @@
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;
 
-use colconv::{
+use pixon::{
   frame::Gbrpf32LeFrame,
   sinker::MixedSinker,
   source::{Gbrpf32, gbrpf32_to},

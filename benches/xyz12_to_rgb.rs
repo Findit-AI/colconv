@@ -15,7 +15,7 @@
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;
 
-use colconv::{DcpTargetGamut, bench_internals::xyz12_to_rgb_row};
+use pixon::{DcpTargetGamut, bench_internals::xyz12_to_rgb_row};
 
 /// Fills a `u16` buffer with deterministic XYZ12-packed pseudo-random
 /// samples — 12-bit values shifted into the high 12 bits (low 4 bits

@@ -8,7 +8,7 @@
 //! independently of any library.
 //!
 //! Domain convention: `colour-science`'s `YcCbcCrc_to_RGB` returns **linear**
-//! RGB (the stage before colconv's transfer-preserving OETF re-encode), so the
+//! RGB (the stage before pixon's transfer-preserving OETF re-encode), so the
 //! reference vectors below pin [`cl_norm_to_rgb_linear`] (the linear stage);
 //! the re-encode to `R'G'B'` and the integer narrow are pinned separately.
 //! Studio (`legal`) range corresponds to `full_range = false`; full range to

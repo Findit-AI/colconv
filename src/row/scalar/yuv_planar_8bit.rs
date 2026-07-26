@@ -306,7 +306,7 @@ pub(crate) fn yuv_420_to_rgba_row_with_coeffs(
 /// The result is a full-width chroma row the caller feeds to the existing
 /// 4:4:4 decode ([`yuv_444_to_rgb_row`] and siblings), so the center-sited
 /// path reuses the fully-SIMD 4:4:4 kernels and stays bit-identical per
-/// tier. The left-co-sited / unspecified sitings keep colconv's default
+/// tier. The left-co-sited / unspecified sitings keep pixon's default
 /// nearest-neighbor decode and never call this.
 ///
 /// # Panics (debug builds)
@@ -610,7 +610,7 @@ pub(crate) fn chroma_upsample_420_bottom_even_h_pair(
   full[2 * j + 1] = ((3 * mid + right + 2) >> 2) as u8;
 }
 
-/// Co-sited (`h = 0`) horizontal 4:2:0 chroma upsample — colconv's default
+/// Co-sited (`h = 0`) horizontal 4:2:0 chroma upsample — pixon's default
 /// **nearest-neighbor** reconstruction expressed as a full-width chroma row. Each
 /// half-width chroma sample `c[j]` covers its two luma columns `2j` and `2j+1`
 /// unchanged (the `AVCHROMA_LOC_LEFT` / `TopLeft` / `BottomLeft` horizontal
