@@ -116,8 +116,14 @@ happens, trading speed for colorimetric correctness:
 
 ```toml
 [dependencies]
-pixon = "0.2"
+pixon = "0.1"
 ```
+
+> **Renamed from `colconv`.** Everything through `colconv` 0.2.1 was published
+> under that name, which is now frozen. `pixon` starts its own version history
+> at 0.1.0 — it is a new name on crates.io, so the number carries no maturity
+> claim: `pixon` 0.1.0 *is* `colconv` 0.2.1's code, with an unchanged API.
+> Migrating is a manifest edit plus `s/colconv/pixon/` over your imports.
 
 ## Examples
 

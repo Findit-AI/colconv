@@ -1,12 +1,55 @@
 # Changelog
 
-All notable changes to colconv are documented here.
+All notable changes to pixon are documented here. `pixon`'s own version
+history starts at 0.1.0. The 0.1.0–0.2.1 entries below it were published
+under the crate's former name, `colconv`, and are kept for provenance —
+they record APIs that shipped as `colconv` and keep the paths they shipped
+with. Note the two series are independent: `pixon` 0.1.0 is the code
+`colconv` 0.2.1 shipped, and a future `pixon` 0.2.0 has no relation to
+`colconv` 0.2.x.
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [SemVer](https://semver.org/spec/v2.0.0.html); pre-1.0
 breaking changes bump the `x` in `0.x.y`.
 
-## Unreleased
+## 0.1.0 — unreleased
+
+### Changed
+
+- **The crate is renamed `colconv` → `pixon`.** The package name, the library
+  name and therefore every import path change; nothing else does. The API is
+  byte-for-byte the one `colconv` 0.2.1 shipped — no type, function, trait,
+  feature flag or behavior was added, removed or altered.
+
+  **`pixon` starts its version history at 0.1.0** because it is a new name on
+  crates.io with no prior releases: a first and only version of `0.2.2` would
+  imply a 0.1.x and 0.2.0–0.2.1 that never existed under this name. The number
+  therefore carries no maturity claim relative to `colconv` — this is `colconv`
+  0.2.1's code, not an earlier or reduced one. `colconv` 0.2.1 remains on
+  crates.io and is frozen; it will receive no further releases.
+
+  Migration is two mechanical edits:
+
+  ```toml
+  # Cargo.toml
+  - colconv = "0.2"
+  + pixon = "0.1"
+  ```
+
+  ```rust
+  // every module
+  - use colconv::{Convert, ColorSpec};
+  + use pixon::{Convert, ColorSpec};
+  ```
+
+  A crate-wide `s/colconv/pixon/` over your own sources is sufficient; there
+  are no renamed items to reconcile beyond the crate root itself.
+
+- Repository-internal dispatch-override cfgs are renamed to match the crate:
+  `colconv_force_scalar` → `pixon_force_scalar`, `colconv_disable_avx512` →
+  `pixon_disable_avx512`, `colconv_disable_avx2` → `pixon_disable_avx2`. These
+  are testing/coverage helpers set via `RUSTFLAGS` by this repository's own CI
+  and carry no stability guarantee.
 
 ## 0.2.0 & 0.2.1 — 2026-07-11
 
