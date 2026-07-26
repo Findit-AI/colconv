@@ -215,7 +215,7 @@ macro_rules! impl_filter_simd_elem {
           },
           _ => {}
         }
-        // No SIMD tier ran (none available — e.g. `colconv_force_scalar`, or
+        // No SIMD tier ran (none available — e.g. `pixon_force_scalar`, or
         // a CPU lacking the feature). Fall back on the scalar reference, but
         // over the PADDED arena bounded by `ksize`: the real-span reference
         // (`filter_h_reduce_row_c1`) takes raw `offsets`, whereas here only

@@ -43,7 +43,7 @@ jobs:
             rustflags: ''
             label: macos-aarch64-neon
 
-          # aarch64 with NEON short-circuited via `colconv_force_scalar`:
+          # aarch64 with NEON short-circuited via `pixon_force_scalar`:
           # dispatcher takes the scalar path on every call, producing a
           # scalar baseline that matches the one measured inside the
           # `use_simd=false` bench variant but with dispatcher branches
@@ -51,7 +51,7 @@ jobs:
           - os: macos-latest
             arch: aarch64
             tier: scalar
-            rustflags: '--cfg colconv_force_scalar'
+            rustflags: '--cfg pixon_force_scalar'
             label: macos-aarch64-scalar
 
           # x86_64 default — runtime dispatcher picks whichever x86 tier
@@ -77,7 +77,7 @@ jobs:
           - os: ubuntu-latest
             arch: x86_64
             tier: avx2-max
-            rustflags: '--cfg colconv_disable_avx512'
+            rustflags: '--cfg pixon_disable_avx512'
             label: ubuntu-x86_64-avx2-max
 
           # x86_64 with AVX-512 and AVX2 both disabled: forces the SSE4.1
@@ -86,7 +86,7 @@ jobs:
           - os: ubuntu-latest
             arch: x86_64
             tier: sse41-max
-            rustflags: '--cfg colconv_disable_avx512 --cfg colconv_disable_avx2'
+            rustflags: '--cfg pixon_disable_avx512 --cfg pixon_disable_avx2'
             label: ubuntu-x86_64-sse41-max
 
           # x86_64 with every SIMD backend short-circuited: scalar-only
@@ -95,7 +95,7 @@ jobs:
           - os: ubuntu-latest
             arch: x86_64
             tier: scalar
-            rustflags: '--cfg colconv_force_scalar'
+            rustflags: '--cfg pixon_force_scalar'
             label: ubuntu-x86_64-scalar
 
           # x86_64 with `-C target-cpu=native`: enables the full feature

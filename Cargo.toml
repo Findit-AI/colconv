@@ -460,7 +460,7 @@ unexpected_cfgs = { level = "warn", check-cfg = [
   # in CI to force the dispatcher down a specific path so lower‑tier
   # kernels and the scalar fallback get coverage on runners that would
   # otherwise always pick the top tier.
-  'cfg(colconv_force_scalar)',
-  'cfg(colconv_disable_avx512)',
-  'cfg(colconv_disable_avx2)',
+  'cfg(pixon_force_scalar)',
+  'cfg(pixon_disable_avx512)',
+  'cfg(pixon_disable_avx2)',
 ] }

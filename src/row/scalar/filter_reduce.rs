@@ -114,7 +114,7 @@ pub(crate) fn filter_h_reduce_row_c3<S: FilterElem>(
 /// Scalar H-pass over the **padded** SIMD arena (`starts` / `ksize` /
 /// padded `coeffs` / padded `off`) — the dispatch fallback taken when a
 /// SIMD arch is compiled in (so the arena exists) but no SIMD tier is
-/// available at runtime (`colconv_force_scalar`, or a CPU lacking the
+/// available at runtime (`pixon_force_scalar`, or a CPU lacking the
 /// feature). It sums only span `j`'s `ksize[j]` **real** taps, so it never
 /// reads the padding lanes that overhang the row — the overhang the absent
 /// SIMD kernel would otherwise have staged through guarded stack copies.
