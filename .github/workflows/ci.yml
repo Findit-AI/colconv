@@ -210,7 +210,7 @@ jobs:
         # tested-latest within this major) is used; bump the action major
         # to pick up future SDE bumps. AVX-512F/BW/DQ/VL/VNNI/BF16 under
         # `-icx` is stable across 9.x and 10.x.
-        uses: petarpetrovt/setup-sde@v5.0
+        uses: petarpetrovt/setup-sde@v6.0
         with:
           environmentVariableName: SDE_PATH
       - name: Run tests under SDE (-icx, Ice Lake AVX-512)

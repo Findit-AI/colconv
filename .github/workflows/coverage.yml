@@ -155,7 +155,7 @@ jobs:
         # v5.0: own-repo Release LFS binaries instead of Intel CDN
         # (fixes HTTP 202 flakes). `sdeVersion` omitted → action's
         # bundled default (its tested-latest within this major).
-        uses: petarpetrovt/setup-sde@v5.0
+        uses: petarpetrovt/setup-sde@v6.0
         with:
           environmentVariableName: SDE_PATH
 
