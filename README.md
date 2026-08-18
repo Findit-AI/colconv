@@ -38,12 +38,13 @@ video pipelines:
   packed, Y-series, V210, RGB 8/10/16/F16/F32, GBR, Gray, XYZ, Bayer,
   PAL8 / Mono). Pair pixon with [mediaframe][mediaframe-url] for the
   pixel-data + `SourceFormat` traits the kernels are generic over.
-- **Colorimetry-honest** — every H.273 `ColorMatrix` decodes (including
-  the non-affine ICtCp, IPT-C2, SMPTE ST 2085 and chroma-derived
-  variants), `ChromaLocation` drives siting-aware chroma upsampling
-  (center / co-sited, top / bottom variants included), and SMPTE ST 428-1
-  primaries can be interpreted per FFmpeg's tabulated values or as true
-  CIE XYZ.
+- **Colorimetry-honest** — fourteen H.273 `ColorMatrix` values decode,
+  including the non-affine ICtCp, IPT-C2, SMPTE ST 2085 and chroma-derived
+  variants; the ones pixon has no decode for are **refused at the door**
+  (`ColorSpec::kernel_matrix`) rather than converted as BT.709.
+  `ChromaLocation` drives siting-aware chroma upsampling (center /
+  co-sited, top / bottom variants included), and SMPTE ST 428-1 primaries
+  can be interpreted per FFmpeg's tabulated values or as true CIE XYZ.
 - **Fused resampling** — downscale *while* converting in a single pass:
   a resampler splices into the convert pipeline at the earliest stage
   that realizes its averaging domain, so the frame is binned once and
@@ -116,7 +117,7 @@ happens, trading speed for colorimetric correctness:
 
 ```toml
 [dependencies]
-pixon = "0.1"
+pixon = "0.2"
 ```
 
 > **Renamed from `colconv`.** Everything through `colconv` 0.2.1 was published
