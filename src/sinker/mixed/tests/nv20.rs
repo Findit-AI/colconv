@@ -519,8 +519,8 @@ fn nv20_rgba_too_short_returns_err() {
 #[allow(deprecated)]
 fn nv20_walker_matches_direct_le_and_be() {
   let (w, h) = (40u32, 4u32);
-  let opts = YuvOptions::new()
-    .with_matrix(KernelMatrix::Bt601)
+  let opts = YuvOptions::from_color_spec(&crate::ColorSpec::of_matrix(KernelMatrix::Bt601))
+    .unwrap()
     .with_full_range();
 
   // LE.

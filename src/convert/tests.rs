@@ -214,7 +214,8 @@ fn yuv420p_format_options_override_wins() {
   let (y, u, v) = y420();
   let spec = spec_601(); // matrix = Bt601
   let (w, h) = (4usize, 2usize);
-  let override_opts = YuvOptions::new().with_matrix(KernelMatrix::Bt2020Ncl);
+  let override_opts =
+    YuvOptions::from_color_spec(&ColorSpec::of_matrix(KernelMatrix::Bt2020Ncl)).unwrap();
   assert_ne!(override_opts.matrix(), spec.kernel_matrix().unwrap());
 
   let mut a = std::vec![0u8; w * h * 3];
@@ -552,7 +553,8 @@ fn yuv444p_format_options_override_wins() {
   let (y, u, v) = y444();
   let spec = spec_601(); // matrix = Bt601
   let (w, h) = (4usize, 2usize);
-  let override_opts = YuvOptions::new().with_matrix(KernelMatrix::Bt2020Ncl);
+  let override_opts =
+    YuvOptions::from_color_spec(&ColorSpec::of_matrix(KernelMatrix::Bt2020Ncl)).unwrap();
   assert_ne!(override_opts.matrix(), spec.kernel_matrix().unwrap());
 
   let mut a = std::vec![0u8; w * h * 3];

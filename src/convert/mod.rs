@@ -307,7 +307,16 @@ impl<'a, Fr: Source, R> Convert<'a, Fr, R> {
   }
 
   /// Overrides the per-format walk options that [`spec`](Self::spec) would
-  /// otherwise derive — the rare case where a knob is known out of band.
+  /// otherwise derive — the rare case where a knob is known out of band, and
+  /// the only way to name an XYZ12 target gamut, which no `ColorSpec`
+  /// describes.
+  ///
+  /// This is the one place the single-source rule is *deliberately* set
+  /// aside: [`spec`](Self::spec) still configures the sink, so a `YuvOptions`
+  /// passed here that was derived from a different spec puts a different
+  /// matrix in front of each reader. That is a decision, not an accident —
+  /// the options carry no colour value the caller did not source from *some*
+  /// [`ColorSpec`] — but when both are set, they should be set from one.
   #[must_use]
   #[inline]
   pub fn format_options(mut self, options: Fr::Options) -> Self {

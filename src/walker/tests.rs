@@ -7,6 +7,18 @@
 use super::*;
 use crate::ColorMatrix;
 
+/// Walk options naming `matrix` at `full_range`.
+///
+/// A `KernelMatrix` reaches a walk only out of `ColorSpec::kernel_matrix`, so
+/// the affine sweeps below source theirs the way every caller does — through
+/// the casual-path `ColorSpec::of_matrix`, whose round trip across the closed
+/// vocabulary cannot fail.
+fn yuv_opts(full_range: bool, matrix: KernelMatrix) -> YuvOptions {
+  YuvOptions::from_color_spec(&ColorSpec::of_matrix(matrix))
+    .unwrap()
+    .maybe_full_range(full_range)
+}
+
 // ---- Structural round-trip: Options builders / getters ----------------
 
 #[test]
@@ -17,15 +29,25 @@ fn xyz12_options_default_is_dcip3() {
   assert_eq!(Xyz12Options::default().target_gamut(), KernelGamut::DciP3);
 }
 
+/// The gamut door: `KernelGamut` enters `Xyz12Options` only by exchanging the
+/// open descriptor, and a descriptor with no tabulated matrix is refused
+/// rather than converted as one of the three that are.
 #[test]
-fn xyz12_options_with_target_gamut_round_trips() {
-  for g in [
-    KernelGamut::DciP3,
-    KernelGamut::Rec709,
-    KernelGamut::Rec2020,
+fn xyz12_options_target_gamut_comes_only_from_the_descriptor() {
+  for (descriptor, kernel) in [
+    (DcpTargetGamut::DciP3, KernelGamut::DciP3),
+    (DcpTargetGamut::Rec709, KernelGamut::Rec709),
+    (DcpTargetGamut::Rec2020, KernelGamut::Rec2020),
   ] {
-    assert_eq!(Xyz12Options::new().with_target_gamut(g).target_gamut(), g);
+    assert_eq!(
+      Xyz12Options::for_target_gamut(&descriptor)
+        .unwrap()
+        .target_gamut(),
+      kernel
+    );
   }
+
+  assert!(Xyz12Options::for_target_gamut(&DcpTargetGamut::other("acescg")).is_err());
 }
 
 #[test]
@@ -37,9 +59,11 @@ fn yuv_options_default_is_limited_bt709() {
 
 #[test]
 fn yuv_options_builders_and_mutators_round_trip() {
-  // with_matrix
+  // The matrix has exactly one source: a `ColorSpec`.
   assert_eq!(
-    YuvOptions::new().with_matrix(KernelMatrix::Bt601).matrix(),
+    YuvOptions::from_color_spec(&ColorSpec::of_matrix(KernelMatrix::Bt601))
+      .unwrap()
+      .matrix(),
     KernelMatrix::Bt601
   );
 
@@ -152,12 +176,42 @@ fn yuv_options_from_color_spec_bridges_range_and_matrix() {
   assert_eq!(opts.matrix(), KernelMatrix::Bt601);
 
   // The bridge equals a direct raw construction of the resolved values.
-  assert_eq!(
-    opts,
-    YuvOptions::new()
-      .maybe_full_range(true)
-      .with_matrix(KernelMatrix::Bt601)
-  );
+  assert_eq!(opts, yuv_opts(true, KernelMatrix::Bt601));
+}
+
+/// The casual-path constructor is a shortcut into the one carrier, not a
+/// second one: it round-trips every closed matrix and leaves everything it
+/// was not told at the unspecified posture.
+#[test]
+fn color_spec_of_matrix_round_trips_and_leaves_the_rest_unspecified() {
+  for k in [
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Unspecified,
+    KernelMatrix::Fcc,
+    KernelMatrix::Bt470Bg,
+    KernelMatrix::Smpte170M,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::YCgCo,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::ChromaDerivedNcl,
+  ] {
+    let spec = ColorSpec::of_matrix(k);
+    assert_eq!(spec.kernel_matrix().unwrap(), k);
+    assert_eq!(spec.matrix(), ColorMatrix::from(k));
+
+    // Unnamed axes stay unspecified — no new implicit path.
+    assert_eq!(spec.format(), PixelFormat::None);
+    assert!(!spec.full_range());
+    assert_eq!(spec.primaries(), Primaries::Unspecified);
+    assert_eq!(spec.transfer(), Transfer::Unspecified);
+    assert_eq!(spec.chroma_location(), ChromaLocation::Unspecified);
+
+    // And it is exactly what the walk options consume.
+    let opts = YuvOptions::from_color_spec(&spec).unwrap();
+    assert_eq!(opts.matrix(), k);
+    assert!(!opts.full_range());
+  }
 }
 
 // ---- ColorSpec::from_info: carries the full colour Info ----------------
@@ -379,7 +433,7 @@ mod xyz12_parity {
   fn assert_parity_rgb_u8_le(gamut: KernelGamut) {
     let pix = ramp_frame(W, H, pack12_le);
     let src = Xyz12LeFrame::try_new(&pix, W, H, W * 3).unwrap();
-    let opts = Xyz12Options::new().with_target_gamut(gamut);
+    let opts = Xyz12Options::for_target_gamut(&DcpTargetGamut::from(gamut)).unwrap();
 
     let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
     let mut via_direct = std::vec![0u8; (W * H * 3) as usize];
@@ -401,7 +455,7 @@ mod xyz12_parity {
   fn assert_parity_rgb_u16_be(gamut: KernelGamut) {
     let pix = ramp_frame(W, H, pack12_be);
     let src = Xyz12BeFrame::try_new(&pix, W, H, W * 3).unwrap();
-    let opts = Xyz12Options::new().with_target_gamut(gamut);
+    let opts = Xyz12Options::for_target_gamut(&DcpTargetGamut::from(gamut)).unwrap();
 
     let mut via_walker = std::vec![0u16; (W * H * 3) as usize];
     let mut via_direct = std::vec![0u16; (W * H * 3) as usize];
@@ -459,7 +513,7 @@ mod xyz12_parity {
       {
         let pix = ramp_frame(W, H, pack12_le);
         let src = Xyz12LeFrame::try_new(&pix, W, H, W * 3).unwrap();
-        let opts = Xyz12Options::new().with_target_gamut(gamut);
+        let opts = Xyz12Options::for_target_gamut(&DcpTargetGamut::from(gamut)).unwrap();
         let mut via_walker = std::vec![0u16; (W * H * 3) as usize];
         let mut via_direct = std::vec![0u16; (W * H * 3) as usize];
         let mut sw = MixedSinker::<Xyz12Le>::new(W as usize, H as usize)
@@ -479,7 +533,7 @@ mod xyz12_parity {
       {
         let pix = ramp_frame(W, H, pack12_be);
         let src = Xyz12BeFrame::try_new(&pix, W, H, W * 3).unwrap();
-        let opts = Xyz12Options::new().with_target_gamut(gamut);
+        let opts = Xyz12Options::for_target_gamut(&DcpTargetGamut::from(gamut)).unwrap();
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
         let mut via_direct = std::vec![0u8; (W * H * 3) as usize];
         let mut sw = MixedSinker::<Xyz12Be>::new(W as usize, H as usize)
@@ -763,9 +817,7 @@ mod mono_parity {
     let (data, stride) = packed_1bpp();
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = YuvOptions::new()
-          .maybe_full_range(full_range)
-          .with_matrix(matrix);
+        let opts = yuv_opts(full_range, matrix);
 
         let mut bp = MonoblackProbe::default();
         let src = MonoblackFrame::try_new(&data, W, H, stride).unwrap();
@@ -803,9 +855,7 @@ mod mono_parity {
     let (data, stride) = packed_1bpp();
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = YuvOptions::new()
-          .maybe_full_range(full_range)
-          .with_matrix(matrix);
+        let opts = yuv_opts(full_range, matrix);
         let src = MonoblackFrame::try_new(&data, W, H, stride).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H) as usize];
@@ -838,9 +888,7 @@ mod mono_parity {
     let (data, stride) = packed_1bpp();
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = YuvOptions::new()
-          .maybe_full_range(full_range)
-          .with_matrix(matrix);
+        let opts = yuv_opts(full_range, matrix);
         let src = MonowhiteFrame::try_new(&data, W, H, stride).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H) as usize];
@@ -944,9 +992,7 @@ mod yuv_planar_parity {
         let spec_opts = YuvOptions::from_color_spec(&spec).unwrap();
 
         // The equivalent raw path sets the resolved range directly.
-        let raw_opts = YuvOptions::new()
-          .maybe_full_range(expected_fr)
-          .with_matrix(matrix);
+        let raw_opts = yuv_opts(expected_fr, matrix);
         assert_eq!(spec_opts, raw_opts);
 
         let src =
@@ -998,7 +1044,7 @@ mod yuv_planar_parity {
 
         for full_range in [false, true] {
           for matrix in MATRICES {
-            let opts = YuvOptions::new().maybe_full_range(full_range).with_matrix(matrix);
+            let opts = yuv_opts(full_range, matrix);
             let src = $try_new(&y, &u, &v, W, H, W, cw as u32, cw as u32).unwrap();
 
             let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -1082,7 +1128,7 @@ mod yuv_planar_parity {
 
         for full_range in [false, true] {
           for matrix in MATRICES {
-            let opts = YuvOptions::new().maybe_full_range(full_range).with_matrix(matrix);
+            let opts = yuv_opts(full_range, matrix);
             let src = $try_new(&y, &u, &v, W, H, W, cw as u32, cw as u32).unwrap();
 
             let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -1163,7 +1209,7 @@ mod yuv_semi_planar_parity {
 
         for full_range in [false, true] {
           for matrix in MATRICES {
-            let opts = YuvOptions::new().maybe_full_range(full_range).with_matrix(matrix);
+            let opts = yuv_opts(full_range, matrix);
             let src = $try_new(&y, &uv, W, H, W, uv_row as u32).unwrap();
 
             let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -1235,7 +1281,7 @@ mod yuv_semi_planar_parity {
 
         for full_range in [false, true] {
           for matrix in MATRICES {
-            let opts = YuvOptions::new().maybe_full_range(full_range).with_matrix(matrix);
+            let opts = yuv_opts(full_range, matrix);
             let src = $try_new(&y, &uv, W, H, W, uv_row as u32).unwrap();
 
             let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -1300,9 +1346,7 @@ mod yuv_packed_parity {
 
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = YuvOptions::new()
-          .maybe_full_range(full_range)
-          .with_matrix(matrix);
+        let opts = yuv_opts(full_range, matrix);
         let src = Yuyv422Frame::try_new(&buf, W, H, W * 2).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -1362,9 +1406,7 @@ mod y2xx_parity {
 
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = YuvOptions::new()
-          .maybe_full_range(full_range)
-          .with_matrix(matrix);
+        let opts = yuv_opts(full_range, matrix);
         let src = Y210LeFrame::try_new(&buf, W, H, W * 2).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -1402,9 +1444,7 @@ mod y2xx_parity {
 
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = YuvOptions::new()
-          .maybe_full_range(full_range)
-          .with_matrix(matrix);
+        let opts = yuv_opts(full_range, matrix);
         let src = Y210BeFrame::try_new(&buf, W, H, W * 2).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -1484,9 +1524,7 @@ mod yuv_444_packed_parity {
         let buf = ($ramp)(row_elems * H as usize);
         for full_range in [false, true] {
           for matrix in MATRICES {
-            let opts = YuvOptions::new()
-              .maybe_full_range(full_range)
-              .with_matrix(matrix);
+            let opts = yuv_opts(full_range, matrix);
             let src = $try_new(&buf, W, H, row_elems as u32).unwrap();
 
             let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -1560,9 +1598,7 @@ mod yuv_444_packed_parity {
         let buf = ($ramp)(row_elems * H as usize);
         for full_range in [false, true] {
           for matrix in MATRICES {
-            let opts = YuvOptions::new()
-              .maybe_full_range(full_range)
-              .with_matrix(matrix);
+            let opts = yuv_opts(full_range, matrix);
             let src = $try_new(&buf, W, H, row_elems as u32).unwrap();
 
             let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -1685,9 +1721,7 @@ mod v210_parity {
     let buf = ramp((STRIDE * H) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = YuvOptions::new()
-          .maybe_full_range(full_range)
-          .with_matrix(matrix);
+        let opts = yuv_opts(full_range, matrix);
         let src = V210LeFrame::try_new(&buf, W, H, STRIDE).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -1722,9 +1756,7 @@ mod v210_parity {
     let buf = ramp((STRIDE * H) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = YuvOptions::new()
-          .maybe_full_range(full_range)
-          .with_matrix(matrix);
+        let opts = yuv_opts(full_range, matrix);
         let src = V210BeFrame::try_new(&buf, W, H, STRIDE).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -1794,7 +1826,7 @@ mod yuva_parity {
 
         for full_range in [false, true] {
           for matrix in MATRICES {
-            let opts = YuvOptions::new().maybe_full_range(full_range).with_matrix(matrix);
+            let opts = yuv_opts(full_range, matrix);
             let src = $try_new(&y, &u, &v, &a, W, H, W, cw as u32, cw as u32, W).unwrap();
 
             let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -1868,7 +1900,7 @@ mod yuva_parity {
 
         for full_range in [false, true] {
           for matrix in MATRICES {
-            let opts = YuvOptions::new().maybe_full_range(full_range).with_matrix(matrix);
+            let opts = yuv_opts(full_range, matrix);
             let src = $try_new(&y, &u, &v, &a, W, H, W, cw as u32, cw as u32, W).unwrap();
 
             let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -1962,9 +1994,7 @@ mod rgb_parity {
     let buf = ramp8((W * H * 3) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = YuvOptions::new()
-          .maybe_full_range(full_range)
-          .with_matrix(matrix);
+        let opts = yuv_opts(full_range, matrix);
         let src = Rgb24Frame::try_new(&buf, W, H, W * 3).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -2000,9 +2030,7 @@ mod rgb_parity {
     let buf = ramp16((W * H * 3) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = YuvOptions::new()
-          .maybe_full_range(full_range)
-          .with_matrix(matrix);
+        let opts = yuv_opts(full_range, matrix);
         let src = Rgb48Frame::try_new(&buf, W, H, W * 3).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -2039,9 +2067,7 @@ mod rgb_parity {
     let buf = ramp16((W * H * 3) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = YuvOptions::new()
-          .maybe_full_range(full_range)
-          .with_matrix(matrix);
+        let opts = yuv_opts(full_range, matrix);
         let src = Rgb48BeFrame::try_new(&buf, W, H, W * 3).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -2078,9 +2104,7 @@ mod rgb_parity {
     let buf = ramp32((W * H * 3) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = YuvOptions::new()
-          .maybe_full_range(full_range)
-          .with_matrix(matrix);
+        let opts = yuv_opts(full_range, matrix);
         let src = Rgb96Frame::try_new(&buf, W, H, W * 3).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H) as usize];
@@ -2116,9 +2140,7 @@ mod rgb_parity {
     let buf = ramp32((W * H * 3) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = YuvOptions::new()
-          .maybe_full_range(full_range)
-          .with_matrix(matrix);
+        let opts = yuv_opts(full_range, matrix);
         let src = Rgb96BeFrame::try_new(&buf, W, H, W * 3).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H) as usize];
@@ -2187,9 +2209,7 @@ mod x2_packed_rgb_parity {
         let buf = ramp((W * 4 * H) as usize);
         for full_range in [false, true] {
           for matrix in MATRICES {
-            let opts = YuvOptions::new()
-              .maybe_full_range(full_range)
-              .with_matrix(matrix);
+            let opts = yuv_opts(full_range, matrix);
             let src = $try_new(&buf, W, H, W * 4).unwrap();
 
             let mut via_walker = std::vec![0u8; (W * H) as usize];
@@ -2277,9 +2297,7 @@ mod rgb_legacy_parity {
       .collect();
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = YuvOptions::new()
-          .maybe_full_range(full_range)
-          .with_matrix(matrix);
+        let opts = yuv_opts(full_range, matrix);
         let src = Rgb565Frame::try_new(&buf, W, H, W * 2).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -2316,9 +2334,7 @@ mod rgb_legacy_parity {
           (0..rb * H as usize).map(|i| ((i * 19 + 7) % 251) as u8).collect();
         for full_range in [false, true] {
           for matrix in MATRICES {
-            let opts = YuvOptions::new()
-              .maybe_full_range(full_range)
-              .with_matrix(matrix);
+            let opts = yuv_opts(full_range, matrix);
             let src = $Frame::try_new(&buf, W, H, rb as u32).unwrap();
 
             let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -2415,9 +2431,7 @@ mod gray_parity {
     let y = ramp8((W * H) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = YuvOptions::new()
-          .maybe_full_range(full_range)
-          .with_matrix(matrix);
+        let opts = yuv_opts(full_range, matrix);
         let src = Gray8Frame::try_new(&y, W, H, W).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -2455,9 +2469,7 @@ mod gray_parity {
     let packed = ramp8((W * H * 2) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = YuvOptions::new()
-          .maybe_full_range(full_range)
-          .with_matrix(matrix);
+        let opts = yuv_opts(full_range, matrix);
         let src = Ya8Frame::try_new(&packed, W, H, W * 2).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -2497,9 +2509,7 @@ mod gray_parity {
     let y = ramp16((W * H) as usize, 10);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = YuvOptions::new()
-          .maybe_full_range(full_range)
-          .with_matrix(matrix);
+        let opts = yuv_opts(full_range, matrix);
         let src = Gray10LeFrame::try_new(&y, W, H, W).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -2539,9 +2549,7 @@ mod gray_parity {
     let y = ramp16((W * H) as usize, 10);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = YuvOptions::new()
-          .maybe_full_range(full_range)
-          .with_matrix(matrix);
+        let opts = yuv_opts(full_range, matrix);
         let src = Gray10BeFrame::try_new(&y, W, H, W).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -2580,9 +2588,7 @@ mod gray_parity {
     let y = ramp16((W * H) as usize, 16);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = YuvOptions::new()
-          .maybe_full_range(full_range)
-          .with_matrix(matrix);
+        let opts = yuv_opts(full_range, matrix);
         let src = Gray16LeFrame::try_new(&y, W, H, W).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -2621,9 +2627,7 @@ mod gray_parity {
     let y = ramp16((W * H) as usize, 16);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = YuvOptions::new()
-          .maybe_full_range(full_range)
-          .with_matrix(matrix);
+        let opts = yuv_opts(full_range, matrix);
         let src = Gray16BeFrame::try_new(&y, W, H, W).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -2662,9 +2666,7 @@ mod gray_parity {
     let y = ramp32((W * H) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = YuvOptions::new()
-          .maybe_full_range(full_range)
-          .with_matrix(matrix);
+        let opts = yuv_opts(full_range, matrix);
         let src = Gray32LeFrame::try_new(&y, W, H, W).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -2703,9 +2705,7 @@ mod gray_parity {
     let y = ramp32((W * H) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = YuvOptions::new()
-          .maybe_full_range(full_range)
-          .with_matrix(matrix);
+        let opts = yuv_opts(full_range, matrix);
         let src = Gray32BeFrame::try_new(&y, W, H, W).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -2790,9 +2790,7 @@ mod gbr_parity {
     let (g, b, r) = planes8();
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = YuvOptions::new()
-          .maybe_full_range(full_range)
-          .with_matrix(matrix);
+        let opts = yuv_opts(full_range, matrix);
         let src = GbrpFrame::try_new(&g, &b, &r, W, H, W, W, W).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -2832,9 +2830,7 @@ mod gbr_parity {
     let (g, b, r) = planes16(10);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = YuvOptions::new()
-          .maybe_full_range(full_range)
-          .with_matrix(matrix);
+        let opts = yuv_opts(full_range, matrix);
         let src = Gbrp10LeFrame::try_new(&g, &b, &r, W, H, W, W, W).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -2874,9 +2870,7 @@ mod gbr_parity {
     let (g, b, r) = planes16(10);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = YuvOptions::new()
-          .maybe_full_range(full_range)
-          .with_matrix(matrix);
+        let opts = yuv_opts(full_range, matrix);
         let src = Gbrp10BeFrame::try_new(&g, &b, &r, W, H, W, W, W).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -2941,9 +2935,7 @@ mod gbr_parity {
     let (g, b, r, a) = planes32();
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = YuvOptions::new()
-          .maybe_full_range(full_range)
-          .with_matrix(matrix);
+        let opts = yuv_opts(full_range, matrix);
         let src = Gbrap32LeFrame::try_new(&g, &b, &r, &a, W, H, W, W, W, W).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 4) as usize];
@@ -2982,9 +2974,7 @@ mod gbr_parity {
     let (g, b, r, a) = planes32();
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = YuvOptions::new()
-          .maybe_full_range(full_range)
-          .with_matrix(matrix);
+        let opts = yuv_opts(full_range, matrix);
         let src = Gbrap32BeFrame::try_new(&g, &b, &r, &a, W, H, W, W, W, W).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 4) as usize];
@@ -3028,9 +3018,7 @@ mod gbr_parity {
     let (g16, b16, r16) = planes16(10);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = YuvOptions::new()
-          .maybe_full_range(full_range)
-          .with_matrix(matrix);
+        let opts = yuv_opts(full_range, matrix);
 
         let src = GbrpFrame::try_new(&g8, &b8, &r8, W, H, W, W, W).unwrap();
         let mut vw = std::vec![0u8; (W * H) as usize];
@@ -3105,9 +3093,7 @@ mod gbr_parity {
     let (g, b, r) = (msb_align(&g, 10), msb_align(&b, 10), msb_align(&r, 10));
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = YuvOptions::new()
-          .maybe_full_range(full_range)
-          .with_matrix(matrix);
+        let opts = yuv_opts(full_range, matrix);
         let src = Gbrp10MsbLeFrame::new(&g, &b, &r, W, H, W, W, W);
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -3148,9 +3134,7 @@ mod gbr_parity {
     let (g, b, r) = (msb_align(&g, 12), msb_align(&b, 12), msb_align(&r, 12));
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = YuvOptions::new()
-          .maybe_full_range(full_range)
-          .with_matrix(matrix);
+        let opts = yuv_opts(full_range, matrix);
         let src = Gbrp12MsbBeFrame::new(&g, &b, &r, W, H, W, W, W);
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -3192,9 +3176,7 @@ mod gbr_parity {
     let (y, u, v) = (msb_align(&y, 10), msb_align(&u, 10), msb_align(&v, 10));
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = YuvOptions::new()
-          .maybe_full_range(full_range)
-          .with_matrix(matrix);
+        let opts = yuv_opts(full_range, matrix);
         let src = Yuv444p10MsbLeFrame::new(&y, &u, &v, W, H, W, W, W);
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -3236,9 +3218,7 @@ mod gbr_parity {
     let (y, u, v) = (msb_align(&y, 12), msb_align(&u, 12), msb_align(&v, 12));
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = YuvOptions::new()
-          .maybe_full_range(full_range)
-          .with_matrix(matrix);
+        let opts = yuv_opts(full_range, matrix);
         let src = Yuv444p12MsbBeFrame::new(&y, &u, &v, W, H, W, W, W);
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -3290,9 +3270,7 @@ mod gbr_parity {
     );
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = YuvOptions::new()
-          .maybe_full_range(full_range)
-          .with_matrix(matrix);
+        let opts = yuv_opts(full_range, matrix);
 
         let src = Gbrp10MsbLeFrame::new(&g10, &b10, &r10, W, H, W, W, W);
         let mut vw = std::vec![0u16; (W * H) as usize];
@@ -3385,9 +3363,7 @@ mod rgbf_parity {
     let buf = ramp_f16((W * H * 3) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = YuvOptions::new()
-          .maybe_full_range(full_range)
-          .with_matrix(matrix);
+        let opts = yuv_opts(full_range, matrix);
         let src = Rgbf16Frame::try_new(&buf, W, H, W * 3).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H) as usize];
@@ -3423,9 +3399,7 @@ mod rgbf_parity {
     let buf = ramp_f16((W * H * 3) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = YuvOptions::new()
-          .maybe_full_range(full_range)
-          .with_matrix(matrix);
+        let opts = yuv_opts(full_range, matrix);
         let src = Rgbf16BeFrame::try_new(&buf, W, H, W * 3).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H) as usize];
@@ -3460,9 +3434,7 @@ mod rgbf_parity {
     let buf = ramp_f32((W * H * 3) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = YuvOptions::new()
-          .maybe_full_range(full_range)
-          .with_matrix(matrix);
+        let opts = yuv_opts(full_range, matrix);
         let src = Rgbf32Frame::try_new(&buf, W, H, W * 3).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H) as usize];
@@ -3498,9 +3470,7 @@ mod rgbf_parity {
     let buf = ramp_f32((W * H * 3) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = YuvOptions::new()
-          .maybe_full_range(full_range)
-          .with_matrix(matrix);
+        let opts = yuv_opts(full_range, matrix);
         let src = Rgbf32BeFrame::try_new(&buf, W, H, W * 3).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H) as usize];
@@ -3536,9 +3506,7 @@ mod rgbf_parity {
     let buf = ramp_f32((W * H * 3) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = YuvOptions::new()
-          .maybe_full_range(full_range)
-          .with_matrix(matrix);
+        let opts = yuv_opts(full_range, matrix);
         let src = Rgbf32Frame::try_new(&buf, W, H, W * 3).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -3602,9 +3570,7 @@ mod rgbaf_parity {
     let buf = ramp_f16((W * H * 4) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = YuvOptions::new()
-          .maybe_full_range(full_range)
-          .with_matrix(matrix);
+        let opts = yuv_opts(full_range, matrix);
         let src = Rgbaf16Frame::try_new(&buf, W, H, W * 4).unwrap();
         let mut via_walker = std::vec![0u8; (W * H) as usize];
         let mut via_direct = std::vec![0u8; (W * H) as usize];
@@ -3630,9 +3596,7 @@ mod rgbaf_parity {
     let buf = ramp_f16((W * H * 4) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = YuvOptions::new()
-          .maybe_full_range(full_range)
-          .with_matrix(matrix);
+        let opts = yuv_opts(full_range, matrix);
         let src = Rgbaf16BeFrame::try_new(&buf, W, H, W * 4).unwrap();
         let mut via_walker = std::vec![0u8; (W * H) as usize];
         let mut via_direct = std::vec![0u8; (W * H) as usize];
@@ -3658,9 +3622,7 @@ mod rgbaf_parity {
     let buf = ramp_f32((W * H * 4) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = YuvOptions::new()
-          .maybe_full_range(full_range)
-          .with_matrix(matrix);
+        let opts = yuv_opts(full_range, matrix);
         let src = Rgbaf32Frame::try_new(&buf, W, H, W * 4).unwrap();
         let mut via_walker = std::vec![0u8; (W * H) as usize];
         let mut via_direct = std::vec![0u8; (W * H) as usize];
@@ -3686,9 +3648,7 @@ mod rgbaf_parity {
     let buf = ramp_f32((W * H * 4) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = YuvOptions::new()
-          .maybe_full_range(full_range)
-          .with_matrix(matrix);
+        let opts = yuv_opts(full_range, matrix);
         let src = Rgbaf32BeFrame::try_new(&buf, W, H, W * 4).unwrap();
         let mut via_walker = std::vec![0u8; (W * H) as usize];
         let mut via_direct = std::vec![0u8; (W * H) as usize];
@@ -3801,9 +3761,7 @@ mod grayf32_parity {
     let y = ramp_f32((W * H) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = YuvOptions::new()
-          .maybe_full_range(full_range)
-          .with_matrix(matrix);
+        let opts = yuv_opts(full_range, matrix);
 
         let src = Grayf32Frame::try_new(&y, W, H, W).unwrap();
         let mut le = Grayf32Probe::default();
@@ -3843,9 +3801,7 @@ mod grayf32_parity {
     let y = ramp_f32((W * H) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = YuvOptions::new()
-          .maybe_full_range(full_range)
-          .with_matrix(matrix);
+        let opts = yuv_opts(full_range, matrix);
         let src = Grayf32Frame::try_new(&y, W, H, W).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -3881,9 +3837,7 @@ mod grayf32_parity {
     let y = ramp_f32((W * H) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = YuvOptions::new()
-          .maybe_full_range(full_range)
-          .with_matrix(matrix);
+        let opts = yuv_opts(full_range, matrix);
         let src = Grayf32BeFrame::try_new(&y, W, H, W).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -3969,9 +3923,7 @@ mod grayf16_parity {
     let y = ramp_f16((W * H) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = YuvOptions::new()
-          .maybe_full_range(full_range)
-          .with_matrix(matrix);
+        let opts = yuv_opts(full_range, matrix);
 
         let src = Grayf16Frame::try_new(&y, W, H, W).unwrap();
         let mut le = Grayf16Probe::default();
@@ -4011,9 +3963,7 @@ mod grayf16_parity {
     let y = ramp_f16((W * H) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = YuvOptions::new()
-          .maybe_full_range(full_range)
-          .with_matrix(matrix);
+        let opts = yuv_opts(full_range, matrix);
         let src = Grayf16Frame::try_new(&y, W, H, W).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -4048,9 +3998,7 @@ mod grayf16_parity {
     let y = ramp_f16((W * H) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = YuvOptions::new()
-          .maybe_full_range(full_range)
-          .with_matrix(matrix);
+        let opts = yuv_opts(full_range, matrix);
         let src = Grayf16BeFrame::try_new(&y, W, H, W).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -4306,9 +4254,7 @@ mod yaf_parity {
     let packed = ramp_f32_packed((W * H * 2) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = YuvOptions::new()
-          .maybe_full_range(full_range)
-          .with_matrix(matrix);
+        let opts = yuv_opts(full_range, matrix);
         let src = Yaf32Frame::try_new(&packed, W, H, W * 2).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 4) as usize];
@@ -4364,9 +4310,7 @@ mod yaf_parity {
     let packed = ramp_f16_packed((W * H * 2) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = YuvOptions::new()
-          .maybe_full_range(full_range)
-          .with_matrix(matrix);
+        let opts = yuv_opts(full_range, matrix);
         let src = Yaf16Frame::try_new(&packed, W, H, W * 2).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 4) as usize];

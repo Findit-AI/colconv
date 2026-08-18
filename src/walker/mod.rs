@@ -696,11 +696,13 @@ macro_rules! walker {
 /// gamut its inverse-OETF + 3×3 matrix converts into.
 ///
 /// The gamut is a [`KernelGamut`]: the **closed** set the XYZ → RGB matrix
-/// and luma basis are tabulated for. A caller holding the open descriptor
-/// [`DcpTargetGamut`] exchanges it at the door with
-/// [`for_target_gamut`](Self::for_target_gamut), which refuses a gamut this
-/// build does not name rather than converting it as if it were one of the
-/// three that are tabulated.
+/// and luma basis are tabulated for. It is not settable directly. A caller
+/// names the gamut with the open descriptor [`DcpTargetGamut`] and exchanges
+/// it at the single door [`for_target_gamut`](Self::for_target_gamut), which
+/// refuses a gamut this build does not name rather than converting it as if
+/// it were one of the three that are tabulated. `KernelGamut` therefore only
+/// ever enters these options through that one exchange — it cannot be
+/// conjured beside the descriptor that was supposed to select it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Xyz12Options {
   target_gamut: KernelGamut,
@@ -735,14 +737,6 @@ impl Xyz12Options {
   pub const fn target_gamut(&self) -> KernelGamut {
     self.target_gamut
   }
-
-  /// Sets the target RGB gamut (consuming builder).
-  #[must_use]
-  #[inline(always)]
-  pub const fn with_target_gamut(mut self, target_gamut: KernelGamut) -> Self {
-    self.target_gamut = target_gamut;
-    self
-  }
 }
 
 impl Default for Xyz12Options {
@@ -758,8 +752,19 @@ impl Default for Xyz12Options {
 /// The matrix here is the **closed** coefficient selector, not the open
 /// [`ColorMatrix`] descriptor: this value is handed straight to a walker,
 /// which stamps it on every row, and a row must never carry a matrix no
-/// kernel has coefficients for. The exchange happens once, at
-/// [`from_color_spec`](Self::from_color_spec).
+/// kernel has coefficients for.
+///
+/// It is **not settable**. [`from_color_spec`](Self::from_color_spec) is the
+/// only constructor that names a matrix, and it obtains it from
+/// [`ColorSpec::kernel_matrix`] — so a `KernelMatrix` riding a pixon walk
+/// provably came from a [`ColorSpec`], and the colour intent has one source.
+/// A caller with no spec to hand reaches for [`ColorSpec::of_matrix`] rather
+/// than a second door into this type. The [`new`](Self::new) default is the
+/// unnamed-colorimetry posture — limited-range [`KernelMatrix::Bt709`], which
+/// is what [`ColorMatrix::Unspecified`] itself resolves to.
+///
+/// `full_range` is a quantisation knob, not colour intent, and keeps its own
+/// setters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct YuvOptions {
   full_range: bool,
@@ -768,7 +773,10 @@ pub struct YuvOptions {
 
 impl YuvOptions {
   /// Creates options for limited-range [`KernelMatrix::Bt709`] — the
-  /// implicit default of the common HD YUV pipeline.
+  /// unnamed-colorimetry posture, identical to what a spec carrying
+  /// [`ColorMatrix::Unspecified`] resolves to. Naming a *different* matrix
+  /// goes through a [`ColorSpec`]: [`from_color_spec`](Self::from_color_spec),
+  /// seeded by [`ColorSpec::of_matrix`] when there is no fuller spec to hand.
   #[inline(always)]
   pub const fn new() -> Self {
     Self {
@@ -778,25 +786,27 @@ impl YuvOptions {
   }
 
   /// Builds options from a resolved [`ColorSpec`] — the **range-safe**
-  /// entry point.
+  /// entry point, and the only constructor that names a matrix.
   ///
   /// The spec's resolved [`full_range`](ColorSpec::full_range) and
   /// [`kernel_matrix`](ColorSpec::kernel_matrix) become this `YuvOptions`.
-  /// Because a `ColorSpec` can only be produced by [`ColorSpec::resolve`] —
-  /// which honours a format's *pinned* range — this is the constructor a
+  /// When the spec came from [`ColorSpec::resolve`] / [`ColorSpec::from_info`]
+  /// — which honour a format's *pinned* range — this is the constructor a
   /// caller cannot use to decode a range-pinned source (a `yuvj*` alias) with
-  /// the wrong range. It feeds the **same** kernels as the raw builders, so it
-  /// carries zero per-pixel cost.
+  /// the wrong range. It feeds the **same** kernels as
+  /// [`new`](Self::new), so it carries zero per-pixel cost.
   ///
   /// Only the **walker-consumed** half of the spec lands here: the
   /// [`chroma_location`](ColorSpec::chroma_location), the
   /// [`transfer`](ColorSpec::transfer), the [`primaries`](ColorSpec::primaries)
   /// and the open [`matrix`](ColorSpec::matrix) descriptor are *intentionally
   /// not* carried, because a walker row threads only range + kernel matrix to
-  /// the kernels. They are **sink-consumed** instead — pass the same `spec` to
-  /// [`MixedSinker::with_color_spec`](crate::sinker::MixedSinker::with_color_spec)
-  /// to drive siting-aware 4:2:0 upsampling (#302) and the non-affine decodes
-  /// (#303).
+  /// the kernels. They are **sink-consumed** instead. Hand the **same** `spec`
+  /// to [`MixedSinker::with_color_spec`](crate::sinker::MixedSinker::with_color_spec)
+  /// so both halves read one description — that drives siting-aware 4:2:0
+  /// upsampling (#302) and the non-affine decodes (#303). The
+  /// [`Convert`](crate::Convert) tier does exactly this from a single
+  /// [`spec`](crate::Convert::spec) call.
   ///
   /// # Errors
   ///
@@ -863,14 +873,6 @@ impl YuvOptions {
   #[inline(always)]
   pub const fn clear_full_range(&mut self) -> &mut Self {
     self.full_range = false;
-    self
-  }
-
-  /// Sets the YCbCr matrix (consuming builder).
-  #[must_use]
-  #[inline(always)]
-  pub const fn with_matrix(mut self, matrix: KernelMatrix) -> Self {
-    self.matrix = matrix;
     self
   }
 }
@@ -1045,6 +1047,54 @@ impl ColorSpec {
     }
   }
 
+  /// The **casual affine path**: a spec that names a YCbCr matrix and nothing
+  /// else.
+  ///
+  /// Colour intent has one carrier in pixon — this type — so a caller who
+  /// knows only "these are BT.601 samples" still expresses that as a
+  /// `ColorSpec` rather than reaching for a second door into
+  /// [`YuvOptions`]. This constructor is that shortcut, not a second door:
+  /// what it returns is an ordinary `ColorSpec`, and it feeds
+  /// [`YuvOptions::from_color_spec`] and
+  /// [`MixedSinker::with_color_spec`](crate::sinker::MixedSinker::with_color_spec)
+  /// like any other.
+  ///
+  /// Everything the caller did not name stays at the unspecified posture:
+  /// [`PixelFormat::None`] (no format named, so **no format-pinned range** —
+  /// use [`resolve`](Self::resolve) or [`from_info`](Self::from_info) for a
+  /// `yuvj*` source), limited range, and `Unspecified`
+  /// [`primaries`](Self::primaries) / [`transfer`](Self::transfer) /
+  /// [`chroma_location`](Self::chroma_location). No new silent path is
+  /// introduced: those are the same defaults an all-`Unspecified`
+  /// [`ColorInfo`] already resolves to.
+  ///
+  /// The parameter is the **closed** [`KernelMatrix`], so this shortcut can
+  /// only describe an *affine* source and [`kernel_matrix`](Self::kernel_matrix)
+  /// on the result never fails. The four non-affine decodes (#303) select
+  /// their variant from the signalled transfer and primaries, which a
+  /// matrix-only spec does not carry — those sources build a full spec
+  /// through [`from_info`](Self::from_info).
+  ///
+  /// ```
+  /// use pixon::{ColorMatrix, ColorSpec, KernelMatrix, PixelFormat, YuvOptions};
+  ///
+  /// let spec = ColorSpec::of_matrix(KernelMatrix::Bt601);
+  /// assert_eq!(spec.matrix(), ColorMatrix::Bt601);
+  /// assert_eq!(spec.format(), PixelFormat::None);
+  /// assert!(!spec.full_range());
+  ///
+  /// let opts = YuvOptions::from_color_spec(&spec).unwrap();
+  /// assert_eq!(opts.matrix(), KernelMatrix::Bt601);
+  /// ```
+  #[inline]
+  pub fn of_matrix(matrix: KernelMatrix) -> Self {
+    // Routed through `from_info` so the range-pinning rule keeps one home.
+    Self::from_info(
+      PixelFormat::None,
+      ColorInfo::UNSPECIFIED.with_matrix(ColorMatrix::from(matrix)),
+    )
+  }
+
   /// The canonical decode format the source alias resolves to (e.g.
   /// `Gray8a` → `Ya8`). A non-alias format resolves to itself.
   #[inline(always)]
@@ -1075,19 +1125,28 @@ impl ColorSpec {
   /// [`matrix`](Self::matrix) descriptor exchanged for the closed
   /// [`KernelMatrix`] vocabulary.
   ///
-  /// This is the one door where a matrix pixon cannot decode is refused, and
-  /// past it the wrong coefficient set is unrepresentable. The exchange is not
-  /// simply [`KernelMatrix::try_from`], because pixon decodes four matrices
-  /// mediaframe tabulates no *affine* coefficients for:
+  /// This is the **single** exchange point between the two vocabularies: the
+  /// only way a `KernelMatrix` reaches a pixon walk is out of this method, via
+  /// [`YuvOptions::from_color_spec`] (nothing else on [`YuvOptions`] sets one).
+  /// It is therefore also the one door where a matrix pixon cannot decode is
+  /// refused, and past it the wrong coefficient set is unrepresentable.
+  ///
+  /// The exchange is not simply [`KernelMatrix::try_from`], because pixon
+  /// decodes four matrices mediaframe tabulates no *affine* coefficients for:
   ///
   /// - the ten [`KernelMatrix`] members map to themselves;
   /// - [`Ictcp`](ColorMatrix::Ictcp), [`ChromaDerivedCl`](ColorMatrix::ChromaDerivedCl),
   ///   [`IptC2`](ColorMatrix::IptC2) and [`Smpte2085`](ColorMatrix::Smpte2085)
   ///   map to [`KernelMatrix::Bt709`]. pixon decodes all four **non-affinely**
-  ///   from the sink's signalled transfer / primaries (#303), so the affine
-  ///   selector is consulted only on the documented fallback path where that
-  ///   tag does not resolve (an ICtCp source with no PQ/HLG transfer, say) —
-  ///   the behaviour these matrices have had since #303;
+  ///   from the signalled transfer / primaries (#303), so the affine selector
+  ///   is consulted only where that tag does not resolve — an ICtCp source
+  ///   whose transfer names neither PQ nor HLG, say. Decoding such a source
+  ///   affinely as BT.709 is a **chosen** posture, not an accident of
+  ///   history: the tag is present but underdetermined, and BT.709 is what
+  ///   this crate resolves underdetermined colorimetry to everywhere else —
+  ///   the same prerogative it exercises for
+  ///   [`Unspecified`](ColorMatrix::Unspecified). Refusal is reserved for
+  ///   matrices pixon has *no* decode for, below;
   /// - [`Rgb`](ColorMatrix::Rgb) maps to [`KernelMatrix::Bt709`]. The GBR
   ///   identity names no YCbCr basis at all; the only kernel that consults a
   ///   matrix for a GBR source is the luma derivation, which pixon pins to
@@ -1106,7 +1165,7 @@ impl ColorSpec {
   pub fn kernel_matrix(&self) -> Result<KernelMatrix, UnsupportedKernelMatrixError> {
     match &self.matrix {
       // pixon's own non-affine decodes (#303) plus the GBR identity: the
-      // affine selector is a documented fallback for these, not a guess.
+      // affine selector is a decided fallback for these, not a guess.
       ColorMatrix::Ictcp
       | ColorMatrix::ChromaDerivedCl
       | ColorMatrix::IptC2

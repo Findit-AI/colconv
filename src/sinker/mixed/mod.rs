@@ -3718,6 +3718,23 @@ pub struct MixedSinker<'a, F: SourceFormat, R = NoopResampler> {
   /// [`ColorMatrix::Unspecified`](crate::ColorMatrix::Unspecified) — no
   /// non-affine tag → the affine path, byte-identical to the pre-#303
   /// behaviour. Set via [`Self::with_color_spec`] / [`Self::set_color_spec`].
+  ///
+  /// **One description, two readers.** This field and the row's
+  /// `KernelMatrix` are not two independent knobs to keep in step: colour
+  /// intent has a single carrier, [`ColorSpec`](crate::ColorSpec), and the
+  /// two are its projections. The row's selector can only be produced by
+  /// [`ColorSpec::kernel_matrix`](crate::ColorSpec::kernel_matrix) through
+  /// [`YuvOptions::from_color_spec`](crate::YuvOptions::from_color_spec) —
+  /// [`YuvOptions`](crate::YuvOptions) has no setter that names a matrix — and
+  /// this field can only be set from a `ColorSpec` too. Feed the **same**
+  /// spec to both and the non-affine tag cannot go missing;
+  /// [`Convert::spec`](crate::Convert::spec) does that for you from one call.
+  ///
+  /// The one shape that still needs care is Tier 1 reached through
+  /// mediaframe's free `{fmt}_to` walkers, whose signature takes the row's
+  /// `KernelMatrix` positionally: a caller who passes a matrix there and hands
+  /// the sink no spec gets the affine BT.709 decode, because the non-affine
+  /// tag never arrived. Give the sink the spec.
   #[cfg(feature = "yuv-planar")]
   matrix: crate::ColorMatrix,
   /// Per-frame accumulator for the RFC #238 [`AveragingDomain::Linear`]
@@ -5349,9 +5366,11 @@ impl<F: SourceFormat, R> MixedSinker<'_, F, R> {
   }
 
   /// Applies the **sink-consumed** colour metadata of a resolved
-  /// [`ColorSpec`](crate::ColorSpec) in place — currently its
-  /// [`ChromaLocation`](crate::ChromaLocation), driving siting-aware 4:2:0
-  /// upsampling (#302). See [`Self::with_color_spec`].
+  /// [`ColorSpec`](crate::ColorSpec) in place — its
+  /// [`ChromaLocation`](crate::ChromaLocation) (siting-aware 4:2:0
+  /// upsampling, #302) plus the [`primaries`](Self::primaries),
+  /// [`transfer`](Self::transfer) and open matrix descriptor the non-affine
+  /// decodes read (#303). See [`Self::with_color_spec`].
   #[cfg(feature = "yuv-planar")]
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub fn set_color_spec(&mut self, spec: &crate::ColorSpec) -> &mut Self {
@@ -5365,16 +5384,20 @@ impl<F: SourceFormat, R> MixedSinker<'_, F, R> {
   /// Configures the sink from a resolved [`ColorSpec`](crate::ColorSpec),
   /// completing the **end-to-end ColorSpec decode path** (#301 / #302 / #303).
   ///
-  /// A `ColorSpec` splits across two consumers: its
-  /// [`matrix`](crate::ColorSpec::matrix) and
+  /// A `ColorSpec` is the single carrier of colour intent; it splits across
+  /// two *readers*, not two sources. Its
+  /// [`kernel_matrix`](crate::ColorSpec::kernel_matrix) and
   /// [`full_range`](crate::ColorSpec::full_range) are **walker-consumed** —
   /// route them via [`YuvOptions::from_color_spec`](crate::YuvOptions::from_color_spec)
   /// to the `*_to` walk — while its
-  /// [`chroma_location`](crate::ColorSpec::chroma_location) and
-  /// [`primaries`](crate::ColorSpec::primaries) are **sink-consumed**
-  /// (mediaframe's YUV row carries only range + matrix, neither the siting nor
-  /// the primaries). This builder threads the latter pair so the **same
-  /// `spec`** drives both halves — the `primaries` feed the
+  /// [`chroma_location`](crate::ColorSpec::chroma_location),
+  /// [`primaries`](crate::ColorSpec::primaries),
+  /// [`transfer`](crate::ColorSpec::transfer) and open
+  /// [`matrix`](crate::ColorSpec::matrix) descriptor are **sink-consumed**
+  /// (mediaframe's YUV row carries only range + kernel matrix — neither the
+  /// siting, the primaries, the transfer, nor a non-affine tag). This builder
+  /// threads that half, so passing the **same `spec`** to both keeps one
+  /// description behind both readers — the `primaries` feed the
   /// [`KernelMatrix::ChromaDerivedNcl`](crate::KernelMatrix::ChromaDerivedNcl)
   /// decode (#303), whose `Kr` / `Kb` are derived from them:
   ///

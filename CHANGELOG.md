@@ -30,10 +30,20 @@ of silently decoded as BT.709**.
   | `ColorMatrix` | result |
   | --- | --- |
   | `Bt601` `Bt709` `Unspecified` `Fcc` `Bt470Bg` `Smpte170M` `Smpte240m` `YCgCo` `Bt2020Ncl` `ChromaDerivedNcl` | the matching `KernelMatrix` |
-  | `Ictcp` `ChromaDerivedCl` `IptC2` `Smpte2085` | `KernelMatrix::Bt709` — pixon decodes all four **non-affinely** from the sink's transfer / primaries; the affine selector is the documented fallback for an unresolved tag, unchanged since #303 |
+  | `Ictcp` `ChromaDerivedCl` `IptC2` `Smpte2085` | `KernelMatrix::Bt709` — pixon decodes all four **non-affinely** from the signalled transfer / primaries; the affine selector is reached only where that tag is underdetermined (an ICtCp source naming neither PQ nor HLG), and resolving underdetermined colorimetry to BT.709 is the same prerogative exercised for `Unspecified` |
   | `Rgb` | `KernelMatrix::Bt709` — the GBR identity names no YCbCr basis; the luma derivation is pinned to BT.709 regardless |
   | `Bt2020Cl` `YCgCoRe` `YCgCoRo` `Other(_)` | **`UnsupportedKernelMatrixError`** |
 
+- **`ColorSpec::of_matrix(KernelMatrix)`** — the casual affine path. Colour
+  intent has exactly one carrier in pixon (`ColorSpec`), so a caller who knows
+  only "these are BT.601 samples" still says so with a spec instead of reaching
+  for a second door into `YuvOptions`. Everything unnamed stays at the
+  unspecified posture — `PixelFormat::None` (so **no** format-pinned range: use
+  `resolve` / `from_info` for a `yuvj*` source), limited range, `Unspecified`
+  primaries / transfer / siting. It takes the *closed* selector, so it can only
+  describe an affine source and `kernel_matrix` on the result never fails; the
+  four non-affine decodes need a transfer and primaries and so still build a
+  full spec.
 - `pixon::KernelMatrix`, `pixon::KernelGamut`, `pixon::UnsupportedKernelMatrixError`
   and `pixon::UnsupportedKernelGamutError`, re-exported from mediaframe.
 - `Xyz12Options::for_target_gamut(&DcpTargetGamut)` — the same exchange for the
@@ -57,11 +67,35 @@ of silently decoded as BT.709**.
   now spelled out with their rationale instead of riding a fallback.
 
 - **Breaking: the kernels take `KernelMatrix`, not `ColorMatrix`.** A walker
-  row now carries the closed selector, so `YuvOptions::matrix`,
-  `YuvOptions::with_matrix` and every `{fmt}_to` walker argument are
-  `KernelMatrix`; `Xyz12Options::target_gamut` / `with_target_gamut` are
-  `KernelGamut`. `ColorSpec` keeps the **open** `ColorMatrix` descriptor — it
-  describes a stream, and the four non-affine decodes read their tag from it.
+  row now carries the closed selector, so `YuvOptions::matrix` and every
+  `{fmt}_to` walker argument are `KernelMatrix`; `Xyz12Options::target_gamut`
+  is `KernelGamut`. `ColorSpec` keeps the **open** `ColorMatrix` descriptor —
+  it describes a stream, and the four non-affine decodes read their tag from
+  it.
+
+- **Breaking: the closed selectors are no longer settable — colour intent has
+  one source.** `YuvOptions::with_matrix(KernelMatrix)` and
+  `Xyz12Options::with_target_gamut(KernelGamut)` are **removed**. A
+  `KernelMatrix` now enters a walk only out of `ColorSpec::kernel_matrix`, via
+  `YuvOptions::from_color_spec`; a `KernelGamut` only out of
+  `Xyz12Options::for_target_gamut(&DcpTargetGamut)`. Each closed vocabulary
+  therefore has exactly one exchange point with the open descriptor that was
+  supposed to select it, and neither can be conjured alongside — or in
+  contradiction of — the description the sink is decoding against. Migration:
+
+  ```rust
+  - let opts = YuvOptions::new().with_matrix(KernelMatrix::Bt601);
+  + let opts = YuvOptions::from_color_spec(&ColorSpec::of_matrix(KernelMatrix::Bt601))?;
+  // …or, when a fuller description is at hand, straight from it:
+  + let opts = YuvOptions::from_color_spec(&spec)?;
+
+  - let opts = Xyz12Options::new().with_target_gamut(KernelGamut::Rec709);
+  + let opts = Xyz12Options::for_target_gamut(&DcpTargetGamut::Rec709)?;
+  ```
+
+  `full_range` is a quantisation knob rather than colour intent and keeps its
+  own setters; `YuvOptions::new()` still means limited-range BT.709, which is
+  what `ColorMatrix::Unspecified` resolves to — no new implicit path.
 
 - **Breaking: `YuvOptions::from_color_spec` and `FromSpec::from_spec` are
   fallible** and take `&ColorSpec`. `MixedSinker::with_color_spec` /
