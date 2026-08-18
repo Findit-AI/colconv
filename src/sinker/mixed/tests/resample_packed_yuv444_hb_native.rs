@@ -38,7 +38,7 @@
 //!   freeze guard, and the luma-only lazy-chroma carry-through.
 
 use crate::{
-  ColorMatrix, PixelSink,
+  KernelMatrix, PixelSink,
   frame::{Yuv444p10LeFrame, Yuv444p12LeFrame},
   resample::{AreaResampler, ResampleError},
   sinker::{MixedSinker, MixedSinkerError},
@@ -50,7 +50,7 @@ use crate::{
 
 const SRC: usize = 8;
 const OUT: usize = 4;
-const M: ColorMatrix = ColorMatrix::Bt601;
+const M: KernelMatrix = KernelMatrix::Bt601;
 const FR: bool = true;
 
 /// In-gamut per-channel u8 tolerance between the native and row-stage tiers — the

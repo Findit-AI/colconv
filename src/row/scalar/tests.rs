@@ -132,7 +132,7 @@ fn yuv420_rgb_black() {
   let u = [128u8; 2];
   let v = [128u8; 2];
   let mut rgb = [0u8; 12];
-  yuv_420_to_rgb_row(&y, &u, &v, &mut rgb, 4, ColorMatrix::Bt601, true);
+  yuv_420_to_rgb_row(&y, &u, &v, &mut rgb, 4, KernelMatrix::Bt601, true);
   assert!(rgb.iter().all(|&c| c == 0), "got {rgb:?}");
 }
 
@@ -143,7 +143,7 @@ fn yuv420_rgb_white_full_range() {
   let u = [128u8; 2];
   let v = [128u8; 2];
   let mut rgb = [0u8; 12];
-  yuv_420_to_rgb_row(&y, &u, &v, &mut rgb, 4, ColorMatrix::Bt601, true);
+  yuv_420_to_rgb_row(&y, &u, &v, &mut rgb, 4, KernelMatrix::Bt601, true);
   assert!(rgb.iter().all(|&c| c == 255), "got {rgb:?}");
 }
 
@@ -154,7 +154,7 @@ fn yuv420_rgb_gray_is_gray() {
   let u = [128u8; 2];
   let v = [128u8; 2];
   let mut rgb = [0u8; 12];
-  yuv_420_to_rgb_row(&y, &u, &v, &mut rgb, 4, ColorMatrix::Bt601, true);
+  yuv_420_to_rgb_row(&y, &u, &v, &mut rgb, 4, KernelMatrix::Bt601, true);
   for x in 0..4 {
     let (r, g, b) = (rgb[x * 3], rgb[x * 3 + 1], rgb[x * 3 + 2]);
     assert_eq!(r, g);
@@ -173,7 +173,7 @@ fn yuv420_rgb_chroma_shared_across_pair() {
   let u = [128u8; 2];
   let v = [128u8; 2];
   let mut rgb = [0u8; 12];
-  yuv_420_to_rgb_row(&y, &u, &v, &mut rgb, 4, ColorMatrix::Bt601, true);
+  yuv_420_to_rgb_row(&y, &u, &v, &mut rgb, 4, KernelMatrix::Bt601, true);
   // With neutral chroma, output is gray = Y.
   assert_eq!(rgb[0], 50);
   assert_eq!(rgb[3], 200);
@@ -189,7 +189,7 @@ fn yuv420_rgb_limited_range_black_and_white() {
   let u = [128u8; 2];
   let v = [128u8; 2];
   let mut rgb = [0u8; 12];
-  yuv_420_to_rgb_row(&y, &u, &v, &mut rgb, 4, ColorMatrix::Bt601, false);
+  yuv_420_to_rgb_row(&y, &u, &v, &mut rgb, 4, KernelMatrix::Bt601, false);
   for x in 0..2 {
     let (r, g, b) = (rgb[x * 3], rgb[x * 3 + 1], rgb[x * 3 + 2]);
     assert_eq!((r, g, b), (0, 0, 0), "limited-range Y=16 should be black");
@@ -212,7 +212,7 @@ fn yuv420_rgb_ycgco_neutral_is_gray() {
   let u = [128u8; 1]; // Cg
   let v = [128u8; 1]; // Co
   let mut rgb = [0u8; 6];
-  yuv_420_to_rgb_row(&y, &u, &v, &mut rgb, 2, ColorMatrix::YCgCo, true);
+  yuv_420_to_rgb_row(&y, &u, &v, &mut rgb, 2, KernelMatrix::YCgCo, true);
   for px in rgb.chunks(3) {
     assert!(px[0].abs_diff(128) <= 1, "RGB should be gray, got {rgb:?}");
     assert_eq!(px[0], px[1]);
@@ -233,7 +233,7 @@ fn yuv420_rgb_ycgco_high_cg_is_green() {
   let u = [200u8; 1]; // Cg = 200 (green-ward)
   let v = [128u8; 1]; // Co neutral
   let mut rgb = [0u8; 6];
-  yuv_420_to_rgb_row(&y, &u, &v, &mut rgb, 2, ColorMatrix::YCgCo, true);
+  yuv_420_to_rgb_row(&y, &u, &v, &mut rgb, 2, KernelMatrix::YCgCo, true);
   for px in rgb.chunks(3) {
     // Allow ±1 for Q15 rounding. RGB order: [R, G, B].
     assert!(px[0].abs_diff(56) <= 1, "expected R≈56, got {rgb:?}");
@@ -255,7 +255,7 @@ fn yuv420_rgb_ycgco_high_co_is_red() {
   let u = [128u8; 1]; // Cg neutral
   let v = [200u8; 1]; // Co = 200 (orange-ward)
   let mut rgb = [0u8; 6];
-  yuv_420_to_rgb_row(&y, &u, &v, &mut rgb, 2, ColorMatrix::YCgCo, true);
+  yuv_420_to_rgb_row(&y, &u, &v, &mut rgb, 2, KernelMatrix::YCgCo, true);
   for px in rgb.chunks(3) {
     // RGB order: [R, G, B].
     assert!(px[0].abs_diff(200) <= 1, "expected R≈200, got {rgb:?}");
@@ -274,8 +274,8 @@ fn yuv420_rgb_bt601_vs_bt709_differ_for_chroma() {
   let v = [200u8; 1];
   let mut b601 = [0u8; 6];
   let mut b709 = [0u8; 6];
-  yuv_420_to_rgb_row(&y, &u, &v, &mut b601, 2, ColorMatrix::Bt601, true);
-  yuv_420_to_rgb_row(&y, &u, &v, &mut b709, 2, ColorMatrix::Bt709, true);
+  yuv_420_to_rgb_row(&y, &u, &v, &mut b601, 2, KernelMatrix::Bt601, true);
+  yuv_420_to_rgb_row(&y, &u, &v, &mut b709, 2, KernelMatrix::Bt709, true);
   // Sum of per-channel absolute differences — robust to which
   // particular channel the two matrices disagree on.
   let sad: i32 = b601
@@ -300,7 +300,7 @@ fn yuv411_rgb_black() {
   let u = [128u8; 1];
   let v = [128u8; 1];
   let mut rgb = [0u8; 12];
-  yuv_411_to_rgb_row(&y, &u, &v, &mut rgb, 4, ColorMatrix::Bt601, true);
+  yuv_411_to_rgb_row(&y, &u, &v, &mut rgb, 4, KernelMatrix::Bt601, true);
   assert!(rgb.iter().all(|&c| c == 0), "got {rgb:?}");
 }
 
@@ -311,7 +311,7 @@ fn yuv411_rgb_white_full_range() {
   let u = [128u8; 1];
   let v = [128u8; 1];
   let mut rgb = [0u8; 12];
-  yuv_411_to_rgb_row(&y, &u, &v, &mut rgb, 4, ColorMatrix::Bt601, true);
+  yuv_411_to_rgb_row(&y, &u, &v, &mut rgb, 4, KernelMatrix::Bt601, true);
   assert!(rgb.iter().all(|&c| c == 255), "got {rgb:?}");
 }
 
@@ -322,7 +322,7 @@ fn yuv411_rgb_gray_is_gray() {
   let u = [128u8; 1];
   let v = [128u8; 1];
   let mut rgb = [0u8; 12];
-  yuv_411_to_rgb_row(&y, &u, &v, &mut rgb, 4, ColorMatrix::Bt601, true);
+  yuv_411_to_rgb_row(&y, &u, &v, &mut rgb, 4, KernelMatrix::Bt601, true);
   for x in 0..4 {
     let (r, g, b) = (rgb[x * 3], rgb[x * 3 + 1], rgb[x * 3 + 2]);
     assert_eq!(r, g);
@@ -341,7 +341,7 @@ fn yuv411_rgb_chroma_shared_across_quartet() {
   let u = [128u8; 1];
   let v = [128u8; 1];
   let mut rgb = [0u8; 12];
-  yuv_411_to_rgb_row(&y, &u, &v, &mut rgb, 4, ColorMatrix::Bt601, true);
+  yuv_411_to_rgb_row(&y, &u, &v, &mut rgb, 4, KernelMatrix::Bt601, true);
   // With neutral chroma, output is gray = Y for each pixel.
   assert_eq!(rgb[0], 50);
   assert_eq!(rgb[3], 100);
@@ -360,7 +360,7 @@ fn yuv411_rgb_two_chroma_blocks() {
   let u = [128u8, 128];
   let v = [200u8, 64];
   let mut rgb = [0u8; 24];
-  yuv_411_to_rgb_row(&y, &u, &v, &mut rgb, 8, ColorMatrix::Bt601, true);
+  yuv_411_to_rgb_row(&y, &u, &v, &mut rgb, 8, KernelMatrix::Bt601, true);
   // First four pixels: red boost.
   for x in 0..4 {
     let r = rgb[x * 3];
@@ -384,13 +384,13 @@ fn yuv411_rgba_alpha_is_opaque() {
   let u = [128u8; 1];
   let v = [128u8; 1];
   let mut rgba = [0u8; 16];
-  yuv_411_to_rgba_row(&y, &u, &v, &mut rgba, 4, ColorMatrix::Bt601, true);
+  yuv_411_to_rgba_row(&y, &u, &v, &mut rgba, 4, KernelMatrix::Bt601, true);
   for x in 0..4 {
     assert_eq!(rgba[x * 4 + 3], 0xFF, "alpha at px {x}");
   }
   // R/G/B match `yuv_411_to_rgb_row` byte-for-byte.
   let mut rgb = [0u8; 12];
-  yuv_411_to_rgb_row(&y, &u, &v, &mut rgb, 4, ColorMatrix::Bt601, true);
+  yuv_411_to_rgb_row(&y, &u, &v, &mut rgb, 4, KernelMatrix::Bt601, true);
   for x in 0..4 {
     assert_eq!(rgba[x * 4], rgb[x * 3]);
     assert_eq!(rgba[x * 4 + 1], rgb[x * 3 + 1]);
@@ -406,7 +406,7 @@ fn yuv411_rgb_limited_range_black_and_white() {
   let u = [128u8; 2];
   let v = [128u8; 2];
   let mut rgb = [0u8; 24];
-  yuv_411_to_rgb_row(&y, &u, &v, &mut rgb, 8, ColorMatrix::Bt601, false);
+  yuv_411_to_rgb_row(&y, &u, &v, &mut rgb, 8, KernelMatrix::Bt601, false);
   for x in 0..4 {
     assert_eq!((rgb[x * 3], rgb[x * 3 + 1], rgb[x * 3 + 2]), (0, 0, 0));
   }
@@ -430,7 +430,7 @@ fn yuv411_rgb_widths_1_through_3_partial_chroma_only() {
     let u = [128u8; 1];
     let v = [128u8; 1];
     let mut rgb = std::vec![0u8; 3 * w];
-    yuv_411_to_rgb_row(&y, &u, &v, &mut rgb, w, ColorMatrix::Bt601, true);
+    yuv_411_to_rgb_row(&y, &u, &v, &mut rgb, w, KernelMatrix::Bt601, true);
     for x in 0..w {
       let (r, g, b) = (rgb[x * 3], rgb[x * 3 + 1], rgb[x * 3 + 2]);
       assert_eq!(r, g, "width={w} px={x}: r={r} g={g}");
@@ -452,7 +452,7 @@ fn yuv411_rgb_widths_5_6_7_partial_tail_uses_last_chroma() {
     // First chroma drives red boost (V=200), second drives blue boost (V=64).
     let v = [200u8, 64];
     let mut rgb = std::vec![0u8; 3 * w];
-    yuv_411_to_rgb_row(&y, &u, &v, &mut rgb, w, ColorMatrix::Bt601, true);
+    yuv_411_to_rgb_row(&y, &u, &v, &mut rgb, w, KernelMatrix::Bt601, true);
     // First four pixels: red > blue.
     for x in 0..4 {
       let r = rgb[x * 3];
@@ -484,7 +484,7 @@ fn yuv411_rgba_widths_5_through_7_alpha_opaque() {
     let u = std::vec![128u8; 2];
     let v = std::vec![128u8; 2];
     let mut rgba = std::vec![0u8; 4 * w];
-    yuv_411_to_rgba_row(&y, &u, &v, &mut rgba, w, ColorMatrix::Bt601, true);
+    yuv_411_to_rgba_row(&y, &u, &v, &mut rgba, w, KernelMatrix::Bt601, true);
     for x in 0..w {
       assert_eq!(rgba[x * 4 + 3], 0xFF, "width={w} alpha at px {x}");
     }
@@ -503,7 +503,7 @@ fn yuv411_rgb_width_641_realistic_cropped() {
   let u = std::vec![128u8; 161];
   let v = std::vec![128u8; 161];
   let mut rgb = std::vec![0u8; 3 * w];
-  yuv_411_to_rgb_row(&y, &u, &v, &mut rgb, w, ColorMatrix::Bt601, true);
+  yuv_411_to_rgb_row(&y, &u, &v, &mut rgb, w, KernelMatrix::Bt601, true);
   // Neutral chroma → R=G=B≈Y. Spot-check first, mid, and last pixel
   // (the last is the partial-tail one — y[640] inside chroma[160]).
   for &x in &[0usize, 320, 639, 640] {
@@ -561,7 +561,7 @@ fn yuv420p10_rgb_black_full_range() {
   let u = as_le_u16(&[512u16; 2]);
   let v = as_le_u16(&[512u16; 2]);
   let mut rgb = [0u8; 12];
-  yuv_420p_n_to_rgb_row::<10, false>(&y, &u, &v, &mut rgb, 4, ColorMatrix::Bt601, true);
+  yuv_420p_n_to_rgb_row::<10, false>(&y, &u, &v, &mut rgb, 4, KernelMatrix::Bt601, true);
   assert!(rgb.iter().all(|&c| c == 0), "got {rgb:?}");
 }
 
@@ -573,7 +573,7 @@ fn yuv420p10_rgb_white_full_range() {
   let u = as_le_u16(&[512u16; 2]);
   let v = as_le_u16(&[512u16; 2]);
   let mut rgb = [0u8; 12];
-  yuv_420p_n_to_rgb_row::<10, false>(&y, &u, &v, &mut rgb, 4, ColorMatrix::Bt601, true);
+  yuv_420p_n_to_rgb_row::<10, false>(&y, &u, &v, &mut rgb, 4, KernelMatrix::Bt601, true);
   assert!(rgb.iter().all(|&c| c == 255), "got {rgb:?}");
 }
 
@@ -585,7 +585,7 @@ fn yuv420p10_rgb_gray_is_gray() {
   let u = as_le_u16(&[512u16; 2]);
   let v = as_le_u16(&[512u16; 2]);
   let mut rgb = [0u8; 12];
-  yuv_420p_n_to_rgb_row::<10, false>(&y, &u, &v, &mut rgb, 4, ColorMatrix::Bt601, true);
+  yuv_420p_n_to_rgb_row::<10, false>(&y, &u, &v, &mut rgb, 4, KernelMatrix::Bt601, true);
   for x in 0..4 {
     let (r, g, b) = (rgb[x * 3], rgb[x * 3 + 1], rgb[x * 3 + 2]);
     assert_eq!(r, g);
@@ -602,7 +602,7 @@ fn yuv420p10_rgb_limited_range_black_and_white() {
   let u = as_le_u16(&[512u16; 2]);
   let v = as_le_u16(&[512u16; 2]);
   let mut rgb = [0u8; 12];
-  yuv_420p_n_to_rgb_row::<10, false>(&y, &u, &v, &mut rgb, 4, ColorMatrix::Bt601, false);
+  yuv_420p_n_to_rgb_row::<10, false>(&y, &u, &v, &mut rgb, 4, KernelMatrix::Bt601, false);
   assert_eq!((rgb[0], rgb[1], rgb[2]), (0, 0, 0));
   assert_eq!((rgb[3], rgb[4], rgb[5]), (0, 0, 0));
   assert_eq!((rgb[6], rgb[7], rgb[8]), (255, 255, 255));
@@ -617,7 +617,7 @@ fn yuv420p10_rgb_chroma_shared_across_pair() {
   let u = as_le_u16(&[512u16; 2]);
   let v = as_le_u16(&[512u16; 2]);
   let mut rgb = [0u8; 12];
-  yuv_420p_n_to_rgb_row::<10, false>(&y, &u, &v, &mut rgb, 4, ColorMatrix::Bt601, true);
+  yuv_420p_n_to_rgb_row::<10, false>(&y, &u, &v, &mut rgb, 4, KernelMatrix::Bt601, true);
   // Full-range 10→8 scale = 255/1023, so Y=200 → 50, Y=800 → 199.4 → 199.
   // Allow ±1 for Q15 rounding.
   assert!(rgb[0].abs_diff(50) <= 1, "got {}", rgb[0]);
@@ -635,7 +635,7 @@ fn yuv420p10_rgb_u16_black_full_range() {
   let u = as_le_u16(&[512u16; 2]);
   let v = as_le_u16(&[512u16; 2]);
   let mut rgb = [0u16; 12];
-  yuv_420p_n_to_rgb_u16_row::<10, false>(&y, &u, &v, &mut rgb, 4, ColorMatrix::Bt601, true);
+  yuv_420p_n_to_rgb_u16_row::<10, false>(&y, &u, &v, &mut rgb, 4, KernelMatrix::Bt601, true);
   assert!(rgb.iter().all(|&c| c == 0), "got {rgb:?}");
 }
 
@@ -647,7 +647,7 @@ fn yuv420p10_rgb_u16_white_full_range() {
   let u = as_le_u16(&[512u16; 2]);
   let v = as_le_u16(&[512u16; 2]);
   let mut rgb = [0u16; 12];
-  yuv_420p_n_to_rgb_u16_row::<10, false>(&y, &u, &v, &mut rgb, 4, ColorMatrix::Bt601, true);
+  yuv_420p_n_to_rgb_u16_row::<10, false>(&y, &u, &v, &mut rgb, 4, KernelMatrix::Bt601, true);
   assert!(rgb.iter().all(|&c| c == 1023), "got {rgb:?}");
 }
 
@@ -659,7 +659,7 @@ fn yuv420p10_rgb_u16_limited_range_endpoints() {
   let u = as_le_u16(&[512u16; 1]);
   let v = as_le_u16(&[512u16; 1]);
   let mut rgb = [0u16; 6];
-  yuv_420p_n_to_rgb_u16_row::<10, false>(&y, &u, &v, &mut rgb, 2, ColorMatrix::Bt709, false);
+  yuv_420p_n_to_rgb_u16_row::<10, false>(&y, &u, &v, &mut rgb, 2, KernelMatrix::Bt709, false);
   assert_eq!((rgb[0], rgb[1], rgb[2]), (0, 0, 0));
   assert_eq!((rgb[3], rgb[4], rgb[5]), (1023, 1023, 1023));
 }
@@ -676,8 +676,8 @@ fn yuv420p10_rgb_u16_preserves_full_10bit_precision() {
   let v = as_le_u16(&[512u16; 1]);
   let mut rgb8 = [0u8; 6];
   let mut rgb16 = [0u16; 6];
-  yuv_420p_n_to_rgb_row::<10, false>(&y, &u, &v, &mut rgb8, 2, ColorMatrix::Bt601, true);
-  yuv_420p_n_to_rgb_u16_row::<10, false>(&y, &u, &v, &mut rgb16, 2, ColorMatrix::Bt601, true);
+  yuv_420p_n_to_rgb_row::<10, false>(&y, &u, &v, &mut rgb8, 2, KernelMatrix::Bt601, true);
+  yuv_420p_n_to_rgb_u16_row::<10, false>(&y, &u, &v, &mut rgb16, 2, KernelMatrix::Bt601, true);
   assert_eq!(rgb8[0], rgb8[3]);
   assert_ne!(rgb16[0], rgb16[3]);
 }
@@ -691,8 +691,8 @@ fn yuv420p10_bt709_ycgco_differ_for_chroma() {
   let v = [800u16; 1];
   let mut bt709 = [0u8; 6];
   let mut ycgco = [0u8; 6];
-  yuv_420p_n_to_rgb_row::<10, false>(&y, &u, &v, &mut bt709, 2, ColorMatrix::Bt709, true);
-  yuv_420p_n_to_rgb_row::<10, false>(&y, &u, &v, &mut ycgco, 2, ColorMatrix::YCgCo, true);
+  yuv_420p_n_to_rgb_row::<10, false>(&y, &u, &v, &mut bt709, 2, KernelMatrix::Bt709, true);
+  yuv_420p_n_to_rgb_row::<10, false>(&y, &u, &v, &mut ycgco, 2, KernelMatrix::YCgCo, true);
   let sad: i32 = bt709
     .iter()
     .zip(ycgco.iter())
@@ -716,7 +716,7 @@ fn p010_rgb_black_full_range() {
   let y = as_le_u16(&[0u16; 4]);
   let uv = as_le_u16(&[0x8000u16, 0x8000, 0x8000, 0x8000]); // U0 V0 U1 V1
   let mut rgb = [0u8; 12];
-  p_n_to_rgb_row::<10, false>(&y, &uv, &mut rgb, 4, ColorMatrix::Bt601, true);
+  p_n_to_rgb_row::<10, false>(&y, &uv, &mut rgb, 4, KernelMatrix::Bt601, true);
   assert!(rgb.iter().all(|&c| c == 0), "got {rgb:?}");
 }
 
@@ -727,7 +727,7 @@ fn p010_rgb_white_full_range() {
   let y = as_le_u16(&[0xFFC0u16; 4]);
   let uv = as_le_u16(&[0x8000u16, 0x8000, 0x8000, 0x8000]);
   let mut rgb = [0u8; 12];
-  p_n_to_rgb_row::<10, false>(&y, &uv, &mut rgb, 4, ColorMatrix::Bt601, true);
+  p_n_to_rgb_row::<10, false>(&y, &uv, &mut rgb, 4, KernelMatrix::Bt601, true);
   assert!(rgb.iter().all(|&c| c == 255), "got {rgb:?}");
 }
 
@@ -738,7 +738,7 @@ fn p010_rgb_gray_is_gray() {
   let y = as_le_u16(&[0x8000u16; 4]);
   let uv = as_le_u16(&[0x8000u16; 4]);
   let mut rgb = [0u8; 12];
-  p_n_to_rgb_row::<10, false>(&y, &uv, &mut rgb, 4, ColorMatrix::Bt601, true);
+  p_n_to_rgb_row::<10, false>(&y, &uv, &mut rgb, 4, KernelMatrix::Bt601, true);
   for x in 0..4 {
     let (r, g, b) = (rgb[x * 3], rgb[x * 3 + 1], rgb[x * 3 + 2]);
     assert_eq!(r, g);
@@ -755,7 +755,7 @@ fn p010_rgb_limited_range_endpoints() {
   let y = as_le_u16(&[0x1000u16, 0x1000, 0xEB00, 0xEB00]);
   let uv = as_le_u16(&[0x8000u16, 0x8000, 0x8000, 0x8000]);
   let mut rgb = [0u8; 12];
-  p_n_to_rgb_row::<10, false>(&y, &uv, &mut rgb, 4, ColorMatrix::Bt601, false);
+  p_n_to_rgb_row::<10, false>(&y, &uv, &mut rgb, 4, KernelMatrix::Bt601, false);
   assert_eq!((rgb[0], rgb[1], rgb[2]), (0, 0, 0));
   assert_eq!((rgb[3], rgb[4], rgb[5]), (0, 0, 0));
   assert_eq!((rgb[6], rgb[7], rgb[8]), (255, 255, 255));
@@ -811,7 +811,7 @@ fn p010_matches_yuv420p10_when_shifted() {
     &v_p10,
     &mut rgb_p10,
     4,
-    ColorMatrix::Bt709,
+    KernelMatrix::Bt709,
     true,
   );
   p_n_to_rgb_row::<10, false>(
@@ -819,7 +819,7 @@ fn p010_matches_yuv420p10_when_shifted() {
     &uv_p010,
     &mut rgb_p010,
     4,
-    ColorMatrix::Bt709,
+    KernelMatrix::Bt709,
     true,
   );
   // Parity: same logical samples, same RGB output regardless of layout.
@@ -850,7 +850,7 @@ fn p010_rgb_u16_white_full_range() {
   let y = as_le_u16(&[0xFFC0u16; 4]);
   let uv = as_le_u16(&[0x8000u16; 4]);
   let mut rgb = [0u16; 12];
-  p_n_to_rgb_u16_row::<10, false>(&y, &uv, &mut rgb, 4, ColorMatrix::Bt601, true);
+  p_n_to_rgb_u16_row::<10, false>(&y, &uv, &mut rgb, 4, KernelMatrix::Bt601, true);
   assert!(rgb.iter().all(|&c| c == 1023), "got {rgb:?}");
 }
 
@@ -860,7 +860,7 @@ fn p010_rgb_u16_limited_range_endpoints() {
   let y = as_le_u16(&[0x1000u16, 0xEB00]);
   let uv = as_le_u16(&[0x8000u16, 0x8000]);
   let mut rgb = [0u16; 6];
-  p_n_to_rgb_u16_row::<10, false>(&y, &uv, &mut rgb, 2, ColorMatrix::Bt709, false);
+  p_n_to_rgb_u16_row::<10, false>(&y, &uv, &mut rgb, 2, KernelMatrix::Bt709, false);
   assert_eq!((rgb[0], rgb[1], rgb[2]), (0, 0, 0));
   assert_eq!((rgb[3], rgb[4], rgb[5]), (1023, 1023, 1023));
 }
@@ -876,7 +876,7 @@ fn yuv444p10_rgba_gray_alpha_is_ff() {
   let u = as_le_u16(&[512u16; 4]);
   let v = as_le_u16(&[512u16; 4]);
   let mut rgba = [0u8; 16];
-  yuv_444p_n_to_rgba_row::<10, false>(&y, &u, &v, &mut rgba, 4, ColorMatrix::Bt601, true);
+  yuv_444p_n_to_rgba_row::<10, false>(&y, &u, &v, &mut rgba, 4, KernelMatrix::Bt601, true);
   for x in 0..4 {
     let (r, g, b, a) = (
       rgba[x * 4],
@@ -901,7 +901,7 @@ fn yuv444p10_rgba_u16_gray_alpha_is_1023() {
   let u = as_le_u16(&[512u16; 4]);
   let v = as_le_u16(&[512u16; 4]);
   let mut rgba = [0u16; 16];
-  yuv_444p_n_to_rgba_u16_row::<10, false>(&y, &u, &v, &mut rgba, 4, ColorMatrix::Bt601, true);
+  yuv_444p_n_to_rgba_u16_row::<10, false>(&y, &u, &v, &mut rgba, 4, KernelMatrix::Bt601, true);
   for x in 0..4 {
     let (r, g, b, a) = (
       rgba[x * 4],
@@ -926,7 +926,7 @@ fn yuv444p16_rgba_gray_alpha_is_ff() {
   let u = as_le_u16(&[0x8000u16; 4]);
   let v = as_le_u16(&[0x8000u16; 4]);
   let mut rgba = [0u8; 16];
-  yuv_444p16_to_rgba_row::<false>(&y, &u, &v, &mut rgba, 4, ColorMatrix::Bt601, true);
+  yuv_444p16_to_rgba_row::<false>(&y, &u, &v, &mut rgba, 4, KernelMatrix::Bt601, true);
   for x in 0..4 {
     let (r, g, b, a) = (
       rgba[x * 4],
@@ -951,7 +951,7 @@ fn yuv444p16_rgba_u16_gray_alpha_is_ffff() {
   let u = as_le_u16(&[0x8000u16; 4]);
   let v = as_le_u16(&[0x8000u16; 4]);
   let mut rgba = [0u16; 16];
-  yuv_444p16_to_rgba_u16_row::<false>(&y, &u, &v, &mut rgba, 4, ColorMatrix::Bt601, true);
+  yuv_444p16_to_rgba_u16_row::<false>(&y, &u, &v, &mut rgba, 4, KernelMatrix::Bt601, true);
   for x in 0..4 {
     let (r, g, b, a) = (
       rgba[x * 4],
@@ -978,7 +978,7 @@ fn p410_rgba_gray_alpha_is_ff() {
   // 4 pixels x (U,V) per pixel = 8 elements.
   let uv = as_le_u16(&[0x8000u16; 8]);
   let mut rgba = [0u8; 16];
-  p_n_444_to_rgba_row::<10, false>(&y, &uv, &mut rgba, 4, ColorMatrix::Bt601, true);
+  p_n_444_to_rgba_row::<10, false>(&y, &uv, &mut rgba, 4, KernelMatrix::Bt601, true);
   for x in 0..4 {
     let (r, g, b, a) = (
       rgba[x * 4],
@@ -1003,7 +1003,7 @@ fn p416_rgba_u16_gray_alpha_is_ffff() {
   let y = as_le_u16(&[0x8000u16; 4]);
   let uv = as_le_u16(&[0x8000u16; 8]);
   let mut rgba = [0u16; 16];
-  p_n_444_16_to_rgba_u16_row::<false>(&y, &uv, &mut rgba, 4, ColorMatrix::Bt601, true);
+  p_n_444_16_to_rgba_u16_row::<false>(&y, &uv, &mut rgba, 4, KernelMatrix::Bt601, true);
   for x in 0..4 {
     let (r, g, b, a) = (
       rgba[x * 4],
@@ -1178,7 +1178,7 @@ fn uyyvyy411_to_rgb_row_solid_gray_full_range() {
   let w = 16;
   let p = uyyvyy411_solid_row(w, 128, 128, 128);
   let mut rgb = std::vec![0u8; w * 3];
-  uyyvyy411_to_rgb_row(&p, &mut rgb, w, ColorMatrix::Bt601, true);
+  uyyvyy411_to_rgb_row(&p, &mut rgb, w, KernelMatrix::Bt601, true);
   for px in rgb.chunks(3) {
     assert!(px[0].abs_diff(128) <= 1);
     assert_eq!(px[0], px[1]);
@@ -1192,7 +1192,7 @@ fn uyyvyy411_to_rgba_row_solid_gray_alpha_opaque() {
   let w = 16;
   let p = uyyvyy411_solid_row(w, 128, 128, 128);
   let mut rgba = std::vec![0u8; w * 4];
-  uyyvyy411_to_rgba_row(&p, &mut rgba, w, ColorMatrix::Bt601, true);
+  uyyvyy411_to_rgba_row(&p, &mut rgba, w, KernelMatrix::Bt601, true);
   for px in rgba.chunks(4) {
     assert_eq!(px[3], 0xFF);
   }
@@ -1226,7 +1226,7 @@ fn uyyvyy411_chroma_shared_across_4_pixels_decodes_via_y_only_variation() {
   // Block: U=128, Y0=64, Y1=96, V=128, Y2=160, Y3=224.
   let p = std::vec![128u8, 64, 96, 128, 160, 224];
   let mut rgb = std::vec![0u8; 4 * 3];
-  uyyvyy411_to_rgb_row(&p, &mut rgb, 4, ColorMatrix::Bt601, true);
+  uyyvyy411_to_rgb_row(&p, &mut rgb, 4, KernelMatrix::Bt601, true);
   let lumas = [64u8, 96, 160, 224];
   for (i, expected) in lumas.iter().enumerate() {
     let r = rgb[i * 3];
@@ -1257,7 +1257,7 @@ fn uyyvyy411_chroma_shared_across_4_pixels_decodes_via_y_only_variation() {
   feature = "yuv-semi-planar",
   feature = "yuva",
 ))]
-fn coeffs_tuple(m: ColorMatrix) -> (i32, i32, i32, i32, i32, i32) {
+fn coeffs_tuple(m: KernelMatrix) -> (i32, i32, i32, i32, i32, i32) {
   // `Coefficients` is internal and intentionally not `PartialEq`; compare
   // through its public accessors instead.
   let c = Coefficients::for_matrix(m);
@@ -1275,20 +1275,20 @@ fn coeffs_tuple(m: ColorMatrix) -> (i32, i32, i32, i32, i32, i32) {
 ))]
 #[test]
 fn smpte170m_bt470bg_use_bt601_yuv_coefficients() {
-  let bt601 = coeffs_tuple(ColorMatrix::Bt601);
-  assert_eq!(coeffs_tuple(ColorMatrix::Smpte170M), bt601);
-  assert_eq!(coeffs_tuple(ColorMatrix::Bt470Bg), bt601);
+  let bt601 = coeffs_tuple(KernelMatrix::Bt601);
+  assert_eq!(coeffs_tuple(KernelMatrix::Smpte170M), bt601);
+  assert_eq!(coeffs_tuple(KernelMatrix::Bt470Bg), bt601);
   // Regression guard: must no longer match the BT.709 fallback.
-  assert_ne!(coeffs_tuple(ColorMatrix::Bt709), bt601);
+  assert_ne!(coeffs_tuple(KernelMatrix::Bt709), bt601);
 }
 
 #[test]
 fn smpte170m_bt470bg_use_bt601_luma_coefficients() {
-  let bt601 = luma_coefficients_q15(ColorMatrix::Bt601);
-  assert_eq!(luma_coefficients_q15(ColorMatrix::Smpte170M), bt601);
-  assert_eq!(luma_coefficients_q15(ColorMatrix::Bt470Bg), bt601);
+  let bt601 = luma_coefficients_q15(KernelMatrix::Bt601);
+  assert_eq!(luma_coefficients_q15(KernelMatrix::Smpte170M), bt601);
+  assert_eq!(luma_coefficients_q15(KernelMatrix::Bt470Bg), bt601);
   // Regression guard: must no longer match the BT.709 fallback.
-  assert_ne!(luma_coefficients_q15(ColorMatrix::Bt709), bt601);
+  assert_ne!(luma_coefficients_q15(KernelMatrix::Bt709), bt601);
 }
 
 #[cfg(feature = "yuv-planar")]
@@ -1303,9 +1303,9 @@ fn yuv420_smpte170m_decodes_identically_to_bt601() {
   let mut rgb_601 = [0u8; 12];
   let mut rgb_170m = [0u8; 12];
   let mut rgb_709 = [0u8; 12];
-  yuv_420_to_rgb_row(&y, &u, &v, &mut rgb_601, 4, ColorMatrix::Bt601, true);
-  yuv_420_to_rgb_row(&y, &u, &v, &mut rgb_170m, 4, ColorMatrix::Smpte170M, true);
-  yuv_420_to_rgb_row(&y, &u, &v, &mut rgb_709, 4, ColorMatrix::Bt709, true);
+  yuv_420_to_rgb_row(&y, &u, &v, &mut rgb_601, 4, KernelMatrix::Bt601, true);
+  yuv_420_to_rgb_row(&y, &u, &v, &mut rgb_170m, 4, KernelMatrix::Smpte170M, true);
+  yuv_420_to_rgb_row(&y, &u, &v, &mut rgb_709, 4, KernelMatrix::Bt709, true);
   assert_eq!(rgb_170m, rgb_601, "Smpte170M must match BT.601");
   assert_ne!(rgb_170m, rgb_709, "Smpte170M must differ from BT.709");
 }
@@ -1339,12 +1339,12 @@ fn assert_coeffs_within(got: &Coefficients, want: &Coefficients, tol: i32, ctx: 
 #[test]
 fn chroma_derived_ncl_bt709_matches_hardcoded_bt709() {
   let derived =
-    Coefficients::for_matrix_with_primaries(ColorMatrix::ChromaDerivedNcl, Primaries::Bt709);
-  let bt709 = Coefficients::for_matrix(ColorMatrix::Bt709);
+    Coefficients::for_matrix_with_primaries(KernelMatrix::ChromaDerivedNcl, &Primaries::Bt709);
+  let bt709 = Coefficients::for_matrix(KernelMatrix::Bt709);
   assert_coeffs_within(&derived, &bt709, 8, "ChromaDerivedNcl(Bt709) vs Bt709");
   // Discrimination: it consulted the primaries, not a fixed fallback — it
   // must NOT equal the BT.2020 set (r_v differs by >3000 LSB).
-  let bt2020 = Coefficients::for_matrix(ColorMatrix::Bt2020Ncl);
+  let bt2020 = Coefficients::for_matrix(KernelMatrix::Bt2020Ncl);
   assert!(
     (derived.r_v() - bt2020.r_v()).abs() > 100,
     "ChromaDerivedNcl(Bt709) must differ from Bt2020Ncl"
@@ -1358,15 +1358,15 @@ fn chroma_derived_ncl_bt709_matches_hardcoded_bt709() {
 #[test]
 fn chroma_derived_ncl_bt2020_matches_hardcoded_bt2020ncl() {
   let derived =
-    Coefficients::for_matrix_with_primaries(ColorMatrix::ChromaDerivedNcl, Primaries::Bt2020);
-  let bt2020 = Coefficients::for_matrix(ColorMatrix::Bt2020Ncl);
+    Coefficients::for_matrix_with_primaries(KernelMatrix::ChromaDerivedNcl, &Primaries::Bt2020);
+  let bt2020 = Coefficients::for_matrix(KernelMatrix::Bt2020Ncl);
   assert_coeffs_within(
     &derived,
     &bt2020,
     8,
     "ChromaDerivedNcl(Bt2020) vs Bt2020Ncl",
   );
-  let bt709 = Coefficients::for_matrix(ColorMatrix::Bt709);
+  let bt709 = Coefficients::for_matrix(KernelMatrix::Bt709);
   assert!(
     (derived.r_v() - bt709.r_v()).abs() > 100,
     "ChromaDerivedNcl(Bt2020) must differ from Bt709"
@@ -1384,7 +1384,7 @@ fn chroma_derived_ncl_bt2020_matches_hardcoded_bt2020ncl() {
 #[test]
 fn chroma_derived_ncl_bt470m_weights_are_bt601() {
   let (kr, kg, kb) =
-    chroma_derived_luma_weights(Primaries::Bt470M).expect("Bt470M carries primaries");
+    chroma_derived_luma_weights(&Primaries::Bt470M).expect("Bt470M carries primaries");
   assert!((kr - 0.299).abs() < 1.5e-3, "Kr {kr} (want ~0.299)");
   assert!((kg - 0.587).abs() < 1.5e-3, "Kg {kg} (want ~0.587)");
   assert!((kb - 0.114).abs() < 1.5e-3, "Kb {kb} (want ~0.114)");
@@ -1397,7 +1397,7 @@ fn chroma_derived_ncl_bt470m_weights_are_bt601() {
 #[test]
 fn chroma_derived_ncl_smpte170m_primaries_are_smpte_c_not_bt601() {
   let (kr, _kg, kb) =
-    chroma_derived_luma_weights(Primaries::Smpte170M).expect("Smpte170M carries primaries");
+    chroma_derived_luma_weights(&Primaries::Smpte170M).expect("Smpte170M carries primaries");
   assert!(
     (kr - 0.2124).abs() < 1e-3 && (kb - 0.0866).abs() < 1e-3,
     "SMPTE-C weights expected, got Kr={kr} Kb={kb}"
@@ -1421,7 +1421,7 @@ fn chroma_derived_weights_reconstruct_white_point() {
     Primaries::SmpteRp431,
     Primaries::Film,
   ] {
-    let (kr, kg, kb) = chroma_derived_luma_weights(p).expect("carries primaries");
+    let (kr, kg, kb) = chroma_derived_luma_weights(&p).expect("carries primaries");
     assert!(
       (kr + kg + kb - 1.0).abs() < 1e-9,
       "{p:?}: weights sum {} != 1",
@@ -1454,9 +1454,11 @@ fn chroma_derived_weights_reconstruct_white_point() {
 #[cfg(feature = "yuv-planar")]
 #[test]
 fn chroma_derived_ncl_without_primaries_falls_back_to_bt709() {
-  let fallback =
-    Coefficients::for_matrix_with_primaries(ColorMatrix::ChromaDerivedNcl, Primaries::Unspecified);
-  let bt709 = Coefficients::for_matrix(ColorMatrix::Bt709);
+  let fallback = Coefficients::for_matrix_with_primaries(
+    KernelMatrix::ChromaDerivedNcl,
+    &Primaries::Unspecified,
+  );
+  let bt709 = Coefficients::for_matrix(KernelMatrix::Bt709);
   assert_coeffs_within(
     &fallback,
     &bt709,
@@ -1475,7 +1477,7 @@ fn chroma_derived_ncl_without_primaries_falls_back_to_bt709() {
 #[cfg(feature = "yuv-planar")]
 #[test]
 fn chroma_derived_ncl_smpte_st428_derives_from_tabulated_primaries() {
-  let (kr, kg, kb) = chroma_derived_luma_weights(Primaries::SmpteSt428)
+  let (kr, kg, kb) = chroma_derived_luma_weights(&Primaries::SmpteSt428)
     .expect("SmpteSt428 carries FFmpeg's tabulated primaries + white point E");
   assert!(
     (kr + kg + kb - 1.0).abs() < 1e-9,
@@ -1495,7 +1497,7 @@ fn chroma_derived_ncl_smpte_st428_derives_from_tabulated_primaries() {
   // The wired `ChromaDerivedNcl` derivation resolves through exactly these
   // tabulated weights — byte-identical to the pre-#310 coefficients.
   let derived =
-    Coefficients::for_matrix_with_primaries(ColorMatrix::ChromaDerivedNcl, Primaries::SmpteSt428);
+    Coefficients::for_matrix_with_primaries(KernelMatrix::ChromaDerivedNcl, &Primaries::SmpteSt428);
   let from_weights = Coefficients::from_luma_weights(kr, kg, kb);
   assert_coeffs_within(
     &derived,
@@ -1512,14 +1514,14 @@ fn chroma_derived_ncl_smpte_st428_derives_from_tabulated_primaries() {
 #[test]
 fn for_matrix_with_primaries_ignores_primaries_for_fixed_matrices() {
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::YCgCo,
-    ColorMatrix::Fcc,
-    ColorMatrix::Smpte170M,
-    ColorMatrix::Bt470Bg,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::YCgCo,
+    KernelMatrix::Fcc,
+    KernelMatrix::Smpte170M,
+    KernelMatrix::Bt470Bg,
   ] {
     let base = Coefficients::for_matrix(m);
     for p in [
@@ -1528,7 +1530,7 @@ fn for_matrix_with_primaries_ignores_primaries_for_fixed_matrices() {
       Primaries::Unspecified,
       Primaries::Smpte170M,
     ] {
-      let with = Coefficients::for_matrix_with_primaries(m, p);
+      let with = Coefficients::for_matrix_with_primaries(m, &p);
       assert_coeffs_within(&with, &base, 0, "fixed matrix must ignore primaries");
     }
   }
@@ -1545,7 +1547,7 @@ fn chroma_derived_ncl_bt470bg_row_matches_independent_derivation() {
   use crate::row::yuv_420_to_rgb_row_primaries;
 
   let (kr, kg, kb) =
-    chroma_derived_luma_weights(Primaries::Bt470Bg).expect("Bt470Bg carries primaries");
+    chroma_derived_luma_weights(&Primaries::Bt470Bg).expect("Bt470Bg carries primaries");
   // Pin to the values computed offline from the BT.470BG chromaticities
   // (EBU/PAL-class, distinct from BT.601/709/2020): an external anchor.
   assert!((kr - 0.222_004).abs() < 1e-5, "Kr {kr}");
@@ -1569,8 +1571,8 @@ fn chroma_derived_ncl_bt470bg_row_matches_independent_derivation() {
     &v,
     &mut got,
     4,
-    ColorMatrix::ChromaDerivedNcl,
-    Primaries::Bt470Bg,
+    KernelMatrix::ChromaDerivedNcl,
+    &Primaries::Bt470Bg,
     true,
     true,
   );

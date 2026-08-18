@@ -25,7 +25,7 @@
 //! value — they FAIL without the clamp.
 
 use crate::{
-  ColorMatrix, PixelSink,
+  KernelMatrix, PixelSink,
   frame::GrayNFrame,
   resample::{
     AreaResampler, CatmullRom, FilterKernel, FilterStream, FilteredResampler, Lanczos3,
@@ -42,7 +42,7 @@ const SRC: usize = 8;
 const OUT: usize = 4;
 // Gray is luma-only; the walker still threads a matrix / range through.
 const FR: bool = true;
-const M: ColorMatrix = ColorMatrix::Bt709;
+const M: KernelMatrix = KernelMatrix::Bt709;
 
 /// Re-encode a host-native u16 slice as LE-encoded byte storage (the
 /// `grayNle` plane contract). The loader recovers the logical values via

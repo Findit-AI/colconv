@@ -39,8 +39,8 @@ fn main() -> Result<(), pixon::Error> {
   ] {
     let mut rgb = vec![0u8; w * h * 3];
     Convert::from(&frame)
-      .spec(spec)
-      .chroma_location(loc)
+      .spec(spec.clone())
+      .chroma_location(loc.clone())
       .rgb(&mut rgb)
       .run()?;
     println!("  {loc:?}: {:?}", &rgb[..w * 3]);
@@ -64,7 +64,7 @@ fn main() -> Result<(), pixon::Error> {
     .run()?;
   let mut via_override = vec![0u8; w * h * 3];
   Convert::from(&frame)
-    .spec(spec)
+    .spec(spec.clone())
     .chroma_location(ChromaLocation::Center)
     .rgb(&mut via_override)
     .run()?;

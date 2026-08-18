@@ -13,7 +13,7 @@
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;
 
-use pixon::{ColorMatrix, bench_internals::nv12_to_rgb_row};
+use pixon::{KernelMatrix, bench_internals::nv12_to_rgb_row};
 
 /// Fills a buffer with a deterministic pseudo‑random byte sequence so
 /// the measurement isn't inflated by cache‑friendly uniform data.
@@ -29,7 +29,7 @@ fn bench(c: &mut Criterion) {
   // 720p / 1080p / 4K row widths — all multiples of 16 (and 32 / 64
   // for the wider SIMD tiers) so the main loop covers them fully.
   const WIDTHS: &[usize] = &[1280, 1920, 3840];
-  const MATRIX: ColorMatrix = ColorMatrix::Bt709;
+  const MATRIX: KernelMatrix = KernelMatrix::Bt709;
   const FULL_RANGE: bool = false;
 
   let mut group = c.benchmark_group("nv12_to_rgb_row");

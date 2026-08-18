@@ -37,7 +37,7 @@ use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_m
 use std::hint::black_box;
 
 use pixon::{
-  ColorMatrix,
+  KernelMatrix,
   bench_internals::{
     yuv_444_to_rgb_row, yuv444p10_to_rgb_row, yuv444p10_to_rgb_u16_row, yuv444p16_to_rgb_row,
     yuv444p16_to_rgb_u16_row, yuva444p_to_rgba_row, yuva444p10_to_rgba_row,
@@ -82,7 +82,7 @@ fn fill_pseudo_random_u16_full(buf: &mut [u16], seed: u32) {
 
 fn bench_yuva444p(c: &mut Criterion) {
   const WIDTHS: &[u32] = &[1280, 1920, 3840];
-  const MATRIX: ColorMatrix = ColorMatrix::Bt709;
+  const MATRIX: KernelMatrix = KernelMatrix::Bt709;
   const FULL_RANGE: bool = false;
 
   let mut group = c.benchmark_group("yuva444p_a_plus_combo");
@@ -189,7 +189,7 @@ fn bench_yuva444p(c: &mut Criterion) {
 
 fn bench_yuva444p10_u8(c: &mut Criterion) {
   const WIDTHS: &[u32] = &[1280, 1920, 3840];
-  const MATRIX: ColorMatrix = ColorMatrix::Bt709;
+  const MATRIX: KernelMatrix = KernelMatrix::Bt709;
   const FULL_RANGE: bool = false;
 
   let mut group = c.benchmark_group("yuva444p10_a_plus_combo_u8");
@@ -292,7 +292,7 @@ fn bench_yuva444p10_u8(c: &mut Criterion) {
 
 fn bench_yuva444p10_u16(c: &mut Criterion) {
   const WIDTHS: &[u32] = &[1280, 1920, 3840];
-  const MATRIX: ColorMatrix = ColorMatrix::Bt709;
+  const MATRIX: KernelMatrix = KernelMatrix::Bt709;
   const FULL_RANGE: bool = false;
 
   let mut group = c.benchmark_group("yuva444p10_a_plus_combo_u16");
@@ -395,7 +395,7 @@ fn bench_yuva444p10_u16(c: &mut Criterion) {
 
 fn bench_yuva444p16_u8(c: &mut Criterion) {
   const WIDTHS: &[u32] = &[1280, 1920, 3840];
-  const MATRIX: ColorMatrix = ColorMatrix::Bt709;
+  const MATRIX: KernelMatrix = KernelMatrix::Bt709;
   const FULL_RANGE: bool = false;
 
   let mut group = c.benchmark_group("yuva444p16_a_plus_combo_u8");
@@ -498,7 +498,7 @@ fn bench_yuva444p16_u8(c: &mut Criterion) {
 
 fn bench_yuva444p16_u16(c: &mut Criterion) {
   const WIDTHS: &[u32] = &[1280, 1920, 3840];
-  const MATRIX: ColorMatrix = ColorMatrix::Bt709;
+  const MATRIX: KernelMatrix = KernelMatrix::Bt709;
   const FULL_RANGE: bool = false;
 
   let mut group = c.benchmark_group("yuva444p16_a_plus_combo_u16");

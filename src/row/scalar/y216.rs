@@ -24,7 +24,7 @@ pub(crate) fn y216_to_rgb_or_rgba_row<const ALPHA: bool, const BE: bool>(
   packed: &[u16],
   out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // assert! (not debug_assert!) — bounds gate `unsafe load_endian_u16`
@@ -77,7 +77,7 @@ pub(crate) fn y216_to_rgb_u16_or_rgba_u16_row<const ALPHA: bool, const BE: bool>
   packed: &[u16],
   out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // assert! (not debug_assert!) — bounds gate `unsafe load_endian_u16`
@@ -198,7 +198,7 @@ pub(crate) fn y216_to_hsv_row<const BE: bool>(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // assert! (not debug_assert!) — bounds gate `unsafe load_endian_u16`
@@ -254,7 +254,7 @@ pub(crate) fn y216_to_hsv_row<const BE: bool>(
 #[cfg(all(test, feature = "std"))]
 mod tests {
   use super::*;
-  use crate::ColorMatrix;
+  use crate::KernelMatrix;
 
   /// Re-encode a host-native u16 slice as LE-encoded bytes packed back as
   /// `Vec<u16>`. On LE host this is a no-op; on BE host every u16 is byte-
@@ -302,7 +302,7 @@ mod tests {
   fn ref_y216_to_rgb_u8(
     intended: &[u16],
     width: usize,
-    matrix: ColorMatrix,
+    matrix: KernelMatrix,
     full_range: bool,
   ) -> std::vec::Vec<u8> {
     let coeffs = Coefficients::for_matrix(matrix);
@@ -337,7 +337,7 @@ mod tests {
   fn ref_y216_to_rgb_u16(
     intended: &[u16],
     width: usize,
-    matrix: ColorMatrix,
+    matrix: KernelMatrix,
     full_range: bool,
   ) -> std::vec::Vec<u16> {
     let coeffs = Coefficients::for_matrix(matrix);
@@ -411,7 +411,7 @@ mod tests {
   fn y216_known_pattern_rgb() {
     let packed = test_input();
     let mut out = [0u8; 4 * 3];
-    y216_to_rgb_or_rgba_row::<false, false>(&packed, &mut out, 4, ColorMatrix::Bt709, false);
+    y216_to_rgb_or_rgba_row::<false, false>(&packed, &mut out, 4, KernelMatrix::Bt709, false);
 
     // Pixel 0: Y=4096 (limited-range black), neutral chroma → (0, 0, 0)
     assert_eq!(&out[0..3], &[0, 0, 0], "pixel 0 (Y=4096, neutral chroma)");
@@ -436,7 +436,7 @@ mod tests {
   fn y216_known_pattern_rgba() {
     let packed = test_input();
     let mut out = [0u8; 4 * 4];
-    y216_to_rgb_or_rgba_row::<true, false>(&packed, &mut out, 4, ColorMatrix::Bt709, false);
+    y216_to_rgb_or_rgba_row::<true, false>(&packed, &mut out, 4, KernelMatrix::Bt709, false);
 
     assert_eq!(&out[0..4], &[0, 0, 0, 0xFF]);
     assert_eq!(&out[4..8], &[127, 127, 127, 0xFF]);
@@ -457,7 +457,7 @@ mod tests {
       &packed,
       &mut out,
       4,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       false,
     );
 
@@ -484,7 +484,13 @@ mod tests {
   fn y216_known_pattern_rgba_u16() {
     let packed = test_input();
     let mut out = [0u16; 4 * 4];
-    y216_to_rgb_u16_or_rgba_u16_row::<true, false>(&packed, &mut out, 4, ColorMatrix::Bt709, false);
+    y216_to_rgb_u16_or_rgba_u16_row::<true, false>(
+      &packed,
+      &mut out,
+      4,
+      KernelMatrix::Bt709,
+      false,
+    );
 
     assert_eq!(&out[0..4], &[0, 0, 0, 0xFFFF]);
     assert_eq!(&out[4..8], &[32618, 32618, 32618, 0xFFFF]);
@@ -531,9 +537,9 @@ mod tests {
     let be = as_be_u16(&intended);
     let mut out_le = [0u8; 4 * 3];
     let mut out_be = [0u8; 4 * 3];
-    y216_to_rgb_or_rgba_row::<false, false>(&le, &mut out_le, 4, ColorMatrix::Bt709, false);
-    y216_to_rgb_or_rgba_row::<false, true>(&be, &mut out_be, 4, ColorMatrix::Bt709, false);
-    let expected = ref_y216_to_rgb_u8(&intended, 4, ColorMatrix::Bt709, false);
+    y216_to_rgb_or_rgba_row::<false, false>(&le, &mut out_le, 4, KernelMatrix::Bt709, false);
+    y216_to_rgb_or_rgba_row::<false, true>(&be, &mut out_be, 4, KernelMatrix::Bt709, false);
+    let expected = ref_y216_to_rgb_u8(&intended, 4, KernelMatrix::Bt709, false);
     assert_eq!(
       out_le.as_slice(),
       expected,
@@ -554,9 +560,15 @@ mod tests {
     let be = as_be_u16(&intended);
     let mut out_le = [0u16; 4 * 3];
     let mut out_be = [0u16; 4 * 3];
-    y216_to_rgb_u16_or_rgba_u16_row::<false, false>(&le, &mut out_le, 4, ColorMatrix::Bt709, false);
-    y216_to_rgb_u16_or_rgba_u16_row::<false, true>(&be, &mut out_be, 4, ColorMatrix::Bt709, false);
-    let expected = ref_y216_to_rgb_u16(&intended, 4, ColorMatrix::Bt709, false);
+    y216_to_rgb_u16_or_rgba_u16_row::<false, false>(
+      &le,
+      &mut out_le,
+      4,
+      KernelMatrix::Bt709,
+      false,
+    );
+    y216_to_rgb_u16_or_rgba_u16_row::<false, true>(&be, &mut out_be, 4, KernelMatrix::Bt709, false);
+    let expected = ref_y216_to_rgb_u16(&intended, 4, KernelMatrix::Bt709, false);
     assert_eq!(
       out_le.as_slice(),
       expected,

@@ -9,7 +9,7 @@
 //! kernel for this padding-source), byte-identical to the direct path.
 
 use crate::{
-  ColorMatrix, PixelSink,
+  KernelMatrix, PixelSink,
   resample::{AreaResampler, ResampleError},
   sinker::{MixedSinker, MixedSinkerError},
   source::{X2Bgr10, X2Rgb10, X2Rgb10Row, x2bgr10_to, x2rgb10_to},
@@ -18,7 +18,7 @@ use mediaframe::frame::{X2Bgr10Frame, X2Rgb10Frame};
 
 const SRC: usize = 8;
 const OUT: usize = 4;
-const MATRIX: ColorMatrix = ColorMatrix::Bt709;
+const MATRIX: KernelMatrix = KernelMatrix::Bt709;
 
 /// X2RGB10 LE word: `(MSB) 2X | 10R | 10G | 10B (LSB)`.
 fn pack_x2rgb10(r10: u32, g10: u32, b10: u32) -> u32 {

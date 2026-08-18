@@ -55,7 +55,7 @@ macro_rules! test_gbrp_saturation_u16 {
       let mut sink = MixedSinker::<crate::source::$marker>::new(w, h)
         .with_rgb_u16(&mut out)
         .unwrap();
-      crate::source::$walker(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+      crate::source::$walker(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
       for (i, &v) in out.iter().enumerate() {
         assert_eq!(v, max, "u16 output[{i}] must be {max} (max for BITS={}) but got {v}", $bits);
       }
@@ -87,7 +87,7 @@ macro_rules! test_gbrp_saturation_u8 {
       let mut sink = MixedSinker::<crate::source::$marker>::new(w, h)
         .with_rgb(&mut out)
         .unwrap();
-      crate::source::$walker(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+      crate::source::$walker(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
       for (i, &v) in out.iter().enumerate() {
         assert_eq!(v, 0xFF, "u8 output[{i}] must be 0xFF for max BITS={} input but got {v}", $bits);
       }
@@ -120,7 +120,7 @@ macro_rules! test_gbrp_channel_reorder {
       let mut sink = MixedSinker::<crate::source::$marker>::new(w, h)
         .with_rgb(&mut out_u8)
         .unwrap();
-      crate::source::$walker(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+      crate::source::$walker(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
       for i in 0..w * h {
         assert_eq!(out_u8[i * 3],     200, "R[{i}] mismatch");
         assert_eq!(out_u8[i * 3 + 1], 100, "G[{i}] mismatch");
@@ -164,7 +164,7 @@ macro_rules! test_gbrap_strategy_a_plus {
       let mut sink_ref = MixedSinker::<crate::source::$marker>::new(w, h)
         .with_rgba(&mut rgba_ref)
         .unwrap();
-      crate::source::$walker(&src_ref, false, ColorMatrix::Bt709, &mut sink_ref).unwrap();
+      crate::source::$walker(&src_ref, false, KernelMatrix::Bt709, &mut sink_ref).unwrap();
 
       // Combo: with_rgb + with_rgba (Strategy A+).
       let src_combo = solid_gbrap_frame::<$bits>(&g, &b, &r, &a, w as u32, h as u32);
@@ -175,7 +175,7 @@ macro_rules! test_gbrap_strategy_a_plus {
         .unwrap()
         .with_rgba(&mut rgba_combo)
         .unwrap();
-      crate::source::$walker(&src_combo, false, ColorMatrix::Bt709, &mut sink_combo).unwrap();
+      crate::source::$walker(&src_combo, false, KernelMatrix::Bt709, &mut sink_combo).unwrap();
 
       // RGBA bytes must be identical between standalone and combo paths.
       assert_eq!(
@@ -252,7 +252,7 @@ macro_rules! test_gbrap_strategy_a_plus_u16 {
       let mut sink_ref = MixedSinker::<crate::source::$marker>::new(w, h)
         .with_rgba_u16(&mut rgba_u16_ref)
         .unwrap();
-      crate::source::$walker(&src_ref, false, ColorMatrix::Bt709, &mut sink_ref).unwrap();
+      crate::source::$walker(&src_ref, false, KernelMatrix::Bt709, &mut sink_ref).unwrap();
 
       // Combo: with_rgb_u16 + with_rgba_u16 (Strategy A+ native-depth).
       let src_combo = solid_gbrap_frame::<$bits>(&g, &b, &r, &a, w as u32, h as u32);
@@ -263,7 +263,7 @@ macro_rules! test_gbrap_strategy_a_plus_u16 {
         .unwrap()
         .with_rgba_u16(&mut rgba_u16_combo)
         .unwrap();
-      crate::source::$walker(&src_combo, false, ColorMatrix::Bt709, &mut sink_combo).unwrap();
+      crate::source::$walker(&src_combo, false, KernelMatrix::Bt709, &mut sink_combo).unwrap();
 
       // RGBA u16 elements must be byte-exact between standalone and combo paths.
       assert_eq!(
@@ -380,7 +380,7 @@ macro_rules! test_gbrap_alpha_downshift {
       let mut sink = MixedSinker::<crate::source::$marker>::new(w, h)
         .with_rgba(&mut rgba)
         .unwrap();
-      crate::source::$walker(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+      crate::source::$walker(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
 
       let shift = $bits - 8;
       for i in 0..n {
@@ -429,13 +429,13 @@ macro_rules! test_gbrp_simd_matches_scalar {
         let mut sink = MixedSinker::<crate::source::$marker>::new(w, h)
           .with_rgb(&mut rgb_simd).unwrap()
           .with_rgba(&mut rgba_simd).unwrap();
-        crate::source::$walker(&src_simd, true, ColorMatrix::Bt709, &mut sink).unwrap();
+        crate::source::$walker(&src_simd, true, KernelMatrix::Bt709, &mut sink).unwrap();
       }
       {
         let mut sink = MixedSinker::<crate::source::$marker>::new(w, h)
           .with_rgb(&mut rgb_scal).unwrap()
           .with_rgba(&mut rgba_scal).unwrap();
-        crate::source::$walker(&src_scal, false, ColorMatrix::Bt709, &mut sink).unwrap();
+        crate::source::$walker(&src_scal, false, KernelMatrix::Bt709, &mut sink).unwrap();
       }
 
       assert_eq!(rgb_simd, rgb_scal, "rgb SIMD≠scalar for BITS={} w={}", $bits, $w);
@@ -481,12 +481,12 @@ macro_rules! test_gbrap_simd_matches_scalar {
       {
         let mut sink = MixedSinker::<crate::source::$marker>::new(w, h)
           .with_rgba(&mut rgba_simd).unwrap();
-        crate::source::$walker(&src_simd, true, ColorMatrix::Bt709, &mut sink).unwrap();
+        crate::source::$walker(&src_simd, true, KernelMatrix::Bt709, &mut sink).unwrap();
       }
       {
         let mut sink = MixedSinker::<crate::source::$marker>::new(w, h)
           .with_rgba(&mut rgba_scal).unwrap();
-        crate::source::$walker(&src_scal, false, ColorMatrix::Bt709, &mut sink).unwrap();
+        crate::source::$walker(&src_scal, false, KernelMatrix::Bt709, &mut sink).unwrap();
       }
 
       assert_eq!(rgba_simd, rgba_scal, "rgba SIMD≠scalar for BITS={} w={}", $bits, $w);
@@ -619,7 +619,7 @@ macro_rules! gbrp_le_be_roundtrip {
           .with_simd(use_simd)
           .with_rgba(&mut out_le)
           .unwrap();
-        $walker(&frame_le, true, ColorMatrix::Bt709, &mut sink_le).unwrap();
+        $walker(&frame_le, true, KernelMatrix::Bt709, &mut sink_le).unwrap();
 
         let frame_be = crate::frame::$be_alias::try_new(
           &g_be, &b_be, &r_be, w as u32, h as u32, stride, stride, stride,
@@ -632,7 +632,7 @@ macro_rules! gbrp_le_be_roundtrip {
           .unwrap();
         // BE-frame call must use the `_endian` helper — the LE-only wrapper
         // is signature-bound to `Frame<'_, false>`.
-        $walker_endian(&frame_be, true, ColorMatrix::Bt709, &mut sink_be).unwrap();
+        $walker_endian(&frame_be, true, KernelMatrix::Bt709, &mut sink_be).unwrap();
 
         assert_eq!(
           out_le,
@@ -740,7 +740,7 @@ macro_rules! gbrap_le_be_roundtrip {
           .unwrap()
           .with_rgba_u16(&mut out_le_rgba_u16)
           .unwrap();
-        $walker(&frame_le, true, ColorMatrix::Bt709, &mut sink_le).unwrap();
+        $walker(&frame_le, true, KernelMatrix::Bt709, &mut sink_le).unwrap();
 
         let frame_be = crate::frame::$be_alias::try_new(
           &g_be, &b_be, &r_be, &a_be, w as u32, h as u32, stride, stride, stride, stride,
@@ -755,7 +755,7 @@ macro_rules! gbrap_le_be_roundtrip {
           .with_rgba_u16(&mut out_be_rgba_u16)
           .unwrap();
         // BE-frame call must use the `_endian` helper.
-        $walker_endian(&frame_be, true, ColorMatrix::Bt709, &mut sink_be).unwrap();
+        $walker_endian(&frame_be, true, KernelMatrix::Bt709, &mut sink_be).unwrap();
 
         assert_eq!(
           out_le_rgba,

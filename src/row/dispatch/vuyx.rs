@@ -22,7 +22,7 @@ use crate::row::simd128_available;
 #[cfg(target_arch = "x86_64")]
 use crate::row::{avx2_available, avx512_available, sse41_available};
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   row::{rgba_row_bytes, scalar},
 };
 
@@ -64,7 +64,7 @@ pub fn vuyx_to_rgba_row(
   packed: &[u8],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) {
@@ -140,7 +140,7 @@ mod tests {
   fn vuyx_rgba_dispatcher_rejects_short_packed() {
     let packed = [0u8; 8];
     let mut rgba = [0u8; 4 * 4];
-    vuyx_to_rgba_row(&packed, &mut rgba, 4, ColorMatrix::Bt709, true, false);
+    vuyx_to_rgba_row(&packed, &mut rgba, 4, KernelMatrix::Bt709, true, false);
   }
 
   #[test]
@@ -148,7 +148,7 @@ mod tests {
   fn vuyx_rgba_dispatcher_rejects_short_output() {
     let packed = [0u8; 4 * 4];
     let mut rgba = [0u8; 2];
-    vuyx_to_rgba_row(&packed, &mut rgba, 4, ColorMatrix::Bt709, true, false);
+    vuyx_to_rgba_row(&packed, &mut rgba, 4, KernelMatrix::Bt709, true, false);
   }
 
   #[test]
@@ -156,7 +156,7 @@ mod tests {
     // Source padding bytes are 0x42 and 0x99 — output α must be 0xFF for all.
     let buf = solid_vuyx(8, 128, 0x42);
     let mut rgba = [0u8; 8 * 4];
-    vuyx_to_rgba_row(&buf, &mut rgba, 8, ColorMatrix::Bt709, true, false);
+    vuyx_to_rgba_row(&buf, &mut rgba, 8, KernelMatrix::Bt709, true, false);
     for px in rgba.chunks(4) {
       assert_eq!(px[3], 0xFF, "VUYX output alpha must always be 0xFF");
     }
@@ -168,7 +168,7 @@ mod tests {
     // More importantly: when the padding byte is 0x00 the output must still be 0xFF.
     let buf = solid_vuyx(4, 200, 0x00);
     let mut rgba = [0u8; 4 * 4];
-    vuyx_to_rgba_row(&buf, &mut rgba, 4, ColorMatrix::Bt709, true, false);
+    vuyx_to_rgba_row(&buf, &mut rgba, 4, KernelMatrix::Bt709, true, false);
     for px in rgba.chunks(4) {
       assert_eq!(
         px[3], 0xFF,
@@ -192,7 +192,7 @@ mod tests {
       &p,
       &mut rgba,
       OVERFLOW_WIDTH_TIMES_4,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       true,
       false,
     );

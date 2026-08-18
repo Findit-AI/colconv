@@ -38,7 +38,7 @@
 use core::arch::wasm32::*;
 
 #[allow(unused_imports)]
-pub(super) use crate::{ColorMatrix, row::scalar};
+pub(super) use crate::{KernelMatrix, row::scalar};
 
 #[cfg(any(feature = "gbr", feature = "yuv-444-packed", feature = "yuva"))]
 pub(crate) mod alpha_extract;

@@ -20,7 +20,7 @@
 //! direct kernels; LE/BE parity exercises the `<const BE>` propagation.
 
 use crate::{
-  ColorMatrix, PixelSink,
+  KernelMatrix, PixelSink,
   frame::{Ayuv64BeFrame, Ayuv64Frame, Ayuv64LeFrame},
   resample::{AreaResampler, ResampleError},
   sinker::{AlphaMode, MixedSinker, MixedSinkerError},
@@ -29,7 +29,7 @@ use crate::{
 
 const SRC: usize = 8;
 const OUT: usize = 4;
-const M: ColorMatrix = ColorMatrix::Bt709;
+const M: KernelMatrix = KernelMatrix::Bt709;
 const FR: bool = true;
 const FR_LIMITED: bool = false;
 const MAX16: u32 = 65535;

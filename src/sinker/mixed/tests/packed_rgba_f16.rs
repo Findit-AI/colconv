@@ -47,7 +47,7 @@ fn rgbaf16_with_rgba_carries_source_alpha() {
   let mut sink = MixedSinker::<Rgbaf16>::new(16, 4)
     .with_rgba(&mut rgba_out)
     .unwrap();
-  rgbaf16_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  rgbaf16_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
 
   for px in rgba_out.chunks(4) {
     assert_eq!(px[0], 255);
@@ -77,7 +77,7 @@ fn rgbaf16_with_rgb_drops_alpha() {
   let mut sink = MixedSinker::<Rgbaf16>::new(16, 4)
     .with_rgb(&mut rgb_out)
     .unwrap();
-  rgbaf16_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  rgbaf16_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
   for px in rgb_out.chunks(3) {
     assert_eq!(px, [255, 255, 0]);
   }
@@ -99,7 +99,7 @@ fn rgbaf16_with_rgba_f16_is_lossless_4channel() {
   let mut sink = MixedSinker::<Rgbaf16>::new(16, 4)
     .with_rgba_f16(&mut out)
     .unwrap();
-  rgbaf16_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  rgbaf16_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
   assert_eq!(out, pix, "rgba_f16 4-channel pass-through is not lossless");
 }
 
@@ -119,7 +119,7 @@ fn rgbaf16_with_rgba_f32_widens_losslessly() {
   let mut sink = MixedSinker::<Rgbaf16>::new(16, 4)
     .with_rgba_f32(&mut out)
     .unwrap();
-  rgbaf16_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  rgbaf16_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
 
   let expected: std::vec::Vec<f32> = pix.iter().map(|h| h.to_f32()).collect();
   assert_eq!(out, expected, "rgba_f32 widen is not lossless");
@@ -141,7 +141,7 @@ fn rgbaf16_with_rgb_f16_drops_alpha() {
   let mut sink = MixedSinker::<Rgbaf16>::new(16, 4)
     .with_rgb_f16(&mut out)
     .unwrap();
-  rgbaf16_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  rgbaf16_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
   for (o, s) in out.chunks(3).zip(pix.chunks(4)) {
     assert_eq!(o, &s[..3]);
   }
@@ -200,7 +200,7 @@ fn rgbaf16_simd_matches_scalar_with_random_input() {
     .unwrap()
     .with_luma(&mut luma_s)
     .unwrap();
-  rgbaf16_to(&src, true, ColorMatrix::Bt709, &mut s_simd).unwrap();
+  rgbaf16_to(&src, true, KernelMatrix::Bt709, &mut s_simd).unwrap();
 
   let mut s_scalar = MixedSinker::<Rgbaf16>::new(w, h)
     .with_rgb(&mut rgb_c)
@@ -218,7 +218,7 @@ fn rgbaf16_simd_matches_scalar_with_random_input() {
     .with_luma(&mut luma_c)
     .unwrap();
   s_scalar.set_simd(false);
-  rgbaf16_to(&src, true, ColorMatrix::Bt709, &mut s_scalar).unwrap();
+  rgbaf16_to(&src, true, KernelMatrix::Bt709, &mut s_scalar).unwrap();
 
   assert_eq!(rgb_s, rgb_c, "rgb");
   assert_eq!(rgba_s, rgba_c, "rgba");
@@ -256,7 +256,7 @@ fn rgbaf16_le_be_roundtrip_byte_identical() {
     .with_simd(false)
     .with_rgba_f16(&mut out_le)
     .unwrap();
-  rgbaf16_to(&frame_le, true, ColorMatrix::Bt709, &mut sink_le).unwrap();
+  rgbaf16_to(&frame_le, true, KernelMatrix::Bt709, &mut sink_le).unwrap();
 
   let frame_be = Rgbaf16BeFrame::try_new(&pix_be, 16, 4, 16 * 4).unwrap();
   let mut out_be = std::vec![half::f16::ZERO; 16 * 4 * 4];
@@ -264,7 +264,7 @@ fn rgbaf16_le_be_roundtrip_byte_identical() {
     .with_simd(false)
     .with_rgba_f16(&mut out_be)
     .unwrap();
-  rgbaf16_to_endian(&frame_be, true, ColorMatrix::Bt709, &mut sink_be).unwrap();
+  rgbaf16_to_endian(&frame_be, true, KernelMatrix::Bt709, &mut sink_be).unwrap();
 
   assert_eq!(out_le, intended, "LE plane decoded wrong");
   assert_eq!(out_be, intended, "BE plane decoded wrong");

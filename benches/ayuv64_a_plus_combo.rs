@@ -32,7 +32,7 @@ use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_m
 use std::hint::black_box;
 
 use pixon::{
-  Ayuv64, Ayuv64Frame, ColorMatrix, ayuv64_to,
+  Ayuv64, Ayuv64Frame, KernelMatrix, ayuv64_to,
   bench_internals::{
     ayuv64_to_rgb_row, ayuv64_to_rgb_u16_row, ayuv64_to_rgba_row, ayuv64_to_rgba_u16_row,
   },
@@ -56,7 +56,7 @@ fn fill_pseudo_random_u16(buf: &mut [u16], seed: u32) {
 
 fn bench_u8(c: &mut Criterion) {
   const WIDTHS: &[u32] = &[1280, 1920, 3840];
-  const MATRIX: ColorMatrix = ColorMatrix::Bt709;
+  const MATRIX: KernelMatrix = KernelMatrix::Bt709;
   const FULL_RANGE: bool = false;
 
   let mut group = c.benchmark_group("ayuv64_a_plus_combo_u8");
@@ -144,7 +144,7 @@ fn bench_u8(c: &mut Criterion) {
 
 fn bench_u16(c: &mut Criterion) {
   const WIDTHS: &[u32] = &[1280, 1920, 3840];
-  const MATRIX: ColorMatrix = ColorMatrix::Bt709;
+  const MATRIX: KernelMatrix = KernelMatrix::Bt709;
   const FULL_RANGE: bool = false;
 
   let mut group = c.benchmark_group("ayuv64_a_plus_combo_u16");

@@ -24,7 +24,7 @@
 //! rounding), never a tolerance.
 
 use crate::{
-  ChromaLocation, ColorMatrix, PixelSink,
+  ChromaLocation, KernelMatrix, PixelSink,
   frame::*,
   resample::{AreaResampler, FilteredResampler, Triangle},
   sinker::{MixedSinker, MixedSinkerError},
@@ -34,7 +34,7 @@ use crate::{
 const SRC: usize = 8;
 const CW: usize = SRC / 2;
 const OUT: usize = 4;
-const M: ColorMatrix = ColorMatrix::Bt601;
+const M: KernelMatrix = KernelMatrix::Bt601;
 const FR: bool = true;
 
 /// Round-half-up integer divide.
@@ -221,7 +221,7 @@ macro_rules! hibit_422_resample_siting {
           )
           .unwrap()
           .with_native(native)
-          .with_chroma_location(loc)
+          .with_chroma_location(loc.clone())
           .with_simd(simd)
           .with_rgb(&mut rgb)
           .unwrap()
@@ -252,7 +252,7 @@ macro_rules! hibit_422_resample_siting {
             FilteredResampler::new(OUT, OUT, Triangle),
           )
           .unwrap()
-          .with_chroma_location(loc)
+          .with_chroma_location(loc.clone())
           .with_simd(simd)
           .with_rgb(&mut rgb)
           .unwrap()
@@ -285,7 +285,7 @@ macro_rules! hibit_422_resample_siting {
           )
           .unwrap()
           .with_native(native)
-          .with_chroma_location(loc)
+          .with_chroma_location(loc.clone())
           .with_rgb(&mut rgb)
           .unwrap()
           .with_rgb_u16(&mut rgb16)
@@ -390,10 +390,10 @@ macro_rules! hibit_422_resample_siting {
             ChromaLocation::Left,
             ChromaLocation::TopLeft,
             ChromaLocation::BottomLeft,
-            ChromaLocation::Unknown(7),
+            ChromaLocation::other("unassigned-7"),
           ] {
             assert_eq!(
-              run(&y, &u, &v, loc, native, true),
+              run(&y, &u, &v, loc.clone(), native, true),
               base,
               "co-sited siting {loc:?} must keep the byte-identical decode (native={native})"
             );
@@ -417,7 +417,7 @@ macro_rules! hibit_422_resample_siting {
           ChromaLocation::Bottom,
         ] {
           assert_eq!(
-            run(&y, &u, &v, loc, true, true),
+            run(&y, &u, &v, loc.clone(), true, true),
             want,
             "centered native {loc:?} must equal the code-domain reconstruct-then-bin oracle"
           );
@@ -437,7 +437,7 @@ macro_rules! hibit_422_resample_siting {
           ChromaLocation::Bottom,
         ] {
           assert_eq!(
-            run(&y, &u, &v, loc, false, true),
+            run(&y, &u, &v, loc.clone(), false, true),
             want,
             "centered row-stage {loc:?} must equal the RGB-domain reconstruct-then-bin oracle"
           );
@@ -532,11 +532,11 @@ macro_rules! hibit_422_resample_siting {
         loc1: ChromaLocation,
         loc2: ChromaLocation,
       ) -> Result<(), MixedSinkerError> {
-        sink.set_chroma_location(loc1);
+        sink.set_chroma_location(loc1.clone());
         PixelSink::begin_frame(&mut sink, SRC as u32, SRC as u32).unwrap();
         let row0 = $Row::new(&y[0..SRC], &u[0..CW], &v[0..CW], 0, M, FR);
         PixelSink::process(&mut sink, row0).unwrap();
-        sink.set_chroma_location(loc2);
+        sink.set_chroma_location(loc2.clone());
         let row1 = $Row::new(&y[SRC..2 * SRC], &u[CW..2 * CW], &v[CW..2 * CW], 1, M, FR);
         PixelSink::process(&mut sink, row1)
       }
@@ -560,7 +560,7 @@ macro_rules! hibit_422_resample_siting {
           .with_native(true)
           .with_rgb(&mut rgb)
           .unwrap();
-          let err = flip_row1(sink, &y, &u, &v, loc1, loc2).unwrap_err();
+          let err = flip_row1(sink, &y, &u, &v, loc1.clone(), loc2.clone()).unwrap_err();
           assert!(
             matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
             "native {loc1:?}->{loc2:?}: want ChromaSitingChanged, got {err:?}"
@@ -577,7 +577,7 @@ macro_rules! hibit_422_resample_siting {
           .with_native(false)
           .with_rgb(&mut rgb)
           .unwrap();
-          let err = flip_row1(sink, &y, &u, &v, loc1, loc2).unwrap_err();
+          let err = flip_row1(sink, &y, &u, &v, loc1.clone(), loc2.clone()).unwrap_err();
           assert!(
             matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
             "row-stage {loc1:?}->{loc2:?}: want ChromaSitingChanged, got {err:?}"
@@ -593,7 +593,7 @@ macro_rules! hibit_422_resample_siting {
           .unwrap()
           .with_rgb(&mut rgb)
           .unwrap();
-          let err = flip_row1(sink, &y, &u, &v, loc1, loc2).unwrap_err();
+          let err = flip_row1(sink, &y, &u, &v, loc1.clone(), loc2.clone()).unwrap_err();
           assert!(
             matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
             "filter {loc1:?}->{loc2:?}: want ChromaSitingChanged, got {err:?}"

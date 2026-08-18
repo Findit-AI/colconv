@@ -26,10 +26,10 @@ use crate::row::{
   p016_to_rgb_row_endian, rgb_to_hsv_row,
 };
 
-const MATRICES: [ColorMatrix; 3] = [
-  ColorMatrix::Bt601,
-  ColorMatrix::Bt709,
-  ColorMatrix::Bt2020Ncl,
+const MATRICES: [KernelMatrix; 3] = [
+  KernelMatrix::Bt601,
+  KernelMatrix::Bt709,
+  KernelMatrix::Bt2020Ncl,
 ];
 
 /// A non-trivial, non-gray pseudo-random logical sample masked to `bits`
@@ -253,7 +253,7 @@ fn p010_hsv_only_grows_no_rgb_scratch() {
     let mut sink = MixedSinker::<P010>::new(w, h)
       .with_hsv(&mut hh, &mut ss, &mut vv)
       .unwrap();
-    p010_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    p010_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
     sink.rgb_scratch.len()
   };
   assert_eq!(
@@ -268,7 +268,7 @@ fn p010_hsv_only_grows_no_rgb_scratch() {
     &uvp[..w],
     &mut rgb0,
     w,
-    ColorMatrix::Bt601,
+    KernelMatrix::Bt601,
     true,
     true,
     false,
@@ -299,7 +299,7 @@ fn p0xx_hsv_only_grows_no_rgb_scratch_all_formats() {
       let mut sink = MixedSinker::<P012>::new(w, h)
         .with_hsv(&mut hh, &mut ss, &mut vv)
         .unwrap();
-      p012_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+      p012_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
       sink.rgb_scratch.len()
     };
     assert_eq!(scratch_len, 0, "P012 HSV-only RGB-free");
@@ -317,7 +317,7 @@ fn p0xx_hsv_only_grows_no_rgb_scratch_all_formats() {
       let mut sink = MixedSinker::<P016>::new(w, h)
         .with_hsv(&mut hh, &mut ss, &mut vv)
         .unwrap();
-      p016_to(&src, true, ColorMatrix::Bt2020Ncl, &mut sink).unwrap();
+      p016_to(&src, true, KernelMatrix::Bt2020Ncl, &mut sink).unwrap();
       sink.rgb_scratch.len()
     };
     assert_eq!(scratch_len, 0, "P016 HSV-only RGB-free");
@@ -347,7 +347,7 @@ fn p012_luma_plus_hsv_only_is_correct_and_rgb_free() {
       .unwrap()
       .with_hsv(&mut hh, &mut ss, &mut vv)
       .unwrap();
-    p012_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    p012_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
     sink.rgb_scratch.len()
   };
   assert_eq!(
@@ -366,7 +366,7 @@ fn p012_luma_plus_hsv_only_is_correct_and_rgb_free() {
     &uvp[..w],
     &mut rgb0,
     w,
-    ColorMatrix::Bt709,
+    KernelMatrix::Bt709,
     true,
     true,
     false,

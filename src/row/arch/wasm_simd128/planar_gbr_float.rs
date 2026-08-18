@@ -26,7 +26,7 @@
 use core::arch::wasm32::*;
 
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   row::{
     arch::wasm_simd128::endian,
     scalar::{planar_gbr_f16 as scalar_f16, planar_gbr_float as scalar},
@@ -498,7 +498,7 @@ pub(crate) unsafe fn gbrpf32_to_luma_row<const BE: bool>(
   r: &[f32],
   out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert!(g.len() >= width, "g row too short");
@@ -549,7 +549,7 @@ pub(crate) unsafe fn gbrpf32_to_luma_u16_row<const BE: bool>(
   r: &[f32],
   out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert!(g.len() >= width, "g row too short");

@@ -146,7 +146,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuva422p, R> {
     // siting-independent (it is never subsampled), so it passes through
     // unchanged on every path. `Copy`, so read it out before the field
     // split-borrow below.
-    let chroma_location = self.chroma_location;
+    let chroma_location = self.chroma_location.clone();
 
     if w & 1 != 0 {
       return Err(MixedSinkerError::WidthAlignment(WidthAlignment::odd(w)));
@@ -253,7 +253,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuva422p, R> {
       // horizontally only — no vertical phase. The full-resolution α plane is never
       // subsampled, so it is siting-independent and passes through the 4:4:4 kernels
       // UNCHANGED.
-      let center_sited = chroma_422_center_sited_h(chroma_location);
+      let center_sited = chroma_422_center_sited_h(&chroma_location);
       // A colour output drives the centered chroma reconstruction; a luma-only row
       // bins the native Y (siting-independent) and never reconstructs chroma, so it
       // stays on the co-sited fused arm.
@@ -562,7 +562,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuva422p, R> {
     // per-row chroma contract is identical — half-width chroma, one pair per Y
     // pair). 4:2:2 is subsampled horizontally only — no vertical blend or chroma
     // lookback (cf. the 4:2:0 sibling).
-    let center_sited = chroma_422_center_sited_h(chroma_location);
+    let center_sited = chroma_422_center_sited_h(&chroma_location);
 
     // Per-frame chroma-siting freeze (RFC #238, mirroring the resample-path guard
     // above): the first output-bearing row pins the phase; a later row whose siting
@@ -1426,7 +1426,7 @@ fn yuva422p_high_bit_process<const BITS: u32, const BE: bool, F: crate::SourceFo
   u_half_row: &[u16],
   v_half_row: &[u16],
   a_row: &[u16],
-  matrix: crate::ColorMatrix,
+  matrix: crate::KernelMatrix,
   full_range: bool,
   y_slice: RowSlice,
   u_slice: RowSlice,
@@ -1436,14 +1436,14 @@ fn yuva422p_high_bit_process<const BITS: u32, const BE: bool, F: crate::SourceFo
   // `big_endian` flag the helper passes from `BE`. Function POINTERS (not generic
   // `Fn` bounds) so the 4:2:0 dispatcher and its 4:4:4 twin below — distinct fn
   // items of the SAME signature — coerce to one parameter type.
-  rgb_dispatch: fn(&[u16], &[u16], &[u16], &mut [u8], usize, crate::ColorMatrix, bool, bool, bool),
+  rgb_dispatch: fn(&[u16], &[u16], &[u16], &mut [u8], usize, crate::KernelMatrix, bool, bool, bool),
   rgb_u16_dispatch: fn(
     &[u16],
     &[u16],
     &[u16],
     &mut [u16],
     usize,
-    crate::ColorMatrix,
+    crate::KernelMatrix,
     bool,
     bool,
     bool,
@@ -1455,7 +1455,7 @@ fn yuva422p_high_bit_process<const BITS: u32, const BE: bool, F: crate::SourceFo
     &[u16],
     &mut [u8],
     usize,
-    crate::ColorMatrix,
+    crate::KernelMatrix,
     bool,
     bool,
     bool,
@@ -1470,7 +1470,7 @@ fn yuva422p_high_bit_process<const BITS: u32, const BE: bool, F: crate::SourceFo
     &mut [u8],
     &mut [u8],
     usize,
-    crate::ColorMatrix,
+    crate::KernelMatrix,
     bool,
     bool,
     bool,
@@ -1482,7 +1482,7 @@ fn yuva422p_high_bit_process<const BITS: u32, const BE: bool, F: crate::SourceFo
     &[u16],
     &mut [u16],
     usize,
-    crate::ColorMatrix,
+    crate::KernelMatrix,
     bool,
     bool,
     bool,
@@ -1501,7 +1501,7 @@ fn yuva422p_high_bit_process<const BITS: u32, const BE: bool, F: crate::SourceFo
     &[u16],
     &mut [u8],
     usize,
-    crate::ColorMatrix,
+    crate::KernelMatrix,
     bool,
     bool,
     bool,
@@ -1512,7 +1512,7 @@ fn yuva422p_high_bit_process<const BITS: u32, const BE: bool, F: crate::SourceFo
     &[u16],
     &mut [u16],
     usize,
-    crate::ColorMatrix,
+    crate::KernelMatrix,
     bool,
     bool,
     bool,
@@ -1524,7 +1524,7 @@ fn yuva422p_high_bit_process<const BITS: u32, const BE: bool, F: crate::SourceFo
     &[u16],
     &mut [u8],
     usize,
-    crate::ColorMatrix,
+    crate::KernelMatrix,
     bool,
     bool,
     bool,
@@ -1537,7 +1537,7 @@ fn yuva422p_high_bit_process<const BITS: u32, const BE: bool, F: crate::SourceFo
     &mut [u8],
     &mut [u8],
     usize,
-    crate::ColorMatrix,
+    crate::KernelMatrix,
     bool,
     bool,
     bool,
@@ -1549,7 +1549,7 @@ fn yuva422p_high_bit_process<const BITS: u32, const BE: bool, F: crate::SourceFo
     &[u16],
     &mut [u16],
     usize,
-    crate::ColorMatrix,
+    crate::KernelMatrix,
     bool,
     bool,
     bool,
@@ -1559,7 +1559,7 @@ fn yuva422p_high_bit_process<const BITS: u32, const BE: bool, F: crate::SourceFo
   let h = sinker.height;
   let use_simd = sinker.simd;
   // Chroma siting (#302): `Copy`, read before the field split-borrow below.
-  let chroma_location = sinker.chroma_location;
+  let chroma_location = sinker.chroma_location.clone();
 
   if w & 1 != 0 {
     return Err(MixedSinkerError::WidthAlignment(WidthAlignment::odd(w)));
@@ -1650,7 +1650,7 @@ fn yuva422p_high_bit_process<const BITS: u32, const BE: bool, F: crate::SourceFo
   // per-row chroma contract is identical — half-width chroma, one pair per Y
   // pair). 4:2:2 is subsampled horizontally only — no vertical blend or chroma
   // lookback (cf. the 4:2:0 sibling).
-  let center_sited = chroma_422_center_sited_h(chroma_location);
+  let center_sited = chroma_422_center_sited_h(&chroma_location);
 
   // Per-frame chroma-siting freeze (RFC #238, mirroring the resample-path guard):
   // the first output-bearing row pins the phase; a later row whose siting flipped
@@ -1973,7 +1973,7 @@ fn yuva422p_high_bit_resample<const BITS: u32, const BE: bool>(
   u_half_row: &[u16],
   v_half_row: &[u16],
   a_row: &[u16],
-  matrix: crate::ColorMatrix,
+  matrix: crate::KernelMatrix,
   full_range: bool,
   y_slice: RowSlice,
   u_slice: RowSlice,
@@ -1986,7 +1986,7 @@ fn yuva422p_high_bit_resample<const BITS: u32, const BE: bool>(
     &[u16],
     &mut [u8],
     usize,
-    crate::ColorMatrix,
+    crate::KernelMatrix,
     bool,
     bool,
     bool,
@@ -1998,7 +1998,7 @@ fn yuva422p_high_bit_resample<const BITS: u32, const BE: bool>(
     &[u16],
     &mut [u16],
     usize,
-    crate::ColorMatrix,
+    crate::KernelMatrix,
     bool,
     bool,
     bool,
@@ -2016,7 +2016,7 @@ fn yuva422p_high_bit_resample<const BITS: u32, const BE: bool>(
     &[u16],
     &mut [u8],
     usize,
-    crate::ColorMatrix,
+    crate::KernelMatrix,
     bool,
     bool,
     bool,
@@ -2028,7 +2028,7 @@ fn yuva422p_high_bit_resample<const BITS: u32, const BE: bool>(
     &[u16],
     &mut [u16],
     usize,
-    crate::ColorMatrix,
+    crate::KernelMatrix,
     bool,
     bool,
     bool,
@@ -2038,7 +2038,7 @@ fn yuva422p_high_bit_resample<const BITS: u32, const BE: bool>(
   let h = sinker.height;
   let use_simd = sinker.simd;
   // Chroma siting (#302): `Copy`, read before the field split-borrow below.
-  let chroma_location = sinker.chroma_location;
+  let chroma_location = sinker.chroma_location.clone();
 
   if w & 1 != 0 {
     return Err(MixedSinkerError::WidthAlignment(WidthAlignment::odd(w)));
@@ -2117,7 +2117,7 @@ fn yuva422p_high_bit_resample<const BITS: u32, const BE: bool>(
   // fused 4:2:2 decode, byte-identical). 4:2:2 is subsampled horizontally only —
   // no vertical phase. The full-resolution α plane is never subsampled, so it is
   // siting-independent and passes through the 4:4:4 twins UNCHANGED.
-  let center_sited = chroma_422_center_sited_h(chroma_location);
+  let center_sited = chroma_422_center_sited_h(&chroma_location);
   // A colour output drives the centered chroma reconstruction (u8 OR native u16);
   // a luma-only row bins the native Y (siting-independent) and never reconstructs
   // chroma, so it stays on the co-sited fused arm.

@@ -65,7 +65,7 @@ fn assert_close(got: [f32; 3], want: [f32; 3], tol: f32, what: &str) {
 /// in_bits=12, in_legal=True, in_int=True, is_12_bits_system=True)`.
 #[test]
 fn decode_matches_colour_science_12bit_studio_midcode() {
-  let system = ClSystem::resolve(Primaries::Bt2020, Transfer::Bt2020_12Bit).unwrap();
+  let system = ClSystem::resolve(&Primaries::Bt2020, &Transfer::Bt2020_12Bit).unwrap();
   let got = decode_linear::<12>(2048, 2148, 1948, false, system);
   assert_close(
     got,
@@ -80,7 +80,7 @@ fn decode_matches_colour_science_12bit_studio_midcode() {
 /// in_int=True, is_12_bits_system=True)`.
 #[test]
 fn decode_matches_colour_science_12bit_studio_saturated() {
-  let system = ClSystem::resolve(Primaries::Bt2020, Transfer::Bt2020_12Bit).unwrap();
+  let system = ClSystem::resolve(&Primaries::Bt2020, &Transfer::Bt2020_12Bit).unwrap();
   let got = decode_linear::<12>(3000, 2600, 1500, false, system);
   assert_close(
     got,
@@ -95,7 +95,7 @@ fn decode_matches_colour_science_12bit_studio_saturated() {
 /// in_legal=True, in_int=True, is_12_bits_system=False)`.
 #[test]
 fn decode_matches_colour_science_10bit_studio_midcode() {
-  let system = ClSystem::resolve(Primaries::Bt2020, Transfer::Bt2020_10Bit).unwrap();
+  let system = ClSystem::resolve(&Primaries::Bt2020, &Transfer::Bt2020_10Bit).unwrap();
   assert!(!system.is_12_bit(), "Bt2020_10Bit must select 10-bit OETF");
   let got = decode_linear::<10>(512, 540, 480, false, system);
   assert_close(
@@ -115,7 +115,7 @@ fn decode_matches_colour_science_10bit_studio_midcode() {
 /// `R = B = Yc` because `Kr + Kg + Kb = 1`.
 #[test]
 fn gray_axis_is_neutral_full_range() {
-  let system = ClSystem::resolve(Primaries::Bt2020, Transfer::Bt2020_12Bit).unwrap();
+  let system = ClSystem::resolve(&Primaries::Bt2020, &Transfer::Bt2020_12Bit).unwrap();
   for yc in [0u16, 1024, 2048, 3072, 4095] {
     let [r, g, b] = decode_linear::<12>(yc, 2048, 2048, true, system);
     assert!(
@@ -132,7 +132,7 @@ fn gray_axis_is_neutral_full_range() {
 /// range against `colour-science` (`Y'c = 3760` → linear `0.842107`).
 #[test]
 fn gray_axis_full_range_round_trips_to_native_code() {
-  let system = ClSystem::resolve(Primaries::Bt2020, Transfer::Bt2020_12Bit).unwrap();
+  let system = ClSystem::resolve(&Primaries::Bt2020, &Transfer::Bt2020_12Bit).unwrap();
   let lin = decode_linear::<12>(3760, 2048, 2048, true, system);
   assert_close(
     lin,
@@ -409,7 +409,7 @@ fn bt2020_oetf_is_odd_extended() {
 /// exact and `libm`-free), but they are the same numbers.
 #[test]
 fn published_weights_match_chromaticity_derivation() {
-  let (kr, kg, kb) = crate::row::scalar::chroma_derived_luma_weights(Primaries::Bt2020)
+  let (kr, kg, kb) = crate::row::scalar::chroma_derived_luma_weights(&Primaries::Bt2020)
     .expect("Bt2020 carries chromaticities");
   assert!((kr as f32 - KR).abs() <= 5e-4, "Kr {kr} vs {KR}");
   assert!((kg as f32 - KG).abs() <= 5e-4, "Kg {kg} vs {KG}");
@@ -463,29 +463,29 @@ fn chroma_normalisers_derive_from_the_oetf() {
 #[test]
 fn cl_system_resolves_bt2020_only() {
   assert_eq!(
-    ClSystem::resolve(Primaries::Bt2020, Transfer::Bt2020_10Bit).map(|s| s.is_12_bit()),
+    ClSystem::resolve(&Primaries::Bt2020, &Transfer::Bt2020_10Bit).map(|s| s.is_12_bit()),
     Some(false)
   );
   assert_eq!(
-    ClSystem::resolve(Primaries::Bt2020, Transfer::Bt2020_12Bit).map(|s| s.is_12_bit()),
+    ClSystem::resolve(&Primaries::Bt2020, &Transfer::Bt2020_12Bit).map(|s| s.is_12_bit()),
     Some(true)
   );
   // Unspecified transfer with BT.2020 primaries → NOT CL: the transfer must
   // name a BT.2020 OETF for the camera-gamma decode to be defined. Resolves to
   // None so the caller takes the affine fallback (mirrors ICtCp's explicit
   // transfer allow-list).
-  assert!(ClSystem::resolve(Primaries::Bt2020, Transfer::Unspecified).is_none());
+  assert!(ClSystem::resolve(&Primaries::Bt2020, &Transfer::Unspecified).is_none());
   // PQ/HLG with BT.2020 primaries → NOT CL: HDR transfers are not the CL camera
   // gamma; decoding them through the BT.2020 inverse-OETF would emit wrong RGB,
   // so they must fall back to the affine path, never silently route as CL.
-  assert!(ClSystem::resolve(Primaries::Bt2020, Transfer::SmpteSt2084Pq).is_none());
-  assert!(ClSystem::resolve(Primaries::Bt2020, Transfer::AribStdB67Hlg).is_none());
+  assert!(ClSystem::resolve(&Primaries::Bt2020, &Transfer::SmpteSt2084Pq).is_none());
+  assert!(ClSystem::resolve(&Primaries::Bt2020, &Transfer::AribStdB67Hlg).is_none());
   // Non-BT.2020 primaries → no CL decode.
-  assert!(ClSystem::resolve(Primaries::Bt709, Transfer::Bt2020_10Bit).is_none());
-  assert!(ClSystem::resolve(Primaries::Unspecified, Transfer::Bt2020_12Bit).is_none());
+  assert!(ClSystem::resolve(&Primaries::Bt709, &Transfer::Bt2020_10Bit).is_none());
+  assert!(ClSystem::resolve(&Primaries::Unspecified, &Transfer::Bt2020_12Bit).is_none());
   // as_str accessor.
-  let s10 = ClSystem::resolve(Primaries::Bt2020, Transfer::Bt2020_10Bit).unwrap();
-  let s12 = ClSystem::resolve(Primaries::Bt2020, Transfer::Bt2020_12Bit).unwrap();
+  let s10 = ClSystem::resolve(&Primaries::Bt2020, &Transfer::Bt2020_10Bit).unwrap();
+  let s12 = ClSystem::resolve(&Primaries::Bt2020, &Transfer::Bt2020_12Bit).unwrap();
   assert_eq!(s10.as_str(), "bt2020-cl-10");
   assert_eq!(s12.as_str(), "bt2020-cl-12");
 }
@@ -497,7 +497,7 @@ fn cl_system_resolves_bt2020_only() {
 /// colour-science-derived `R'G'B'` narrow for the 12-bit studio mid-code.
 #[test]
 fn kernels_narrow_and_alpha_are_consistent() {
-  let system = ClSystem::resolve(Primaries::Bt2020, Transfer::Bt2020_12Bit).unwrap();
+  let system = ClSystem::resolve(&Primaries::Bt2020, &Transfer::Bt2020_12Bit).unwrap();
   let (y, u, v) = (
     [le_wire_u16(2048)],
     [le_wire_u16(2148)],
@@ -545,7 +545,7 @@ fn kernels_narrow_and_alpha_are_consistent() {
 /// the 10-bit depth where the gap is widest.
 #[test]
 fn toe_region_10bit_matches_colour_science_reference() {
-  let system = ClSystem::resolve(Primaries::Bt2020, Transfer::Bt2020_10Bit).unwrap();
+  let system = ClSystem::resolve(&Primaries::Bt2020, &Transfer::Bt2020_10Bit).unwrap();
   assert!(!system.is_12_bit());
   let mut rgb_u16 = [0u16; 3];
   cl_444p_n_to_rgb_u16_row::<10, false>(
@@ -568,7 +568,7 @@ fn toe_region_10bit_matches_colour_science_reference() {
 /// are swapped — the `BE` const generic only changes the load.
 #[test]
 fn big_endian_matches_swapped_little_endian() {
-  let system = ClSystem::resolve(Primaries::Bt2020, Transfer::Bt2020_12Bit).unwrap();
+  let system = ClSystem::resolve(&Primaries::Bt2020, &Transfer::Bt2020_12Bit).unwrap();
   let (y, u, v) = (2048u16, 2148u16, 1948u16);
   let mut le = [0u16; 3];
   let mut be = [0u16; 3];

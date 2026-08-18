@@ -1,5 +1,5 @@
 use super::super::*;
-use crate::{ColorMatrix, row::scalar};
+use crate::{KernelMatrix, row::scalar};
 
 /// Pack one V30X word: `(v << 22) | (y << 12) | (u << 2)` with each channel
 /// masked to 10-bit range.
@@ -22,7 +22,7 @@ fn pseudo_random_v30x(width: usize, seed: usize) -> std::vec::Vec<u32> {
     .collect()
 }
 
-fn check_rgb<const ALPHA: bool>(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_rgb<const ALPHA: bool>(width: usize, matrix: KernelMatrix, full_range: bool) {
   let p = pseudo_random_v30x(width, 0xAA55);
   let bpp = if ALPHA { 4 } else { 3 };
   let mut s = std::vec![0u8; width * bpp];
@@ -39,7 +39,7 @@ fn check_rgb<const ALPHA: bool>(width: usize, matrix: ColorMatrix, full_range: b
   );
 }
 
-fn check_rgb_u16<const ALPHA: bool>(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_rgb_u16<const ALPHA: bool>(width: usize, matrix: KernelMatrix, full_range: bool) {
   let p = pseudo_random_v30x(width, 0xAA55);
   let bpp = if ALPHA { 4 } else { 3 };
   let mut s = std::vec![0u16; width * bpp];
@@ -88,12 +88,12 @@ fn avx2_v30x_rgb_matches_scalar_all_matrices() {
     return;
   }
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       // Width 16 = two main-loop iterations (no tail).
@@ -118,10 +118,10 @@ fn avx2_v30x_matches_scalar_widths() {
   // (1..7 — <8 pixels, no main loop), and large production widths
   // (1920p, 1921 = 1920+1 tail, 1923 = 1920+3 tail).
   for w in [1usize, 2, 3, 4, 5, 6, 7, 8, 9, 15, 16, 17, 1920, 1921, 1923] {
-    check_rgb::<false>(w, ColorMatrix::Bt709, false);
-    check_rgb::<true>(w, ColorMatrix::Bt709, true);
-    check_rgb_u16::<false>(w, ColorMatrix::Bt2020Ncl, true);
-    check_rgb_u16::<true>(w, ColorMatrix::Bt601, false);
+    check_rgb::<false>(w, KernelMatrix::Bt709, false);
+    check_rgb::<true>(w, KernelMatrix::Bt709, true);
+    check_rgb_u16::<false>(w, KernelMatrix::Bt2020Ncl, true);
+    check_rgb_u16::<true>(w, KernelMatrix::Bt601, false);
   }
 }
 
@@ -192,13 +192,13 @@ fn avx2_v30x_lane_order_per_pixel_y_and_u() {
   let mut simd_rgb = std::vec![0u8; W * 3];
   let mut scalar_rgb = std::vec![0u8; W * 3];
   unsafe {
-    v30x_to_rgb_or_rgba_row::<false>(&packed, &mut simd_rgb, W, crate::ColorMatrix::Bt709, false);
+    v30x_to_rgb_or_rgba_row::<false>(&packed, &mut simd_rgb, W, crate::KernelMatrix::Bt709, false);
   }
   scalar::v30x_to_rgb_or_rgba_row::<false>(
     &packed,
     &mut scalar_rgb,
     W,
-    crate::ColorMatrix::Bt709,
+    crate::KernelMatrix::Bt709,
     false,
   );
   assert_eq!(

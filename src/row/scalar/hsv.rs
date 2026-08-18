@@ -83,25 +83,34 @@ pub(crate) fn rgb_to_hsv_row(
 /// `crate::row::scalar` so the per-arch SIMD backends can hoist the
 /// per-matrix constants outside their main loops.
 #[cfg_attr(not(tarpaulin), inline(always))]
-pub(crate) const fn luma_coefficients_q15(matrix: ColorMatrix) -> (i32, i32, i32) {
+pub(crate) const fn luma_coefficients_q15(matrix: KernelMatrix) -> (i32, i32, i32) {
   match matrix {
     // BT.601: Kr=0.299, Kg=0.587, Kb=0.114. SMPTE 170M (525-line) and
     // BT.470 System BG (625-line) carry the identical coefficients, so
     // they share this arm; FCC (Kr=0.30/Kb=0.11) is a close approximation.
-    ColorMatrix::Bt601 | ColorMatrix::Fcc | ColorMatrix::Smpte170M | ColorMatrix::Bt470Bg => {
+    KernelMatrix::Bt601 | KernelMatrix::Fcc | KernelMatrix::Smpte170M | KernelMatrix::Bt470Bg => {
       (9798, 19235, 3735)
     }
     // BT.709: Kr=0.2126, Kg=0.7152, Kb=0.0722.
-    ColorMatrix::Bt709 => (6966, 23436, 2366),
+    KernelMatrix::Bt709 => (6966, 23436, 2366),
     // BT.2020-NCL: Kr=0.2627, Kg=0.6780, Kb=0.0593.
-    ColorMatrix::Bt2020Ncl => (8607, 22217, 1944),
+    KernelMatrix::Bt2020Ncl => (8607, 22217, 1944),
     // SMPTE 240M: Kr=0.212, Kg=0.701, Kb=0.087.
-    ColorMatrix::Smpte240m => (6947, 22971, 2851),
+    KernelMatrix::Smpte240m => (6947, 22971, 2851),
     // YCgCo: Y = 0.25 R + 0.5 G + 0.25 B (lossless integer).
-    ColorMatrix::YCgCo => (8192, 16384, 8192),
-    // ColorMatrix is #[non_exhaustive] in mediaframe; fall back to BT.709
-    // for any future variants added there before pixon is updated.
-    _ => (6966, 23436, 2366),
+    KernelMatrix::YCgCo => (8192, 16384, 8192),
+    // The two matrices with no luma basis of their own at this entry point,
+    // spelled out rather than left to a wildcard so the BT.709 weights are a
+    // decision on the record and not a fallback: `Unspecified` (`Matrix`'s
+    // own default, which pixon resolves to BT.709 unconditionally — see
+    // `Coefficients::for_matrix`) and `ChromaDerivedNcl` (whose weights are
+    // derived from the signalled primaries, which this primaries-blind entry
+    // point is not given).
+    //
+    // There is no `_` arm: `KernelMatrix` is a closed vocabulary, so this
+    // match is exhaustiveness-checked and a new coefficient set upstream
+    // becomes a compile error here rather than a silent BT.709 luma.
+    KernelMatrix::Unspecified | KernelMatrix::ChromaDerivedNcl => (6966, 23436, 2366),
   }
 }
 
@@ -126,7 +135,7 @@ pub(crate) fn rgb_to_luma_row(
   rgb: &[u8],
   luma_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert!(rgb.len() >= width * 3, "rgb row too short");
@@ -178,7 +187,7 @@ pub(crate) fn rgb_to_luma_u16_row(
   rgb: &[u8],
   luma_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert!(rgb.len() >= width * 3, "rgb row too short");
@@ -240,7 +249,7 @@ pub(crate) fn rgb_to_luma_u16_native_row(
   rgb: &[u16],
   luma_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   bits: u32,
 ) {

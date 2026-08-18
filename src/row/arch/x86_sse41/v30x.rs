@@ -24,7 +24,7 @@
 //! `width % 8` remaining pixels fall through to `scalar::v30x_*`.
 
 use super::*;
-use crate::{ColorMatrix, row::scalar};
+use crate::{KernelMatrix, row::scalar};
 
 // ---- u8 RGB / RGBA output (8 px/iter) -----------------------------------
 
@@ -43,7 +43,7 @@ pub(crate) unsafe fn v30x_to_rgb_or_rgba_row<const ALPHA: bool>(
   packed: &[u32],
   out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert!(packed.len() >= width, "packed row too short");
@@ -231,7 +231,7 @@ pub(crate) unsafe fn v30x_to_hsv_row(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert!(packed.len() >= width, "packed row too short");
@@ -266,7 +266,7 @@ pub(crate) unsafe fn v30x_to_rgb_u16_or_rgba_u16_row<const ALPHA: bool>(
   packed: &[u32],
   out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert!(packed.len() >= width, "packed row too short");

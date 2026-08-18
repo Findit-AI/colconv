@@ -48,7 +48,7 @@
 //! `width % 16` remaining pixels fall through to `scalar::xv36_*`.
 
 use super::{endian, *};
-use crate::{ColorMatrix, row::scalar};
+use crate::{KernelMatrix, row::scalar};
 
 // ---- Deinterleave helper ------------------------------------------------
 
@@ -176,7 +176,7 @@ pub(crate) unsafe fn xv36_to_rgb_or_rgba_row<const ALPHA: bool, const BE: bool>(
   packed: &[u16],
   out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert!(packed.len() >= width * 4, "packed row too short");
@@ -318,7 +318,7 @@ pub(crate) unsafe fn xv36_to_rgb_u16_or_rgba_u16_row<const ALPHA: bool, const BE
   packed: &[u16],
   out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert!(packed.len() >= width * 4, "packed row too short");
@@ -626,7 +626,7 @@ pub(crate) unsafe fn xv36_to_hsv_row<const BE: bool>(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert!(packed.len() >= width * 4, "packed row too short");

@@ -10,7 +10,7 @@
 //! expanded value of the direct path.
 
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   resample::AreaResampler,
   sinker::MixedSinker,
   source::{Monoblack, Monowhite, monoblack_to, monowhite_to},
@@ -86,7 +86,7 @@ fn monoblack_resample_luma_is_block_mean_of_expanded_bits() {
     .unwrap()
     .with_luma(&mut luma)
     .unwrap();
-    monoblack_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    monoblack_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
   }
 
   // Expanded 0/255 luma plane (Monoblack: bit=1 → 255):
@@ -144,7 +144,7 @@ fn monoblack_resample_all_outputs_match_direct_mono_over_binned_luma() {
     .unwrap()
     .with_hsv(&mut hp, &mut sp, &mut vp)
     .unwrap();
-    monoblack_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    monoblack_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
   }
 
   // Oracle: the direct mono path broadcasts each (binned) luma to
@@ -199,7 +199,7 @@ fn monowhite_resample_all_outputs_match_direct_mono_over_binned_luma() {
     .unwrap()
     .with_rgba(&mut rgba)
     .unwrap();
-    monowhite_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    monowhite_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
   }
 
   // Monowhite inverts polarity: the expanded plane is the complement of
@@ -230,7 +230,7 @@ fn monoblack_identity_plan_matches_new_sink() {
       .unwrap()
       .with_rgba(&mut direct_rgba)
       .unwrap();
-    monoblack_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    monoblack_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
   }
 
   let mut area_rgb = vec![0u8; SRC_W * SRC_H * 3];
@@ -248,7 +248,7 @@ fn monoblack_identity_plan_matches_new_sink() {
     .unwrap()
     .with_rgba(&mut area_rgba)
     .unwrap();
-    monoblack_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    monoblack_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
   }
 
   assert_eq!(
@@ -284,9 +284,9 @@ fn monoblack_resample_reuses_luma_stream_across_frames() {
     .with_luma(&mut luma)
     .unwrap();
     let f1 = MonoblackFrame::try_new(&frame1, SRC_W as u32, SRC_H as u32, STRIDE as u32).unwrap();
-    monoblack_to(&f1, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    monoblack_to(&f1, true, KernelMatrix::Bt709, &mut sink).unwrap();
     let f2 = MonoblackFrame::try_new(&frame2, SRC_W as u32, SRC_H as u32, STRIDE as u32).unwrap();
-    monoblack_to(&f2, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    monoblack_to(&f2, true, KernelMatrix::Bt709, &mut sink).unwrap();
   }
 
   let y2_ref = block_mean_2x2(&expand_luma(&frame2, false));
@@ -308,7 +308,7 @@ fn monoblack_resample_no_outputs_is_a_no_op() {
   // No outputs attached: a legal no-op, accepted without error. The
   // sequence guard's no-output branch returns before any stream is
   // created, so the luma stream is never allocated.
-  monoblack_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  monoblack_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
   assert!(
     !sink.luma_stream_allocated(),
     "a no-output frame must not allocate the luma stream"
@@ -344,14 +344,14 @@ fn monoblack_resample_begin_frame_resets_stream_sequencing() {
   .unwrap()
   .with_luma(&mut luma)
   .unwrap();
-  monoblack_to(&f1, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  monoblack_to(&f1, true, KernelMatrix::Bt709, &mut sink).unwrap();
   assert!(
     sink.luma_stream_allocated(),
     "the first frame must have created the luma stream"
   );
   // A second walk re-enters begin_frame (reset to next_y == 0) and must
   // succeed in strict order on the SAME stream.
-  monoblack_to(&f1, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  monoblack_to(&f1, true, KernelMatrix::Bt709, &mut sink).unwrap();
   let y_ref = block_mean_2x2(&expand_luma(&PATTERN, false));
   assert_eq!(
     luma, y_ref,
@@ -387,7 +387,7 @@ fn mono_first_row_scratch_oom_leaves_stream_uncommitted_for_retry() {
     // (the commit-together atomic shape; the insert-before-scratch shape would have
     // left the stream committed).
     crate::sinker::mixed::arm_source_luma_scratch_failure();
-    let err = monoblack_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap_err();
+    let err = monoblack_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap_err();
     assert!(
       matches!(
         err,
@@ -409,7 +409,7 @@ fn mono_first_row_scratch_oom_leaves_stream_uncommitted_for_retry() {
     // The frame is recoverable: attaching rgb (a CHANGED output set) and re-walking
     // (begin_frame re-sequences from row 0) succeeds and drives both outputs.
     sink.set_rgb(&mut rgb).unwrap();
-    monoblack_to(&src, true, ColorMatrix::Bt709, &mut sink)
+    monoblack_to(&src, true, KernelMatrix::Bt709, &mut sink)
       .expect("re-walk after a first-row scratch OOM must succeed");
   }
   assert!(
@@ -577,7 +577,7 @@ fn monoblack_filter_outputs<K: FilterKernel + Copy>(
     .unwrap()
     .with_hsv(&mut o.hp, &mut o.sp, &mut o.vp)
     .unwrap();
-    monoblack_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    monoblack_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
   }
   o
 }
@@ -717,7 +717,7 @@ fn monowhite_filter_luma_is_single_channel_native_luma() {
       .unwrap()
       .with_rgba(&mut rgba)
       .unwrap();
-      monowhite_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+      monowhite_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
     }
     let y_ref = native_luma_filter(Triangle, &expand_luma_grid(&FPATTERN, true), FW, FH, ow, oh);
     assert_eq!(
@@ -798,7 +798,7 @@ fn mono_filter_plans_are_accepted() {
     .unwrap()
     .with_luma(&mut luma)
     .unwrap();
-    monowhite_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    monowhite_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
   }
   assert!(
     luma.iter().any(|&v| v != 0),
@@ -818,7 +818,7 @@ fn mono_filter_no_outputs_is_a_no_op_without_allocating() {
     FilteredResampler::new(FOUT_DOWN, FOUT_DOWN, Triangle),
   )
   .unwrap();
-  monoblack_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  monoblack_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
   assert!(
     !sink.luma_filter_stream_allocated(),
     "a no-output filter frame must not allocate the filter stream"
@@ -854,9 +854,9 @@ fn monoblack_filter_reuses_stream_across_frames() {
     .with_luma(&mut luma)
     .unwrap();
     let f1 = MonoblackFrame::try_new(&frame1, FW as u32, FH as u32, FSTRIDE as u32).unwrap();
-    monoblack_to(&f1, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    monoblack_to(&f1, true, KernelMatrix::Bt709, &mut sink).unwrap();
     let f2 = MonoblackFrame::try_new(&frame2, FW as u32, FH as u32, FSTRIDE as u32).unwrap();
-    monoblack_to(&f2, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    monoblack_to(&f2, true, KernelMatrix::Bt709, &mut sink).unwrap();
   }
   let want = native_luma_filter(
     Triangle,
@@ -887,7 +887,7 @@ fn monoblack_filter_identity_plan_matches_new_sink() {
     let mut sink = MixedSinker::<Monoblack>::new(FW, FH)
       .with_rgb(&mut direct_rgb)
       .unwrap();
-    monoblack_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    monoblack_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
   }
   let mut filt_rgb = vec![0u8; FW * FH * 3];
   {
@@ -899,7 +899,7 @@ fn monoblack_filter_identity_plan_matches_new_sink() {
     .unwrap()
     .with_rgb(&mut filt_rgb)
     .unwrap();
-    monoblack_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    monoblack_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
   }
   assert_eq!(
     direct_rgb, filt_rgb,

@@ -23,7 +23,7 @@
 use core::arch::wasm32::*;
 
 use super::{endian, *};
-use crate::{ColorMatrix, row::scalar};
+use crate::{KernelMatrix, row::scalar};
 
 // ---- u8 RGB / RGBA output -----------------------------------------------
 
@@ -42,7 +42,7 @@ pub(crate) unsafe fn v410_to_rgb_or_rgba_row<const ALPHA: bool, const BE: bool>(
   packed: &[u32],
   out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert!(packed.len() >= width, "packed row too short");
@@ -236,7 +236,7 @@ pub(crate) unsafe fn v410_to_hsv_row<const BE: bool>(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert!(packed.len() >= width, "packed row too short");
@@ -271,7 +271,7 @@ pub(crate) unsafe fn v410_to_rgb_u16_or_rgba_u16_row<const ALPHA: bool, const BE
   packed: &[u32],
   out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert!(packed.len() >= width, "packed row too short");

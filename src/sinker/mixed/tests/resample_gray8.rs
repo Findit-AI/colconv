@@ -8,7 +8,7 @@
 //! already holds the binned Y plane.
 
 use crate::{
-  ColorMatrix, PixelSink,
+  KernelMatrix, PixelSink,
   resample::{AreaResampler, FilteredResampler, ResampleError, Triangle},
   sinker::{MixedSinker, MixedSinkerError},
   source::{Gray8, Gray8Row, gray8_to},
@@ -19,7 +19,7 @@ const SRC: usize = 8;
 const OUT: usize = 4;
 // Gray is luma-only; the walker still threads a matrix / range through.
 const FR: bool = true;
-const M: ColorMatrix = ColorMatrix::Bt709;
+const M: KernelMatrix = KernelMatrix::Bt709;
 
 fn gray8_frame(plane: &[u8]) -> Gray8Frame<'_> {
   Gray8Frame::new(plane, SRC as u32, SRC as u32, SRC as u32)

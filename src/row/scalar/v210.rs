@@ -94,7 +94,7 @@ pub(crate) fn v210_to_rgb_or_rgba_row<const ALPHA: bool, const BE: bool>(
   packed: &[u8],
   out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert!(width.is_multiple_of(2), "v210 requires even width");
@@ -198,7 +198,7 @@ pub(crate) fn v210_to_hsv_row<const BE: bool>(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert!(width.is_multiple_of(2), "v210 requires even width");
@@ -270,7 +270,7 @@ pub(crate) fn v210_to_rgb_u16_or_rgba_u16_row<const ALPHA: bool, const BE: bool>
   packed: &[u8],
   out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert!(width.is_multiple_of(2), "v210 requires even width");
@@ -421,7 +421,7 @@ pub(crate) fn v210_to_luma_u16_row<const BE: bool>(
 #[cfg(all(test, feature = "std"))]
 mod tests {
   use super::*;
-  use crate::ColorMatrix;
+  use crate::KernelMatrix;
 
   /// Build a v210 word from 12 logical samples in v210 standard
   /// order: `[Cb0, Y0, Cr0, Y1, Cb1, Y2, Cr1, Y3, Cb2, Y4, Cr2, Y5]`.
@@ -478,7 +478,7 @@ mod tests {
     // Full-range gray: Y=512, U=V=512 (10-bit center).
     let word = pack_v210_word([512; 12]);
     let mut rgb = [0u8; 6 * 3];
-    v210_to_rgb_or_rgba_row::<false, false>(&word, &mut rgb, 6, ColorMatrix::Bt709, true);
+    v210_to_rgb_or_rgba_row::<false, false>(&word, &mut rgb, 6, KernelMatrix::Bt709, true);
     for px in rgb.chunks(3) {
       assert!(px[0].abs_diff(128) <= 1);
       assert_eq!(px[0], px[1]);
@@ -490,7 +490,7 @@ mod tests {
   fn scalar_v210_to_rgba_gray_is_gray_with_opaque_alpha() {
     let word = pack_v210_word([512; 12]);
     let mut rgba = [0u8; 6 * 4];
-    v210_to_rgb_or_rgba_row::<true, false>(&word, &mut rgba, 6, ColorMatrix::Bt709, true);
+    v210_to_rgb_or_rgba_row::<true, false>(&word, &mut rgba, 6, KernelMatrix::Bt709, true);
     for px in rgba.chunks(4) {
       assert!(px[0].abs_diff(128) <= 1);
       assert_eq!(px[3], 0xFF);
@@ -506,7 +506,7 @@ mod tests {
       &word,
       &mut rgb_u16,
       6,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       true,
     );
     for px in rgb_u16.chunks(3) {
@@ -525,7 +525,7 @@ mod tests {
       &word,
       &mut rgba_u16,
       6,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       true,
     );
     for px in rgba_u16.chunks(4) {
@@ -572,7 +572,7 @@ mod tests {
     packed.extend_from_slice(&pack_v210_word(samples));
     packed.extend_from_slice(&pack_v210_word(samples));
     let mut rgb = std::vec![0u8; 12 * 3];
-    v210_to_rgb_or_rgba_row::<false, false>(&packed, &mut rgb, 12, ColorMatrix::Bt709, true);
+    v210_to_rgb_or_rgba_row::<false, false>(&packed, &mut rgb, 12, KernelMatrix::Bt709, true);
     for px in rgb.chunks(3) {
       assert!(px[0].abs_diff(128) <= 1);
     }
@@ -595,13 +595,13 @@ mod tests {
       packed.extend_from_slice(&pack_v210_word([512; 12]));
     }
     let mut rgb = std::vec![0u8; width * 3];
-    v210_to_rgb_or_rgba_row::<false, false>(&packed, &mut rgb, width, ColorMatrix::Bt709, true);
+    v210_to_rgb_or_rgba_row::<false, false>(&packed, &mut rgb, width, KernelMatrix::Bt709, true);
     for px in rgb.chunks(3) {
       assert!(px[0].abs_diff(128) <= 1, "width={width}: gray RGB diverged");
       assert_eq!(px[0], px[1]);
     }
     let mut rgba = std::vec![0u8; width * 4];
-    v210_to_rgb_or_rgba_row::<true, false>(&packed, &mut rgba, width, ColorMatrix::Bt709, true);
+    v210_to_rgb_or_rgba_row::<true, false>(&packed, &mut rgba, width, KernelMatrix::Bt709, true);
     for px in rgba.chunks(4) {
       assert!(px[0].abs_diff(128) <= 1);
       assert_eq!(px[3], 0xFF);
@@ -611,7 +611,7 @@ mod tests {
       &packed,
       &mut rgb_u16,
       width,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       true,
     );
     for px in rgb_u16.chunks(3) {
@@ -704,8 +704,8 @@ mod tests {
     let be_word = pack_v210_word_be(samples);
     let mut le_rgb = [0u8; 6 * 3];
     let mut be_rgb = [0u8; 6 * 3];
-    v210_to_rgb_or_rgba_row::<false, false>(&le_word, &mut le_rgb, 6, ColorMatrix::Bt709, true);
-    v210_to_rgb_or_rgba_row::<false, true>(&be_word, &mut be_rgb, 6, ColorMatrix::Bt709, true);
+    v210_to_rgb_or_rgba_row::<false, false>(&le_word, &mut le_rgb, 6, KernelMatrix::Bt709, true);
+    v210_to_rgb_or_rgba_row::<false, true>(&be_word, &mut be_rgb, 6, KernelMatrix::Bt709, true);
     assert_eq!(le_rgb, be_rgb, "BE rgb output must match LE");
   }
 
@@ -722,14 +722,14 @@ mod tests {
       &le_word,
       &mut le_rgb,
       6,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       true,
     );
     v210_to_rgb_u16_or_rgba_u16_row::<false, true>(
       &be_word,
       &mut be_rgb,
       6,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       true,
     );
     assert_eq!(le_rgb, be_rgb, "BE rgb_u16 output must match LE");

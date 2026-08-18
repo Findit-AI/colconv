@@ -9,9 +9,9 @@
 //! and SIMD-vs-scalar parity are checked directly. (Yuv444p exposes no
 //! `luma_u16` output, so it is absent here.)
 
-use crate::{ColorMatrix, sinker::MixedSinker};
+use crate::{KernelMatrix, sinker::MixedSinker};
 
-const MATRIX: ColorMatrix = ColorMatrix::Bt709;
+const MATRIX: KernelMatrix = KernelMatrix::Bt709;
 
 /// Deterministic native-depth samples masked to `BITS` (legal native codes).
 fn samples<const BITS: u32>(seed: u64, n: usize) -> std::vec::Vec<u16> {

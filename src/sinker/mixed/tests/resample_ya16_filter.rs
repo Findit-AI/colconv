@@ -33,7 +33,7 @@
 //! regression are feature-independent, so they also guard the `gray`-solo build.
 
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   frame::{Ya16BeFrame, Ya16Frame},
   resample::{
     CatmullRom, FilterKernel, FilterStream, FilteredResampler, Lanczos3, ResampleError, Resampler,
@@ -43,7 +43,7 @@ use crate::{
   source::{Ya16, ya16_to, ya16_to_endian},
 };
 
-const M: ColorMatrix = ColorMatrix::Bt709;
+const M: KernelMatrix = KernelMatrix::Bt709;
 const FR: bool = true;
 const FR_LIMITED: bool = false;
 

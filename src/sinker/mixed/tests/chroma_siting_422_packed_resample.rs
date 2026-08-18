@@ -21,7 +21,7 @@
 //! kernel.
 
 use crate::{
-  ChromaLocation, ColorMatrix, PixelSink,
+  ChromaLocation, KernelMatrix, PixelSink,
   resample::{AreaResampler, FilteredResampler, Triangle},
   sinker::MixedSinker,
   source::{
@@ -31,7 +31,7 @@ use crate::{
 };
 use mediaframe::frame::{Uyvy422Frame, Yuv422pFrame, Yuv444pFrame, Yuyv422Frame, Yvyu422Frame};
 
-const M: ColorMatrix = ColorMatrix::Bt601;
+const M: KernelMatrix = KernelMatrix::Bt601;
 const FR: bool = true;
 
 /// Round `a / d` half-up (ties toward `+∞`) — the production
@@ -263,7 +263,7 @@ fn run_yuv422p(
       MixedSinker::<Yuv422p, AreaResampler>::with_resampler(sw, sh, AreaResampler::to(ow, oh))
         .unwrap()
         .with_native(native)
-        .with_chroma_location(loc)
+        .with_chroma_location(loc.clone())
         .with_simd(simd)
         .with_rgb(&mut rgb)
         .unwrap()
@@ -395,7 +395,7 @@ macro_rules! packed_422_siting_resample_suite {
             MixedSinker::<$fmt, AreaResampler>::with_resampler(sw, sh, AreaResampler::to(ow, oh))
               .unwrap()
               .with_native(native)
-              .with_chroma_location(loc)
+              .with_chroma_location(loc.clone())
               .with_simd(simd)
               .with_rgb(&mut rgb)
               .unwrap()
@@ -442,9 +442,9 @@ macro_rules! packed_422_siting_resample_suite {
             ChromaLocation::Left,
             ChromaLocation::TopLeft,
             ChromaLocation::BottomLeft,
-            ChromaLocation::Unknown(7),
+            ChromaLocation::other("unassigned-7"),
           ] {
-            let got = run(&y, &u, &v, 8, 8, 4, 4, loc, native, true);
+            let got = run(&y, &u, &v, 8, 8, 4, 4, loc.clone(), native, true);
             assert_eq!(got.0, base.0, "rgb {loc:?} native={native}");
             assert_eq!(got.1, base.1, "rgba {loc:?} native={native}");
             assert_eq!(got.2, base.2, "hsv {loc:?} native={native}");
@@ -471,7 +471,7 @@ macro_rules! packed_422_siting_resample_suite {
             ChromaLocation::Top,
             ChromaLocation::Bottom,
           ] {
-            let n = run(&y, &u, &v, sw, sh, ow, oh, loc, true, true);
+            let n = run(&y, &u, &v, sw, sh, ow, oh, loc.clone(), true, true);
             assert_eq!(n.0, o.0, "rgb {loc:?} {sw}x{sh}->{ow}x{oh}");
             assert_eq!(n.1, o.1, "rgba {loc:?} {sw}x{sh}->{ow}x{oh}");
             assert_eq!(n.2, o.2, "hsv {loc:?} {sw}x{sh}->{ow}x{oh}");
@@ -512,7 +512,7 @@ macro_rules! packed_422_siting_resample_suite {
             ChromaLocation::Top,
             ChromaLocation::Bottom,
           ] {
-            let got = run(&y, &u, &v, sw, sh, ow, oh, loc, false, true);
+            let got = run(&y, &u, &v, sw, sh, ow, oh, loc.clone(), false, true);
             assert_eq!(got.0, oracle, "rgb {loc:?} {sw}x{sh}->{ow}x{oh}");
           }
         }
@@ -539,8 +539,8 @@ macro_rules! packed_422_siting_resample_suite {
             ChromaLocation::Bottom,
           ] {
             for native in [true, false] {
-              let packed = run(&y, &u, &v, sw, sh, ow, oh, loc, native, true);
-              let yuv422p = run_yuv422p(&y, &u, &v, sw, sh, ow, oh, loc, native, true);
+              let packed = run(&y, &u, &v, sw, sh, ow, oh, loc.clone(), native, true);
+              let yuv422p = run_yuv422p(&y, &u, &v, sw, sh, ow, oh, loc.clone(), native, true);
               assert_eq!(
                 packed, yuv422p,
                 "packed vs Yuv422p {loc:?} native={native} {sw}x{sh}->{ow}x{oh}"
@@ -572,7 +572,7 @@ macro_rules! packed_422_siting_resample_suite {
             FilteredResampler::new(ow, oh, Triangle),
           )
           .unwrap()
-          .with_chroma_location(loc)
+          .with_chroma_location(loc.clone())
           .with_rgb(&mut rgb)
           .unwrap();
           let f = $frame::new(&packed, sw as u32, sh as u32, (2 * sw) as u32);
@@ -601,7 +601,7 @@ macro_rules! packed_422_siting_resample_suite {
             FilteredResampler::new(ow, oh, Triangle),
           )
           .unwrap()
-          .with_chroma_location(loc)
+          .with_chroma_location(loc.clone())
           .with_rgb(&mut rgb)
           .unwrap();
           let f = Yuv422pFrame::new(
@@ -718,9 +718,9 @@ macro_rules! packed_422_siting_resample_suite {
               .with_luma_u16(&mut luma_u16)
               .unwrap();
           let f = $frame::new(&packed, sw as u32, sh as u32, (2 * sw) as u32);
-          sink.set_chroma_location(loc1);
+          sink.set_chroma_location(loc1.clone());
           $drv(&f, FR, M, &mut sink).unwrap();
-          sink.set_chroma_location(loc2);
+          sink.set_chroma_location(loc2.clone());
           $drv(&f, FR, M, &mut sink).unwrap();
         }
         (rgb, rgba, (hh, ss, vv), luma, luma_u16)
@@ -740,8 +740,8 @@ macro_rules! packed_422_siting_resample_suite {
           (ChromaLocation::Left, ChromaLocation::Center),
           (ChromaLocation::Center, ChromaLocation::Left),
         ] {
-          let reused = run_reuse_native(&y, &u, &v, 8, 8, 4, 4, a, b);
-          let fresh = run(&y, &u, &v, 8, 8, 4, 4, b, true, true);
+          let reused = run_reuse_native(&y, &u, &v, 8, 8, 4, 4, a.clone(), b.clone());
+          let fresh = run(&y, &u, &v, 8, 8, 4, 4, b.clone(), true, true);
           assert_eq!(
             reused.0, fresh.0,
             "native rgb {a:?}->{b:?} stale-phase carryover"
@@ -749,7 +749,7 @@ macro_rules! packed_422_siting_resample_suite {
           assert_eq!(reused.2, fresh.2, "native hsv {a:?}->{b:?}");
           assert_eq!(reused.3, fresh.3, "native luma {a:?}->{b:?}");
           // Non-vacuous: the two sitings genuinely differ on this ramp.
-          let stale = run(&y, &u, &v, 8, 8, 4, 4, a, true, true);
+          let stale = run(&y, &u, &v, 8, 8, 4, 4, a.clone(), true, true);
           assert_ne!(
             fresh.0, stale.0,
             "sitings {a:?} vs {b:?} must differ (non-vacuous)"
@@ -823,11 +823,11 @@ macro_rules! packed_422_siting_resample_suite {
         loc1: ChromaLocation,
         loc2: ChromaLocation,
       ) -> Result<(), super::super::super::MixedSinkerError> {
-        sink.set_chroma_location(loc1);
+        sink.set_chroma_location(loc1.clone());
         PixelSink::begin_frame(&mut sink, 8, 8).unwrap();
         let row0 = $row::new(&packed[0..16], 0, M, FR);
         PixelSink::process(&mut sink, row0).unwrap();
-        sink.set_chroma_location(loc2);
+        sink.set_chroma_location(loc2.clone());
         let row1 = $row::new(&packed[16..32], 1, M, FR);
         PixelSink::process(&mut sink, row1)
       }
@@ -856,7 +856,7 @@ macro_rules! packed_422_siting_resample_suite {
               .with_native(true)
               .with_rgb(&mut rgb)
               .unwrap();
-          let err = in_sequence_flip_row1(sink, &packed, loc1, loc2).unwrap_err();
+          let err = in_sequence_flip_row1(sink, &packed, loc1.clone(), loc2.clone()).unwrap_err();
           assert!(
             matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
             "native {loc1:?}->{loc2:?}: want ChromaSitingChanged, got {err:?}"
@@ -870,7 +870,7 @@ macro_rules! packed_422_siting_resample_suite {
               .with_native(false)
               .with_rgb(&mut rgb)
               .unwrap();
-          let err = in_sequence_flip_row1(sink, &packed, loc1, loc2).unwrap_err();
+          let err = in_sequence_flip_row1(sink, &packed, loc1.clone(), loc2.clone()).unwrap_err();
           assert!(
             matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
             "encoded-rgb {loc1:?}->{loc2:?}: want ChromaSitingChanged, got {err:?}"
@@ -885,7 +885,7 @@ macro_rules! packed_422_siting_resample_suite {
               .with_native(false)
               .with_hsv(&mut hh, &mut ss, &mut vv)
               .unwrap();
-          let err = in_sequence_flip_row1(sink, &packed, loc1, loc2).unwrap_err();
+          let err = in_sequence_flip_row1(sink, &packed, loc1.clone(), loc2.clone()).unwrap_err();
           assert!(
             matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
             "hsv {loc1:?}->{loc2:?}: want ChromaSitingChanged, got {err:?}"
@@ -901,7 +901,7 @@ macro_rules! packed_422_siting_resample_suite {
           .unwrap()
           .with_rgb(&mut rgb)
           .unwrap();
-          let err = in_sequence_flip_row1(sink, &packed, loc1, loc2).unwrap_err();
+          let err = in_sequence_flip_row1(sink, &packed, loc1.clone(), loc2.clone()).unwrap_err();
           assert!(
             matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
             "filter {loc1:?}->{loc2:?}: want ChromaSitingChanged, got {err:?}"

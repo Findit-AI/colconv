@@ -1,5 +1,5 @@
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   frame::{
     Gray8Frame, Gray16Frame, Gray32Frame, GrayNFrame, Grayf16Frame, Grayf32Frame, Ya8Frame,
     Ya16Frame,
@@ -49,7 +49,7 @@ fn as_le_f32(host: &[f32]) -> std::vec::Vec<f32> {
 // Gray formats are luma-only; full_range and matrix are unused by the kernels
 // but are required by the walker signature. Use full_range=true, Bt709.
 const FR: bool = true;
-const M: ColorMatrix = ColorMatrix::Bt709;
+const M: KernelMatrix = KernelMatrix::Bt709;
 
 fn make_gray8_frame(data: &[u8], w: u32, h: u32) -> Gray8Frame<'_> {
   Gray8Frame::new(data, w, h, w)

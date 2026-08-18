@@ -31,7 +31,7 @@
 //!   default-on flag, and the native/row-stage route-freeze (#186) contracts.
 
 use crate::{
-  ColorMatrix, PixelSink,
+  KernelMatrix, PixelSink,
   resample::AreaResampler,
   sinker::{MixedSinker, MixedSinkerError},
   source::{Vuyx, VuyxRow, Yuv444p, vuyx_to, yuv444p_to},
@@ -108,7 +108,7 @@ fn run_yuv444p(
   ow: usize,
   oh: usize,
   full_range: bool,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   native: bool,
 ) -> (Vec<u8>, Vec<u8>) {
   let n = ow * oh;
@@ -138,7 +138,7 @@ fn run(
   ow: usize,
   oh: usize,
   full_range: bool,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   native: bool,
 ) -> Outs {
   let n = ow * oh;
@@ -186,8 +186,8 @@ fn native_equals_yuv444p_native_on_depacked_planes() {
     let (y, u, v) = yuv_ramp(w, h);
     let packed = vuyx_from(&y, &u, &v, w, h);
 
-    let nv = run(&packed, w, h, ow, oh, true, ColorMatrix::Bt601, true);
-    let (p_rgb, p_luma) = run_yuv444p(&y, &u, &v, w, h, ow, oh, true, ColorMatrix::Bt601, true);
+    let nv = run(&packed, w, h, ow, oh, true, KernelMatrix::Bt601, true);
+    let (p_rgb, p_luma) = run_yuv444p(&y, &u, &v, w, h, ow, oh, true, KernelMatrix::Bt601, true);
 
     assert_eq!(
       nv.0, p_rgb,
@@ -224,9 +224,9 @@ fn native_within_tolerance_of_row_stage() {
   for (ow, oh) in [(6, 5), (4, 4), (7, 6), (5, 3)] {
     for full_range in [false, true] {
       for matrix in [
-        ColorMatrix::Bt601,
-        ColorMatrix::Bt709,
-        ColorMatrix::Bt2020Ncl,
+        KernelMatrix::Bt601,
+        KernelMatrix::Bt709,
+        KernelMatrix::Bt2020Ncl,
       ] {
         let native = run(&packed, w, h, ow, oh, full_range, matrix, true);
         let row = run(&packed, w, h, ow, oh, full_range, matrix, false);
@@ -272,9 +272,9 @@ fn native_solid_frame_exact() {
     let mut sink = MixedSinker::<Vuyx>::new(w, h)
       .with_rgb(&mut full_rgb)
       .unwrap();
-    vuyx_to(&frame, false, ColorMatrix::Bt709, &mut sink).unwrap();
+    vuyx_to(&frame, false, KernelMatrix::Bt709, &mut sink).unwrap();
   }
-  let out = run(&packed, w, h, 4, 4, false, ColorMatrix::Bt709, true);
+  let out = run(&packed, w, h, 4, 4, false, KernelMatrix::Bt709, true);
   for px in out.0.chunks_exact(3) {
     assert_eq!(
       (px[0], px[1], px[2]),
@@ -318,14 +318,19 @@ fn native_to_rowstage_route_flip_mid_frame_rejected() {
   sink.begin_frame(w as u32, h as u32).unwrap();
   // Row 0 freezes the route = native.
   sink
-    .process(VuyxRow::new(&packed[0..4 * w], 0, ColorMatrix::Bt601, true))
+    .process(VuyxRow::new(
+      &packed[0..4 * w],
+      0,
+      KernelMatrix::Bt601,
+      true,
+    ))
     .expect("native row 0 freezes the route and succeeds");
   sink.set_native(false);
   let err = sink
     .process(VuyxRow::new(
       &packed[4 * w..8 * w],
       1,
-      ColorMatrix::Bt601,
+      KernelMatrix::Bt601,
       true,
     ))
     .unwrap_err();
@@ -356,11 +361,11 @@ fn native_reuses_join_and_resets_route_across_frames() {
     .unwrap();
   let frame = VuyxFrame::try_new(&packed, w as u32, h as u32, (4 * w) as u32).unwrap();
   // Frame 1: native, route constant across every row — no false reject.
-  vuyx_to(&frame, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  vuyx_to(&frame, true, KernelMatrix::Bt601, &mut sink).unwrap();
   // Frame 2: flip to row-stage for the WHOLE frame; the per-frame reset (in
   // `begin_frame`) cleared the frozen route, so this is allowed.
   sink.set_native(false);
-  vuyx_to(&frame, true, ColorMatrix::Bt601, &mut sink)
+  vuyx_to(&frame, true, KernelMatrix::Bt601, &mut sink)
     .expect("a new frame may pick the other tier; the route reset per frame");
 }
 
@@ -406,7 +411,7 @@ fn luma_only_native_skips_chroma_planning() {
         .with_native(true)
         .with_luma(&mut luma)
         .unwrap();
-    vuyx_to(&frame, true, ColorMatrix::Bt601, &mut sink)
+    vuyx_to(&frame, true, KernelMatrix::Bt601, &mut sink)
       .expect("luma-only native must not plan chroma");
   }
   assert_eq!(luma, y_ref, "luma-only native == area-downscaled Y");
@@ -420,7 +425,7 @@ fn luma_only_native_skips_chroma_planning() {
     .with_rgb(&mut rgb)
     .unwrap();
   assert!(
-    vuyx_to(&frame, true, ColorMatrix::Bt601, &mut sink).is_err(),
+    vuyx_to(&frame, true, KernelMatrix::Bt601, &mut sink).is_err(),
     "colour native must reach chroma planning (the armed failpoint fires)"
   );
 }

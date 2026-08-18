@@ -31,7 +31,7 @@
 //! are feature-independent, so they also guard the `yuv-444-packed`-solo build.
 
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   frame::{VuyaFrame, VuyxFrame},
   resample::{
     CatmullRom, FilterKernel, FilterStream, FilteredResampler, Lanczos3, Resampler, Triangle,
@@ -40,7 +40,7 @@ use crate::{
   source::{Vuya, Vuyx, vuya_to, vuyx_to},
 };
 
-const M: ColorMatrix = ColorMatrix::Bt709;
+const M: KernelMatrix = KernelMatrix::Bt709;
 const FR: bool = true;
 const NATIVE_MAX: u16 = 255; // 8-bit native Y / colour max
 const SHIFT: u32 = 0; // 8-bit native Y → u8 is a zero-shift identity

@@ -444,7 +444,7 @@ impl TransferFunction {
   /// maps to [`Self::Bt1886`], the ITU-R BT.1886 reference display EOTF.
   /// See the module-level documentation for the colorimetric rationale.
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub const fn for_matrix(matrix: ColorMatrix) -> Self {
+  pub const fn for_matrix(matrix: &ColorMatrix) -> Self {
     match matrix {
       // The sRGB / ST 428-1 identity (GBR) pairs with the sRGB curve.
       ColorMatrix::Rgb => Self::Srgb,

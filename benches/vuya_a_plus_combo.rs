@@ -28,7 +28,7 @@ use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_m
 use std::hint::black_box;
 
 use pixon::{
-  ColorMatrix,
+  KernelMatrix,
   bench_internals::{vuya_to_rgb_row, vuya_to_rgba_row},
   frame::VuyaFrame,
   sinker::MixedSinker,
@@ -50,7 +50,7 @@ fn fill_pseudo_random(buf: &mut [u8], seed: u32) {
 
 fn bench(c: &mut Criterion) {
   const WIDTHS: &[u32] = &[1280, 1920, 3840];
-  const MATRIX: ColorMatrix = ColorMatrix::Bt709;
+  const MATRIX: KernelMatrix = KernelMatrix::Bt709;
   const FULL_RANGE: bool = false;
 
   let mut group = c.benchmark_group("vuya_a_plus_combo");

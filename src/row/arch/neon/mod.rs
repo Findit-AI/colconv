@@ -52,7 +52,7 @@
 use core::arch::aarch64::*;
 
 #[allow(unused_imports)]
-pub(super) use crate::{ColorMatrix, row::scalar};
+pub(super) use crate::{KernelMatrix, row::scalar};
 
 // `cfg(miri)` fallbacks for the specialized NEON intrinsics Miri cannot
 // execute (horizontal reduce, float→int convert, saturating narrow).

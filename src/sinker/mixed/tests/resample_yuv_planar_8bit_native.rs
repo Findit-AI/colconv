@@ -44,7 +44,7 @@
 //!   tier (`with_native` defaults to `true`).
 
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   resample::AreaResampler,
   sinker::MixedSinker,
   source::{Yuv444p, yuv444p_to},
@@ -53,7 +53,7 @@ use mediaframe::frame::{Yuv422pFrame, Yuv440pFrame, Yuv444pFrame};
 
 const SRC: usize = 8;
 const OUT: usize = 4;
-const M: ColorMatrix = ColorMatrix::Bt601;
+const M: KernelMatrix = KernelMatrix::Bt601;
 const FR: bool = true;
 
 /// In-gamut per-channel tolerance between the native and row-stage tiers.

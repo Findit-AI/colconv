@@ -51,7 +51,7 @@
 // Kernels are not yet consumed by any sinker (Task 8 wires MixedSinker impls).
 #![cfg_attr(not(test), allow(dead_code))]
 
-use crate::ColorMatrix;
+use crate::KernelMatrix;
 
 // ---- shared helpers --------------------------------------------------------
 
@@ -343,7 +343,7 @@ pub(crate) fn gbrpf32_to_luma_row<const BE: bool>(
   r: &[f32],
   luma_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert!(g.len() >= width, "g row too short");
@@ -391,7 +391,7 @@ pub(crate) fn gbrpf32_to_luma_u16_row<const BE: bool>(
   r: &[f32],
   luma_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert!(g.len() >= width, "g row too short");

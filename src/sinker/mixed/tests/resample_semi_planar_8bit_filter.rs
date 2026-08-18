@@ -27,7 +27,7 @@
 //! (where the routing exists but no packed-RGB oracle does).
 
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   resample::{
     CatmullRom, FilterKernel, FilterStream, FilteredResampler, Lanczos3, Resampler, Triangle,
   },
@@ -36,7 +36,7 @@ use crate::{
 };
 use mediaframe::frame::{Nv12Frame, Nv16Frame, Nv21Frame, Nv24Frame, Nv42Frame};
 
-const M: ColorMatrix = ColorMatrix::Bt601;
+const M: KernelMatrix = KernelMatrix::Bt601;
 const FR: bool = true;
 
 /// Every resampled output a filter equivalence asserts on.

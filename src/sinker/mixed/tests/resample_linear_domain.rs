@@ -15,13 +15,13 @@
 //! - **`transfer_function_caller_override_changes_output` /
 //!   `per_color_matrix_default_transfer_resolves`** — a caller
 //!   `with_transfer_function` override changes the Linear output, and a sink
-//!   with no override resolves the curve from its `ColorMatrix`.
+//!   with no override resolves the curve from its `KernelMatrix`.
 //! - **`encoded_default_is_byte_identical_to_unset`** — leaving the domain
 //!   at its default (`Encoded`) is byte-identical to never touching the
 //!   builder; the encoded path is unchanged.
 
 use crate::{
-  ColorMatrix, PixelSink,
+  KernelMatrix, PixelSink,
   resample::{
     AreaResampler, AveragingDomain, FilteredResampler, ResampleError, TransferFunction, Triangle,
   },
@@ -60,7 +60,7 @@ fn chroma(cw: usize, ch: usize, base: u8, step: u8) -> Vec<u8> {
 /// Decode a YUV frame to a **full-resolution encoded RGB** buffer
 /// (`SRC x SRC x 3`) via the format's own identity conversion — the same
 /// kernel the Linear path decodes through.
-fn full_res_rgb_420(y: &[u8], u: &[u8], v: &[u8], matrix: ColorMatrix) -> Vec<u8> {
+fn full_res_rgb_420(y: &[u8], u: &[u8], v: &[u8], matrix: KernelMatrix) -> Vec<u8> {
   let cw = SRC / 2;
   let src = Yuv420pFrame::new(
     y, u, v, SRC as u32, SRC as u32, SRC as u32, cw as u32, cw as u32,
@@ -75,7 +75,7 @@ fn full_res_rgb_420(y: &[u8], u: &[u8], v: &[u8], matrix: ColorMatrix) -> Vec<u8
   rgb
 }
 
-fn full_res_rgb_422(y: &[u8], u: &[u8], v: &[u8], matrix: ColorMatrix) -> Vec<u8> {
+fn full_res_rgb_422(y: &[u8], u: &[u8], v: &[u8], matrix: KernelMatrix) -> Vec<u8> {
   let cw = SRC / 2;
   let src = Yuv422pFrame::new(
     y, u, v, SRC as u32, SRC as u32, SRC as u32, cw as u32, cw as u32,
@@ -90,7 +90,7 @@ fn full_res_rgb_422(y: &[u8], u: &[u8], v: &[u8], matrix: ColorMatrix) -> Vec<u8
   rgb
 }
 
-fn full_res_rgb_444(y: &[u8], u: &[u8], v: &[u8], matrix: ColorMatrix) -> Vec<u8> {
+fn full_res_rgb_444(y: &[u8], u: &[u8], v: &[u8], matrix: KernelMatrix) -> Vec<u8> {
   let src = Yuv444pFrame::new(
     y, u, v, SRC as u32, SRC as u32, SRC as u32, SRC as u32, SRC as u32,
   );
@@ -104,7 +104,7 @@ fn full_res_rgb_444(y: &[u8], u: &[u8], v: &[u8], matrix: ColorMatrix) -> Vec<u8
   rgb
 }
 
-fn full_res_rgb_440(y: &[u8], u: &[u8], v: &[u8], matrix: ColorMatrix) -> Vec<u8> {
+fn full_res_rgb_440(y: &[u8], u: &[u8], v: &[u8], matrix: KernelMatrix) -> Vec<u8> {
   let src = Yuv440pFrame::new(
     y, u, v, SRC as u32, SRC as u32, SRC as u32, SRC as u32, SRC as u32,
   );
@@ -171,8 +171,8 @@ fn max_abs_diff(a: &[u8], b: &[u8]) -> u8 {
   ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
 )]
 fn yuv420p_linear_domain_equals_independent_linear_light_oracle() {
-  let matrix = ColorMatrix::Bt709;
-  let tf = TransferFunction::for_matrix(matrix);
+  let matrix = KernelMatrix::Bt709;
+  let tf = TransferFunction::for_matrix(&crate::ColorMatrix::from(matrix));
   let y = y_ramp();
   let cw = SRC / 2;
   let u = chroma(cw, cw, 200, 6);
@@ -206,8 +206,8 @@ fn yuv420p_linear_domain_equals_independent_linear_light_oracle() {
   ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
 )]
 fn yuv422p_linear_domain_equals_independent_linear_light_oracle() {
-  let matrix = ColorMatrix::Bt709;
-  let tf = TransferFunction::for_matrix(matrix);
+  let matrix = KernelMatrix::Bt709;
+  let tf = TransferFunction::for_matrix(&crate::ColorMatrix::from(matrix));
   let y = y_ramp();
   let cw = SRC / 2;
   let u = chroma(cw, SRC, 200, 6);
@@ -241,8 +241,8 @@ fn yuv422p_linear_domain_equals_independent_linear_light_oracle() {
   ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
 )]
 fn yuv444p_linear_domain_equals_independent_linear_light_oracle() {
-  let matrix = ColorMatrix::Bt709;
-  let tf = TransferFunction::for_matrix(matrix);
+  let matrix = KernelMatrix::Bt709;
+  let tf = TransferFunction::for_matrix(&crate::ColorMatrix::from(matrix));
   let y = y_ramp();
   let u = chroma(SRC, SRC, 200, 6);
   let v = chroma(SRC, SRC, 40, 7);
@@ -275,8 +275,8 @@ fn yuv444p_linear_domain_equals_independent_linear_light_oracle() {
   ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
 )]
 fn yuv440p_linear_domain_equals_independent_linear_light_oracle() {
-  let matrix = ColorMatrix::Bt709;
-  let tf = TransferFunction::for_matrix(matrix);
+  let matrix = KernelMatrix::Bt709;
+  let tf = TransferFunction::for_matrix(&crate::ColorMatrix::from(matrix));
   let y = y_ramp();
   let ch = SRC / 2;
   let u = chroma(SRC, ch, 200, 6);
@@ -307,7 +307,7 @@ fn yuv440p_linear_domain_equals_independent_linear_light_oracle() {
 // ---- linear vs encoded materially differ ---------------------------------
 
 /// Runs a `Yuv420p` area downscale to RGB under the given domain.
-fn run_420(y: &[u8], u: &[u8], v: &[u8], matrix: ColorMatrix, domain: AveragingDomain) -> Vec<u8> {
+fn run_420(y: &[u8], u: &[u8], v: &[u8], matrix: KernelMatrix, domain: AveragingDomain) -> Vec<u8> {
   let cw = SRC / 2;
   let src = Yuv420pFrame::new(
     y, u, v, SRC as u32, SRC as u32, SRC as u32, cw as u32, cw as u32,
@@ -351,7 +351,7 @@ fn linear_and_encoded_domains_differ() {
   // each output pixel a dark/bright mix whose linear-light mean is far from
   // its gamma-encoded mean. (Saturated chroma instead clamps every channel
   // to 0/255, which would hide the domain difference behind the clamp.)
-  let matrix = ColorMatrix::Bt709;
+  let matrix = KernelMatrix::Bt709;
   let y = y_checker();
   let cw = SRC / 2;
   let u = vec![128u8; cw * cw];
@@ -374,7 +374,7 @@ fn linear_and_encoded_domains_differ() {
   ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
 )]
 fn transfer_function_caller_override_changes_output() {
-  let matrix = ColorMatrix::Bt709;
+  let matrix = KernelMatrix::Bt709;
   // In-gamut grey mid-tones (checker luma + neutral chroma): the sRGB and
   // BT.1886 curves linearise mid-grey differently, so the re-encoded mean
   // differs — without the clamp that saturated content would impose.
@@ -434,7 +434,7 @@ fn transfer_function_caller_override_changes_output() {
 fn per_color_matrix_default_transfer_resolves() {
   // With no caller override, a video-matrix sink resolves to BT.1886 — so
   // the un-overridden Linear output equals the BT.1886-override output.
-  let matrix = ColorMatrix::Bt709;
+  let matrix = KernelMatrix::Bt709;
   let y = y_ramp();
   let cw = SRC / 2;
   let u = chroma(cw, cw, 200, 6);
@@ -475,7 +475,7 @@ fn encoded_default_is_byte_identical_to_unset() {
   // `with_averaging_domain` must produce byte-identical output to explicitly
   // setting Encoded — i.e. the new field is inert on the default path. Cover
   // both encoded tiers (native + row-stage) and an RGBA output.
-  let matrix = ColorMatrix::Bt601;
+  let matrix = KernelMatrix::Bt601;
   let y = y_ramp();
   let cw = SRC / 2;
   let u = chroma(cw, cw, 110, 6);
@@ -527,7 +527,7 @@ fn encoded_default_is_byte_identical_to_unset() {
   ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
 )]
 fn linear_domain_rejects_filter_plan() {
-  let matrix = ColorMatrix::Bt709;
+  let matrix = KernelMatrix::Bt709;
   let y = y_ramp();
   let cw = SRC / 2;
   let u = chroma(cw, cw, 200, 6);
@@ -594,7 +594,7 @@ fn linear_domain_out_of_sequence_row_is_atomic() {
     // Row 3 before rows 0..3: rejected before the frame buffer is allocated
     // and before any output is written.
     let err = sink
-      .process(Yuv420pRow::new(&y, &u, &v, 3, ColorMatrix::Bt709, true))
+      .process(Yuv420pRow::new(&y, &u, &v, 3, KernelMatrix::Bt709, true))
       .unwrap_err();
     assert!(
       matches!(
@@ -647,7 +647,7 @@ fn linear_domain_final_row_output_change_is_atomic() {
       let ur = &u[cr * cw..(cr + 1) * cw];
       let vr = &v[cr * cw..(cr + 1) * cw];
       sink
-        .process(Yuv420pRow::new(yr, ur, vr, r, ColorMatrix::Bt709, true))
+        .process(Yuv420pRow::new(yr, ur, vr, r, KernelMatrix::Bt709, true))
         .unwrap();
     }
     // Final row: attach a new output (changing the frozen set) — must reject
@@ -659,7 +659,7 @@ fn linear_domain_final_row_output_change_is_atomic() {
     let ur = &u[cr * cw..(cr + 1) * cw];
     let vr = &v[cr * cw..(cr + 1) * cw];
     let err = sink
-      .process(Yuv420pRow::new(yr, ur, vr, r, ColorMatrix::Bt709, true))
+      .process(Yuv420pRow::new(yr, ur, vr, r, KernelMatrix::Bt709, true))
       .unwrap_err();
     assert!(
       matches!(err, MixedSinkerError::ResampleOutputsChanged(_)),
@@ -689,8 +689,8 @@ fn linear_domain_final_row_output_change_is_atomic() {
   ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
 )]
 fn linear_domain_final_row_alloc_failure_leaves_frame_retryable() {
-  let matrix = ColorMatrix::Bt709;
-  let tf = TransferFunction::for_matrix(matrix);
+  let matrix = KernelMatrix::Bt709;
+  let tf = TransferFunction::for_matrix(&crate::ColorMatrix::from(matrix));
   let y = y_ramp();
   let cw = SRC / 2;
   let u = chroma(cw, cw, 200, 6);
@@ -716,7 +716,7 @@ fn linear_domain_final_row_alloc_failure_leaves_frame_retryable() {
       let cr = r / 2;
       let ur = &u[cr * cw..(cr + 1) * cw];
       let vr = &v[cr * cw..(cr + 1) * cw];
-      sink.process(Yuv420pRow::new(yr, ur, vr, r, ColorMatrix::Bt709, true))
+      sink.process(Yuv420pRow::new(yr, ur, vr, r, KernelMatrix::Bt709, true))
     };
 
     // Rows 0..SRC-1 buffer cleanly.
@@ -779,7 +779,7 @@ fn linear_domain_final_row_alloc_failure_leaves_frame_retryable() {
 )]
 fn linear_domain_premultiplied_on_non_alpha_rejects() {
   const SENTINEL: u8 = 0x9E;
-  let matrix = ColorMatrix::Bt709;
+  let matrix = KernelMatrix::Bt709;
   let y = y_ramp();
   let cw = SRC / 2;
 
@@ -909,7 +909,7 @@ fn linear_domain_mid_frame_transfer_change_is_rejected_and_retryable() {
     // Row 0 freezes the resolved transfer (Srgb) on the lazily-created frame.
     let (yr, ur, vr) = row(0);
     sink
-      .process(Yuv420pRow::new(yr, ur, vr, 0, ColorMatrix::Bt709, true))
+      .process(Yuv420pRow::new(yr, ur, vr, 0, KernelMatrix::Bt709, true))
       .unwrap();
 
     // Flip the transfer mid-frame, then feed row 1 — must reject before the
@@ -917,7 +917,7 @@ fn linear_domain_mid_frame_transfer_change_is_rejected_and_retryable() {
     sink.set_transfer_function(TransferFunction::Bt1886);
     let (yr, ur, vr) = row(1);
     let err = sink
-      .process(Yuv420pRow::new(yr, ur, vr, 1, ColorMatrix::Bt709, true))
+      .process(Yuv420pRow::new(yr, ur, vr, 1, KernelMatrix::Bt709, true))
       .unwrap_err();
     assert!(
       matches!(err, MixedSinkerError::TransferFunctionChanged(_)),
@@ -931,7 +931,7 @@ fn linear_domain_mid_frame_transfer_change_is_rejected_and_retryable() {
     for r in 1..SRC {
       let (yr, ur, vr) = row(r);
       sink
-        .process(Yuv420pRow::new(yr, ur, vr, r, ColorMatrix::Bt709, true))
+        .process(Yuv420pRow::new(yr, ur, vr, r, KernelMatrix::Bt709, true))
         .unwrap();
     }
   }
@@ -975,7 +975,7 @@ fn linear_domain_mid_frame_domain_change_is_rejected() {
     // Row 0 freezes the domain (Linear) on its first output-bearing row.
     let (yr, ur, vr) = row(0);
     sink
-      .process(Yuv420pRow::new(yr, ur, vr, 0, ColorMatrix::Bt709, true))
+      .process(Yuv420pRow::new(yr, ur, vr, 0, KernelMatrix::Bt709, true))
       .unwrap();
 
     // Flip the domain mid-frame, then feed row 1 — the freeze guards the domain
@@ -987,7 +987,7 @@ fn linear_domain_mid_frame_domain_change_is_rejected() {
     sink.set_averaging_domain(AveragingDomain::Encoded);
     let (yr, ur, vr) = row(1);
     let err = sink
-      .process(Yuv420pRow::new(yr, ur, vr, 1, ColorMatrix::Bt709, true))
+      .process(Yuv420pRow::new(yr, ur, vr, 1, KernelMatrix::Bt709, true))
       .unwrap_err();
     assert!(
       matches!(err, MixedSinkerError::AveragingDomainChanged(_)),
@@ -1012,7 +1012,7 @@ fn linear_domain_mid_frame_domain_change_is_rejected() {
     for r in 1..SRC {
       let (yr, ur, vr) = row(r);
       sink
-        .process(Yuv420pRow::new(yr, ur, vr, r, ColorMatrix::Bt709, true))
+        .process(Yuv420pRow::new(yr, ur, vr, r, KernelMatrix::Bt709, true))
         .unwrap();
     }
   }
@@ -1053,7 +1053,7 @@ fn linear_domain_filter_reject_does_not_poison_domain_freeze() {
       &u[cr * cw..(cr + 1) * cw],
       &v[cr * cw..(cr + 1) * cw],
       r,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       true,
     )
   };
@@ -1128,7 +1128,7 @@ fn linear_domain_filter_reject_does_not_poison_domain_freeze() {
   ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
 )]
 fn linear_domain_first_row_scratch_failure_leaves_frame_unset() {
-  let matrix = ColorMatrix::Bt709;
+  let matrix = KernelMatrix::Bt709;
   let y = y_ramp();
   let cw = SRC / 2;
   let u = chroma(cw, cw, 200, 6);
@@ -1160,7 +1160,7 @@ fn linear_domain_first_row_scratch_failure_leaves_frame_unset() {
       let cr = r / 2;
       let ur = &u[cr * cw..(cr + 1) * cw];
       let vr = &v[cr * cw..(cr + 1) * cw];
-      sink.process(Yuv420pRow::new(yr, ur, vr, r, ColorMatrix::Bt709, true))
+      sink.process(Yuv420pRow::new(yr, ur, vr, r, KernelMatrix::Bt709, true))
     };
 
     // Row 0 with the scratch reserve armed to fail: the frame was built into a
@@ -1222,8 +1222,8 @@ fn linear_domain_first_row_scratch_failure_leaves_frame_unset() {
   ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
 )]
 fn linear_domain_first_row_failure_allows_output_set_retry() {
-  let matrix = ColorMatrix::Bt709;
-  let tf = TransferFunction::for_matrix(matrix);
+  let matrix = KernelMatrix::Bt709;
+  let tf = TransferFunction::for_matrix(&crate::ColorMatrix::from(matrix));
   let y = y_ramp();
   let cw = SRC / 2;
   let u = chroma(cw, cw, 200, 6);
@@ -1253,7 +1253,7 @@ fn linear_domain_first_row_failure_allows_output_set_retry() {
       let cr = r / 2;
       let ur = &u[cr * cw..(cr + 1) * cw];
       let vr = &v[cr * cw..(cr + 1) * cw];
-      Yuv420pRow::new(yr, ur, vr, r, ColorMatrix::Bt709, true)
+      Yuv420pRow::new(yr, ur, vr, r, KernelMatrix::Bt709, true)
     };
 
     // Row 0 (rgb-only) with the scratch reserve armed to fail: the output-set
@@ -1340,7 +1340,7 @@ fn linear_domain_single_row_frame_tail_failure_leaves_frame_unset() {
     // `*frame` still `None`.
     crate::sinker::mixed::linear_light::arm_linear_tail_alloc_failure();
     let err = sink
-      .process(Yuv444pRow::new(&y, &u, &v, 0, ColorMatrix::Bt709, true))
+      .process(Yuv444pRow::new(&y, &u, &v, 0, KernelMatrix::Bt709, true))
       .unwrap_err();
     assert!(
       matches!(
@@ -1355,7 +1355,7 @@ fn linear_domain_single_row_frame_tail_failure_leaves_frame_unset() {
     // (the one-shot failpoint is already taken, so the tail now allocates).
     sink.set_transfer_function(TransferFunction::Bt1886);
     sink
-      .process(Yuv444pRow::new(&y, &u, &v, 0, ColorMatrix::Bt709, true))
+      .process(Yuv444pRow::new(&y, &u, &v, 0, KernelMatrix::Bt709, true))
       .expect(
         "after a single-row tail failure the corrected-transfer retry of row 0 \
          must succeed — the failed row must not have committed the frame",

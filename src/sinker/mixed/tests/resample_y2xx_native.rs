@@ -49,7 +49,7 @@
 //!   freeze guard.
 
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   PixelSink,
   // `Y2xxFrame` is the packed source frame; the `Yuv4*pNLeFrame` types are the
   // planar oracle / twin-parity frames the macro references by name.
@@ -72,7 +72,7 @@ use crate::{
 const SRC: usize = 8;
 const CW: usize = SRC / 2;
 const OUT: usize = 4;
-const M: ColorMatrix = ColorMatrix::Bt601;
+const M: KernelMatrix = KernelMatrix::Bt601;
 const FR: bool = true;
 
 /// In-gamut per-channel u8 tolerance between the native and row-stage tiers.

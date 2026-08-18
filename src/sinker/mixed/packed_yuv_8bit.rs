@@ -16,7 +16,7 @@
 //!
 //! Outputs map to the sink's standard channels:
 //! - `with_rgb` / `with_rgba` — packed YUV → RGB Q15 pipeline (full
-//!   `ColorMatrix` + range support inherited from the row); RGBA
+//!   `KernelMatrix` + range support inherited from the row); RGBA
 //!   alpha is forced to `0xFF` (the source has no alpha channel).
 //! - `with_luma` — extracts the Y bytes from the packed plane via
 //!   the dedicated luma kernel (much cheaper than a full YUV→RGB
@@ -85,7 +85,7 @@ use super::{
 };
 #[cfg(all(feature = "yuv-packed", feature = "yuv-planar"))]
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   resample::{
     AveragingDomain, InsertionContext, InsertionPoint, PlanGeometry, ResampleError,
     select_insertion_point,
@@ -596,7 +596,7 @@ fn packed_yuv422_process_native(
   u_off: usize,
   v_off: usize,
   chroma_h_phase: f64,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   idx: usize,
   w: usize,
@@ -923,7 +923,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuyv422, R> {
     // only consumer (`chroma_422_center_sited_h` + the 4:4:4 kernels need
     // `yuv-planar`); a `yuv-packed`-only build keeps the default nearest decode.
     #[cfg(all(feature = "yuv-packed", feature = "yuv-planar"))]
-    let chroma_location = self.chroma_location;
+    let chroma_location = self.chroma_location.clone();
 
     let Self {
       rgb,
@@ -982,7 +982,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuyv422, R> {
       // phase-0.5 upsample) and decode 4:4:4. The co-sited path keeps the fused
       // `yuyv422_to_rgb_row` decode.
       #[cfg(all(feature = "yuv-packed", feature = "yuv-planar"))]
-      let center_sited = chroma_422_center_sited_h(chroma_location);
+      let center_sited = chroma_422_center_sited_h(&chroma_location);
       #[cfg(all(feature = "yuv-packed", feature = "yuv-planar"))]
       let chroma_h_phase = if center_sited {
         YUV422P_CENTERED_H_PHASE
@@ -1391,7 +1391,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuyv422, R> {
     // nearest-neighbor decode. 4:2:2 is horizontally subsampled only — there is no
     // vertical blend or chroma lookback (cf. the Yuv420p `Bottom` path).
     #[cfg(all(feature = "yuv-packed", feature = "yuv-planar"))]
-    let center_sited = chroma_422_center_sited_h(chroma_location);
+    let center_sited = chroma_422_center_sited_h(&chroma_location);
 
     // Per-frame chroma-siting freeze (RFC #238, mirroring the resample-path guard
     // above): the first output-bearing row pins the phase; a later row whose siting
@@ -1761,7 +1761,7 @@ impl<R> PixelSink for MixedSinker<'_, Uyvy422, R> {
     // only consumer (`chroma_422_center_sited_h` + the 4:4:4 kernels need
     // `yuv-planar`); a `yuv-packed`-only build keeps the default nearest decode.
     #[cfg(all(feature = "yuv-packed", feature = "yuv-planar"))]
-    let chroma_location = self.chroma_location;
+    let chroma_location = self.chroma_location.clone();
 
     let Self {
       rgb,
@@ -1808,7 +1808,7 @@ impl<R> PixelSink for MixedSinker<'_, Uyvy422, R> {
       // phase 0 (byte-identical to the pre-siting resample). See the Yuyv422 impl
       // for the full per-tier rationale.
       #[cfg(all(feature = "yuv-packed", feature = "yuv-planar"))]
-      let center_sited = chroma_422_center_sited_h(chroma_location);
+      let center_sited = chroma_422_center_sited_h(&chroma_location);
       #[cfg(all(feature = "yuv-packed", feature = "yuv-planar"))]
       let chroma_h_phase = if center_sited {
         YUV422P_CENTERED_H_PHASE
@@ -2164,7 +2164,7 @@ impl<R> PixelSink for MixedSinker<'_, Uyvy422, R> {
     // nearest-neighbor decode. 4:2:2 is horizontally subsampled only — there is no
     // vertical blend or chroma lookback (cf. the Yuv420p `Bottom` path).
     #[cfg(all(feature = "yuv-packed", feature = "yuv-planar"))]
-    let center_sited = chroma_422_center_sited_h(chroma_location);
+    let center_sited = chroma_422_center_sited_h(&chroma_location);
 
     // Per-frame chroma-siting freeze (RFC #238, mirroring the resample-path guard
     // above): the first output-bearing row pins the phase; a later row whose siting
@@ -2529,7 +2529,7 @@ impl<R> PixelSink for MixedSinker<'_, Yvyu422, R> {
     // only consumer (`chroma_422_center_sited_h` + the 4:4:4 kernels need
     // `yuv-planar`); a `yuv-packed`-only build keeps the default nearest decode.
     #[cfg(all(feature = "yuv-packed", feature = "yuv-planar"))]
-    let chroma_location = self.chroma_location;
+    let chroma_location = self.chroma_location.clone();
 
     let Self {
       rgb,
@@ -2576,7 +2576,7 @@ impl<R> PixelSink for MixedSinker<'_, Yvyu422, R> {
       // is phase 0 (byte-identical to the pre-siting resample). See the Yuyv422
       // impl for the full per-tier rationale.
       #[cfg(all(feature = "yuv-packed", feature = "yuv-planar"))]
-      let center_sited = chroma_422_center_sited_h(chroma_location);
+      let center_sited = chroma_422_center_sited_h(&chroma_location);
       #[cfg(all(feature = "yuv-packed", feature = "yuv-planar"))]
       let chroma_h_phase = if center_sited {
         YUV422P_CENTERED_H_PHASE
@@ -2932,7 +2932,7 @@ impl<R> PixelSink for MixedSinker<'_, Yvyu422, R> {
     // nearest-neighbor decode. 4:2:2 is horizontally subsampled only — there is no
     // vertical blend or chroma lookback (cf. the Yuv420p `Bottom` path).
     #[cfg(all(feature = "yuv-packed", feature = "yuv-planar"))]
-    let center_sited = chroma_422_center_sited_h(chroma_location);
+    let center_sited = chroma_422_center_sited_h(&chroma_location);
 
     // Per-frame chroma-siting freeze (RFC #238, mirroring the resample-path guard
     // above): the first output-bearing row pins the phase; a later row whose siting

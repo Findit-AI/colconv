@@ -62,7 +62,7 @@ fn vyu444_matches_vuyx_reference_all_outputs() {
   let vx = VuyxFrame::try_new(&vuyx_buf, width as u32, height as u32, (width * 4) as u32).unwrap();
 
   for full_range in [true, false] {
-    let m = ColorMatrix::Bt709;
+    let m = KernelMatrix::Bt709;
     // RGB
     let (mut y_rgb, mut x_rgb) = (std::vec![0u8; n * 3], std::vec![0u8; n * 3]);
     {
@@ -96,7 +96,7 @@ fn vyu444_matches_vuyx_reference_all_outputs() {
   }
 
   // Luma / luma_u16 / HSV.
-  let m = ColorMatrix::Bt709;
+  let m = KernelMatrix::Bt709;
   let (mut y_l, mut x_l) = (std::vec![0u8; n], std::vec![0u8; n]);
   {
     let mut a = MixedSinker::<Vyu444>::new(width, height)
@@ -167,7 +167,7 @@ fn vyu444_downscale_matches_vuyx() {
   let vy = Vyu444Frame::try_new(&vyu_buf, in_w as u32, in_h as u32, (in_w * 3) as u32).unwrap();
   let vx = VuyxFrame::try_new(&vuyx_buf, in_w as u32, in_h as u32, (in_w * 4) as u32).unwrap();
 
-  let m = ColorMatrix::Bt709;
+  let m = KernelMatrix::Bt709;
   // RGB + luma through a 2:1 area downscale.
   let (mut y_rgb, mut x_rgb) = (
     std::vec![0u8; out_w * out_h * 3],
@@ -222,14 +222,14 @@ fn vyu444_simd_vs_scalar_parity_at_1922() {
     let mut s = MixedSinker::<Vyu444>::new(w, h)
       .with_rgba(&mut simd)
       .unwrap();
-    vyu444_to(&src, false, ColorMatrix::Bt709, &mut s).unwrap();
+    vyu444_to(&src, false, KernelMatrix::Bt709, &mut s).unwrap();
   }
   {
     let mut s = MixedSinker::<Vyu444>::new(w, h)
       .with_rgba(&mut scalar)
       .unwrap()
       .with_simd(false);
-    vyu444_to(&src, false, ColorMatrix::Bt709, &mut s).unwrap();
+    vyu444_to(&src, false, KernelMatrix::Bt709, &mut s).unwrap();
   }
   assert_eq!(simd, scalar, "VYU444 SIMD ≠ scalar at width {w}");
 }
@@ -244,7 +244,7 @@ fn vyu444_malformed_row_returns_row_shape_mismatch() {
   sink.begin_frame(4, 1).unwrap();
   // Width 4 needs 12 packed bytes; hand 10.
   let short = std::vec![0u8; 10];
-  let row = Vyu444Row::new(&short, 0, ColorMatrix::Bt709, false);
+  let row = Vyu444Row::new(&short, 0, KernelMatrix::Bt709, false);
   let err = sink.process(row).unwrap_err();
   assert!(
     matches!(err, MixedSinkerError::RowShapeMismatch(e)
@@ -298,7 +298,7 @@ fn vyu444_rgb_scratch_alloc_failure_leaves_outputs_untouched() {
     .unwrap();
 
   super::super::arm_rgb_scratch_alloc_failure();
-  let err = vyu444_to(&src, false, ColorMatrix::Bt601, &mut sink).unwrap_err();
+  let err = vyu444_to(&src, false, KernelMatrix::Bt601, &mut sink).unwrap_err();
   drop(sink);
 
   assert!(

@@ -1,5 +1,5 @@
 use super::super::*;
-use crate::{ColorMatrix, row::scalar};
+use crate::{KernelMatrix, row::scalar};
 
 /// Builds a deterministic pseudo-random Y216-shaped u16 buffer with
 /// `width * 2` u16 samples. Each sample is a full 16-bit value
@@ -10,7 +10,7 @@ fn pseudo_random_y216(width: usize, seed: usize) -> std::vec::Vec<u16> {
     .collect()
 }
 
-fn check_rgb<const ALPHA: bool>(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_rgb<const ALPHA: bool>(width: usize, matrix: KernelMatrix, full_range: bool) {
   let p = pseudo_random_y216(width, 0xAA55);
   let bpp = if ALPHA { 4 } else { 3 };
   let mut s = std::vec![0u8; width * bpp];
@@ -27,7 +27,7 @@ fn check_rgb<const ALPHA: bool>(width: usize, matrix: ColorMatrix, full_range: b
   );
 }
 
-fn check_rgb_u16<const ALPHA: bool>(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_rgb_u16<const ALPHA: bool>(width: usize, matrix: KernelMatrix, full_range: bool) {
   let p = pseudo_random_y216(width, 0xAA55);
   let bpp = if ALPHA { 4 } else { 3 };
   let mut s = std::vec![0u16; width * bpp];
@@ -70,12 +70,12 @@ fn check_luma_u16(width: usize) {
 #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
 fn neon_y216_rgb_matches_scalar_all_matrices() {
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       check_rgb::<false>(16, m, full);
@@ -90,10 +90,10 @@ fn neon_y216_rgb_matches_scalar_all_matrices() {
 #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
 fn neon_y216_matches_scalar_widths() {
   for w in [2usize, 4, 14, 16, 18, 30, 32, 34, 62, 64, 66, 1920, 1922] {
-    check_rgb::<false>(w, ColorMatrix::Bt709, false);
-    check_rgb::<true>(w, ColorMatrix::Bt709, true);
-    check_rgb_u16::<false>(w, ColorMatrix::Bt2020Ncl, true);
-    check_rgb_u16::<true>(w, ColorMatrix::Bt601, false);
+    check_rgb::<false>(w, KernelMatrix::Bt709, false);
+    check_rgb::<true>(w, KernelMatrix::Bt709, true);
+    check_rgb_u16::<false>(w, KernelMatrix::Bt2020Ncl, true);
+    check_rgb_u16::<true>(w, KernelMatrix::Bt601, false);
   }
 }
 
@@ -155,7 +155,7 @@ fn neon_y216_lane_order_per_pixel_y_and_u() {
       &packed,
       &mut simd_rgb,
       W,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       false,
     );
   }
@@ -163,7 +163,7 @@ fn neon_y216_lane_order_per_pixel_y_and_u() {
     &packed,
     &mut scalar_rgb,
     W,
-    ColorMatrix::Bt709,
+    KernelMatrix::Bt709,
     false,
   );
   assert_eq!(
@@ -210,8 +210,8 @@ fn neon_y216_be_le_simd_parity() {
     let mut le_rgb = std::vec![0u8; w * 3];
     let mut be_rgb = std::vec![0u8; w * 3];
     unsafe {
-      y216_to_rgb_or_rgba_row::<false, false>(&le, &mut le_rgb, w, ColorMatrix::Bt709, false);
-      y216_to_rgb_or_rgba_row::<false, true>(&be, &mut be_rgb, w, ColorMatrix::Bt709, false);
+      y216_to_rgb_or_rgba_row::<false, false>(&le, &mut le_rgb, w, KernelMatrix::Bt709, false);
+      y216_to_rgb_or_rgba_row::<false, true>(&be, &mut be_rgb, w, KernelMatrix::Bt709, false);
     }
     assert_eq!(le_rgb, be_rgb, "y216 NEON LE vs BE RGB parity (w={w})");
 
@@ -219,8 +219,8 @@ fn neon_y216_be_le_simd_parity() {
     let mut le_rgba = std::vec![0u8; w * 4];
     let mut be_rgba = std::vec![0u8; w * 4];
     unsafe {
-      y216_to_rgb_or_rgba_row::<true, false>(&le, &mut le_rgba, w, ColorMatrix::Bt709, false);
-      y216_to_rgb_or_rgba_row::<true, true>(&be, &mut be_rgba, w, ColorMatrix::Bt709, false);
+      y216_to_rgb_or_rgba_row::<true, false>(&le, &mut le_rgba, w, KernelMatrix::Bt709, false);
+      y216_to_rgb_or_rgba_row::<true, true>(&be, &mut be_rgba, w, KernelMatrix::Bt709, false);
     }
     assert_eq!(le_rgba, be_rgba, "y216 NEON LE vs BE RGBA parity (w={w})");
 
@@ -232,14 +232,14 @@ fn neon_y216_be_le_simd_parity() {
         &le,
         &mut le_u16,
         w,
-        ColorMatrix::Bt2020Ncl,
+        KernelMatrix::Bt2020Ncl,
         true,
       );
       y216_to_rgb_u16_or_rgba_u16_row::<false, true>(
         &be,
         &mut be_u16,
         w,
-        ColorMatrix::Bt2020Ncl,
+        KernelMatrix::Bt2020Ncl,
         true,
       );
     }

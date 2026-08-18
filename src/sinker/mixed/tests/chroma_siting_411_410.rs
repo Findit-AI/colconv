@@ -15,7 +15,7 @@
 //! planes; and the mid-frame siting-flip rejection.
 
 use crate::{
-  ChromaLocation, ColorMatrix, PixelSink,
+  ChromaLocation, KernelMatrix, PixelSink,
   resample::AreaResampler,
   sinker::{MixedSinker, MixedSinkerError},
   source::{
@@ -25,7 +25,7 @@ use crate::{
 };
 use mediaframe::frame::{Uyyvyy411Frame, Yuv410pFrame, Yuv411pFrame, Yuv444pFrame};
 
-const M: ColorMatrix = ColorMatrix::Bt601;
+const M: KernelMatrix = KernelMatrix::Bt601;
 const FR: bool = true;
 
 // ---- shared oracles --------------------------------------------------------
@@ -271,7 +271,7 @@ fn id_411(w: usize, h: usize, loc: ChromaLocation, simd: bool) -> (Vec<u8>, Vec<
       &yp, &up, &vp, w as u32, h as u32, w as u32, cw as u32, cw as u32,
     );
     let mut sink = MixedSinker::<Yuv411p>::new(w, h)
-      .with_chroma_location(loc)
+      .with_chroma_location(loc.clone())
       .with_simd(simd)
       .with_rgb(&mut rgb)
       .unwrap()
@@ -308,7 +308,7 @@ fn rs_411(
     let mut sink =
       MixedSinker::<Yuv411p, AreaResampler>::with_resampler(w, h, AreaResampler::to(ow, oh))
         .unwrap()
-        .with_chroma_location(loc)
+        .with_chroma_location(loc.clone())
         .with_simd(simd);
     if color {
       sink = sink.with_rgb(&mut rgb).unwrap();
@@ -362,13 +362,18 @@ const CENTERED: [ChromaLocation; 3] = [
   ChromaLocation::Top,
   ChromaLocation::Bottom,
 ];
-const COSITED: [ChromaLocation; 5] = [
-  ChromaLocation::Unspecified,
-  ChromaLocation::Unknown(99),
-  ChromaLocation::Left,
-  ChromaLocation::TopLeft,
-  ChromaLocation::BottomLeft,
-];
+/// The cosited sitings, plus the open escape: a siting this build does not
+/// name cosites like `Unspecified`. Not a `const` because `other` allocates
+/// its slug (mediaframe 0.3 struck the numeric `Unknown(u32)` escape).
+fn cosited() -> [ChromaLocation; 5] {
+  [
+    ChromaLocation::Unspecified,
+    ChromaLocation::Left,
+    ChromaLocation::TopLeft,
+    ChromaLocation::BottomLeft,
+    ChromaLocation::other("unassigned-99"),
+  ]
+}
 
 // ---- 1→4 kernel oracle -----------------------------------------------------
 
@@ -416,8 +421,8 @@ fn kernel_4to1_non_multiple_of_4_width_writes_only_real_columns() {
 )]
 fn id_411_cosited_is_byte_identical() {
   let base = id_411(16, 6, ChromaLocation::Unspecified, true);
-  for loc in COSITED {
-    assert_eq!(id_411(16, 6, loc, true), base, "siting {loc:?}");
+  for loc in cosited() {
+    assert_eq!(id_411(16, 6, loc.clone(), true), base, "siting {loc:?}");
   }
 }
 
@@ -429,7 +434,7 @@ fn id_411_cosited_is_byte_identical() {
 fn id_411_centered_differs_from_cosited() {
   let cos = id_411(16, 6, ChromaLocation::Left, true);
   for loc in CENTERED {
-    let cen = id_411(16, 6, loc, true);
+    let cen = id_411(16, 6, loc.clone(), true);
     assert_ne!(
       cen.0, cos.0,
       "centered rgb {loc:?} must differ from co-sited"
@@ -448,7 +453,7 @@ fn id_411_centered_equals_reconstruct_444_oracle() {
   for (w, h) in [(16usize, 6usize), (12, 4), (20, 5)] {
     let (rgb_o, hsv_o) = id_411_oracle(w, h);
     for loc in CENTERED {
-      let (rgb, hsv, _) = id_411(w, h, loc, true);
+      let (rgb, hsv, _) = id_411(w, h, loc.clone(), true);
       assert_eq!(rgb, rgb_o, "rgb {loc:?} {w}x{h}");
       assert_eq!(hsv, hsv_o, "hsv {loc:?} {w}x{h}");
     }
@@ -480,9 +485,9 @@ fn id_411_centered_simd_matches_scalar() {
 )]
 fn rs_411_cosited_is_byte_identical() {
   let base = rs_411(16, 8, 4, 4, ChromaLocation::Unspecified, true, true);
-  for loc in COSITED {
+  for loc in cosited() {
     assert_eq!(
-      rs_411(16, 8, 4, 4, loc, true, true),
+      rs_411(16, 8, 4, 4, loc.clone(), true, true),
       base,
       "resample siting {loc:?}"
     );
@@ -725,7 +730,7 @@ fn id_410(w: usize, h: usize, loc: ChromaLocation, simd: bool) -> (Vec<u8>, Vec<
   {
     let f = Yuv410pFrame::new(&yp, &up, &vp, w as u32, h as u32, w as u32, cw, cw);
     let mut sink = MixedSinker::<Yuv410p>::new(w, h)
-      .with_chroma_location(loc)
+      .with_chroma_location(loc.clone())
       .with_simd(simd)
       .with_rgb(&mut rgb)
       .unwrap()
@@ -777,7 +782,7 @@ fn rs_410(
     let mut sink =
       MixedSinker::<Yuv410p, AreaResampler>::with_resampler(w, h, AreaResampler::to(ow, oh))
         .unwrap()
-        .with_chroma_location(loc)
+        .with_chroma_location(loc.clone())
         .with_simd(simd);
     if color {
       sink = sink.with_rgb(&mut rgb).unwrap();
@@ -800,8 +805,8 @@ fn rs_410(
 )]
 fn id_410_cosited_is_byte_identical() {
   let base = id_410(16, 8, ChromaLocation::Unspecified, true);
-  for loc in COSITED {
-    assert_eq!(id_410(16, 8, loc, true), base, "410 siting {loc:?}");
+  for loc in cosited() {
+    assert_eq!(id_410(16, 8, loc.clone(), true), base, "410 siting {loc:?}");
   }
 }
 
@@ -814,7 +819,7 @@ fn id_410_centered_equals_reconstruct_444_oracle() {
   for (w, h) in [(16usize, 8usize), (12, 8), (20, 12)] {
     let (rgb_o, hsv_o) = id_410_oracle(w, h);
     for loc in CENTERED {
-      let (rgb, hsv, _) = id_410(w, h, loc, true);
+      let (rgb, hsv, _) = id_410(w, h, loc.clone(), true);
       assert_eq!(rgb, rgb_o, "410 rgb {loc:?} {w}x{h}");
       assert_eq!(hsv, hsv_o, "410 hsv {loc:?} {w}x{h}");
     }
@@ -841,9 +846,9 @@ fn id_410_centered_simd_matches_scalar() {
 )]
 fn rs_410_cosited_is_byte_identical() {
   let base = rs_410(16, 8, 4, 2, ChromaLocation::Unspecified, true, true);
-  for loc in COSITED {
+  for loc in cosited() {
     assert_eq!(
-      rs_410(16, 8, 4, 2, loc, true, true),
+      rs_410(16, 8, 4, 2, loc.clone(), true, true),
       base,
       "410 resample siting {loc:?}"
     );
@@ -1023,7 +1028,7 @@ fn id_packed(w: usize, h: usize, loc: ChromaLocation, simd: bool) -> (Vec<u8>, V
   {
     let f = Uyyvyy411Frame::new(&packed, w as u32, h as u32, (w * 3 / 2) as u32);
     let mut sink = MixedSinker::<Uyyvyy411>::new(w, h)
-      .with_chroma_location(loc)
+      .with_chroma_location(loc.clone())
       .with_simd(simd)
       .with_rgb(&mut rgb)
       .unwrap()
@@ -1058,7 +1063,7 @@ fn rs_packed(
       MixedSinker::<Uyyvyy411, AreaResampler>::with_resampler(w, h, AreaResampler::to(ow, oh))
         .unwrap()
         .with_native(native)
-        .with_chroma_location(loc)
+        .with_chroma_location(loc.clone())
         .with_simd(simd)
         .with_rgb(&mut rgb)
         .unwrap()
@@ -1076,8 +1081,12 @@ fn rs_packed(
 )]
 fn packed_cosited_is_byte_identical() {
   let base = id_packed(16, 6, ChromaLocation::Unspecified, true);
-  for loc in COSITED {
-    assert_eq!(id_packed(16, 6, loc, true), base, "packed siting {loc:?}");
+  for loc in cosited() {
+    assert_eq!(
+      id_packed(16, 6, loc.clone(), true),
+      base,
+      "packed siting {loc:?}"
+    );
   }
 }
 
@@ -1091,8 +1100,8 @@ fn packed_centered_equals_planar_411_decode() {
   // reconstruction + 4:4:4 kernels as planar Yuv411p, so it is byte-identical to
   // a planar Yuv411p centered decode of the same logical planes.
   for loc in CENTERED {
-    let packed = id_packed(16, 6, loc, true);
-    let planar = id_411(16, 6, loc, true);
+    let packed = id_packed(16, 6, loc.clone(), true);
+    let planar = id_411(16, 6, loc.clone(), true);
     assert_eq!(packed, planar, "packed vs planar {loc:?}");
   }
   // Negative control: centered differs from co-sited.
@@ -1122,9 +1131,9 @@ fn packed_centered_simd_matches_scalar() {
 fn packed_resample_cosited_is_byte_identical() {
   for native in [true, false] {
     let base = rs_packed(16, 8, 4, 4, ChromaLocation::Unspecified, native, true);
-    for loc in COSITED {
+    for loc in cosited() {
       assert_eq!(
-        rs_packed(16, 8, 4, 4, loc, native, true),
+        rs_packed(16, 8, 4, 4, loc.clone(), native, true),
         base,
         "packed resample siting {loc:?} native={native}"
       );

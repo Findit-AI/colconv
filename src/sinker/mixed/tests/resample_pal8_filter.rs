@@ -161,7 +161,7 @@ fn rgba_filter_oracle<K: FilterKernel + Copy>(
   oh: usize,
   kernel: K,
 ) -> Vec<u8> {
-  use crate::{ColorMatrix, frame::RgbaFrame, source::rgba_to};
+  use crate::{KernelMatrix, frame::RgbaFrame, source::rgba_to};
   let src = RgbaFrame::new(canonical, sw as u32, sh as u32, (sw * 4) as u32);
   let mut rgba = std::vec![0u8; ow * oh * 4];
   {
@@ -173,7 +173,7 @@ fn rgba_filter_oracle<K: FilterKernel + Copy>(
     .unwrap()
     .with_rgba(&mut rgba)
     .unwrap();
-    rgba_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    rgba_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
   }
   rgba
 }

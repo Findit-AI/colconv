@@ -157,7 +157,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv422p9<BE>, R> {
 
     // Chroma siting (#302): drives the identity-plan horizontal chroma phase.
     // `Copy`, so read it out before the field split-borrow below.
-    let chroma_location = self.chroma_location;
+    let chroma_location = self.chroma_location.clone();
 
     let Self {
       rgb,
@@ -208,7 +208,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv422p9<BE>, R> {
       // folds the phase into the `area_chroma_422` chroma weights while the
       // row-stage and filter tiers reconstruct full-width `u16` chroma and
       // decode 4:4:4.
-      let center_sited = chroma_422_center_sited_h(chroma_location);
+      let center_sited = chroma_422_center_sited_h(&chroma_location);
       let chroma_h_phase = if center_sited {
         YUV422P_CENTERED_H_PHASE
       } else {
@@ -624,7 +624,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv422p9<BE>, R> {
     // co-sited path keeps the byte-identical decode (the fused high-bit 4:2:2
     // kernels upsample chroma in-register). 4:2:2 is subsampled horizontally only
     // — there is no vertical blend or chroma lookback (cf. the 4:2:0 sibling).
-    let center_sited = chroma_422_center_sited_h(chroma_location);
+    let center_sited = chroma_422_center_sited_h(&chroma_location);
 
     // Per-frame chroma-siting freeze (RFC #238, mirroring the resample-path guard
     // above): the first output-bearing row pins the phase; a later row whose
@@ -1050,7 +1050,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv422p10<BE>, R> {
 
     // Chroma siting (#302): drives the identity-plan horizontal chroma phase.
     // `Copy`, so read it out before the field split-borrow below.
-    let chroma_location = self.chroma_location;
+    let chroma_location = self.chroma_location.clone();
 
     let Self {
       rgb,
@@ -1107,7 +1107,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv422p10<BE>, R> {
       // folds the phase into the `area_chroma_422` chroma weights while the
       // row-stage and filter tiers reconstruct full-width `u16` chroma and
       // decode 4:4:4.
-      let center_sited = chroma_422_center_sited_h(chroma_location);
+      let center_sited = chroma_422_center_sited_h(&chroma_location);
       let chroma_h_phase = if center_sited {
         YUV422P_CENTERED_H_PHASE
       } else {
@@ -1523,7 +1523,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv422p10<BE>, R> {
     // co-sited path keeps the byte-identical decode (the fused high-bit 4:2:2
     // kernels upsample chroma in-register). 4:2:2 is subsampled horizontally only
     // — there is no vertical blend or chroma lookback (cf. the 4:2:0 sibling).
-    let center_sited = chroma_422_center_sited_h(chroma_location);
+    let center_sited = chroma_422_center_sited_h(&chroma_location);
 
     // Per-frame chroma-siting freeze (RFC #238, mirroring the resample-path guard
     // above): the first output-bearing row pins the phase; a later row whose
@@ -1940,7 +1940,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv422p12<BE>, R> {
 
     // Chroma siting (#302): drives the identity-plan horizontal chroma phase.
     // `Copy`, so read it out before the field split-borrow below.
-    let chroma_location = self.chroma_location;
+    let chroma_location = self.chroma_location.clone();
 
     let Self {
       rgb,
@@ -1991,7 +1991,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv422p12<BE>, R> {
       // folds the phase into the `area_chroma_422` chroma weights while the
       // row-stage and filter tiers reconstruct full-width `u16` chroma and
       // decode 4:4:4.
-      let center_sited = chroma_422_center_sited_h(chroma_location);
+      let center_sited = chroma_422_center_sited_h(&chroma_location);
       let chroma_h_phase = if center_sited {
         YUV422P_CENTERED_H_PHASE
       } else {
@@ -2407,7 +2407,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv422p12<BE>, R> {
     // co-sited path keeps the byte-identical decode (the fused high-bit 4:2:2
     // kernels upsample chroma in-register). 4:2:2 is subsampled horizontally only
     // — there is no vertical blend or chroma lookback (cf. the 4:2:0 sibling).
-    let center_sited = chroma_422_center_sited_h(chroma_location);
+    let center_sited = chroma_422_center_sited_h(&chroma_location);
 
     // Per-frame chroma-siting freeze (RFC #238, mirroring the resample-path guard
     // above): the first output-bearing row pins the phase; a later row whose
@@ -2824,7 +2824,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv422p14<BE>, R> {
 
     // Chroma siting (#302): drives the identity-plan horizontal chroma phase.
     // `Copy`, so read it out before the field split-borrow below.
-    let chroma_location = self.chroma_location;
+    let chroma_location = self.chroma_location.clone();
 
     let Self {
       rgb,
@@ -2875,7 +2875,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv422p14<BE>, R> {
       // folds the phase into the `area_chroma_422` chroma weights while the
       // row-stage and filter tiers reconstruct full-width `u16` chroma and
       // decode 4:4:4.
-      let center_sited = chroma_422_center_sited_h(chroma_location);
+      let center_sited = chroma_422_center_sited_h(&chroma_location);
       let chroma_h_phase = if center_sited {
         YUV422P_CENTERED_H_PHASE
       } else {
@@ -3291,7 +3291,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv422p14<BE>, R> {
     // co-sited path keeps the byte-identical decode (the fused high-bit 4:2:2
     // kernels upsample chroma in-register). 4:2:2 is subsampled horizontally only
     // — there is no vertical blend or chroma lookback (cf. the 4:2:0 sibling).
-    let center_sited = chroma_422_center_sited_h(chroma_location);
+    let center_sited = chroma_422_center_sited_h(&chroma_location);
 
     // Per-frame chroma-siting freeze (RFC #238, mirroring the resample-path guard
     // above): the first output-bearing row pins the phase; a later row whose
@@ -3715,7 +3715,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv422p16<BE>, R> {
 
     // Chroma siting (#302): drives the identity-plan horizontal chroma phase.
     // `Copy`, so read it out before the field split-borrow below.
-    let chroma_location = self.chroma_location;
+    let chroma_location = self.chroma_location.clone();
 
     let Self {
       rgb,
@@ -3766,7 +3766,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv422p16<BE>, R> {
       // folds the phase into the `area_chroma_422` chroma weights while the
       // row-stage and filter tiers reconstruct full-width `u16` chroma and
       // decode 4:4:4.
-      let center_sited = chroma_422_center_sited_h(chroma_location);
+      let center_sited = chroma_422_center_sited_h(&chroma_location);
       let chroma_h_phase = if center_sited {
         YUV422P_CENTERED_H_PHASE
       } else {
@@ -4182,7 +4182,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv422p16<BE>, R> {
     // co-sited path keeps the byte-identical decode (the fused high-bit 4:2:2
     // kernels upsample chroma in-register). 4:2:2 is subsampled horizontally only
     // — there is no vertical blend or chroma lookback (cf. the 4:2:0 sibling).
-    let center_sited = chroma_422_center_sited_h(chroma_location);
+    let center_sited = chroma_422_center_sited_h(&chroma_location);
 
     // Per-frame chroma-siting freeze (RFC #238, mirroring the resample-path guard
     // above): the first output-bearing row pins the phase; a later row whose

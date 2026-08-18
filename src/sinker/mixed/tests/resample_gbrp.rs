@@ -15,7 +15,7 @@
 //! direct out-of-order `process` call cannot be constructed here.
 
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   resample::{AreaResampler, FilteredResampler, Triangle},
   sinker::MixedSinker,
   source::{Gbrp, gbrp_to},
@@ -39,7 +39,7 @@ const OUT: usize = 4;
 /// only by the rgb-gated Rgb24-equivalence upscale test, so gate it too.
 #[cfg(feature = "rgb")]
 const UP: usize = 13;
-const MATRIX: ColorMatrix = ColorMatrix::Bt709;
+const MATRIX: KernelMatrix = KernelMatrix::Bt709;
 
 /// `(r, g, b)` ramp for source pixel `i` — interior values so the
 /// derived luma / HSV kernels see real math.

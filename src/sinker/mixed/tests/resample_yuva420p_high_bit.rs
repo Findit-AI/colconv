@@ -29,7 +29,7 @@
 //! shows up as a mismatch.
 
 use crate::{
-  ColorMatrix, PixelSink,
+  KernelMatrix, PixelSink,
   resample::{AreaResampler, ResampleError},
   sinker::{AlphaMode, MixedSinker, MixedSinkerError},
 };
@@ -38,7 +38,7 @@ const SRC: usize = 8;
 const OUT: usize = 4;
 const CW: usize = SRC / 2; // chroma width
 const CH: usize = SRC / 2; // chroma height (4:2:0)
-const M: ColorMatrix = ColorMatrix::Bt709;
+const M: KernelMatrix = KernelMatrix::Bt709;
 const FR: bool = true;
 const FR_LIMITED: bool = false;
 

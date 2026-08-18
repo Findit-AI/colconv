@@ -13,9 +13,14 @@ use crate::row::simd128_available;
 #[cfg(target_arch = "x86_64")]
 use crate::row::{avx2_available, avx512_available, sse41_available};
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   row::{rgba_row_bytes, rgba_row_elems, scalar},
 };
+// The open descriptor vocabulary: the non-affine splices below gate on a
+// matrix tag that has no `KernelMatrix` spelling, so it cannot ride the row
+// and arrives separately as `tag`.
+#[cfg(any(feature = "std", feature = "alloc"))]
+use crate::ColorMatrix;
 // Used only by the `any(std, alloc)`-gated non-affine Smpte2085 row wrappers
 // (the base RGB dispatcher preflights inside the kernel, not here).
 #[cfg(any(feature = "std", feature = "alloc"))]
@@ -32,7 +37,7 @@ pub fn yuv444p12_to_rgb_row_endian(
   v: &[u16],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
   big_endian: bool,
@@ -54,7 +59,7 @@ pub fn yuv444p12_to_rgb_row(
   v: &[u16],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) {
@@ -70,7 +75,7 @@ pub fn yuv444p12_to_rgb_u16_row_endian(
   v: &[u16],
   rgb_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
   big_endian: bool,
@@ -92,7 +97,7 @@ pub fn yuv444p12_to_rgb_u16_row(
   v: &[u16],
   rgb_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) {
@@ -111,7 +116,7 @@ pub fn yuv444p12_to_rgba_row_endian(
   v: &[u16],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
   big_endian: bool,
@@ -196,7 +201,7 @@ pub fn yuv444p12_to_rgba_row(
   v: &[u16],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) {
@@ -218,7 +223,7 @@ pub fn yuv444p12_to_rgba_u16_row_endian(
   v: &[u16],
   rgba_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
   big_endian: bool,
@@ -303,7 +308,7 @@ pub fn yuv444p12_to_rgba_u16_row(
   v: &[u16],
   rgba_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) {
@@ -332,7 +337,7 @@ pub fn yuv444p12_to_hsv_row_endian(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
   big_endian: bool,
@@ -376,13 +381,14 @@ pub fn yuv444p12_to_rgb_row_ictcp_endian(
   v: &[u16],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
+  tag: &ColorMatrix,
   full_range: bool,
-  transfer: Transfer,
+  transfer: &Transfer,
   use_simd: bool,
   big_endian: bool,
 ) {
-  if matches!(matrix, ColorMatrix::Ictcp)
+  if matches!(tag, ColorMatrix::Ictcp)
     && let Some(tf) = IctcpTransfer::for_transfer(transfer)
   {
     if big_endian {
@@ -408,13 +414,14 @@ pub fn yuv444p12_to_rgba_row_ictcp_endian(
   v: &[u16],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
+  tag: &ColorMatrix,
   full_range: bool,
-  transfer: Transfer,
+  transfer: &Transfer,
   use_simd: bool,
   big_endian: bool,
 ) {
-  if matches!(matrix, ColorMatrix::Ictcp)
+  if matches!(tag, ColorMatrix::Ictcp)
     && let Some(tf) = IctcpTransfer::for_transfer(transfer)
   {
     if big_endian {
@@ -440,13 +447,14 @@ pub fn yuv444p12_to_rgb_u16_row_ictcp_endian(
   v: &[u16],
   rgb_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
+  tag: &ColorMatrix,
   full_range: bool,
-  transfer: Transfer,
+  transfer: &Transfer,
   use_simd: bool,
   big_endian: bool,
 ) {
-  if matches!(matrix, ColorMatrix::Ictcp)
+  if matches!(tag, ColorMatrix::Ictcp)
     && let Some(tf) = IctcpTransfer::for_transfer(transfer)
   {
     if big_endian {
@@ -472,13 +480,14 @@ pub fn yuv444p12_to_rgba_u16_row_ictcp_endian(
   v: &[u16],
   rgba_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
+  tag: &ColorMatrix,
   full_range: bool,
-  transfer: Transfer,
+  transfer: &Transfer,
   use_simd: bool,
   big_endian: bool,
 ) {
-  if matches!(matrix, ColorMatrix::Ictcp)
+  if matches!(tag, ColorMatrix::Ictcp)
     && let Some(tf) = IctcpTransfer::for_transfer(transfer)
   {
     if big_endian {
@@ -523,14 +532,15 @@ pub fn yuv444p12_to_rgb_row_chroma_derived_cl_endian(
   v: &[u16],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
-  primaries: Primaries,
+  matrix: KernelMatrix,
+  tag: &ColorMatrix,
+  primaries: &Primaries,
   full_range: bool,
-  transfer: Transfer,
+  transfer: &Transfer,
   use_simd: bool,
   big_endian: bool,
 ) {
-  if matches!(matrix, ColorMatrix::ChromaDerivedCl)
+  if matches!(tag, ColorMatrix::ChromaDerivedCl)
     && let Some(system) = ClSystem::resolve(primaries, transfer)
   {
     if big_endian {
@@ -544,7 +554,7 @@ pub fn yuv444p12_to_rgb_row_chroma_derived_cl_endian(
   // other non-affine decode (mutually exclusive matrix) and otherwise
   // delegates byte-identically to the affine `*_endian` path.
   yuv444p12_to_rgb_row_ictcp_endian(
-    y, u, v, rgb_out, width, matrix, full_range, transfer, use_simd, big_endian,
+    y, u, v, rgb_out, width, matrix, tag, full_range, transfer, use_simd, big_endian,
   );
 }
 
@@ -559,14 +569,15 @@ pub fn yuv444p12_to_rgba_row_chroma_derived_cl_endian(
   v: &[u16],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
-  primaries: Primaries,
+  matrix: KernelMatrix,
+  tag: &ColorMatrix,
+  primaries: &Primaries,
   full_range: bool,
-  transfer: Transfer,
+  transfer: &Transfer,
   use_simd: bool,
   big_endian: bool,
 ) {
-  if matches!(matrix, ColorMatrix::ChromaDerivedCl)
+  if matches!(tag, ColorMatrix::ChromaDerivedCl)
     && let Some(system) = ClSystem::resolve(primaries, transfer)
   {
     if big_endian {
@@ -577,7 +588,7 @@ pub fn yuv444p12_to_rgba_row_chroma_derived_cl_endian(
     return;
   }
   yuv444p12_to_rgba_row_ictcp_endian(
-    y, u, v, rgba_out, width, matrix, full_range, transfer, use_simd, big_endian,
+    y, u, v, rgba_out, width, matrix, tag, full_range, transfer, use_simd, big_endian,
   );
 }
 
@@ -592,14 +603,15 @@ pub fn yuv444p12_to_rgb_u16_row_chroma_derived_cl_endian(
   v: &[u16],
   rgb_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
-  primaries: Primaries,
+  matrix: KernelMatrix,
+  tag: &ColorMatrix,
+  primaries: &Primaries,
   full_range: bool,
-  transfer: Transfer,
+  transfer: &Transfer,
   use_simd: bool,
   big_endian: bool,
 ) {
-  if matches!(matrix, ColorMatrix::ChromaDerivedCl)
+  if matches!(tag, ColorMatrix::ChromaDerivedCl)
     && let Some(system) = ClSystem::resolve(primaries, transfer)
   {
     if big_endian {
@@ -610,7 +622,7 @@ pub fn yuv444p12_to_rgb_u16_row_chroma_derived_cl_endian(
     return;
   }
   yuv444p12_to_rgb_u16_row_ictcp_endian(
-    y, u, v, rgb_out, width, matrix, full_range, transfer, use_simd, big_endian,
+    y, u, v, rgb_out, width, matrix, tag, full_range, transfer, use_simd, big_endian,
   );
 }
 
@@ -626,14 +638,15 @@ pub fn yuv444p12_to_rgba_u16_row_chroma_derived_cl_endian(
   v: &[u16],
   rgba_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
-  primaries: Primaries,
+  matrix: KernelMatrix,
+  tag: &ColorMatrix,
+  primaries: &Primaries,
   full_range: bool,
-  transfer: Transfer,
+  transfer: &Transfer,
   use_simd: bool,
   big_endian: bool,
 ) {
-  if matches!(matrix, ColorMatrix::ChromaDerivedCl)
+  if matches!(tag, ColorMatrix::ChromaDerivedCl)
     && let Some(system) = ClSystem::resolve(primaries, transfer)
   {
     if big_endian {
@@ -644,7 +657,7 @@ pub fn yuv444p12_to_rgba_u16_row_chroma_derived_cl_endian(
     return;
   }
   yuv444p12_to_rgba_u16_row_ictcp_endian(
-    y, u, v, rgba_out, width, matrix, full_range, transfer, use_simd, big_endian,
+    y, u, v, rgba_out, width, matrix, tag, full_range, transfer, use_simd, big_endian,
   );
 }
 
@@ -677,14 +690,15 @@ pub fn yuv444p12_to_rgb_row_iptc2_endian(
   v: &[u16],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
-  primaries: Primaries,
+  matrix: KernelMatrix,
+  tag: &ColorMatrix,
+  primaries: &Primaries,
   full_range: bool,
-  transfer: Transfer,
+  transfer: &Transfer,
   use_simd: bool,
   big_endian: bool,
 ) {
-  if matches!(matrix, ColorMatrix::IptC2) && IptC2Transfer::for_transfer(transfer).is_some() {
+  if matches!(tag, ColorMatrix::IptC2) && IptC2Transfer::for_transfer(transfer).is_some() {
     if big_endian {
       iptc2::iptc2_444p_n_to_rgb_row::<12, true>(y, u, v, rgb_out, width, full_range);
     } else {
@@ -693,7 +707,7 @@ pub fn yuv444p12_to_rgb_row_iptc2_endian(
     return;
   }
   yuv444p12_to_rgb_row_chroma_derived_cl_endian(
-    y, u, v, rgb_out, width, matrix, primaries, full_range, transfer, use_simd, big_endian,
+    y, u, v, rgb_out, width, matrix, tag, primaries, full_range, transfer, use_simd, big_endian,
   );
 }
 
@@ -708,14 +722,15 @@ pub fn yuv444p12_to_rgba_row_iptc2_endian(
   v: &[u16],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
-  primaries: Primaries,
+  matrix: KernelMatrix,
+  tag: &ColorMatrix,
+  primaries: &Primaries,
   full_range: bool,
-  transfer: Transfer,
+  transfer: &Transfer,
   use_simd: bool,
   big_endian: bool,
 ) {
-  if matches!(matrix, ColorMatrix::IptC2) && IptC2Transfer::for_transfer(transfer).is_some() {
+  if matches!(tag, ColorMatrix::IptC2) && IptC2Transfer::for_transfer(transfer).is_some() {
     if big_endian {
       iptc2::iptc2_444p_n_to_rgba_row::<12, true>(y, u, v, rgba_out, width, full_range);
     } else {
@@ -724,7 +739,7 @@ pub fn yuv444p12_to_rgba_row_iptc2_endian(
     return;
   }
   yuv444p12_to_rgba_row_chroma_derived_cl_endian(
-    y, u, v, rgba_out, width, matrix, primaries, full_range, transfer, use_simd, big_endian,
+    y, u, v, rgba_out, width, matrix, tag, primaries, full_range, transfer, use_simd, big_endian,
   );
 }
 
@@ -739,14 +754,15 @@ pub fn yuv444p12_to_rgb_u16_row_iptc2_endian(
   v: &[u16],
   rgb_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
-  primaries: Primaries,
+  matrix: KernelMatrix,
+  tag: &ColorMatrix,
+  primaries: &Primaries,
   full_range: bool,
-  transfer: Transfer,
+  transfer: &Transfer,
   use_simd: bool,
   big_endian: bool,
 ) {
-  if matches!(matrix, ColorMatrix::IptC2) && IptC2Transfer::for_transfer(transfer).is_some() {
+  if matches!(tag, ColorMatrix::IptC2) && IptC2Transfer::for_transfer(transfer).is_some() {
     if big_endian {
       iptc2::iptc2_444p_n_to_rgb_u16_row::<12, true>(y, u, v, rgb_out, width, full_range);
     } else {
@@ -755,7 +771,7 @@ pub fn yuv444p12_to_rgb_u16_row_iptc2_endian(
     return;
   }
   yuv444p12_to_rgb_u16_row_chroma_derived_cl_endian(
-    y, u, v, rgb_out, width, matrix, primaries, full_range, transfer, use_simd, big_endian,
+    y, u, v, rgb_out, width, matrix, tag, primaries, full_range, transfer, use_simd, big_endian,
   );
 }
 
@@ -771,14 +787,15 @@ pub fn yuv444p12_to_rgba_u16_row_iptc2_endian(
   v: &[u16],
   rgba_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
-  primaries: Primaries,
+  matrix: KernelMatrix,
+  tag: &ColorMatrix,
+  primaries: &Primaries,
   full_range: bool,
-  transfer: Transfer,
+  transfer: &Transfer,
   use_simd: bool,
   big_endian: bool,
 ) {
-  if matches!(matrix, ColorMatrix::IptC2) && IptC2Transfer::for_transfer(transfer).is_some() {
+  if matches!(tag, ColorMatrix::IptC2) && IptC2Transfer::for_transfer(transfer).is_some() {
     if big_endian {
       iptc2::iptc2_444p_n_to_rgba_u16_row::<12, true>(y, u, v, rgba_out, width, full_range);
     } else {
@@ -787,7 +804,7 @@ pub fn yuv444p12_to_rgba_u16_row_iptc2_endian(
     return;
   }
   yuv444p12_to_rgba_u16_row_chroma_derived_cl_endian(
-    y, u, v, rgba_out, width, matrix, primaries, full_range, transfer, use_simd, big_endian,
+    y, u, v, rgba_out, width, matrix, tag, primaries, full_range, transfer, use_simd, big_endian,
   );
 }
 
@@ -820,15 +837,15 @@ pub fn yuv444p12_to_rgb_row_smpte2085_endian(
   v: &[u16],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
-  primaries: Primaries,
+  matrix: KernelMatrix,
+  tag: &ColorMatrix,
+  primaries: &Primaries,
   full_range: bool,
-  transfer: Transfer,
+  transfer: &Transfer,
   use_simd: bool,
   big_endian: bool,
 ) {
-  if matches!(matrix, ColorMatrix::Smpte2085) && Smpte2085Transfer::for_transfer(transfer).is_some()
-  {
+  if matches!(tag, ColorMatrix::Smpte2085) && Smpte2085Transfer::for_transfer(transfer).is_some() {
     let rgb_min = rgb_row_bytes(width);
     assert!(y.len() >= width, "y row too short");
     assert!(u.len() >= width, "u row too short");
@@ -842,7 +859,7 @@ pub fn yuv444p12_to_rgb_row_smpte2085_endian(
     return;
   }
   yuv444p12_to_rgb_row_iptc2_endian(
-    y, u, v, rgb_out, width, matrix, primaries, full_range, transfer, use_simd, big_endian,
+    y, u, v, rgb_out, width, matrix, tag, primaries, full_range, transfer, use_simd, big_endian,
   );
 }
 
@@ -857,15 +874,15 @@ pub fn yuv444p12_to_rgba_row_smpte2085_endian(
   v: &[u16],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
-  primaries: Primaries,
+  matrix: KernelMatrix,
+  tag: &ColorMatrix,
+  primaries: &Primaries,
   full_range: bool,
-  transfer: Transfer,
+  transfer: &Transfer,
   use_simd: bool,
   big_endian: bool,
 ) {
-  if matches!(matrix, ColorMatrix::Smpte2085) && Smpte2085Transfer::for_transfer(transfer).is_some()
-  {
+  if matches!(tag, ColorMatrix::Smpte2085) && Smpte2085Transfer::for_transfer(transfer).is_some() {
     let rgba_min = rgba_row_bytes(width);
     assert!(y.len() >= width, "y row too short");
     assert!(u.len() >= width, "u row too short");
@@ -879,7 +896,7 @@ pub fn yuv444p12_to_rgba_row_smpte2085_endian(
     return;
   }
   yuv444p12_to_rgba_row_iptc2_endian(
-    y, u, v, rgba_out, width, matrix, primaries, full_range, transfer, use_simd, big_endian,
+    y, u, v, rgba_out, width, matrix, tag, primaries, full_range, transfer, use_simd, big_endian,
   );
 }
 
@@ -894,15 +911,15 @@ pub fn yuv444p12_to_rgb_u16_row_smpte2085_endian(
   v: &[u16],
   rgb_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
-  primaries: Primaries,
+  matrix: KernelMatrix,
+  tag: &ColorMatrix,
+  primaries: &Primaries,
   full_range: bool,
-  transfer: Transfer,
+  transfer: &Transfer,
   use_simd: bool,
   big_endian: bool,
 ) {
-  if matches!(matrix, ColorMatrix::Smpte2085) && Smpte2085Transfer::for_transfer(transfer).is_some()
-  {
+  if matches!(tag, ColorMatrix::Smpte2085) && Smpte2085Transfer::for_transfer(transfer).is_some() {
     let rgb_min = rgb_row_elems(width);
     assert!(y.len() >= width, "y row too short");
     assert!(u.len() >= width, "u row too short");
@@ -916,7 +933,7 @@ pub fn yuv444p12_to_rgb_u16_row_smpte2085_endian(
     return;
   }
   yuv444p12_to_rgb_u16_row_iptc2_endian(
-    y, u, v, rgb_out, width, matrix, primaries, full_range, transfer, use_simd, big_endian,
+    y, u, v, rgb_out, width, matrix, tag, primaries, full_range, transfer, use_simd, big_endian,
   );
 }
 
@@ -931,15 +948,15 @@ pub fn yuv444p12_to_rgba_u16_row_smpte2085_endian(
   v: &[u16],
   rgba_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
-  primaries: Primaries,
+  matrix: KernelMatrix,
+  tag: &ColorMatrix,
+  primaries: &Primaries,
   full_range: bool,
-  transfer: Transfer,
+  transfer: &Transfer,
   use_simd: bool,
   big_endian: bool,
 ) {
-  if matches!(matrix, ColorMatrix::Smpte2085) && Smpte2085Transfer::for_transfer(transfer).is_some()
-  {
+  if matches!(tag, ColorMatrix::Smpte2085) && Smpte2085Transfer::for_transfer(transfer).is_some() {
     let rgba_min = rgba_row_elems(width);
     assert!(y.len() >= width, "y row too short");
     assert!(u.len() >= width, "u row too short");
@@ -955,6 +972,6 @@ pub fn yuv444p12_to_rgba_u16_row_smpte2085_endian(
     return;
   }
   yuv444p12_to_rgba_u16_row_iptc2_endian(
-    y, u, v, rgba_out, width, matrix, primaries, full_range, transfer, use_simd, big_endian,
+    y, u, v, rgba_out, width, matrix, tag, primaries, full_range, transfer, use_simd, big_endian,
   );
 }

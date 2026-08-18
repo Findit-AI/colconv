@@ -29,7 +29,7 @@
 //! build (where the routing exists but no packed-RGB oracle does).
 
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   resample::{
     CatmullRom, FilterKernel, FilterStream, FilteredResampler, Lanczos3, Resampler, Triangle,
   },
@@ -37,7 +37,7 @@ use crate::{
   source::{V30X, V410, v30x_to, v410_to},
 };
 
-const M: ColorMatrix = ColorMatrix::Bt709;
+const M: KernelMatrix = KernelMatrix::Bt709;
 const FR: bool = true;
 const BITS: u32 = 10;
 const NATIVE_MAX: u16 = (1 << BITS) - 1; // 1023

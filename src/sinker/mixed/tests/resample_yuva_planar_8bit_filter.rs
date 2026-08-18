@@ -37,7 +37,7 @@
 //! build.
 
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   frame::{Yuv420pFrame, Yuv422pFrame, Yuv444pFrame, Yuva420pFrame, Yuva422pFrame, Yuva444pFrame},
   resample::{
     CatmullRom, FilterKernel, FilterStream, FilteredResampler, Lanczos3, Resampler, Triangle,
@@ -49,7 +49,7 @@ use crate::{
   },
 };
 
-const M: ColorMatrix = ColorMatrix::Bt709;
+const M: KernelMatrix = KernelMatrix::Bt709;
 const FR: bool = true;
 const NATIVE_MAX: u16 = 255; // 8-bit native Y / colour max (pre-fix u16 clamp)
 

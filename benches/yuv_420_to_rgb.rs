@@ -8,7 +8,7 @@
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;
 
-use pixon::{ColorMatrix, bench_internals::yuv_420_to_rgb_row};
+use pixon::{KernelMatrix, bench_internals::yuv_420_to_rgb_row};
 
 /// Fills a buffer with a deterministic pseudo‑random byte sequence so
 /// the measurement isn't inflated by cache‑friendly uniform data.
@@ -25,7 +25,7 @@ fn bench(c: &mut Criterion) {
   // loop covers them fully; picking non‑multiples here would spend
   // measurable time in the scalar tail and skew the comparison.
   const WIDTHS: &[usize] = &[1280, 1920, 3840];
-  const MATRIX: ColorMatrix = ColorMatrix::Bt709;
+  const MATRIX: KernelMatrix = KernelMatrix::Bt709;
   const FULL_RANGE: bool = false;
 
   let mut group = c.benchmark_group("yuv_420_to_rgb_row");

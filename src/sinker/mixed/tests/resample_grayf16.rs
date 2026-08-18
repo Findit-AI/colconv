@@ -9,7 +9,7 @@
 //! `resample_grayf32`.
 
 use crate::{
-  ColorMatrix, PixelSink,
+  KernelMatrix, PixelSink,
   frame::{Grayf16Frame, Grayf32Frame},
   resample::{AreaResampler, ResampleError},
   sinker::{MixedSinker, MixedSinkerError},
@@ -20,7 +20,7 @@ use half::f16;
 const SRC: usize = 8;
 const OUT: usize = 4;
 const FR: bool = true;
-const M: ColorMatrix = ColorMatrix::Bt709;
+const M: KernelMatrix = KernelMatrix::Bt709;
 
 /// Re-encode a host-native f16 slice as LE-encoded byte storage (the `grayf16le`
 /// plane contract), recovered via `u16::from_le`.

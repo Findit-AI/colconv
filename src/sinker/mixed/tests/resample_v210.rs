@@ -31,14 +31,14 @@
 
 use super::*;
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   resample::{AreaResampler, ResampleError},
   sinker::{MixedSinker, MixedSinkerError},
 };
 
 const SRC: usize = 12;
 const OUT: usize = 6;
-const M: ColorMatrix = ColorMatrix::Bt601;
+const M: KernelMatrix = KernelMatrix::Bt601;
 const FR: bool = true;
 
 // ---- V210 wire packing ------------------------------------------------
@@ -524,7 +524,7 @@ fn simd_matches_scalar_across_widths() {
       .unwrap()
       .with_luma_u16(&mut luma16_simd)
       .unwrap();
-      v210_to(&src, false, ColorMatrix::Bt709, &mut sink).unwrap();
+      v210_to(&src, false, KernelMatrix::Bt709, &mut sink).unwrap();
     }
     {
       let mut sink = force_row_stage(
@@ -536,7 +536,7 @@ fn simd_matches_scalar_across_widths() {
       .unwrap()
       .with_luma_u16(&mut luma16_scalar)
       .unwrap();
-      v210_to(&src, false, ColorMatrix::Bt709, &mut sink).unwrap();
+      v210_to(&src, false, KernelMatrix::Bt709, &mut sink).unwrap();
     }
     assert_eq!(
       rgb_simd, rgb_scalar,
@@ -891,7 +891,7 @@ fn rgb_matches_area_bin_of_direct_yuv422p10() {
     let mut sink = MixedSinker::<Yuv422p10>::new(SRC, SRC)
       .with_rgb(&mut rgb_planar_direct)
       .unwrap();
-    yuv422p10_to(&planar, false, ColorMatrix::Bt709, &mut sink).unwrap();
+    yuv422p10_to(&planar, false, KernelMatrix::Bt709, &mut sink).unwrap();
   }
   let planar_ref = block_mean_2x2_rgb_u8(&rgb_planar_direct);
 
@@ -904,7 +904,7 @@ fn rgb_matches_area_bin_of_direct_yuv422p10() {
     )
     .with_rgb(&mut rgb_packed)
     .unwrap();
-    v210_to(&v210, false, ColorMatrix::Bt709, &mut sink).unwrap();
+    v210_to(&v210, false, KernelMatrix::Bt709, &mut sink).unwrap();
   }
   assert_eq!(
     rgb_packed, planar_ref,

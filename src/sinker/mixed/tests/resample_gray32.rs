@@ -11,7 +11,7 @@
 //! `u32`-domain mean).
 
 use crate::{
-  ColorMatrix, PixelSink,
+  KernelMatrix, PixelSink,
   frame::Gray32Frame,
   resample::{AreaResampler, ResampleError},
   sinker::{MixedSinker, MixedSinkerError},
@@ -21,7 +21,7 @@ use crate::{
 const SRC: usize = 8;
 const OUT: usize = 4;
 const FR: bool = true;
-const M: ColorMatrix = ColorMatrix::Bt709;
+const M: KernelMatrix = KernelMatrix::Bt709;
 
 /// Re-encode a host-native u32 slice as LE-encoded byte storage (the
 /// `gray32le` plane contract), recovered via `u32::from_le`.

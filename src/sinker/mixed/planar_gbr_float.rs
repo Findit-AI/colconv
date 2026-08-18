@@ -40,7 +40,7 @@ use super::{
   rgba_plane_row_slice, rgba_u16_plane_row_slice,
 };
 use crate::{
-  ColorMatrix, PixelSink,
+  KernelMatrix, PixelSink,
   row::{
     expand_rgb_to_rgba_row, gbrapf32_to_rgba_f16_row, gbrapf32_to_rgba_f32_row,
     gbrapf32_to_rgba_row, gbrapf32_to_rgba_u16_row, gbrpf32_to_hsv_row, gbrpf32_to_luma_row,
@@ -53,7 +53,7 @@ use crate::{
 
 // Float-planar GBR sources are already component RGB (no chroma matrix).
 // For luma derivation, BT.709 full-range weights are the conventional default.
-const GBR_FLOAT_LUMA_MATRIX: ColorMatrix = ColorMatrix::Bt709;
+const GBR_FLOAT_LUMA_MATRIX: KernelMatrix = KernelMatrix::Bt709;
 const GBR_FLOAT_FULL_RANGE: bool = true;
 
 // ---- Gbrpf32 accessor impl block ----------------------------------------

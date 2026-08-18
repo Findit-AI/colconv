@@ -214,7 +214,7 @@ pub(crate) fn gbr32_to_luma_u16_row<const BE: bool>(
   r: &[u32],
   luma_out: &mut [u16],
   width: usize,
-  matrix: crate::ColorMatrix,
+  matrix: crate::KernelMatrix,
   full_range: bool,
 ) {
   debug_assert!(g.len() >= width, "g row too short");

@@ -25,7 +25,7 @@
 //! mask — BITS=16 samples are already full-range u16.
 
 use super::*;
-use crate::{ColorMatrix, row::scalar};
+use crate::{KernelMatrix, row::scalar};
 
 /// Host-endian gate for Y216 SIMD bodies.
 ///
@@ -61,7 +61,7 @@ pub(crate) unsafe fn y216_to_rgb_or_rgba_row<const ALPHA: bool, const BE: bool>(
   packed: &[u16],
   out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert!(width.is_multiple_of(2), "Y216 requires even width");
@@ -243,7 +243,7 @@ pub(crate) unsafe fn y216_to_rgb_u16_or_rgba_u16_row<const ALPHA: bool, const BE
   packed: &[u16],
   out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert!(width.is_multiple_of(2), "Y216 requires even width");
@@ -578,7 +578,7 @@ pub(crate) unsafe fn y216_to_hsv_row<const BE: bool>(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert!(width.is_multiple_of(2), "Y216 requires even width");

@@ -3,8 +3,8 @@
 //! and every output kind their sinks support.
 
 use crate::{
-  ChromaLocation, ColorInfo, ColorMatrix, ColorSpec, DynamicRange, PixelFormat, Primaries,
-  Transfer, YuvOptions,
+  ChromaLocation, ColorInfo, ColorMatrix, ColorSpec, DynamicRange, KernelMatrix, PixelFormat,
+  Primaries, Transfer, YuvOptions,
   convert::Convert,
   frame::{Yuv420pFrame, Yuv444pFrame},
   resample::AreaResampler,
@@ -52,7 +52,7 @@ fn yuv420p_output_kinds_match_manual() {
   // rgb
   let (mut a, mut b) = (std::vec![0u8; w * h * 3], std::vec![0u8; w * h * 3]);
   Convert::from(&frame420(&y, &u, &v))
-    .spec(spec)
+    .spec(spec.clone())
     .rgb(&mut a)
     .run()
     .unwrap();
@@ -60,11 +60,11 @@ fn yuv420p_output_kinds_match_manual() {
     let mut sink = MixedSinker::<Yuv420p>::new(w, h)
       .with_rgb(&mut b)
       .unwrap()
-      .with_color_spec(spec);
+      .with_color_spec(&spec);
     yuv420p_to(
       &frame420(&y, &u, &v),
       spec.full_range(),
-      spec.matrix(),
+      spec.kernel_matrix().unwrap(),
       &mut sink,
     )
     .unwrap();
@@ -74,7 +74,7 @@ fn yuv420p_output_kinds_match_manual() {
   // rgba
   let (mut a, mut b) = (std::vec![0u8; w * h * 4], std::vec![0u8; w * h * 4]);
   Convert::from(&frame420(&y, &u, &v))
-    .spec(spec)
+    .spec(spec.clone())
     .rgba(&mut a)
     .run()
     .unwrap();
@@ -82,11 +82,11 @@ fn yuv420p_output_kinds_match_manual() {
     let mut sink = MixedSinker::<Yuv420p>::new(w, h)
       .with_rgba(&mut b)
       .unwrap()
-      .with_color_spec(spec);
+      .with_color_spec(&spec);
     yuv420p_to(
       &frame420(&y, &u, &v),
       spec.full_range(),
-      spec.matrix(),
+      spec.kernel_matrix().unwrap(),
       &mut sink,
     )
     .unwrap();
@@ -96,7 +96,7 @@ fn yuv420p_output_kinds_match_manual() {
   // luma
   let (mut a, mut b) = (std::vec![0u8; w * h], std::vec![0u8; w * h]);
   Convert::from(&frame420(&y, &u, &v))
-    .spec(spec)
+    .spec(spec.clone())
     .luma(&mut a)
     .run()
     .unwrap();
@@ -104,11 +104,11 @@ fn yuv420p_output_kinds_match_manual() {
     let mut sink = MixedSinker::<Yuv420p>::new(w, h)
       .with_luma(&mut b)
       .unwrap()
-      .with_color_spec(spec);
+      .with_color_spec(&spec);
     yuv420p_to(
       &frame420(&y, &u, &v),
       spec.full_range(),
-      spec.matrix(),
+      spec.kernel_matrix().unwrap(),
       &mut sink,
     )
     .unwrap();
@@ -127,7 +127,7 @@ fn yuv420p_output_kinds_match_manual() {
     std::vec![0u8; w * h],
   );
   Convert::from(&frame420(&y, &u, &v))
-    .spec(spec)
+    .spec(spec.clone())
     .hsv(&mut ha, &mut sa, &mut va)
     .run()
     .unwrap();
@@ -135,11 +135,11 @@ fn yuv420p_output_kinds_match_manual() {
     let mut sink = MixedSinker::<Yuv420p>::new(w, h)
       .with_hsv(&mut hb, &mut sb, &mut vb)
       .unwrap()
-      .with_color_spec(spec);
+      .with_color_spec(&spec);
     yuv420p_to(
       &frame420(&y, &u, &v),
       spec.full_range(),
-      spec.matrix(),
+      spec.kernel_matrix().unwrap(),
       &mut sink,
     )
     .unwrap();
@@ -157,7 +157,7 @@ fn yuv420p_spec_derivation_matches_manual_matrix_range() {
 
   let mut a = std::vec![0u8; w * h * 3];
   Convert::from(&frame420(&y, &u, &v))
-    .spec(spec)
+    .spec(spec.clone())
     .rgb(&mut a)
     .run()
     .unwrap();
@@ -167,12 +167,12 @@ fn yuv420p_spec_derivation_matches_manual_matrix_range() {
     let mut sink = MixedSinker::<Yuv420p>::new(w, h)
       .with_rgb(&mut b)
       .unwrap()
-      .with_color_spec(spec);
+      .with_color_spec(&spec);
     // Manual: pull the exact range + matrix the spec resolves to.
     yuv420p_to(
       &frame420(&y, &u, &v),
       spec.full_range(),
-      spec.matrix(),
+      spec.kernel_matrix().unwrap(),
       &mut sink,
     )
     .unwrap();
@@ -214,12 +214,12 @@ fn yuv420p_format_options_override_wins() {
   let (y, u, v) = y420();
   let spec = spec_601(); // matrix = Bt601
   let (w, h) = (4usize, 2usize);
-  let override_opts = YuvOptions::new().with_matrix(ColorMatrix::Bt2020Ncl);
-  assert_ne!(override_opts.matrix(), spec.matrix());
+  let override_opts = YuvOptions::new().with_matrix(KernelMatrix::Bt2020Ncl);
+  assert_ne!(override_opts.matrix(), spec.kernel_matrix().unwrap());
 
   let mut a = std::vec![0u8; w * h * 3];
   Convert::from(&frame420(&y, &u, &v))
-    .spec(spec)
+    .spec(spec.clone())
     .format_options(override_opts)
     .rgb(&mut a)
     .run()
@@ -232,7 +232,7 @@ fn yuv420p_format_options_override_wins() {
     let mut sink = MixedSinker::<Yuv420p>::new(w, h)
       .with_rgb(&mut b)
       .unwrap()
-      .with_color_spec(spec);
+      .with_color_spec(&spec);
     yuv420p_to(
       &frame420(&y, &u, &v),
       override_opts.full_range(),
@@ -253,7 +253,7 @@ fn yuv420p_simd_false_matches_manual() {
 
   let mut a = std::vec![0u8; w * h * 3];
   Convert::from(&frame420(&y, &u, &v))
-    .spec(spec)
+    .spec(spec.clone())
     .simd(false)
     .rgb(&mut a)
     .run()
@@ -264,12 +264,12 @@ fn yuv420p_simd_false_matches_manual() {
     let mut sink = MixedSinker::<Yuv420p>::new(w, h)
       .with_rgb(&mut b)
       .unwrap()
-      .with_color_spec(spec)
+      .with_color_spec(&spec)
       .with_simd(false);
     yuv420p_to(
       &frame420(&y, &u, &v),
       spec.full_range(),
-      spec.matrix(),
+      spec.kernel_matrix().unwrap(),
       &mut sink,
     )
     .unwrap();
@@ -286,7 +286,7 @@ fn yuv420p_multi_output_matches_manual() {
 
   let (mut rgb_a, mut luma_a) = (std::vec![0u8; w * h * 3], std::vec![0u8; w * h]);
   Convert::from(&frame420(&y, &u, &v))
-    .spec(spec)
+    .spec(spec.clone())
     .rgb(&mut rgb_a)
     .luma(&mut luma_a)
     .run()
@@ -299,11 +299,11 @@ fn yuv420p_multi_output_matches_manual() {
       .unwrap()
       .with_luma(&mut luma_b)
       .unwrap()
-      .with_color_spec(spec);
+      .with_color_spec(&spec);
     yuv420p_to(
       &frame420(&y, &u, &v),
       spec.full_range(),
-      spec.matrix(),
+      spec.kernel_matrix().unwrap(),
       &mut sink,
     )
     .unwrap();
@@ -325,7 +325,7 @@ fn yuv420p_resize_area_matches_manual() {
 
   let mut a = std::vec![0u8; ow * oh * 3];
   Convert::from(&make())
-    .spec(spec)
+    .spec(spec.clone())
     .resize(ow, oh)
     .rgb(&mut a)
     .run()
@@ -338,8 +338,14 @@ fn yuv420p_resize_area_matches_manual() {
         .unwrap()
         .with_rgb(&mut b)
         .unwrap()
-        .with_color_spec(spec);
-    yuv420p_to(&make(), spec.full_range(), spec.matrix(), &mut sink).unwrap();
+        .with_color_spec(&spec);
+    yuv420p_to(
+      &make(),
+      spec.full_range(),
+      spec.kernel_matrix().unwrap(),
+      &mut sink,
+    )
+    .unwrap();
   }
   assert_eq!(a, b);
 }
@@ -385,7 +391,7 @@ fn yuv444p_output_kinds_match_manual() {
   // rgb
   let (mut a, mut b) = (std::vec![0u8; w * h * 3], std::vec![0u8; w * h * 3]);
   Convert::from(&frame444(&y, &u, &v))
-    .spec(spec)
+    .spec(spec.clone())
     .rgb(&mut a)
     .run()
     .unwrap();
@@ -393,11 +399,11 @@ fn yuv444p_output_kinds_match_manual() {
     let mut sink = MixedSinker::<Yuv444p>::new(w, h)
       .with_rgb(&mut b)
       .unwrap()
-      .with_color_spec(spec);
+      .with_color_spec(&spec);
     yuv444p_to(
       &frame444(&y, &u, &v),
       spec.full_range(),
-      spec.matrix(),
+      spec.kernel_matrix().unwrap(),
       &mut sink,
     )
     .unwrap();
@@ -407,7 +413,7 @@ fn yuv444p_output_kinds_match_manual() {
   // rgba
   let (mut a, mut b) = (std::vec![0u8; w * h * 4], std::vec![0u8; w * h * 4]);
   Convert::from(&frame444(&y, &u, &v))
-    .spec(spec)
+    .spec(spec.clone())
     .rgba(&mut a)
     .run()
     .unwrap();
@@ -415,11 +421,11 @@ fn yuv444p_output_kinds_match_manual() {
     let mut sink = MixedSinker::<Yuv444p>::new(w, h)
       .with_rgba(&mut b)
       .unwrap()
-      .with_color_spec(spec);
+      .with_color_spec(&spec);
     yuv444p_to(
       &frame444(&y, &u, &v),
       spec.full_range(),
-      spec.matrix(),
+      spec.kernel_matrix().unwrap(),
       &mut sink,
     )
     .unwrap();
@@ -429,7 +435,7 @@ fn yuv444p_output_kinds_match_manual() {
   // luma
   let (mut a, mut b) = (std::vec![0u8; w * h], std::vec![0u8; w * h]);
   Convert::from(&frame444(&y, &u, &v))
-    .spec(spec)
+    .spec(spec.clone())
     .luma(&mut a)
     .run()
     .unwrap();
@@ -437,11 +443,11 @@ fn yuv444p_output_kinds_match_manual() {
     let mut sink = MixedSinker::<Yuv444p>::new(w, h)
       .with_luma(&mut b)
       .unwrap()
-      .with_color_spec(spec);
+      .with_color_spec(&spec);
     yuv444p_to(
       &frame444(&y, &u, &v),
       spec.full_range(),
-      spec.matrix(),
+      spec.kernel_matrix().unwrap(),
       &mut sink,
     )
     .unwrap();
@@ -460,7 +466,7 @@ fn yuv444p_output_kinds_match_manual() {
     std::vec![0u8; w * h],
   );
   Convert::from(&frame444(&y, &u, &v))
-    .spec(spec)
+    .spec(spec.clone())
     .hsv(&mut ha, &mut sa, &mut va)
     .run()
     .unwrap();
@@ -468,11 +474,11 @@ fn yuv444p_output_kinds_match_manual() {
     let mut sink = MixedSinker::<Yuv444p>::new(w, h)
       .with_hsv(&mut hb, &mut sb, &mut vb)
       .unwrap()
-      .with_color_spec(spec);
+      .with_color_spec(&spec);
     yuv444p_to(
       &frame444(&y, &u, &v),
       spec.full_range(),
-      spec.matrix(),
+      spec.kernel_matrix().unwrap(),
       &mut sink,
     )
     .unwrap();
@@ -490,7 +496,7 @@ fn yuv444p_spec_derivation_matches_manual_matrix_range() {
 
   let mut a = std::vec![0u8; w * h * 3];
   Convert::from(&frame444(&y, &u, &v))
-    .spec(spec)
+    .spec(spec.clone())
     .rgb(&mut a)
     .run()
     .unwrap();
@@ -500,11 +506,11 @@ fn yuv444p_spec_derivation_matches_manual_matrix_range() {
     let mut sink = MixedSinker::<Yuv444p>::new(w, h)
       .with_rgb(&mut b)
       .unwrap()
-      .with_color_spec(spec);
+      .with_color_spec(&spec);
     yuv444p_to(
       &frame444(&y, &u, &v),
       spec.full_range(),
-      spec.matrix(),
+      spec.kernel_matrix().unwrap(),
       &mut sink,
     )
     .unwrap();
@@ -546,12 +552,12 @@ fn yuv444p_format_options_override_wins() {
   let (y, u, v) = y444();
   let spec = spec_601(); // matrix = Bt601
   let (w, h) = (4usize, 2usize);
-  let override_opts = YuvOptions::new().with_matrix(ColorMatrix::Bt2020Ncl);
-  assert_ne!(override_opts.matrix(), spec.matrix());
+  let override_opts = YuvOptions::new().with_matrix(KernelMatrix::Bt2020Ncl);
+  assert_ne!(override_opts.matrix(), spec.kernel_matrix().unwrap());
 
   let mut a = std::vec![0u8; w * h * 3];
   Convert::from(&frame444(&y, &u, &v))
-    .spec(spec)
+    .spec(spec.clone())
     .format_options(override_opts)
     .rgb(&mut a)
     .run()
@@ -564,7 +570,7 @@ fn yuv444p_format_options_override_wins() {
     let mut sink = MixedSinker::<Yuv444p>::new(w, h)
       .with_rgb(&mut b)
       .unwrap()
-      .with_color_spec(spec);
+      .with_color_spec(&spec);
     yuv444p_to(
       &frame444(&y, &u, &v),
       override_opts.full_range(),
@@ -585,7 +591,7 @@ fn yuv444p_simd_false_matches_manual() {
 
   let mut a = std::vec![0u8; w * h * 3];
   Convert::from(&frame444(&y, &u, &v))
-    .spec(spec)
+    .spec(spec.clone())
     .simd(false)
     .rgb(&mut a)
     .run()
@@ -596,12 +602,12 @@ fn yuv444p_simd_false_matches_manual() {
     let mut sink = MixedSinker::<Yuv444p>::new(w, h)
       .with_rgb(&mut b)
       .unwrap()
-      .with_color_spec(spec)
+      .with_color_spec(&spec)
       .with_simd(false);
     yuv444p_to(
       &frame444(&y, &u, &v),
       spec.full_range(),
-      spec.matrix(),
+      spec.kernel_matrix().unwrap(),
       &mut sink,
     )
     .unwrap();
@@ -618,7 +624,7 @@ fn yuv444p_multi_output_matches_manual() {
 
   let (mut rgb_a, mut luma_a) = (std::vec![0u8; w * h * 3], std::vec![0u8; w * h]);
   Convert::from(&frame444(&y, &u, &v))
-    .spec(spec)
+    .spec(spec.clone())
     .rgb(&mut rgb_a)
     .luma(&mut luma_a)
     .run()
@@ -631,11 +637,11 @@ fn yuv444p_multi_output_matches_manual() {
       .unwrap()
       .with_luma(&mut luma_b)
       .unwrap()
-      .with_color_spec(spec);
+      .with_color_spec(&spec);
     yuv444p_to(
       &frame444(&y, &u, &v),
       spec.full_range(),
-      spec.matrix(),
+      spec.kernel_matrix().unwrap(),
       &mut sink,
     )
     .unwrap();
@@ -658,7 +664,7 @@ fn yuv444p_resize_area_matches_manual() {
 
   let mut a = std::vec![0u8; ow * oh * 3];
   Convert::from(&make())
-    .spec(spec)
+    .spec(spec.clone())
     .resize(ow, oh)
     .rgb(&mut a)
     .run()
@@ -671,8 +677,14 @@ fn yuv444p_resize_area_matches_manual() {
         .unwrap()
         .with_rgb(&mut b)
         .unwrap()
-        .with_color_spec(spec);
-    yuv444p_to(&make(), spec.full_range(), spec.matrix(), &mut sink).unwrap();
+        .with_color_spec(&spec);
+    yuv444p_to(
+      &make(),
+      spec.full_range(),
+      spec.kernel_matrix().unwrap(),
+      &mut sink,
+    )
+    .unwrap();
   }
   assert_eq!(a, b);
 }
@@ -706,7 +718,7 @@ fn yuv444p_resize_and_scalar_match_manual() {
 
   let mut a = std::vec![0u8; ow * oh * 3];
   Convert::from(&make())
-    .spec(spec)
+    .spec(spec.clone())
     .simd(false)
     .resize(ow, oh)
     .rgb(&mut a)
@@ -720,9 +732,15 @@ fn yuv444p_resize_and_scalar_match_manual() {
         .unwrap()
         .with_rgb(&mut b)
         .unwrap()
-        .with_color_spec(spec)
+        .with_color_spec(&spec)
         .with_simd(false);
-    yuv444p_to(&make(), spec.full_range(), spec.matrix(), &mut sink).unwrap();
+    yuv444p_to(
+      &make(),
+      spec.full_range(),
+      spec.kernel_matrix().unwrap(),
+      &mut sink,
+    )
+    .unwrap();
   }
   assert_eq!(a, b);
 }

@@ -18,7 +18,7 @@
 //! upsampled in-register), supplied by the caller as a closure so all four
 //! formats share the linearise → bin → re-encode tail. The
 //! [`TransferFunction`] is the sink's caller override, else the
-//! per-[`ColorMatrix`] default.
+//! per-[`KernelMatrix`] default.
 //!
 //! # What "linear" means here: display-referred vs scene-referred
 //!
@@ -63,7 +63,7 @@
 //! wired; every other format and the encoded domain are untouched.
 //!
 //! [`AveragingDomain::Linear`]: crate::resample::AveragingDomain::Linear
-//! [`ColorMatrix`]: crate::ColorMatrix
+//! [`KernelMatrix`]: crate::KernelMatrix
 //! [`TransferFunction::eotf`]: crate::resample::TransferFunction::eotf
 //! [`oetf`]: crate::resample::TransferFunction::oetf
 

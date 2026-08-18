@@ -29,7 +29,7 @@ use crate::row::simd128_available;
 #[cfg(all(feature = "yuv-planar", target_arch = "x86_64"))]
 use crate::row::{avx2_available, avx512_available, sse41_available};
 #[cfg(feature = "yuv-planar")]
-use crate::{ColorMatrix, row::scalar};
+use crate::{KernelMatrix, row::scalar};
 
 /// YUV 4:2:0 planar 9/10/12/14-bit → planar **HSV** (OpenCV
 /// `cv2.COLOR_RGB2HSV` encoding: `H ∈ [0, 179]`, `S, V ∈ [0, 255]`)
@@ -57,7 +57,7 @@ pub(crate) fn yuv_420p_n_to_hsv_row<const BITS: u32, const BE: bool>(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) {

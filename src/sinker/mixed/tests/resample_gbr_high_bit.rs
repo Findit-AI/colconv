@@ -17,11 +17,11 @@
 //! out-of-order `process` call cannot be constructed here (mirrors the 8-bit
 //! `resample_gbrp` suite).
 
-use crate::{ColorMatrix, sinker::MixedSinker};
+use crate::{KernelMatrix, sinker::MixedSinker};
 
 const SRC: usize = 8;
 const OUT: usize = 4;
-const MATRIX: ColorMatrix = ColorMatrix::Bt709;
+const MATRIX: KernelMatrix = KernelMatrix::Bt709;
 
 /// Native-depth `(r, g, b)` ramp for source pixel `i`, masked to `BITS` so
 /// every sample is a legal native code; interior values so the derived luma

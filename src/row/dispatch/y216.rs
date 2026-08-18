@@ -24,7 +24,7 @@ use crate::row::simd128_available;
 #[cfg(target_arch = "x86_64")]
 use crate::row::{avx2_available, avx512_available, sse41_available};
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   row::{rgb_row_bytes, rgb_row_elems, rgba_row_bytes, rgba_row_elems, scalar, y2xx_row_elems},
 };
 
@@ -37,7 +37,7 @@ pub fn y216_to_rgb_row_endian(
   packed: &[u16],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
   big_endian: bool,
@@ -128,7 +128,7 @@ pub fn y216_to_rgb_row(
   packed: &[u16],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) {
@@ -141,7 +141,7 @@ pub fn y216_to_rgba_row_endian(
   packed: &[u16],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
   big_endian: bool,
@@ -232,7 +232,7 @@ pub fn y216_to_rgba_row(
   packed: &[u16],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) {
@@ -246,7 +246,7 @@ pub fn y216_to_rgb_u16_row_endian(
   packed: &[u16],
   rgb_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
   big_endian: bool,
@@ -341,7 +341,7 @@ pub fn y216_to_rgb_u16_row(
   packed: &[u16],
   rgb_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) {
@@ -355,7 +355,7 @@ pub fn y216_to_rgba_u16_row_endian(
   packed: &[u16],
   rgba_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
   big_endian: bool,
@@ -450,7 +450,7 @@ pub fn y216_to_rgba_u16_row(
   packed: &[u16],
   rgba_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) {
@@ -660,7 +660,7 @@ pub fn y216_to_hsv_row_endian(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
   big_endian: bool,
@@ -785,7 +785,7 @@ mod tests {
 
     // u8 RGB
     let mut rgb = [0u8; 8 * 3];
-    y216_to_rgb_row(&buf, &mut rgb, 8, ColorMatrix::Bt709, true, false);
+    y216_to_rgb_row(&buf, &mut rgb, 8, KernelMatrix::Bt709, true, false);
     for px in rgb.chunks(3) {
       assert!(px[0].abs_diff(128) <= 1);
       assert_eq!(px[0], px[1]);
@@ -794,7 +794,7 @@ mod tests {
 
     // u8 RGBA — alpha = 0xFF
     let mut rgba = [0u8; 8 * 4];
-    y216_to_rgba_row(&buf, &mut rgba, 8, ColorMatrix::Bt709, true, false);
+    y216_to_rgba_row(&buf, &mut rgba, 8, KernelMatrix::Bt709, true, false);
     for px in rgba.chunks(4) {
       assert!(px[0].abs_diff(128) <= 1);
       assert_eq!(px[3], 0xFF);
@@ -802,7 +802,7 @@ mod tests {
 
     // u16 RGB at native 16-bit depth.
     let mut rgb_u16 = [0u16; 8 * 3];
-    y216_to_rgb_u16_row(&buf, &mut rgb_u16, 8, ColorMatrix::Bt709, true, false);
+    y216_to_rgb_u16_row(&buf, &mut rgb_u16, 8, KernelMatrix::Bt709, true, false);
     for px in rgb_u16.chunks(3) {
       assert!(px[0].abs_diff(32768) <= 4);
       assert_eq!(px[0], px[1]);
@@ -811,7 +811,7 @@ mod tests {
 
     // u16 RGBA — alpha = 0xFFFF.
     let mut rgba_u16 = [0u16; 8 * 4];
-    y216_to_rgba_u16_row(&buf, &mut rgba_u16, 8, ColorMatrix::Bt709, true, false);
+    y216_to_rgba_u16_row(&buf, &mut rgba_u16, 8, KernelMatrix::Bt709, true, false);
     for px in rgba_u16.chunks(4) {
       assert_eq!(px[3], 0xFFFF);
     }
@@ -837,7 +837,7 @@ mod tests {
     // packed buffer has only 2 elements for width=4 (needs 8).
     let packed = [0u16; 2];
     let mut rgb = [0u8; 4 * 3];
-    y216_to_rgb_row(&packed, &mut rgb, 4, ColorMatrix::Bt709, true, false);
+    y216_to_rgb_row(&packed, &mut rgb, 4, KernelMatrix::Bt709, true, false);
   }
 
   #[test]
@@ -846,7 +846,7 @@ mod tests {
     // output buffer has only 2 bytes for width=4 (needs 12).
     let packed = [0u16; 8];
     let mut rgb = [0u8; 2];
-    y216_to_rgb_row(&packed, &mut rgb, 4, ColorMatrix::Bt709, true, false);
+    y216_to_rgb_row(&packed, &mut rgb, 4, KernelMatrix::Bt709, true, false);
   }
 
   #[test]
@@ -854,7 +854,7 @@ mod tests {
   fn y216_dispatcher_rejects_odd_width() {
     let packed = [0u16; 6];
     let mut rgb = [0u8; 9];
-    y216_to_rgb_row(&packed, &mut rgb, 3, ColorMatrix::Bt709, true, false);
+    y216_to_rgb_row(&packed, &mut rgb, 3, KernelMatrix::Bt709, true, false);
   }
 
   #[test]
@@ -872,7 +872,7 @@ mod tests {
       &packed,
       &mut rgb,
       OVERFLOW_WIDTH_TIMES_2,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       true,
       false,
     );

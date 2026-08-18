@@ -34,7 +34,7 @@ fn yuv420p10_rgb_u8_only_gray_is_gray() {
   let mut sink = MixedSinker::<Yuv420p10>::new(16, 8)
     .with_rgb(&mut rgb)
     .unwrap();
-  yuv420p10_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuv420p10_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
 
   for px in rgb.chunks(3) {
     assert!(px[0].abs_diff(128) <= 1);
@@ -58,7 +58,7 @@ fn yuv420p10_rgb_u16_only_native_depth_gray() {
   let mut sink = MixedSinker::<Yuv420p10>::new(16, 8)
     .with_rgb_u16(&mut rgb)
     .unwrap();
-  yuv420p10_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuv420p10_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
 
   for px in rgb.chunks(3) {
     assert!(px[0].abs_diff(512) <= 1, "got {px:?}");
@@ -88,7 +88,7 @@ fn yuv420p10_rgb_u8_and_u16_both_populated() {
     .unwrap()
     .with_rgb_u16(&mut rgb_u16)
     .unwrap();
-  yuv420p10_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuv420p10_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
 
   assert!(rgb_u8.iter().all(|&c| c == 255));
   assert!(rgb_u16.iter().all(|&c| c == 1023));
@@ -108,7 +108,7 @@ fn yuv420p10_luma_downshifts_to_8bit() {
   let mut sink = MixedSinker::<Yuv420p10>::new(16, 8)
     .with_luma(&mut luma)
     .unwrap();
-  yuv420p10_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuv420p10_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
 
   assert!(luma.iter().all(|&l| l == 128));
 }
@@ -131,7 +131,7 @@ fn yuv420p10_hsv_from_gray_is_zero_hue_zero_sat() {
   let mut sink = MixedSinker::<Yuv420p10>::new(16, 8)
     .with_hsv(&mut h, &mut s, &mut v)
     .unwrap();
-  yuv420p10_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuv420p10_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
 
   assert!(h.iter().all(|&b| b == 0));
   assert!(s.iter().all(|&b| b == 0));
@@ -171,7 +171,7 @@ fn yuv420p10_with_simd_false_matches_with_simd_true() {
     .unwrap()
     .with_rgb_u16(&mut rgb_u16_scalar)
     .unwrap();
-  yuv420p10_to(&src, false, ColorMatrix::Bt709, &mut s_scalar).unwrap();
+  yuv420p10_to(&src, false, KernelMatrix::Bt709, &mut s_scalar).unwrap();
 
   let mut rgb_simd = std::vec![0u8; 64 * 16 * 3];
   let mut rgb_u16_simd = std::vec![0u16; 64 * 16 * 3];
@@ -180,7 +180,7 @@ fn yuv420p10_with_simd_false_matches_with_simd_true() {
     .unwrap()
     .with_rgb_u16(&mut rgb_u16_simd)
     .unwrap();
-  yuv420p10_to(&src, false, ColorMatrix::Bt709, &mut s_simd).unwrap();
+  yuv420p10_to(&src, false, KernelMatrix::Bt709, &mut s_simd).unwrap();
 
   assert_eq!(rgb_scalar, rgb_simd);
   assert_eq!(rgb_u16_scalar, rgb_u16_simd);
@@ -202,7 +202,7 @@ fn yuv420p10_rgba_u8_only_gray_with_opaque_alpha() {
   let mut sink = MixedSinker::<Yuv420p10>::new(16, 8)
     .with_rgba(&mut rgba)
     .unwrap();
-  yuv420p10_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuv420p10_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
 
   for px in rgba.chunks(4) {
     assert!(px[0].abs_diff(128) <= 1);
@@ -226,7 +226,7 @@ fn yuv420p10_rgba_u16_only_native_depth_gray_with_opaque_alpha() {
   let mut sink = MixedSinker::<Yuv420p10>::new(16, 8)
     .with_rgba_u16(&mut rgba)
     .unwrap();
-  yuv420p10_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuv420p10_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
 
   for px in rgba.chunks(4) {
     assert!(px[0].abs_diff(512) <= 1, "got {px:?}");
@@ -253,7 +253,7 @@ fn yuv420p10_with_rgb_and_with_rgba_produce_byte_identical_rgb_bytes() {
   let mut s_solo = MixedSinker::<Yuv420p10>::new(64, 16)
     .with_rgb(&mut rgb_solo)
     .unwrap();
-  yuv420p10_to(&src, true, ColorMatrix::Bt709, &mut s_solo).unwrap();
+  yuv420p10_to(&src, true, KernelMatrix::Bt709, &mut s_solo).unwrap();
 
   let mut rgb_combined = std::vec![0u8; 64 * 16 * 3];
   let mut rgba = std::vec![0u8; 64 * 16 * 4];
@@ -262,7 +262,7 @@ fn yuv420p10_with_rgb_and_with_rgba_produce_byte_identical_rgb_bytes() {
     .unwrap()
     .with_rgba(&mut rgba)
     .unwrap();
-  yuv420p10_to(&src, true, ColorMatrix::Bt709, &mut s_combined).unwrap();
+  yuv420p10_to(&src, true, KernelMatrix::Bt709, &mut s_combined).unwrap();
 
   assert_eq!(rgb_solo, rgb_combined, "RGB bytes must match across runs");
   for (rgb_px, rgba_px) in rgb_combined.chunks(3).zip(rgba.chunks(4)) {
@@ -288,7 +288,7 @@ fn yuv420p10_with_rgb_u16_and_with_rgba_u16_produce_byte_identical_rgb_elems() {
   let mut s_solo = MixedSinker::<Yuv420p10>::new(64, 16)
     .with_rgb_u16(&mut rgb_solo)
     .unwrap();
-  yuv420p10_to(&src, true, ColorMatrix::Bt709, &mut s_solo).unwrap();
+  yuv420p10_to(&src, true, KernelMatrix::Bt709, &mut s_solo).unwrap();
 
   let mut rgb_combined = std::vec![0u16; 64 * 16 * 3];
   let mut rgba = std::vec![0u16; 64 * 16 * 4];
@@ -297,7 +297,7 @@ fn yuv420p10_with_rgb_u16_and_with_rgba_u16_produce_byte_identical_rgb_elems() {
     .unwrap()
     .with_rgba_u16(&mut rgba)
     .unwrap();
-  yuv420p10_to(&src, true, ColorMatrix::Bt709, &mut s_combined).unwrap();
+  yuv420p10_to(&src, true, KernelMatrix::Bt709, &mut s_combined).unwrap();
 
   assert_eq!(
     rgb_solo, rgb_combined,
@@ -372,7 +372,7 @@ fn p010_rgb_u8_only_gray_is_gray() {
 
   let mut rgb = std::vec![0u8; 16 * 8 * 3];
   let mut sink = MixedSinker::<P010>::new(16, 8).with_rgb(&mut rgb).unwrap();
-  p010_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  p010_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
 
   for px in rgb.chunks(3) {
     assert!(px[0].abs_diff(128) <= 1);
@@ -397,7 +397,7 @@ fn p010_rgb_u16_only_native_depth_gray() {
   let mut sink = MixedSinker::<P010>::new(16, 8)
     .with_rgb_u16(&mut rgb)
     .unwrap();
-  p010_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  p010_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
 
   for px in rgb.chunks(3) {
     assert!(px[0].abs_diff(512) <= 1, "got {px:?}");
@@ -429,7 +429,7 @@ fn p010_rgb_u8_and_u16_both_populated() {
     .unwrap()
     .with_rgb_u16(&mut rgb_u16)
     .unwrap();
-  p010_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  p010_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
 
   assert!(rgb_u8.iter().all(|&c| c == 255));
   assert!(rgb_u16.iter().all(|&c| c == 1023));
@@ -451,7 +451,7 @@ fn p010_luma_downshifts_to_8bit() {
   let mut sink = MixedSinker::<P010>::new(16, 8)
     .with_luma(&mut luma)
     .unwrap();
-  p010_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  p010_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
 
   assert!(luma.iter().all(|&l| l == 128));
 }
@@ -486,8 +486,8 @@ fn p010_matches_yuv420p10_mixed_sinker_with_shifted_samples() {
   let mut s_p010 = MixedSinker::<P010>::new(w as usize, h as usize)
     .with_rgb(&mut rgb_p010)
     .unwrap();
-  yuv420p10_to(&src_p10, true, ColorMatrix::Bt709, &mut s_yuv).unwrap();
-  p010_to(&src_p010, true, ColorMatrix::Bt709, &mut s_p010).unwrap();
+  yuv420p10_to(&src_p10, true, KernelMatrix::Bt709, &mut s_yuv).unwrap();
+  p010_to(&src_p010, true, KernelMatrix::Bt709, &mut s_p010).unwrap();
   assert_eq!(rgb_yuv, rgb_p010);
 }
 
@@ -527,7 +527,7 @@ fn p010_with_simd_false_matches_with_simd_true() {
     .unwrap()
     .with_rgb_u16(&mut rgb_u16_scalar)
     .unwrap();
-  p010_to(&src, false, ColorMatrix::Bt709, &mut s_scalar).unwrap();
+  p010_to(&src, false, KernelMatrix::Bt709, &mut s_scalar).unwrap();
 
   let mut rgb_simd = std::vec![0u8; 64 * 16 * 3];
   let mut rgb_u16_simd = std::vec![0u16; 64 * 16 * 3];
@@ -536,7 +536,7 @@ fn p010_with_simd_false_matches_with_simd_true() {
     .unwrap()
     .with_rgb_u16(&mut rgb_u16_simd)
     .unwrap();
-  p010_to(&src, false, ColorMatrix::Bt709, &mut s_simd).unwrap();
+  p010_to(&src, false, KernelMatrix::Bt709, &mut s_simd).unwrap();
 
   assert_eq!(rgb_scalar, rgb_simd);
   assert_eq!(rgb_u16_scalar, rgb_u16_simd);
@@ -560,7 +560,7 @@ fn p010_rgba_u16_only_native_depth_gray_with_opaque_alpha() {
   let mut sink = MixedSinker::<P010>::new(16, 8)
     .with_rgba_u16(&mut rgba)
     .unwrap();
-  p010_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  p010_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
 
   for px in rgba.chunks(4) {
     assert!(px[0].abs_diff(512) <= 1, "got {px:?}");
@@ -608,7 +608,7 @@ fn yuv420p10_rgb_scratch_alloc_failure_leaves_outputs_untouched() {
     .unwrap();
 
   super::super::super::arm_rgb_scratch_alloc_failure();
-  let err = yuv420p10_to(&src, false, ColorMatrix::Bt601, &mut sink).unwrap_err();
+  let err = yuv420p10_to(&src, false, KernelMatrix::Bt601, &mut sink).unwrap_err();
   drop(sink);
 
   assert!(
@@ -651,7 +651,7 @@ fn p010_rgb_scratch_alloc_failure_leaves_outputs_untouched() {
     .unwrap();
 
   super::super::super::arm_rgb_scratch_alloc_failure();
-  let err = p010_to(&src, false, ColorMatrix::Bt601, &mut sink).unwrap_err();
+  let err = p010_to(&src, false, KernelMatrix::Bt601, &mut sink).unwrap_err();
   drop(sink);
 
   assert!(

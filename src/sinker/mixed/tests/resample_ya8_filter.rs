@@ -46,7 +46,7 @@
 //! the `gray`-solo build.
 
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   frame::Ya8Frame,
   resample::{
     CatmullRom, FilterKernel, FilterStream, FilteredResampler, Lanczos3, ResampleError, Resampler,
@@ -56,7 +56,7 @@ use crate::{
   source::{Ya8, ya8_to},
 };
 
-const M: ColorMatrix = ColorMatrix::Bt709;
+const M: KernelMatrix = KernelMatrix::Bt709;
 const FR: bool = true;
 /// Limited (studio) range — exercises native-Y luma against the range-dependent
 /// `rgb_to_luma*` it must NOT use.

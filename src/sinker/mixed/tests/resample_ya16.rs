@@ -33,7 +33,7 @@
 //!   the publicly-constructible `Ya16Row`).
 
 use crate::{
-  ColorMatrix, PixelSink,
+  KernelMatrix, PixelSink,
   frame::{Ya16BeFrame, Ya16Frame},
   resample::{AreaResampler, ResampleError},
   sinker::{AlphaMode, MixedSinker, MixedSinkerError},
@@ -46,7 +46,7 @@ const FR: bool = true;
 /// Limited (studio) range — exercises the native-Y luma path against the
 /// range-dependent `rgb_to_luma*` it must NOT use.
 const FR_LIMITED: bool = false;
-const M: ColorMatrix = ColorMatrix::Bt709;
+const M: KernelMatrix = KernelMatrix::Bt709;
 
 /// Re-encode a host-native u16 slice as LE-encoded wire byte storage (the
 /// `ya16le` plane contract); recovered via `u16::from_le`.
@@ -349,7 +349,7 @@ fn smpte240m_native_luma_is_y_not_matrix_derived() {
   // resampled luma_u16 must equal the binned-Y R channel — NOT the matrix
   // derivation. Pick a uniform-per-block Y near the worst-case so the
   // matrix path would visibly diverge.
-  const SM: ColorMatrix = ColorMatrix::Smpte240m;
+  const SM: KernelMatrix = KernelMatrix::Smpte240m;
   let mut packed = std::vec![0u16; SRC * SRC * 2];
   for (i, px) in packed.chunks_exact_mut(2).enumerate() {
     // Y constant within each 2x2 block so the block mean is exactly Y; the

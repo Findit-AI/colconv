@@ -5,7 +5,7 @@
 //! with the 12 active bits in the high 12 bits (`[15:4]`). The kernel
 //! applies SMPTE ST 428-1 inverse-OETF, a 3×3 XYZ→target-RGB matmul, the
 //! sRGB-shape OETF, and finally `[0, 255]` rescale + u8 narrow. We
-//! benchmark the LE path (`BE = false`) with `DcpTargetGamut::Rec709`
+//! benchmark the LE path (`BE = false`) with `KernelGamut::Rec709`
 //! as a representative; the matrix dim sits behind a runtime argument
 //! so the kernel shape doesn't change across gamuts.
 //!
@@ -15,7 +15,7 @@
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;
 
-use pixon::{DcpTargetGamut, bench_internals::xyz12_to_rgb_row};
+use pixon::{KernelGamut, bench_internals::xyz12_to_rgb_row};
 
 /// Fills a `u16` buffer with deterministic XYZ12-packed pseudo-random
 /// samples — 12-bit values shifted into the high 12 bits (low 4 bits
@@ -30,7 +30,7 @@ fn fill_pseudo_random_xyz12(buf: &mut [u16], seed: u32) {
 
 fn bench(c: &mut Criterion) {
   const WIDTHS: &[usize] = &[1280, 1920, 3840];
-  const GAMUT: DcpTargetGamut = DcpTargetGamut::Rec709;
+  const GAMUT: KernelGamut = KernelGamut::Rec709;
 
   let mut group = c.benchmark_group("xyz12_to_rgb_row");
 

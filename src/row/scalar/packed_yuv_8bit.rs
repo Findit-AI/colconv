@@ -27,7 +27,7 @@ pub(crate) fn yuv422_packed_to_rgb_or_rgba_row<const Y_LSB: bool, const SWAP_UV:
   packed: &[u8],
   out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   alpha: bool,
 ) {
@@ -98,7 +98,7 @@ pub(crate) fn yuyv422_to_rgb_row(
   packed: &[u8],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   yuv422_packed_to_rgb_or_rgba_row::<true, false>(
@@ -112,7 +112,7 @@ pub(crate) fn yuyv422_to_rgba_row(
   packed: &[u8],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   yuv422_packed_to_rgb_or_rgba_row::<true, false>(
@@ -127,7 +127,7 @@ pub(crate) fn uyvy422_to_rgb_row(
   packed: &[u8],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   yuv422_packed_to_rgb_or_rgba_row::<false, false>(
@@ -141,7 +141,7 @@ pub(crate) fn uyvy422_to_rgba_row(
   packed: &[u8],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   yuv422_packed_to_rgb_or_rgba_row::<false, false>(
@@ -156,7 +156,7 @@ pub(crate) fn yvyu422_to_rgb_row(
   packed: &[u8],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   yuv422_packed_to_rgb_or_rgba_row::<true, true>(packed, rgb_out, width, matrix, full_range, false);
@@ -168,7 +168,7 @@ pub(crate) fn yvyu422_to_rgba_row(
   packed: &[u8],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   yuv422_packed_to_rgb_or_rgba_row::<true, true>(packed, rgba_out, width, matrix, full_range, true);
@@ -205,7 +205,7 @@ pub(crate) fn yuv422_packed_to_hsv_row<const Y_LSB: bool, const SWAP_UV: bool>(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert_eq!(width & 1, 0, "packed YUV 4:2:2 requires even width");
@@ -275,7 +275,7 @@ pub(crate) fn yuyv422_to_hsv_row(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   yuv422_packed_to_hsv_row::<true, false>(packed, h_out, s_out, v_out, width, matrix, full_range);
@@ -291,7 +291,7 @@ pub(crate) fn uyvy422_to_hsv_row(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   yuv422_packed_to_hsv_row::<false, false>(packed, h_out, s_out, v_out, width, matrix, full_range);
@@ -308,7 +308,7 @@ pub(crate) fn yvyu422_to_hsv_row(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   yuv422_packed_to_hsv_row::<true, true>(packed, h_out, s_out, v_out, width, matrix, full_range);

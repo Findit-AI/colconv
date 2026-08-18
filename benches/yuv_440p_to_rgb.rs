@@ -14,7 +14,7 @@ use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_m
 use std::hint::black_box;
 
 use pixon::{
-  ColorMatrix,
+  KernelMatrix,
   frame::Yuv440pFrame,
   sinker::MixedSinker,
   source::{Yuv440p, yuv440p_to},
@@ -32,7 +32,7 @@ fn fill_pseudo_random(buf: &mut [u8], seed: u32) {
 
 fn bench(c: &mut Criterion) {
   const WIDTHS: &[u32] = &[1280, 1920, 3840];
-  const MATRIX: ColorMatrix = ColorMatrix::Bt709;
+  const MATRIX: KernelMatrix = KernelMatrix::Bt709;
   const FULL_RANGE: bool = false;
 
   let mut group = c.benchmark_group("yuv440p_to_rgb");

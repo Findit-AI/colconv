@@ -556,7 +556,7 @@ fn fractional_ratio_matches_direct_then_bin() {
   let canonical = direct_rgba(&indices, &palette);
   let mut rgba_ref = std::vec![0u8; F * F * 4];
   {
-    use crate::{ColorMatrix, frame::RgbaFrame, source::rgba_to};
+    use crate::{KernelMatrix, frame::RgbaFrame, source::rgba_to};
     let rsrc = RgbaFrame::new(&canonical, SRC as u32, SRC as u32, (SRC * 4) as u32);
     let mut sink = MixedSinker::<crate::source::Rgba, AreaResampler>::with_resampler(
       SRC,
@@ -566,7 +566,7 @@ fn fractional_ratio_matches_direct_then_bin() {
     .unwrap()
     .with_rgba(&mut rgba_ref)
     .unwrap();
-    rgba_to(&rsrc, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    rgba_to(&rsrc, true, KernelMatrix::Bt709, &mut sink).unwrap();
   }
   assert_eq!(rgba, rgba_ref, "Pal8 8->3 != packed-RGBA 8->3 of canonical");
 }

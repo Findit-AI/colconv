@@ -1,7 +1,7 @@
 use super::super::*;
 
 #[cfg(feature = "yuv-planar")]
-fn check_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_equivalence(width: usize, matrix: KernelMatrix, full_range: bool) {
   let y: std::vec::Vec<u8> = (0..width).map(|i| ((i * 37 + 11) & 0xFF) as u8).collect();
   let u: std::vec::Vec<u8> = (0..width / 2)
     .map(|i| ((i * 53 + 23) & 0xFF) as u8)
@@ -37,12 +37,12 @@ fn avx2_matches_scalar_all_matrices_32() {
     return;
   }
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       check_equivalence(32, m, full);
@@ -56,9 +56,9 @@ fn avx2_matches_scalar_width_64() {
   if !std::arch::is_x86_feature_detected!("avx2") {
     return;
   }
-  check_equivalence(64, ColorMatrix::Bt601, true);
-  check_equivalence(64, ColorMatrix::Bt709, false);
-  check_equivalence(64, ColorMatrix::YCgCo, true);
+  check_equivalence(64, KernelMatrix::Bt601, true);
+  check_equivalence(64, KernelMatrix::Bt709, false);
+  check_equivalence(64, KernelMatrix::YCgCo, true);
 }
 
 #[cfg(feature = "yuv-planar")]
@@ -67,7 +67,7 @@ fn avx2_matches_scalar_width_1920() {
   if !std::arch::is_x86_feature_detected!("avx2") {
     return;
   }
-  check_equivalence(1920, ColorMatrix::Bt709, false);
+  check_equivalence(1920, KernelMatrix::Bt709, false);
 }
 
 #[cfg(feature = "yuv-planar")]
@@ -78,7 +78,7 @@ fn avx2_matches_scalar_odd_tail_widths() {
   }
   // Widths that leave a non‑trivial scalar tail (non‑multiple of 32).
   for w in [34usize, 46, 62, 1922] {
-    check_equivalence(w, ColorMatrix::Bt601, false);
+    check_equivalence(w, KernelMatrix::Bt601, false);
   }
 }
 
@@ -90,7 +90,7 @@ fn avx2_matches_scalar_odd_tail_widths() {
 // dispatcher would pick on the current runner.
 
 #[cfg(feature = "yuv-planar")]
-fn check_rgba_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_rgba_equivalence(width: usize, matrix: KernelMatrix, full_range: bool) {
   let y: std::vec::Vec<u8> = (0..width).map(|i| ((i * 37 + 11) & 0xFF) as u8).collect();
   let u: std::vec::Vec<u8> = (0..width / 2)
     .map(|i| ((i * 53 + 23) & 0xFF) as u8)
@@ -128,12 +128,12 @@ fn avx2_rgba_matches_scalar_all_matrices_32() {
     return;
   }
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       check_rgba_equivalence(32, m, full);
@@ -147,9 +147,9 @@ fn avx2_rgba_matches_scalar_width_64() {
   if !std::arch::is_x86_feature_detected!("avx2") {
     return;
   }
-  check_rgba_equivalence(64, ColorMatrix::Bt601, true);
-  check_rgba_equivalence(64, ColorMatrix::Bt709, false);
-  check_rgba_equivalence(64, ColorMatrix::YCgCo, true);
+  check_rgba_equivalence(64, KernelMatrix::Bt601, true);
+  check_rgba_equivalence(64, KernelMatrix::Bt709, false);
+  check_rgba_equivalence(64, KernelMatrix::YCgCo, true);
 }
 
 #[cfg(feature = "yuv-planar")]
@@ -158,7 +158,7 @@ fn avx2_rgba_matches_scalar_width_1920() {
   if !std::arch::is_x86_feature_detected!("avx2") {
     return;
   }
-  check_rgba_equivalence(1920, ColorMatrix::Bt709, false);
+  check_rgba_equivalence(1920, KernelMatrix::Bt709, false);
 }
 
 #[cfg(feature = "yuv-planar")]
@@ -169,14 +169,14 @@ fn avx2_rgba_matches_scalar_odd_tail_widths() {
   }
   // Widths that leave a non‑trivial scalar tail (non‑multiple of 32).
   for w in [34usize, 46, 62, 1922] {
-    check_rgba_equivalence(w, ColorMatrix::Bt601, false);
+    check_rgba_equivalence(w, KernelMatrix::Bt601, false);
   }
 }
 
 // ---- nv12_to_rgb_row equivalence ------------------------------------
 
 #[cfg(feature = "yuv-semi-planar")]
-fn check_nv12_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_nv12_equivalence(width: usize, matrix: KernelMatrix, full_range: bool) {
   let y: std::vec::Vec<u8> = (0..width).map(|i| ((i * 37 + 11) & 0xFF) as u8).collect();
   let uv: std::vec::Vec<u8> = (0..width / 2)
     .flat_map(|i| [((i * 53 + 23) & 0xFF) as u8, ((i * 71 + 91) & 0xFF) as u8])
@@ -195,7 +195,7 @@ fn check_nv12_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
 }
 
 #[cfg(all(feature = "yuv-planar", feature = "yuv-semi-planar"))]
-fn check_nv12_matches_yuv420p(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_nv12_matches_yuv420p(width: usize, matrix: KernelMatrix, full_range: bool) {
   let y: std::vec::Vec<u8> = (0..width).map(|i| ((i * 37 + 11) & 0xFF) as u8).collect();
   let u: std::vec::Vec<u8> = (0..width / 2)
     .map(|i| ((i * 53 + 23) & 0xFF) as u8)
@@ -224,12 +224,12 @@ fn avx2_nv12_matches_scalar_all_matrices_32() {
     return;
   }
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       check_nv12_equivalence(32, m, full);
@@ -244,7 +244,7 @@ fn avx2_nv12_matches_scalar_widths() {
     return;
   }
   for w in [64usize, 1920, 34, 46, 62, 1922] {
-    check_nv12_equivalence(w, ColorMatrix::Bt709, false);
+    check_nv12_equivalence(w, KernelMatrix::Bt709, false);
   }
 }
 
@@ -255,15 +255,15 @@ fn avx2_nv12_matches_yuv420p() {
     return;
   }
   for w in [32usize, 62, 128, 1920] {
-    check_nv12_matches_yuv420p(w, ColorMatrix::Bt709, false);
-    check_nv12_matches_yuv420p(w, ColorMatrix::YCgCo, true);
+    check_nv12_matches_yuv420p(w, KernelMatrix::Bt709, false);
+    check_nv12_matches_yuv420p(w, KernelMatrix::YCgCo, true);
   }
 }
 
 // ---- nv24_to_rgb_row / nv42_to_rgb_row equivalence ------------------
 
 #[cfg(feature = "yuv-semi-planar")]
-fn check_nv24_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_nv24_equivalence(width: usize, matrix: KernelMatrix, full_range: bool) {
   let y: std::vec::Vec<u8> = (0..width).map(|i| ((i * 37 + 11) & 0xFF) as u8).collect();
   let uv: std::vec::Vec<u8> = (0..width)
     .flat_map(|i| [((i * 53 + 23) & 0xFF) as u8, ((i * 71 + 91) & 0xFF) as u8])
@@ -282,7 +282,7 @@ fn check_nv24_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
 }
 
 #[cfg(feature = "yuv-semi-planar")]
-fn check_nv42_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_nv42_equivalence(width: usize, matrix: KernelMatrix, full_range: bool) {
   let y: std::vec::Vec<u8> = (0..width).map(|i| ((i * 37 + 11) & 0xFF) as u8).collect();
   let vu: std::vec::Vec<u8> = (0..width)
     .flat_map(|i| [((i * 53 + 23) & 0xFF) as u8, ((i * 71 + 91) & 0xFF) as u8])
@@ -307,12 +307,12 @@ fn avx2_nv24_matches_scalar_all_matrices_32() {
     return;
   }
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       check_nv24_equivalence(32, m, full);
@@ -329,7 +329,7 @@ fn avx2_nv24_matches_scalar_widths() {
   // 32 / 64 → main loop; 33 / 65 → main + 1-px tail; 31 → pure
   // scalar tail (< block size); 1920 → wide.
   for w in [31usize, 32, 33, 63, 64, 65, 1920, 1921] {
-    check_nv24_equivalence(w, ColorMatrix::Bt709, false);
+    check_nv24_equivalence(w, KernelMatrix::Bt709, false);
   }
 }
 
@@ -340,12 +340,12 @@ fn avx2_nv42_matches_scalar_all_matrices_32() {
     return;
   }
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       check_nv42_equivalence(32, m, full);
@@ -360,14 +360,14 @@ fn avx2_nv42_matches_scalar_widths() {
     return;
   }
   for w in [31usize, 32, 33, 63, 64, 65, 1920, 1921] {
-    check_nv42_equivalence(w, ColorMatrix::Bt709, false);
+    check_nv42_equivalence(w, KernelMatrix::Bt709, false);
   }
 }
 
 // ---- nv24_to_rgba_row / nv42_to_rgba_row equivalence ----------------
 
 #[cfg(feature = "yuv-semi-planar")]
-fn check_nv24_rgba_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_nv24_rgba_equivalence(width: usize, matrix: KernelMatrix, full_range: bool) {
   let y: std::vec::Vec<u8> = (0..width).map(|i| ((i * 37 + 11) & 0xFF) as u8).collect();
   let uv: std::vec::Vec<u8> = (0..width)
     .flat_map(|i| [((i * 53 + 23) & 0xFF) as u8, ((i * 71 + 91) & 0xFF) as u8])
@@ -396,7 +396,7 @@ fn check_nv24_rgba_equivalence(width: usize, matrix: ColorMatrix, full_range: bo
 }
 
 #[cfg(feature = "yuv-semi-planar")]
-fn check_nv42_rgba_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_nv42_rgba_equivalence(width: usize, matrix: KernelMatrix, full_range: bool) {
   let y: std::vec::Vec<u8> = (0..width).map(|i| ((i * 37 + 11) & 0xFF) as u8).collect();
   let vu: std::vec::Vec<u8> = (0..width)
     .flat_map(|i| [((i * 53 + 23) & 0xFF) as u8, ((i * 71 + 91) & 0xFF) as u8])
@@ -431,12 +431,12 @@ fn avx2_nv24_rgba_matches_scalar_all_matrices_32() {
     return;
   }
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       check_nv24_rgba_equivalence(32, m, full);
@@ -451,7 +451,7 @@ fn avx2_nv24_rgba_matches_scalar_widths() {
     return;
   }
   for w in [31usize, 32, 33, 63, 64, 65, 1920, 1921] {
-    check_nv24_rgba_equivalence(w, ColorMatrix::Bt709, false);
+    check_nv24_rgba_equivalence(w, KernelMatrix::Bt709, false);
   }
 }
 
@@ -462,12 +462,12 @@ fn avx2_nv42_rgba_matches_scalar_all_matrices_32() {
     return;
   }
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       check_nv42_rgba_equivalence(32, m, full);
@@ -482,14 +482,14 @@ fn avx2_nv42_rgba_matches_scalar_widths() {
     return;
   }
   for w in [31usize, 32, 33, 63, 64, 65, 1920, 1921] {
-    check_nv42_rgba_equivalence(w, ColorMatrix::Bt709, false);
+    check_nv42_rgba_equivalence(w, KernelMatrix::Bt709, false);
   }
 }
 
 // ---- yuv_444_to_rgb_row equivalence ---------------------------------
 
 #[cfg(feature = "yuv-planar")]
-fn check_yuv_444_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_yuv_444_equivalence(width: usize, matrix: KernelMatrix, full_range: bool) {
   let y: std::vec::Vec<u8> = (0..width).map(|i| ((i * 37 + 11) & 0xFF) as u8).collect();
   let u: std::vec::Vec<u8> = (0..width).map(|i| ((i * 53 + 23) & 0xFF) as u8).collect();
   let v: std::vec::Vec<u8> = (0..width).map(|i| ((i * 71 + 91) & 0xFF) as u8).collect();
@@ -513,12 +513,12 @@ fn avx2_yuv_444_matches_scalar_all_matrices_32() {
     return;
   }
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       check_yuv_444_equivalence(32, m, full);
@@ -535,14 +535,14 @@ fn avx2_yuv_444_matches_scalar_widths() {
   // Widths straddling the 32-pixel AVX2 block and the 16-pixel
   // SSE4.1 tail; odd widths validate the 4:4:4 no-parity contract.
   for w in [31usize, 32, 33, 63, 64, 65, 1920, 1921] {
-    check_yuv_444_equivalence(w, ColorMatrix::Bt709, false);
+    check_yuv_444_equivalence(w, KernelMatrix::Bt709, false);
   }
 }
 
 // ---- yuv_444_to_rgba_row equivalence --------------------------------
 
 #[cfg(feature = "yuv-planar")]
-fn check_yuv_444_rgba_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_yuv_444_rgba_equivalence(width: usize, matrix: KernelMatrix, full_range: bool) {
   let y: std::vec::Vec<u8> = (0..width).map(|i| ((i * 37 + 11) & 0xFF) as u8).collect();
   let u: std::vec::Vec<u8> = (0..width).map(|i| ((i * 53 + 23) & 0xFF) as u8).collect();
   let v: std::vec::Vec<u8> = (0..width).map(|i| ((i * 71 + 91) & 0xFF) as u8).collect();
@@ -576,12 +576,12 @@ fn avx2_yuv_444_rgba_matches_scalar_all_matrices_32() {
     return;
   }
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       check_yuv_444_rgba_equivalence(32, m, full);
@@ -596,14 +596,14 @@ fn avx2_yuv_444_rgba_matches_scalar_widths() {
     return;
   }
   for w in [31usize, 32, 33, 63, 64, 65, 1920, 1921] {
-    check_yuv_444_rgba_equivalence(w, ColorMatrix::Bt709, false);
+    check_yuv_444_rgba_equivalence(w, KernelMatrix::Bt709, false);
   }
 }
 
 #[cfg(feature = "yuva")]
 fn check_yuv_444_rgba_with_alpha_src_equivalence(
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   alpha_seed: usize,
 ) {
@@ -652,12 +652,12 @@ fn avx2_yuva444p_rgba_matches_scalar_all_matrices() {
     return;
   }
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       check_yuv_444_rgba_with_alpha_src_equivalence(32, m, full, 89);
@@ -672,10 +672,10 @@ fn avx2_yuva444p_rgba_matches_scalar_widths_and_alpha() {
     return;
   }
   for w in [32usize, 33, 47, 63, 1920, 1922] {
-    check_yuv_444_rgba_with_alpha_src_equivalence(w, ColorMatrix::Bt709, true, 89);
+    check_yuv_444_rgba_with_alpha_src_equivalence(w, KernelMatrix::Bt709, true, 89);
   }
   for seed in [13usize, 41, 127, 211] {
-    check_yuv_444_rgba_with_alpha_src_equivalence(32, ColorMatrix::Bt601, false, seed);
+    check_yuv_444_rgba_with_alpha_src_equivalence(32, KernelMatrix::Bt601, false, seed);
   }
 }
 
@@ -684,7 +684,7 @@ fn avx2_yuva444p_rgba_matches_scalar_widths_and_alpha() {
 #[cfg(feature = "yuv-planar")]
 fn check_yuv_444p_n_equivalence<const BITS: u32>(
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   let max_val = (1u16 << BITS) - 1;
@@ -734,7 +734,7 @@ fn avx2_yuv_444p9_matches_scalar_all_matrices() {
   if !std::arch::is_x86_feature_detected!("avx2") {
     return;
   }
-  for m in [ColorMatrix::Bt709, ColorMatrix::Bt2020Ncl] {
+  for m in [KernelMatrix::Bt709, KernelMatrix::Bt2020Ncl] {
     for full in [true, false] {
       check_yuv_444p_n_equivalence::<9>(32, m, full);
     }
@@ -748,12 +748,12 @@ fn avx2_yuv_444p10_matches_scalar_all_matrices() {
     return;
   }
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       check_yuv_444p_n_equivalence::<10>(32, m, full);
@@ -767,7 +767,7 @@ fn avx2_yuv_444p12_matches_scalar_all_matrices() {
   if !std::arch::is_x86_feature_detected!("avx2") {
     return;
   }
-  for m in [ColorMatrix::Bt709, ColorMatrix::Bt2020Ncl] {
+  for m in [KernelMatrix::Bt709, KernelMatrix::Bt2020Ncl] {
     for full in [true, false] {
       check_yuv_444p_n_equivalence::<12>(32, m, full);
     }
@@ -780,7 +780,7 @@ fn avx2_yuv_444p14_matches_scalar_all_matrices() {
   if !std::arch::is_x86_feature_detected!("avx2") {
     return;
   }
-  for m in [ColorMatrix::Bt709, ColorMatrix::Bt2020Ncl] {
+  for m in [KernelMatrix::Bt709, KernelMatrix::Bt2020Ncl] {
     for full in [true, false] {
       check_yuv_444p_n_equivalence::<14>(32, m, full);
     }
@@ -794,12 +794,12 @@ fn avx2_yuv_444p_n_matches_scalar_widths() {
     return;
   }
   for w in [1usize, 3, 15, 17, 31, 32, 33, 63, 64, 65, 1920, 1921] {
-    check_yuv_444p_n_equivalence::<10>(w, ColorMatrix::Bt709, false);
+    check_yuv_444p_n_equivalence::<10>(w, KernelMatrix::Bt709, false);
   }
 }
 
 #[cfg(feature = "yuv-planar")]
-fn check_yuv_444p16_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_yuv_444p16_equivalence(width: usize, matrix: KernelMatrix, full_range: bool) {
   let y: std::vec::Vec<u16> = (0..width).map(|i| (i * 2027 + 11) as u16).collect();
   let u: std::vec::Vec<u16> = (0..width).map(|i| (i * 2671 + 23) as u16).collect();
   let v: std::vec::Vec<u16> = (0..width).map(|i| (i * 3329 + 91) as u16).collect();
@@ -833,12 +833,12 @@ fn avx2_yuv_444p16_matches_scalar_all_matrices() {
     return;
   }
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       check_yuv_444p16_equivalence(32, m, full);
@@ -853,7 +853,7 @@ fn avx2_yuv_444p16_matches_scalar_widths() {
     return;
   }
   for w in [1usize, 7, 8, 15, 31, 32, 33, 63, 64, 65, 1920, 1921] {
-    check_yuv_444p16_equivalence(w, ColorMatrix::Bt709, false);
+    check_yuv_444p16_equivalence(w, KernelMatrix::Bt709, false);
   }
 }
 
@@ -888,7 +888,7 @@ fn avx2_swap_matches_scalar() {
 // ---- nv21_to_rgb_row equivalence ------------------------------------
 
 #[cfg(feature = "yuv-semi-planar")]
-fn check_nv21_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_nv21_equivalence(width: usize, matrix: KernelMatrix, full_range: bool) {
   let y: std::vec::Vec<u8> = (0..width).map(|i| ((i * 37 + 11) & 0xFF) as u8).collect();
   let vu: std::vec::Vec<u8> = (0..width / 2)
     .flat_map(|i| [((i * 53 + 23) & 0xFF) as u8, ((i * 71 + 91) & 0xFF) as u8])
@@ -907,7 +907,7 @@ fn check_nv21_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
 }
 
 #[cfg(feature = "yuv-semi-planar")]
-fn check_nv21_matches_nv12_swapped(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_nv21_matches_nv12_swapped(width: usize, matrix: KernelMatrix, full_range: bool) {
   let y: std::vec::Vec<u8> = (0..width).map(|i| ((i * 37 + 11) & 0xFF) as u8).collect();
   let uv: std::vec::Vec<u8> = (0..width / 2)
     .flat_map(|i| [((i * 53 + 23) & 0xFF) as u8, ((i * 71 + 91) & 0xFF) as u8])
@@ -937,12 +937,12 @@ fn nv21_avx2_matches_scalar_all_matrices_16() {
     return;
   }
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       check_nv21_equivalence(16, m, full);
@@ -957,7 +957,7 @@ fn nv21_avx2_matches_scalar_widths() {
     return;
   }
   for w in [32usize, 1920, 18, 30, 34, 1922] {
-    check_nv21_equivalence(w, ColorMatrix::Bt709, false);
+    check_nv21_equivalence(w, KernelMatrix::Bt709, false);
   }
 }
 
@@ -968,15 +968,15 @@ fn nv21_avx2_matches_nv12_swapped() {
     return;
   }
   for w in [16usize, 30, 64, 1920] {
-    check_nv21_matches_nv12_swapped(w, ColorMatrix::Bt709, false);
-    check_nv21_matches_nv12_swapped(w, ColorMatrix::YCgCo, true);
+    check_nv21_matches_nv12_swapped(w, KernelMatrix::Bt709, false);
+    check_nv21_matches_nv12_swapped(w, KernelMatrix::YCgCo, true);
   }
 }
 
 // ---- nv12_to_rgba_row / nv21_to_rgba_row equivalence ----------------
 
 #[cfg(feature = "yuv-semi-planar")]
-fn check_nv12_rgba_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_nv12_rgba_equivalence(width: usize, matrix: KernelMatrix, full_range: bool) {
   let y: std::vec::Vec<u8> = (0..width).map(|i| ((i * 37 + 11) & 0xFF) as u8).collect();
   let uv: std::vec::Vec<u8> = (0..width / 2)
     .flat_map(|i| [((i * 53 + 23) & 0xFF) as u8, ((i * 71 + 91) & 0xFF) as u8])
@@ -1005,7 +1005,7 @@ fn check_nv12_rgba_equivalence(width: usize, matrix: ColorMatrix, full_range: bo
 }
 
 #[cfg(feature = "yuv-semi-planar")]
-fn check_nv21_rgba_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_nv21_rgba_equivalence(width: usize, matrix: KernelMatrix, full_range: bool) {
   let y: std::vec::Vec<u8> = (0..width).map(|i| ((i * 37 + 11) & 0xFF) as u8).collect();
   let vu: std::vec::Vec<u8> = (0..width / 2)
     .flat_map(|i| [((i * 53 + 23) & 0xFF) as u8, ((i * 71 + 91) & 0xFF) as u8])
@@ -1034,7 +1034,7 @@ fn check_nv21_rgba_equivalence(width: usize, matrix: ColorMatrix, full_range: bo
 }
 
 #[cfg(all(feature = "yuv-planar", feature = "yuv-semi-planar"))]
-fn check_nv12_rgba_matches_yuv420p_rgba(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_nv12_rgba_matches_yuv420p_rgba(width: usize, matrix: KernelMatrix, full_range: bool) {
   let y: std::vec::Vec<u8> = (0..width).map(|i| ((i * 37 + 11) & 0xFF) as u8).collect();
   let u: std::vec::Vec<u8> = (0..width / 2)
     .map(|i| ((i * 53 + 23) & 0xFF) as u8)
@@ -1063,12 +1063,12 @@ fn nv12_avx2_rgba_matches_scalar_all_matrices_32() {
     return;
   }
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       check_nv12_rgba_equivalence(32, m, full);
@@ -1083,7 +1083,7 @@ fn nv12_avx2_rgba_matches_scalar_widths() {
     return;
   }
   for w in [34usize, 46, 62, 1920, 1922] {
-    check_nv12_rgba_equivalence(w, ColorMatrix::Bt601, false);
+    check_nv12_rgba_equivalence(w, KernelMatrix::Bt601, false);
   }
 }
 
@@ -1094,8 +1094,8 @@ fn nv12_avx2_rgba_matches_yuv420p_rgba_avx2() {
     return;
   }
   for w in [32usize, 64, 1920] {
-    check_nv12_rgba_matches_yuv420p_rgba(w, ColorMatrix::Bt709, false);
-    check_nv12_rgba_matches_yuv420p_rgba(w, ColorMatrix::YCgCo, true);
+    check_nv12_rgba_matches_yuv420p_rgba(w, KernelMatrix::Bt709, false);
+    check_nv12_rgba_matches_yuv420p_rgba(w, KernelMatrix::YCgCo, true);
   }
 }
 
@@ -1106,12 +1106,12 @@ fn nv21_avx2_rgba_matches_scalar_all_matrices_32() {
     return;
   }
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       check_nv21_rgba_equivalence(32, m, full);
@@ -1126,7 +1126,7 @@ fn nv21_avx2_rgba_matches_scalar_widths() {
     return;
   }
   for w in [34usize, 46, 62, 1920, 1922] {
-    check_nv21_rgba_equivalence(w, ColorMatrix::Bt601, false);
+    check_nv21_rgba_equivalence(w, KernelMatrix::Bt601, false);
   }
 }
 
@@ -1138,7 +1138,7 @@ fn nv21_avx2_rgba_matches_scalar_widths() {
 // already lane-aligned). Width must be a multiple of 4.
 
 #[cfg(feature = "yuv-planar")]
-fn check_yuv_410_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_yuv_410_equivalence(width: usize, matrix: KernelMatrix, full_range: bool) {
   let y: std::vec::Vec<u8> = (0..width).map(|i| ((i * 37 + 11) & 0xFF) as u8).collect();
   let cw = width / 4;
   let u: std::vec::Vec<u8> = (0..cw).map(|i| ((i * 53 + 23) & 0xFF) as u8).collect();
@@ -1171,12 +1171,12 @@ fn yuv_410_avx2_matches_scalar_all_matrices_32() {
     return;
   }
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       check_yuv_410_equivalence(32, m, full);
@@ -1193,8 +1193,8 @@ fn yuv_410_avx2_matches_scalar_widths() {
   // Cover: pure-scalar (4, 8, 12, 16, 20, 28 — all < 32), exactly one
   // SIMD iter (32), SIMD + tail (36, 60), multi-iter (64, 96, 1920).
   for &w in &[4usize, 8, 12, 16, 20, 28, 32, 36, 60, 64, 96, 128, 1920] {
-    check_yuv_410_equivalence(w, ColorMatrix::Bt601, true);
-    check_yuv_410_equivalence(w, ColorMatrix::Bt709, false);
+    check_yuv_410_equivalence(w, KernelMatrix::Bt601, true);
+    check_yuv_410_equivalence(w, KernelMatrix::Bt709, false);
   }
 }
 
@@ -1205,13 +1205,13 @@ fn yuv_410_avx2_matches_scalar_bt2020() {
     return;
   }
   for &w in &[32usize, 60, 64, 1920] {
-    check_yuv_410_equivalence(w, ColorMatrix::Bt2020Ncl, false);
-    check_yuv_410_equivalence(w, ColorMatrix::Bt2020Ncl, true);
+    check_yuv_410_equivalence(w, KernelMatrix::Bt2020Ncl, false);
+    check_yuv_410_equivalence(w, KernelMatrix::Bt2020Ncl, true);
   }
 }
 
 #[cfg(feature = "yuv-planar")]
-fn check_yuv_410_rgba_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_yuv_410_rgba_equivalence(width: usize, matrix: KernelMatrix, full_range: bool) {
   let y: std::vec::Vec<u8> = (0..width).map(|i| ((i * 37 + 11) & 0xFF) as u8).collect();
   let cw = width / 4;
   let u: std::vec::Vec<u8> = (0..cw).map(|i| ((i * 53 + 23) & 0xFF) as u8).collect();
@@ -1248,8 +1248,8 @@ fn yuv_410_avx2_rgba_matches_scalar_widths() {
     return;
   }
   for &w in &[4usize, 16, 32, 36, 64, 128] {
-    check_yuv_410_rgba_equivalence(w, ColorMatrix::Bt601, true);
-    check_yuv_410_rgba_equivalence(w, ColorMatrix::YCgCo, false);
+    check_yuv_410_rgba_equivalence(w, KernelMatrix::Bt601, true);
+    check_yuv_410_rgba_equivalence(w, KernelMatrix::YCgCo, false);
   }
 }
 
@@ -1260,7 +1260,7 @@ fn yuv_410_avx2_rgba_matches_scalar_widths() {
 // the dispatcher would pick on the current runner.
 
 #[cfg(feature = "yuv-planar")]
-fn check_yuv411_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_yuv411_equivalence(width: usize, matrix: KernelMatrix, full_range: bool) {
   // FFmpeg `AV_PIX_FMT_YUV411P`: chroma row = `width.div_ceil(4)`.
   assert!(width > 0);
   let chroma_w = width.div_ceil(4);
@@ -1301,12 +1301,12 @@ fn avx2_yuv411_matches_scalar_all_matrices_32() {
   }
   // Width 32 = exactly one AVX2 iteration with no scalar tail.
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       check_yuv411_equivalence(32, m, full);
@@ -1324,7 +1324,7 @@ fn avx2_yuv411_matches_scalar_tail_widths() {
   // Widths that leave a non-trivial scalar tail (not multiple of 32
   // but multiple of 4).
   for w in [4usize, 8, 12, 20, 28, 36, 44, 60, 100, 132, 252] {
-    check_yuv411_equivalence(w, ColorMatrix::Bt601, false);
+    check_yuv411_equivalence(w, KernelMatrix::Bt601, false);
   }
 }
 
@@ -1335,7 +1335,7 @@ fn avx2_yuv411_matches_scalar_width_1920() {
   if !std::arch::is_x86_feature_detected!("avx2") {
     return;
   }
-  check_yuv411_equivalence(1920, ColorMatrix::Bt709, false);
+  check_yuv411_equivalence(1920, KernelMatrix::Bt709, false);
 }
 
 #[cfg(feature = "yuv-planar")]
@@ -1350,8 +1350,8 @@ fn avx2_yuv411_matches_scalar_non_4_aligned_widths() {
   // scalar tail; larger non-4-aligned widths exercise the AVX2 32-pixel
   // SIMD body + partial-chroma scalar tail boundary.
   for w in [1usize, 2, 3, 5, 6, 7, 17, 31, 33, 47, 641] {
-    check_yuv411_equivalence(w, ColorMatrix::Bt601, true);
-    check_yuv411_equivalence(w, ColorMatrix::Bt709, false);
+    check_yuv411_equivalence(w, KernelMatrix::Bt601, true);
+    check_yuv411_equivalence(w, KernelMatrix::Bt709, false);
   }
 }
 
@@ -1363,7 +1363,7 @@ fn avx2_yuv411_rgba_matches_scalar_non_4_aligned_widths() {
     return;
   }
   for w in [1usize, 2, 3, 5, 6, 7, 17, 641] {
-    check_yuv411_rgba_equivalence(w, ColorMatrix::Bt601, true);
+    check_yuv411_rgba_equivalence(w, KernelMatrix::Bt601, true);
   }
 }
 
@@ -1394,10 +1394,10 @@ fn avx2_yuv411_chroma_fanout_low_high_split() {
   let v: std::vec::Vec<u8> = std::vec![230, 220, 210, 200, 40, 30, 20, 10];
 
   for &m in &[
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       let mut rgb_scalar = std::vec![0u8; width * 3];
@@ -1426,7 +1426,7 @@ fn avx2_yuv411_chroma_fanout_low_high_split() {
 }
 
 #[cfg(feature = "yuv-planar")]
-fn check_yuv411_rgba_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_yuv411_rgba_equivalence(width: usize, matrix: KernelMatrix, full_range: bool) {
   assert!(width > 0);
   let chroma_w = width.div_ceil(4);
   let y: std::vec::Vec<u8> = (0..width).map(|i| ((i * 37 + 11) & 0xFF) as u8).collect();
@@ -1458,10 +1458,10 @@ fn avx2_yuv411_rgba_matches_scalar_widths() {
     return;
   }
   for &m in &[
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       for &w in &[32usize, 64, 128, 256, 1920] {

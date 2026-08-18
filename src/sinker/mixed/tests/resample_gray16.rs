@@ -14,7 +14,7 @@
 //! high byte only, losing the low 8 bits of every sample.
 
 use crate::{
-  ColorMatrix, PixelSink,
+  KernelMatrix, PixelSink,
   frame::Gray16Frame,
   resample::{AreaResampler, ResampleError},
   sinker::{MixedSinker, MixedSinkerError},
@@ -25,7 +25,7 @@ const SRC: usize = 8;
 const OUT: usize = 4;
 // Gray is luma-only; the walker still threads a matrix / range through.
 const FR: bool = true;
-const M: ColorMatrix = ColorMatrix::Bt709;
+const M: KernelMatrix = KernelMatrix::Bt709;
 
 /// Re-encode a host-native u16 slice as LE-encoded byte storage (the
 /// `gray16le` plane contract). `gray16_to` recovers the logical values

@@ -22,7 +22,7 @@
 //! All kernels are const-generic over `BE: bool` for source endianness;
 //! the `BE = false` branch is a compile-time no-op.
 
-use crate::DcpTargetGamut;
+use crate::KernelGamut;
 
 use super::xyz12_constants::{
   INV_4095, OETF_POLY_COEFFS, OETF_POLY_DEGREE, OETF_POLY_SEG_BOUNDS, OETF_POLY_SEG_CENTERS,
@@ -225,7 +225,7 @@ pub(crate) fn xyz12_to_rgb_row<const BE: bool>(
   xyz: &[u16],
   rgb_out: &mut [u8],
   width: usize,
-  target_gamut: DcpTargetGamut,
+  target_gamut: KernelGamut,
 ) {
   debug_assert!(xyz.len() >= width * 3, "xyz row too short");
   debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
@@ -246,7 +246,7 @@ pub(crate) fn xyz12_to_rgba_row<const BE: bool>(
   xyz: &[u16],
   rgba_out: &mut [u8],
   width: usize,
-  target_gamut: DcpTargetGamut,
+  target_gamut: KernelGamut,
 ) {
   debug_assert!(xyz.len() >= width * 3, "xyz row too short");
   debug_assert!(rgba_out.len() >= width * 4, "rgba_out row too short");
@@ -270,7 +270,7 @@ pub(crate) fn xyz12_to_rgb_u16_row<const BE: bool>(
   xyz: &[u16],
   rgb_out: &mut [u16],
   width: usize,
-  target_gamut: DcpTargetGamut,
+  target_gamut: KernelGamut,
 ) {
   debug_assert!(xyz.len() >= width * 3, "xyz row too short");
   debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
@@ -292,7 +292,7 @@ pub(crate) fn xyz12_to_rgba_u16_row<const BE: bool>(
   xyz: &[u16],
   rgba_out: &mut [u16],
   width: usize,
-  target_gamut: DcpTargetGamut,
+  target_gamut: KernelGamut,
 ) {
   debug_assert!(xyz.len() >= width * 3, "xyz row too short");
   debug_assert!(rgba_out.len() >= width * 4, "rgba_out row too short");
@@ -317,7 +317,7 @@ pub(crate) fn xyz12_to_rgb_f32_row<const BE: bool>(
   xyz: &[u16],
   rgb_out: &mut [f32],
   width: usize,
-  target_gamut: DcpTargetGamut,
+  target_gamut: KernelGamut,
 ) {
   debug_assert!(xyz.len() >= width * 3, "xyz row too short");
   debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
@@ -358,7 +358,7 @@ pub(crate) fn xyz12_to_rgb_f16_row<const BE: bool>(
   xyz: &[u16],
   rgb_out: &mut [half::f16],
   width: usize,
-  target_gamut: DcpTargetGamut,
+  target_gamut: KernelGamut,
 ) {
   debug_assert!(xyz.len() >= width * 3, "xyz row too short");
   debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
@@ -380,7 +380,7 @@ pub(crate) fn xyz12_to_rgba_f16_row<const BE: bool>(
   xyz: &[u16],
   rgba_out: &mut [half::f16],
   width: usize,
-  target_gamut: DcpTargetGamut,
+  target_gamut: KernelGamut,
 ) {
   debug_assert!(xyz.len() >= width * 3, "xyz row too short");
   debug_assert!(rgba_out.len() >= width * 4, "rgba_out row too short");
@@ -401,12 +401,12 @@ pub(crate) fn xyz12_to_rgba_f16_row<const BE: bool>(
 // XYZ12-specific RGB → luma helpers.
 //
 // Routing the `with_luma` / `with_luma_u16` paths through the YUV-leaning
-// `ColorMatrix` enum (BT.709 for both DciP3 and Rec709 targets,
+// `KernelMatrix` enum (BT.709 for both DciP3 and Rec709 targets,
 // BT.2020Ncl for Rec2020) biases luma for saturated colours under the
 // DCI-P3 target — DCI-P3's perceptual brightness has its own weights
 // derived from the DCI-white-pointed RGB→XYZ matrix Y row. These helpers
 // take the gamut-derived Q15 weights directly (carried on
-// `Xyz12Row::luma_q15()`), bypassing the `ColorMatrix` enum entirely.
+// `Xyz12Row::luma_q15()`), bypassing the `KernelMatrix` enum entirely.
 //
 // No SIMD path: luma cost (one Q15 multiply-add per channel) is dwarfed
 // by the upstream 6x scalar `powf` work in the matmul + OETF stages —

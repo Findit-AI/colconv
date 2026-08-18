@@ -11,7 +11,7 @@ use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_m
 use std::hint::black_box;
 
 use pixon::{
-  ColorMatrix,
+  KernelMatrix,
   bench_internals::{yuv420p10_to_rgb_row, yuv420p10_to_rgb_u16_row},
 };
 
@@ -31,7 +31,7 @@ fn bench(c: &mut Criterion) {
   // (AVX‑512, 64 pixels per iteration) covers each fully without tail
   // work. Avoids skewing comparisons across targets.
   const WIDTHS: &[usize] = &[1280, 1920, 3840];
-  const MATRIX: ColorMatrix = ColorMatrix::Bt2020Ncl;
+  const MATRIX: KernelMatrix = KernelMatrix::Bt2020Ncl;
   const FULL_RANGE: bool = false;
 
   // ---- u8 output ------------------------------------------------------

@@ -49,7 +49,7 @@ pub(crate) fn xv48_to_rgb_or_rgba_row<const ALPHA: bool, const BE: bool>(
   packed: &[u16],
   out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert!(packed.len() >= width * 4, "packed row too short");
@@ -122,7 +122,7 @@ pub(crate) fn xv48_to_hsv_row<const BE: bool>(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert!(packed.len() >= width * 4, "packed row too short");
@@ -170,7 +170,7 @@ pub(crate) fn xv48_to_rgb_u16_or_rgba_u16_row<const ALPHA: bool, const BE: bool>
   packed: &[u16],
   out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert!(packed.len() >= width * 4, "packed row too short");
@@ -238,7 +238,7 @@ pub(crate) fn xv48_to_luma_u16_row<const BE: bool>(packed: &[u16], out: &mut [u1
 #[cfg(all(test, feature = "std"))]
 mod tests {
   use super::*;
-  use crate::ColorMatrix;
+  use crate::KernelMatrix;
 
   /// Build a 4-u16 XV48 pixel (host-native u16 quadruple) from explicit
   /// U / Y / V / X samples. Each channel uses the full 16 bits — no shift
@@ -273,7 +273,7 @@ mod tests {
       .collect();
     let packed = as_le_u16(&intended);
     let mut out = vec![0u8; 4 * 3];
-    xv48_to_rgb_or_rgba_row::<false, false>(&packed, &mut out, 4, ColorMatrix::Bt709, false);
+    xv48_to_rgb_or_rgba_row::<false, false>(&packed, &mut out, 4, KernelMatrix::Bt709, false);
     assert_eq!(&out[0..3], &[0u8, 0, 0], "black pixel 0");
     assert_eq!(&out[3..6], &[0u8, 0, 0], "black pixel 1");
     assert_eq!(&out[6..9], &[255u8, 255, 255], "white pixel 2");
@@ -285,7 +285,7 @@ mod tests {
     let p = pack_xv48(32768, 60160, 32768, 0);
     let packed = as_le_u16(&p);
     let mut out = vec![0u8; 4];
-    xv48_to_rgb_or_rgba_row::<true, false>(&packed, &mut out, 1, ColorMatrix::Bt709, false);
+    xv48_to_rgb_or_rgba_row::<true, false>(&packed, &mut out, 1, KernelMatrix::Bt709, false);
     // X = padding; RGBA forces α=0xFF regardless of source X sample.
     assert_eq!(out[3], 0xFF);
   }
@@ -296,7 +296,7 @@ mod tests {
     let p = pack_xv48(32768, 60160, 32768, 0xFFFF);
     let packed = as_le_u16(&p);
     let mut out = vec![0u8; 4];
-    xv48_to_rgb_or_rgba_row::<true, false>(&packed, &mut out, 1, ColorMatrix::Bt709, false);
+    xv48_to_rgb_or_rgba_row::<true, false>(&packed, &mut out, 1, KernelMatrix::Bt709, false);
     assert_eq!(out[3], 0xFF);
   }
 
@@ -333,7 +333,13 @@ mod tests {
     let p = pack_xv48(32768, 60160, 32768, 0xFFFF);
     let packed = as_le_u16(&p);
     let mut out = vec![0u16; 4];
-    xv48_to_rgb_u16_or_rgba_u16_row::<true, false>(&packed, &mut out, 1, ColorMatrix::Bt709, false);
+    xv48_to_rgb_u16_or_rgba_u16_row::<true, false>(
+      &packed,
+      &mut out,
+      1,
+      KernelMatrix::Bt709,
+      false,
+    );
     // 16-bit alpha max = 0xFFFF; X = padding so source X sample is ignored.
     assert_eq!(out[3], 0xFFFF);
   }
@@ -359,8 +365,8 @@ mod tests {
       .collect();
     let mut out_le = vec![0u8; 3];
     let mut out_be = vec![0u8; 3];
-    xv48_to_rgb_or_rgba_row::<false, false>(&le_buf, &mut out_le, 1, ColorMatrix::Bt709, false);
-    xv48_to_rgb_or_rgba_row::<false, true>(&be_buf, &mut out_be, 1, ColorMatrix::Bt709, false);
+    xv48_to_rgb_or_rgba_row::<false, false>(&le_buf, &mut out_le, 1, KernelMatrix::Bt709, false);
+    xv48_to_rgb_or_rgba_row::<false, true>(&be_buf, &mut out_be, 1, KernelMatrix::Bt709, false);
     assert_eq!(out_le, out_be, "XV48 BE scalar must match byte-swapped LE");
   }
 }

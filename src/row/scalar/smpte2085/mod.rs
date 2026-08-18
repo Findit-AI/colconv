@@ -68,6 +68,7 @@
 use crate::{Transfer, resample::pq_hlg};
 
 use super::bits_mask;
+use crate::ColorMatrix;
 
 /// Which transfer system a [`Smpte2085`](self) source is encoded in. SMPTE
 /// 2085 is defined **only** for the SMPTE ST 2084 PQ transfer (like
@@ -106,7 +107,7 @@ impl Smpte2085Transfer {
   /// `ColorMatrix::Smpte2085` with no PQ transfer is malformed; the affine
   /// fallback is the defined, non-panicking policy.
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub(crate) const fn for_transfer(transfer: Transfer) -> Option<Self> {
+  pub(crate) const fn for_transfer(transfer: &Transfer) -> Option<Self> {
     match transfer {
       Transfer::SmpteSt2084Pq => Some(Self::Pq),
       _ => None,

@@ -57,7 +57,7 @@ fn xv48_rgb_only_converts_gray_to_gray() {
   let src = Xv48Frame::new(&buf, 12, 4, 48);
   let mut rgb = std::vec![0u8; 12 * 4 * 3];
   let mut sink = MixedSinker::<Xv48>::new(12, 4).with_rgb(&mut rgb).unwrap();
-  xv48_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  xv48_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
   for px in rgb.chunks(3) {
     assert!(px[0].abs_diff(128) <= 4, "expected ~128, got {}", px[0]);
     assert_eq!(px[0], px[1]);
@@ -79,7 +79,7 @@ fn xv48_rgba_only_converts_gray_to_gray_with_opaque_alpha() {
   let mut sink = MixedSinker::<Xv48>::new(12, 4)
     .with_rgba(&mut rgba)
     .unwrap();
-  xv48_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  xv48_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
   for px in rgba.chunks(4) {
     assert_eq!(px[3], 0xFF, "alpha must be 0xFF for XV48");
   }
@@ -101,7 +101,7 @@ fn xv48_rgb_u16_only_converts_gray_to_gray_native_depth() {
   let mut sink = MixedSinker::<Xv48>::new(12, 4)
     .with_rgb_u16(&mut rgb)
     .unwrap();
-  xv48_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  xv48_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
   for px in rgb.chunks(3) {
     assert!(
       px[0].abs_diff(0x8000) <= 0x100,
@@ -125,7 +125,7 @@ fn xv48_rgba_u16_alpha_is_max() {
   let mut sink = MixedSinker::<Xv48>::new(12, 4)
     .with_rgba_u16(&mut rgba)
     .unwrap();
-  xv48_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  xv48_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
   for px in rgba.chunks(4) {
     assert_eq!(px[3], 0xFFFF, "u16 alpha must be 0xFFFF for XV48");
   }
@@ -143,7 +143,7 @@ fn xv48_luma_only_extracts_y_bytes_downshifted() {
   let src = Xv48Frame::new(&buf, 6, 8, 24);
   let mut luma = std::vec![0u8; 6 * 8];
   let mut sink = MixedSinker::<Xv48>::new(6, 8).with_luma(&mut luma).unwrap();
-  xv48_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  xv48_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
   assert!(luma.iter().all(|&y| y == 0xF0), "luma {luma:?}");
 }
 
@@ -161,7 +161,7 @@ fn xv48_luma_u16_only_extracts_y_native_depth() {
   let mut sink = MixedSinker::<Xv48>::new(6, 8)
     .with_luma_u16(&mut luma)
     .unwrap();
-  xv48_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  xv48_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
   assert!(
     luma.iter().all(|&y| y == 0xABCD),
     "luma_u16 expected 0xABCD, got {:?}",
@@ -192,7 +192,7 @@ fn xv48_with_rgb_and_with_rgba_byte_identical_u8() {
     .unwrap()
     .with_rgba(&mut rgba)
     .unwrap();
-  xv48_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  xv48_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
   for i in 0..(w * h) as usize {
     assert_eq!(rgba[i * 4], rgb[i * 3], "R mismatch at pixel {i}");
     assert_eq!(rgba[i * 4 + 1], rgb[i * 3 + 1], "G mismatch at pixel {i}");
@@ -220,7 +220,7 @@ fn xv48_with_rgb_u16_and_with_rgba_u16_byte_identical() {
     .unwrap()
     .with_rgba_u16(&mut rgba)
     .unwrap();
-  xv48_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  xv48_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
   for i in 0..(w * h) as usize {
     assert_eq!(rgba[i * 4], rgb[i * 3], "R u16 mismatch at pixel {i}");
     assert_eq!(
@@ -271,8 +271,8 @@ fn xv48_with_simd_false_matches_with_simd_true() {
       .with_rgb(&mut rgb_scalar)
       .unwrap()
       .with_simd(false);
-    xv48_to(&src, false, ColorMatrix::Bt709, &mut sink_simd).unwrap();
-    xv48_to(&src, false, ColorMatrix::Bt709, &mut sink_scalar).unwrap();
+    xv48_to(&src, false, KernelMatrix::Bt709, &mut sink_simd).unwrap();
+    xv48_to(&src, false, KernelMatrix::Bt709, &mut sink_scalar).unwrap();
     assert_eq!(rgb_simd, rgb_scalar, "XV48 u8 SIMD≠scalar at width {w}");
 
     // u16 RGB (exercises the i64 chroma path)
@@ -285,8 +285,8 @@ fn xv48_with_simd_false_matches_with_simd_true() {
       .with_rgb_u16(&mut rgb16_scalar)
       .unwrap()
       .with_simd(false);
-    xv48_to(&src, false, ColorMatrix::Bt709, &mut s2).unwrap();
-    xv48_to(&src, false, ColorMatrix::Bt709, &mut s2_scalar).unwrap();
+    xv48_to(&src, false, KernelMatrix::Bt709, &mut s2).unwrap();
+    xv48_to(&src, false, KernelMatrix::Bt709, &mut s2_scalar).unwrap();
     assert_eq!(
       rgb16_simd, rgb16_scalar,
       "XV48 u16 SIMD≠scalar at width {w}"
@@ -366,8 +366,8 @@ fn xv48_planar_parity_with_yuv444p16() {
   let mut x_sink = MixedSinker::<Xv48>::new(width, height)
     .with_rgb(&mut x_rgb)
     .unwrap();
-  yuv444p16_to(&planar, false, ColorMatrix::Bt709, &mut p_sink).unwrap();
-  xv48_to(&xv48, false, ColorMatrix::Bt709, &mut x_sink).unwrap();
+  yuv444p16_to(&planar, false, KernelMatrix::Bt709, &mut p_sink).unwrap();
+  xv48_to(&xv48, false, KernelMatrix::Bt709, &mut x_sink).unwrap();
   assert_eq!(p_rgb, x_rgb, "XV48 ↔ Yuv444p16 u8 RGB diverges");
 
   // u16 RGB parity (validates the BITS=16 i64-chroma path against the
@@ -380,8 +380,8 @@ fn xv48_planar_parity_with_yuv444p16() {
   let mut x_sink2 = MixedSinker::<Xv48>::new(width, height)
     .with_rgb_u16(&mut x_rgb_u16)
     .unwrap();
-  yuv444p16_to(&planar, false, ColorMatrix::Bt709, &mut p_sink2).unwrap();
-  xv48_to(&xv48, false, ColorMatrix::Bt709, &mut x_sink2).unwrap();
+  yuv444p16_to(&planar, false, KernelMatrix::Bt709, &mut p_sink2).unwrap();
+  xv48_to(&xv48, false, KernelMatrix::Bt709, &mut x_sink2).unwrap();
   assert_eq!(p_rgb_u16, x_rgb_u16, "XV48 ↔ Yuv444p16 u16 RGB diverges");
 }
 
@@ -435,7 +435,7 @@ fn xv48_le_be_roundtrip_byte_identical() {
     .with_simd(false)
     .with_rgba(&mut out_le)
     .unwrap();
-  xv48_to(&frame_le, true, ColorMatrix::Bt709, &mut sink_le).unwrap();
+  xv48_to(&frame_le, true, KernelMatrix::Bt709, &mut sink_le).unwrap();
 
   let frame_be = Xv48BeFrame::try_new(&pix_be, 8, 4, 8 * 4).unwrap();
   let mut out_be = std::vec![0u8; 8 * 4 * 4];
@@ -443,7 +443,7 @@ fn xv48_le_be_roundtrip_byte_identical() {
     .with_simd(false)
     .with_rgba(&mut out_be)
     .unwrap();
-  xv48_to_endian(&frame_be, true, ColorMatrix::Bt709, &mut sink_be).unwrap();
+  xv48_to_endian(&frame_be, true, KernelMatrix::Bt709, &mut sink_be).unwrap();
 
   assert_eq!(
     out_le, out_be,
@@ -492,7 +492,7 @@ fn xv48_rgb_scratch_alloc_failure_leaves_outputs_untouched() {
     .unwrap();
 
   super::super::arm_rgb_scratch_alloc_failure();
-  let err = xv48_to(&src, false, ColorMatrix::Bt601, &mut sink).unwrap_err();
+  let err = xv48_to(&src, false, KernelMatrix::Bt601, &mut sink).unwrap_err();
   drop(sink);
 
   assert!(

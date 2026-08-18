@@ -26,7 +26,7 @@
 
 use super::*;
 use crate::{
-  ChromaLocation, ColorMatrix, PixelSink,
+  ChromaLocation, KernelMatrix, PixelSink,
   resample::AreaResampler,
   sinker::{MixedSinker, MixedSinkerError},
   source::{Yuv422p10, Yuv444p10, yuv422p10_to, yuv444p10_to},
@@ -35,7 +35,7 @@ use crate::{
 const SRC: usize = 12;
 const CW: usize = SRC / 2;
 const OUT: usize = 6;
-const M: ColorMatrix = ColorMatrix::Bt601;
+const M: KernelMatrix = KernelMatrix::Bt601;
 const FR: bool = true;
 /// V210 byte stride for an `SRC`-wide row: `ceil(SRC / 6) * 16`.
 const STRIDE: u32 = (SRC.div_ceil(6) * 16) as u32;
@@ -284,7 +284,7 @@ fn run(
       MixedSinker::<V210, AreaResampler>::with_resampler(SRC, SRC, AreaResampler::to(OUT, OUT))
         .unwrap()
         .with_native(native)
-        .with_chroma_location(loc)
+        .with_chroma_location(loc.clone())
         .with_simd(simd)
         .with_rgb(&mut rgb)
         .unwrap()
@@ -315,7 +315,7 @@ fn run_be(
     )
     .unwrap()
     .with_native(native)
-    .with_chroma_location(loc)
+    .with_chroma_location(loc.clone())
     .with_rgb(&mut rgb)
     .unwrap()
     .with_rgb_u16(&mut rgb16)
@@ -346,7 +346,7 @@ fn run_yuv422p(
     )
     .unwrap()
     .with_native(native)
-    .with_chroma_location(loc)
+    .with_chroma_location(loc.clone())
     .with_simd(simd)
     .with_rgb(&mut rgb)
     .unwrap()
@@ -429,10 +429,10 @@ fn cosited_group_is_byte_identical_across_tiers() {
       ChromaLocation::Left,
       ChromaLocation::TopLeft,
       ChromaLocation::BottomLeft,
-      ChromaLocation::Unknown(7),
+      ChromaLocation::other("unassigned-7"),
     ] {
       assert_eq!(
-        run(&y, &u, &v, loc, native, true),
+        run(&y, &u, &v, loc.clone(), native, true),
         base,
         "co-sited siting {loc:?} must keep the byte-identical decode (native={native})"
       );
@@ -453,8 +453,8 @@ fn centered_equals_planar_yuv422p_across_tiers() {
   ] {
     for native in [true, false] {
       assert_eq!(
-        run(&y, &u, &v, loc, native, true),
-        run_yuv422p(&y, &u, &v, loc, native, true),
+        run(&y, &u, &v, loc.clone(), native, true),
+        run_yuv422p(&y, &u, &v, loc.clone(), native, true),
         "centered packed {loc:?} must equal centered planar Yuv422p10 (native={native})"
       );
     }
@@ -474,7 +474,7 @@ fn centered_native_equals_code_domain_oracle() {
     ChromaLocation::Bottom,
   ] {
     assert_eq!(
-      run(&y, &u, &v, loc, true, true),
+      run(&y, &u, &v, loc.clone(), true, true),
       want,
       "centered native {loc:?} must equal the code-domain reconstruct-then-bin oracle"
     );
@@ -494,7 +494,7 @@ fn centered_row_stage_equals_rgb_reconstruct_then_bin() {
     ChromaLocation::Bottom,
   ] {
     assert_eq!(
-      run(&y, &u, &v, loc, false, true),
+      run(&y, &u, &v, loc.clone(), false, true),
       want,
       "centered row-stage {loc:?} must equal the RGB-domain reconstruct-then-bin oracle"
     );
@@ -579,11 +579,11 @@ fn flip_row1<R>(
   loc2: ChromaLocation,
 ) -> Result<(), MixedSinkerError> {
   let packed = pack_v210(y, u, v);
-  sink.set_chroma_location(loc1);
+  sink.set_chroma_location(loc1.clone());
   PixelSink::begin_frame(&mut sink, SRC as u32, SRC as u32).unwrap();
   let row0 = V210Row::new(row_slice(&packed, 0), 0, M, FR);
   PixelSink::process(&mut sink, row0).unwrap();
-  sink.set_chroma_location(loc2);
+  sink.set_chroma_location(loc2.clone());
   let row1 = V210Row::new(row_slice(&packed, 1), 1, M, FR);
   PixelSink::process(&mut sink, row1)
 }
@@ -604,7 +604,7 @@ fn mid_frame_siting_change_rejected() {
         .with_native(true)
         .with_rgb(&mut rgb)
         .unwrap();
-    let err = flip_row1(sink, &y, &u, &v, loc1, loc2).unwrap_err();
+    let err = flip_row1(sink, &y, &u, &v, loc1.clone(), loc2.clone()).unwrap_err();
     assert!(
       matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
       "native {loc1:?}->{loc2:?}: want ChromaSitingChanged, got {err:?}"
@@ -618,7 +618,7 @@ fn mid_frame_siting_change_rejected() {
         .with_native(false)
         .with_rgb(&mut rgb)
         .unwrap();
-    let err = flip_row1(sink, &y, &u, &v, loc1, loc2).unwrap_err();
+    let err = flip_row1(sink, &y, &u, &v, loc1.clone(), loc2.clone()).unwrap_err();
     assert!(
       matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
       "row-stage {loc1:?}->{loc2:?}: want ChromaSitingChanged, got {err:?}"

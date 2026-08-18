@@ -37,7 +37,7 @@
 //! [`LinearMode::DisplayReferred`]: crate::resample::LinearMode::DisplayReferred
 
 use crate::{
-  ColorMatrix, PixelSink,
+  KernelMatrix, PixelSink,
   resample::{
     AreaResampler, AveragingDomain, FilteredResampler, LinearMode, ResampleError, TransferFunction,
     Triangle,
@@ -243,8 +243,8 @@ fn at_440<'a>(u: &'a [u8], v: &'a [u8]) -> impl Fn(usize, usize) -> (u8, u8) + '
   ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
 )]
 fn yuv420p_scene_referred_equals_independent_unclamped_oracle() {
-  let matrix = ColorMatrix::Bt709;
-  let tf = TransferFunction::for_matrix(matrix);
+  let matrix = KernelMatrix::Bt709;
+  let tf = TransferFunction::for_matrix(&crate::ColorMatrix::from(matrix));
   let y = y_ramp();
   let cw = SRC / 2;
   let u = chroma(cw, cw, 200, 6);
@@ -279,8 +279,8 @@ fn yuv420p_scene_referred_equals_independent_unclamped_oracle() {
   ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
 )]
 fn yuv422p_scene_referred_equals_independent_unclamped_oracle() {
-  let matrix = ColorMatrix::Bt709;
-  let tf = TransferFunction::for_matrix(matrix);
+  let matrix = KernelMatrix::Bt709;
+  let tf = TransferFunction::for_matrix(&crate::ColorMatrix::from(matrix));
   let y = y_ramp();
   let cw = SRC / 2;
   let u = chroma(cw, SRC, 200, 6);
@@ -315,8 +315,8 @@ fn yuv422p_scene_referred_equals_independent_unclamped_oracle() {
   ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
 )]
 fn yuv444p_scene_referred_equals_independent_unclamped_oracle() {
-  let matrix = ColorMatrix::Bt709;
-  let tf = TransferFunction::for_matrix(matrix);
+  let matrix = KernelMatrix::Bt709;
+  let tf = TransferFunction::for_matrix(&crate::ColorMatrix::from(matrix));
   let y = y_ramp();
   let u = chroma(SRC, SRC, 200, 6);
   let v = chroma(SRC, SRC, 40, 7);
@@ -350,8 +350,8 @@ fn yuv444p_scene_referred_equals_independent_unclamped_oracle() {
   ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
 )]
 fn yuv440p_scene_referred_equals_independent_unclamped_oracle() {
-  let matrix = ColorMatrix::Bt709;
-  let tf = TransferFunction::for_matrix(matrix);
+  let matrix = KernelMatrix::Bt709;
+  let tf = TransferFunction::for_matrix(&crate::ColorMatrix::from(matrix));
   let y = y_ramp();
   let ch = SRC / 2;
   let u = chroma(SRC, ch, 200, 6);
@@ -385,7 +385,7 @@ fn yuv440p_scene_referred_equals_independent_unclamped_oracle() {
 /// Runs a `Yuv420p` area downscale to RGB under the Linear domain in the given
 /// [`LinearMode`], with the row-stage tier pinned (Linear is row-stage anyway,
 /// but keep it explicit for parity with the Phase 2 tests).
-fn run_420_mode(y: &[u8], u: &[u8], v: &[u8], matrix: ColorMatrix, mode: LinearMode) -> Vec<u8> {
+fn run_420_mode(y: &[u8], u: &[u8], v: &[u8], matrix: KernelMatrix, mode: LinearMode) -> Vec<u8> {
   let cw = SRC / 2;
   let src = Yuv420pFrame::new(
     y, u, v, SRC as u32, SRC as u32, SRC as u32, cw as u32, cw as u32,
@@ -417,7 +417,7 @@ fn scene_and_display_referred_differ_on_out_of_gamut() {
   // display-referred average (which clamps each source pixel to [0, 1] first,
   // throwing the excursion away) lands materially apart from the scene-referred
   // average (which preserves the excursion and clamps only at the output).
-  let matrix = ColorMatrix::Bt709;
+  let matrix = KernelMatrix::Bt709;
   // High-contrast luma so the out-of-gamut chroma actually pushes channels
   // past the cube on the bright pixels.
   let mut y = vec![0u8; SRC * SRC];
@@ -452,7 +452,7 @@ fn scene_and_display_referred_differ_on_out_of_gamut() {
   // The scene-referred result is what its independent unclamped oracle
   // predicts — proving the divergence is the preserved out-of-gamut signal,
   // not noise.
-  let tf = TransferFunction::for_matrix(matrix);
+  let tf = TransferFunction::for_matrix(&crate::ColorMatrix::from(matrix));
   let oracle = scene_oracle(&full_res_unclamped_rgb(&y, at_420(&u, &v, cw)), tf);
   assert!(
     max_abs_diff(&scene, &oracle) <= 1,
@@ -472,7 +472,7 @@ fn scene_and_display_referred_coincide_in_gamut() {
   // the two modes agree to within f32 rounding. This documents that scene mode
   // is a strict superset — it changes the answer ONLY where the clamp would
   // have discarded information.
-  let matrix = ColorMatrix::Bt709;
+  let matrix = KernelMatrix::Bt709;
   let mut y = vec![0u8; SRC * SRC];
   for (i, p) in y.iter_mut().enumerate() {
     let (r, c) = (i / SRC, i % SRC);
@@ -504,7 +504,7 @@ fn display_referred_default_is_byte_identical_to_explicit() {
   // the new mode field is inert on the default path, and the default IS the
   // RFC #238 Phase 2 display-referred linear average. Cover all four formats
   // and an RGBA output.
-  let matrix = ColorMatrix::Bt709;
+  let matrix = KernelMatrix::Bt709;
 
   // Yuv420p (RGBA output).
   {
@@ -629,7 +629,7 @@ fn scene_mode_mid_frame_transfer_change_is_rejected() {
     let ur = &u[0..cw];
     let vr = &v[0..cw];
     sink
-      .process(Yuv420pRow::new(yr, ur, vr, 0, ColorMatrix::Bt709, true))
+      .process(Yuv420pRow::new(yr, ur, vr, 0, KernelMatrix::Bt709, true))
       .unwrap();
     // Row 1 with a different transfer override → rejected.
     sink.set_transfer_function(TransferFunction::Bt1886);
@@ -637,7 +637,7 @@ fn scene_mode_mid_frame_transfer_change_is_rejected() {
     let ur = &u[cw..2 * cw];
     let vr = &v[cw..2 * cw];
     let err = sink
-      .process(Yuv420pRow::new(yr, ur, vr, 1, ColorMatrix::Bt709, true))
+      .process(Yuv420pRow::new(yr, ur, vr, 1, KernelMatrix::Bt709, true))
       .unwrap_err();
     assert!(
       matches!(err, MixedSinkerError::TransferFunctionChanged(_)),
@@ -647,7 +647,7 @@ fn scene_mode_mid_frame_transfer_change_is_rejected() {
     // rejected row left the frame unpoisoned).
     sink.set_transfer_function(TransferFunction::Srgb);
     sink
-      .process(Yuv420pRow::new(yr, ur, vr, 1, ColorMatrix::Bt709, true))
+      .process(Yuv420pRow::new(yr, ur, vr, 1, KernelMatrix::Bt709, true))
       .unwrap();
   }
 }
@@ -677,7 +677,7 @@ fn scene_mode_mid_frame_domain_change_is_rejected() {
     let ur = &u[0..cw];
     let vr = &v[0..cw];
     sink
-      .process(Yuv420pRow::new(yr, ur, vr, 0, ColorMatrix::Bt709, true))
+      .process(Yuv420pRow::new(yr, ur, vr, 0, KernelMatrix::Bt709, true))
       .unwrap();
     // Flip the domain to Encoded mid-frame → rejected.
     sink.set_averaging_domain(AveragingDomain::Encoded);
@@ -685,7 +685,7 @@ fn scene_mode_mid_frame_domain_change_is_rejected() {
     let ur = &u[cw..2 * cw];
     let vr = &v[cw..2 * cw];
     let err = sink
-      .process(Yuv420pRow::new(yr, ur, vr, 1, ColorMatrix::Bt709, true))
+      .process(Yuv420pRow::new(yr, ur, vr, 1, KernelMatrix::Bt709, true))
       .unwrap_err();
     assert!(
       matches!(err, MixedSinkerError::AveragingDomainChanged(_)),
@@ -746,7 +746,7 @@ fn scene_referred_mid_frame_mode_change_is_rejected() {
       // Row 0 freezes the linear mode (`frozen`) on the lazily-created frame.
       let (yr, ur, vr) = row(0);
       sink
-        .process(Yuv420pRow::new(yr, ur, vr, 0, ColorMatrix::Bt709, true))
+        .process(Yuv420pRow::new(yr, ur, vr, 0, KernelMatrix::Bt709, true))
         .unwrap();
 
       // Flip the mode mid-frame, then feed row 1 — the freeze guards the mode
@@ -756,7 +756,7 @@ fn scene_referred_mid_frame_mode_change_is_rejected() {
       sink.set_linear_mode(flipped);
       let (yr, ur, vr) = row(1);
       let err = sink
-        .process(Yuv420pRow::new(yr, ur, vr, 1, ColorMatrix::Bt709, true))
+        .process(Yuv420pRow::new(yr, ur, vr, 1, KernelMatrix::Bt709, true))
         .unwrap_err();
       assert!(
         matches!(err, MixedSinkerError::LinearModeChanged(_)),
@@ -771,7 +771,7 @@ fn scene_referred_mid_frame_mode_change_is_rejected() {
       for r in 1..SRC {
         let (yr, ur, vr) = row(r);
         sink
-          .process(Yuv420pRow::new(yr, ur, vr, r, ColorMatrix::Bt709, true))
+          .process(Yuv420pRow::new(yr, ur, vr, r, KernelMatrix::Bt709, true))
           .unwrap();
       }
     }
@@ -793,8 +793,8 @@ fn scene_referred_mid_frame_mode_change_is_rejected() {
   ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
 )]
 fn scene_mode_final_row_alloc_failure_leaves_frame_retryable() {
-  let matrix = ColorMatrix::Bt709;
-  let tf = TransferFunction::for_matrix(matrix);
+  let matrix = KernelMatrix::Bt709;
+  let tf = TransferFunction::for_matrix(&crate::ColorMatrix::from(matrix));
   let y = y_ramp();
   let cw = SRC / 2;
   let u = chroma(cw, cw, 200, 6);
@@ -819,7 +819,7 @@ fn scene_mode_final_row_alloc_failure_leaves_frame_retryable() {
       let ur = &u[cr * cw..(cr + 1) * cw];
       let vr = &v[cr * cw..(cr + 1) * cw];
       sink
-        .process(Yuv420pRow::new(yr, ur, vr, r, ColorMatrix::Bt709, true))
+        .process(Yuv420pRow::new(yr, ur, vr, r, KernelMatrix::Bt709, true))
         .unwrap();
     }
     // Arm the final-row tail allocation failpoint.
@@ -830,7 +830,7 @@ fn scene_mode_final_row_alloc_failure_leaves_frame_retryable() {
     let ur = &u[cr * cw..(cr + 1) * cw];
     let vr = &v[cr * cw..(cr + 1) * cw];
     let err = sink
-      .process(Yuv420pRow::new(yr, ur, vr, r, ColorMatrix::Bt709, true))
+      .process(Yuv420pRow::new(yr, ur, vr, r, KernelMatrix::Bt709, true))
       .unwrap_err();
     assert!(
       matches!(
@@ -842,7 +842,7 @@ fn scene_mode_final_row_alloc_failure_leaves_frame_retryable() {
     // The failpoint is one-shot; retry the SAME final row → succeeds, frame
     // not poisoned.
     sink
-      .process(Yuv420pRow::new(yr, ur, vr, r, ColorMatrix::Bt709, true))
+      .process(Yuv420pRow::new(yr, ur, vr, r, KernelMatrix::Bt709, true))
       .unwrap();
   }
   assert!(
@@ -862,7 +862,7 @@ fn scene_mode_final_row_alloc_failure_leaves_frame_retryable() {
 )]
 fn scene_mode_rejects_filter_plan() {
   const SENTINEL: u8 = 0x5A;
-  let matrix = ColorMatrix::Bt709;
+  let matrix = KernelMatrix::Bt709;
   let y = y_ramp();
   let cw = SRC / 2;
   let u = chroma(cw, cw, 200, 6);

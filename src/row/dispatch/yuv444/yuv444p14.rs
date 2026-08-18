@@ -13,7 +13,7 @@ use crate::row::simd128_available;
 #[cfg(target_arch = "x86_64")]
 use crate::row::{avx2_available, avx512_available, sse41_available};
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   row::{rgba_row_bytes, rgba_row_elems, scalar},
 };
 
@@ -28,7 +28,7 @@ pub fn yuv444p14_to_rgb_row_endian(
   v: &[u16],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
   big_endian: bool,
@@ -50,7 +50,7 @@ pub fn yuv444p14_to_rgb_row(
   v: &[u16],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) {
@@ -66,7 +66,7 @@ pub fn yuv444p14_to_rgb_u16_row_endian(
   v: &[u16],
   rgb_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
   big_endian: bool,
@@ -88,7 +88,7 @@ pub fn yuv444p14_to_rgb_u16_row(
   v: &[u16],
   rgb_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) {
@@ -107,7 +107,7 @@ pub fn yuv444p14_to_rgba_row_endian(
   v: &[u16],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
   big_endian: bool,
@@ -192,7 +192,7 @@ pub fn yuv444p14_to_rgba_row(
   v: &[u16],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) {
@@ -214,7 +214,7 @@ pub fn yuv444p14_to_rgba_u16_row_endian(
   v: &[u16],
   rgba_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
   big_endian: bool,
@@ -299,7 +299,7 @@ pub fn yuv444p14_to_rgba_u16_row(
   v: &[u16],
   rgba_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) {
@@ -328,7 +328,7 @@ pub fn yuv444p14_to_hsv_row_endian(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
   big_endian: bool,

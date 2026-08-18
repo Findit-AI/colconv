@@ -13,8 +13,8 @@
 //!   proof in [`super::tests`]).
 
 use crate::{
-  ChromaLocation, ColorInfo, ColorMatrix, ColorSpec, DynamicRange, PixelFormat, Primaries,
-  Transfer,
+  ChromaLocation, ColorInfo, ColorMatrix, ColorSpec, DynamicRange, KernelMatrix, PixelFormat,
+  Primaries, Transfer,
   convert::Convert,
   resample::NoopResampler,
   sinker::{MixedSinker, MixedSinkerError},
@@ -297,7 +297,7 @@ where
   W: Fn(
     &Fr,
     bool,
-    ColorMatrix,
+    KernelMatrix,
     &mut MixedSinker<'_, Fr::Marker, NoopResampler>,
   ) -> Result<(), MixedSinkerError>,
 {
@@ -305,7 +305,7 @@ where
 
   let mut convert_rgb = std::vec![0u8; w * h * 3];
   Convert::from(&make())
-    .spec(spec)
+    .spec(spec.clone())
     .rgb(&mut convert_rgb)
     .run()
     .unwrap();
@@ -318,14 +318,20 @@ where
     // `run` applies it only under `yuv-planar`; elsewhere the spec reaches the
     // walk solely through the derived `full_range` / `matrix` arguments.
     #[cfg(feature = "yuv-planar")]
-    sink.set_color_spec(spec);
-    walk(&make(), spec.full_range(), spec.matrix(), &mut sink).unwrap();
+    sink.set_color_spec(&spec);
+    walk(
+      &make(),
+      spec.full_range(),
+      spec.kernel_matrix().unwrap(),
+      &mut sink,
+    )
+    .unwrap();
   }
   assert_eq!(convert_rgb, manual_rgb, "rgb");
 
   let mut convert_luma = std::vec![0u8; w * h];
   Convert::from(&make())
-    .spec(spec)
+    .spec(spec.clone())
     .luma(&mut convert_luma)
     .run()
     .unwrap();
@@ -336,8 +342,14 @@ where
       .unwrap();
     // Mirror `Convert::run` (see the rgb arm above).
     #[cfg(feature = "yuv-planar")]
-    sink.set_color_spec(spec);
-    walk(&make(), spec.full_range(), spec.matrix(), &mut sink).unwrap();
+    sink.set_color_spec(&spec);
+    walk(
+      &make(),
+      spec.full_range(),
+      spec.kernel_matrix().unwrap(),
+      &mut sink,
+    )
+    .unwrap();
   }
   assert_eq!(convert_luma, manual_luma, "luma");
 }
@@ -428,7 +440,7 @@ fn yuva420p_rgba_parity() {
 
   let mut convert_rgba = std::vec![0u8; 4 * 2 * 4];
   Convert::from(&make())
-    .spec(spec)
+    .spec(spec.clone())
     .rgba(&mut convert_rgba)
     .run()
     .unwrap();
@@ -437,8 +449,14 @@ fn yuva420p_rgba_parity() {
     let mut sink = MixedSinker::<crate::source::Yuva420p>::new(4, 2)
       .with_rgba(&mut manual_rgba)
       .unwrap()
-      .with_color_spec(spec);
-    crate::source::yuva420p_to(&make(), spec.full_range(), spec.matrix(), &mut sink).unwrap();
+      .with_color_spec(&spec);
+    crate::source::yuva420p_to(
+      &make(),
+      spec.full_range(),
+      spec.kernel_matrix().unwrap(),
+      &mut sink,
+    )
+    .unwrap();
   }
   assert_eq!(convert_rgba, manual_rgba, "yuva420p rgba");
 }
@@ -474,7 +492,7 @@ fn pal8_parity() {
 
   let mut convert_rgb = std::vec![0u8; 2 * 2 * 3];
   Convert::from(&make())
-    .spec(spec)
+    .spec(spec.clone())
     .rgb(&mut convert_rgb)
     .run()
     .unwrap();
@@ -486,7 +504,7 @@ fn pal8_parity() {
     // Mirror `Convert::run`: the sink-side spec applies only under
     // `yuv-planar` (see `assert_rgb_luma_parity`).
     #[cfg(feature = "yuv-planar")]
-    sink.set_color_spec(spec);
+    sink.set_color_spec(&spec);
     crate::source::pal8_to(&make(), &mut sink).unwrap();
   }
   assert_eq!(convert_rgb, manual_rgb, "pal8 rgb");
@@ -540,7 +558,7 @@ fn xyz12_parity() {
 
   let mut convert_rgb = std::vec![0u8; 2 * 2 * 3];
   Convert::from(&make())
-    .spec(spec)
+    .spec(spec.clone())
     .rgb(&mut convert_rgb)
     .run()
     .unwrap();
@@ -552,7 +570,7 @@ fn xyz12_parity() {
     // Mirror `Convert::run`: the sink-side spec applies only under
     // `yuv-planar` (see `assert_rgb_luma_parity`).
     #[cfg(feature = "yuv-planar")]
-    sink.set_color_spec(spec);
+    sink.set_color_spec(&spec);
     crate::source::xyz12_to::<false, _>(&make(), gamut, &mut sink).unwrap();
   }
   assert_eq!(convert_rgb, manual_rgb, "xyz12 rgb");

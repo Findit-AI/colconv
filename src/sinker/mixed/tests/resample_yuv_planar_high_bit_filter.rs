@@ -38,14 +38,14 @@
 //! `u16::MAX`, so a 16-bit format has no over-native-max overshoot to clip.
 
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   resample::{
     CatmullRom, FilterKernel, FilterStream, FilteredResampler, Lanczos3, Resampler, Triangle,
   },
   sinker::MixedSinker,
 };
 
-const M: ColorMatrix = ColorMatrix::Bt709;
+const M: KernelMatrix = KernelMatrix::Bt709;
 const FR: bool = true;
 const SRC: usize = 8;
 const OUT: usize = 4;

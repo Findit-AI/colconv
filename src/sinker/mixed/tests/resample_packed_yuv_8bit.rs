@@ -20,7 +20,7 @@
 //!   RGB-derived luma would diverge.
 
 use crate::{
-  ColorMatrix, PixelSink,
+  KernelMatrix, PixelSink,
   frame::{Uyvy422Frame, Yuyv422Frame, Yvyu422Frame},
   resample::{AreaResampler, ResampleError},
   sinker::{MixedSinker, MixedSinkerError},
@@ -34,7 +34,7 @@ use super::force_row_stage;
 
 const SRC: usize = 8;
 const OUT: usize = 4;
-const M: ColorMatrix = ColorMatrix::Bt601;
+const M: KernelMatrix = KernelMatrix::Bt601;
 const FR: bool = true;
 
 /// Exact 2x2-block area mean (round-half-up) of an `SRC`-grid plane to

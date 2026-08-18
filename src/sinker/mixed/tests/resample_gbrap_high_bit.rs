@@ -25,14 +25,14 @@
 
 use super::*;
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   resample::AreaResampler,
   sinker::{AlphaMode, MixedSinker},
 };
 
 const SRC: usize = 8;
 const OUT: usize = 4;
-const MATRIX: ColorMatrix = ColorMatrix::Bt709;
+const MATRIX: KernelMatrix = KernelMatrix::Bt709;
 
 /// Pseudo-random canonical host-native `R, G, B, A` plane, every sample
 /// masked to `BITS` so it is a legal native code; alpha varies.

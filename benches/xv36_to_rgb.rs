@@ -11,7 +11,7 @@
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;
 
-use pixon::{ColorMatrix, bench_internals::xv36_to_rgb_row};
+use pixon::{KernelMatrix, bench_internals::xv36_to_rgb_row};
 
 /// Fills a `u16` buffer with deterministic XV36‑packed pseudo‑random
 /// 12‑bit samples (low 12 bits set, high 4 bits zero — kernel masks
@@ -27,7 +27,7 @@ fn fill_pseudo_random_xv36(buf: &mut [u16], seed: u32) {
 
 fn bench(c: &mut Criterion) {
   const WIDTHS: &[usize] = &[1280, 1920, 3840];
-  const MATRIX: ColorMatrix = ColorMatrix::Bt2020Ncl;
+  const MATRIX: KernelMatrix = KernelMatrix::Bt2020Ncl;
   const FULL_RANGE: bool = false;
   const BE_INPUT: bool = false;
 

@@ -15,7 +15,7 @@ use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_m
 use std::hint::black_box;
 
 use pixon::{
-  ColorMatrix,
+  KernelMatrix,
   bench_internals::{p010_to_rgb_row, p010_to_rgb_u16_row},
 };
 
@@ -34,7 +34,7 @@ fn bench(c: &mut Criterion) {
   // 720p / 1080p / 4K widths — multiples of 64 so the widest SIMD
   // tier (AVX‑512, 64 pixels per iteration) covers each block fully.
   const WIDTHS: &[usize] = &[1280, 1920, 3840];
-  const MATRIX: ColorMatrix = ColorMatrix::Bt2020Ncl;
+  const MATRIX: KernelMatrix = KernelMatrix::Bt2020Ncl;
   const FULL_RANGE: bool = false;
 
   // ---- u8 output ------------------------------------------------------

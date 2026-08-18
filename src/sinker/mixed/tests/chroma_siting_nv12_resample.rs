@@ -33,7 +33,7 @@ use crate::{
   resample::{AreaResampler, FilteredResampler, ResampleError, Triangle},
 };
 
-const M: ColorMatrix = ColorMatrix::Bt601;
+const M: KernelMatrix = KernelMatrix::Bt601;
 const FR: bool = true;
 
 /// Round `a / d` half-up (ties toward `+∞`) — the production
@@ -242,7 +242,7 @@ fn run_yuv420p(
       MixedSinker::<Yuv420p, AreaResampler>::with_resampler(sw, sh, AreaResampler::to(ow, oh))
         .unwrap()
         .with_native(native)
-        .with_chroma_location(loc)
+        .with_chroma_location(loc.clone())
         .with_simd(simd)
         .with_rgb(&mut rgb)
         .unwrap()
@@ -578,7 +578,7 @@ macro_rules! nv_resample_siting_tests {
           )
           .unwrap()
           .with_native(native)
-          .with_chroma_location(loc)
+          .with_chroma_location(loc.clone())
           .with_simd(simd)
           .with_rgb(&mut rgb)
           .unwrap()
@@ -619,7 +619,7 @@ macro_rules! nv_resample_siting_tests {
             FilteredResampler::new(ow, oh, Triangle),
           )
           .unwrap()
-          .with_chroma_location(loc)
+          .with_chroma_location(loc.clone())
           .with_rgb(&mut rgb)
           .unwrap();
           let f = $Frame::new(y, &uv, sw as u32, sh as u32, sw as u32, sw as u32);
@@ -668,9 +668,9 @@ macro_rules! nv_resample_siting_tests {
           .with_luma_u16(&mut luma_u16)
           .unwrap();
           let f = $Frame::new(y, &uv, sw as u32, sh as u32, sw as u32, sw as u32);
-          sink.set_chroma_location(loc1);
+          sink.set_chroma_location(loc1.clone());
           $walker(&f, FR, M, &mut sink).unwrap();
-          sink.set_chroma_location(loc2);
+          sink.set_chroma_location(loc2.clone());
           $walker(&f, FR, M, &mut sink).unwrap();
         }
         (rgb, rgba, (hh, ss, vv), luma, luma_u16)
@@ -705,9 +705,9 @@ macro_rules! nv_resample_siting_tests {
           );
           for loc in [
             ChromaLocation::Left,
-            ChromaLocation::Unknown(7),
+            ChromaLocation::other("unassigned-7"),
           ] {
-            let got = run(&y, &u, &v, 8, 8, 4, 4, loc, native, true);
+            let got = run(&y, &u, &v, 8, 8, 4, 4, loc.clone(), native, true);
             assert_eq!(got.0, base.0, "rgb {loc:?} native={native}");
             assert_eq!(got.1, base.1, "rgba {loc:?} native={native}");
             assert_eq!(got.2, base.2, "hsv {loc:?} native={native}");
@@ -734,7 +734,7 @@ macro_rules! nv_resample_siting_tests {
           let (y, u, v) = ramp(sw, sh);
           let o = native_oracle(&y, &u, &v, sw, sh, ow, oh, true);
           for loc in [ChromaLocation::Center] {
-            let n = run(&y, &u, &v, sw, sh, ow, oh, loc, true, true);
+            let n = run(&y, &u, &v, sw, sh, ow, oh, loc.clone(), true, true);
             assert_eq!(n.0, o.0, "rgb {loc:?} {sw}x{sh}->{ow}x{oh}");
             assert_eq!(n.1, o.1, "rgba {loc:?} {sw}x{sh}->{ow}x{oh}");
             assert_eq!(n.2, o.2, "hsv {loc:?} {sw}x{sh}->{ow}x{oh}");
@@ -774,7 +774,7 @@ macro_rules! nv_resample_siting_tests {
           let (y, u, v) = ramp(sw, sh);
           let oracle = encoded_oracle_rgb(&y, &u, &v, sw, sh, ow, oh, true);
           for loc in [ChromaLocation::Center] {
-            let got = run(&y, &u, &v, sw, sh, ow, oh, loc, false, true);
+            let got = run(&y, &u, &v, sw, sh, ow, oh, loc.clone(), false, true);
             assert_eq!(got.0, oracle, "rgb {loc:?} {sw}x{sh}->{ow}x{oh}");
           }
         }
@@ -813,8 +813,8 @@ macro_rules! nv_resample_siting_tests {
             ChromaLocation::TopLeft,
           ] {
             for native in [true, false] {
-              let nv = run(&y, &u, &v, sw, sh, ow, oh, loc, native, true);
-              let yuv420p = run_yuv420p(&y, &u, &v, sw, sh, ow, oh, loc, native, true);
+              let nv = run(&y, &u, &v, sw, sh, ow, oh, loc.clone(), native, true);
+              let yuv420p = run_yuv420p(&y, &u, &v, sw, sh, ow, oh, loc.clone(), native, true);
               assert_eq!(
                 nv, yuv420p,
                 "NV vs Yuv420p {loc:?} native={native} {sw}x{sh}->{ow}x{oh}"
@@ -917,7 +917,7 @@ macro_rules! nv_resample_siting_tests {
                 FilteredResampler::new(ow, oh, Triangle),
               )
               .unwrap()
-              .with_chroma_location(loc)
+              .with_chroma_location(loc.clone())
               .with_rgb(&mut rgb420)
               .unwrap();
               let f = Yuv420pFrame::new(
@@ -925,7 +925,7 @@ macro_rules! nv_resample_siting_tests {
               );
               yuv420p_to(&f, FR, M, &mut sink).unwrap();
             }
-            let nv = filter_rgb(&y, &u, &v, sw, sh, ow, oh, loc);
+            let nv = filter_rgb(&y, &u, &v, sw, sh, ow, oh, loc.clone());
             assert_eq!(nv, rgb420, "filter {loc:?} {sw}x{sh}->{ow}x{oh}");
           }
           let top = filter_rgb(&y, &u, &v, sw, sh, ow, oh, ChromaLocation::Top);
@@ -1004,7 +1004,7 @@ macro_rules! nv_resample_siting_tests {
         let mut rgb = vec![0u8; sw * sh * 3];
         {
           let mut sink = MixedSinker::<$Marker>::new(sw, sh)
-            .with_chroma_location(loc)
+            .with_chroma_location(loc.clone())
             .with_simd(simd)
             .with_rgb(&mut rgb)
             .unwrap();
@@ -1223,7 +1223,7 @@ macro_rules! nv_resample_siting_tests {
             )
             .unwrap()
             .with_native(false)
-            .with_chroma_location(loc)
+            .with_chroma_location(loc.clone())
             .with_rgb(&mut rgb)
             .unwrap();
             sink.begin_frame(sw as u32, sh as u32).unwrap();
@@ -1409,15 +1409,15 @@ macro_rules! nv_resample_siting_tests {
           (ChromaLocation::Left, ChromaLocation::Center),
           (ChromaLocation::Center, ChromaLocation::Left),
         ] {
-          let reused = run_reuse_native(&y, &u, &v, 8, 8, 4, 4, a, b);
-          let fresh = run(&y, &u, &v, 8, 8, 4, 4, b, true, true);
+          let reused = run_reuse_native(&y, &u, &v, 8, 8, 4, 4, a.clone(), b.clone());
+          let fresh = run(&y, &u, &v, 8, 8, 4, 4, b.clone(), true, true);
           assert_eq!(
             reused.0, fresh.0,
             "native rgb {a:?}->{b:?} stale-phase carryover"
           );
           assert_eq!(reused.2, fresh.2, "native hsv {a:?}->{b:?}");
           assert_eq!(reused.3, fresh.3, "native luma {a:?}->{b:?}");
-          let stale = run(&y, &u, &v, 8, 8, 4, 4, a, true, true);
+          let stale = run(&y, &u, &v, 8, 8, 4, 4, a.clone(), true, true);
           assert_ne!(
             fresh.0, stale.0,
             "sitings {a:?} vs {b:?} must differ (non-vacuous)"
@@ -1499,10 +1499,10 @@ macro_rules! nv_resample_siting_tests {
         loc1: ChromaLocation,
         loc2: ChromaLocation,
       ) -> Result<(), MixedSinkerError> {
-        sink.set_chroma_location(loc1);
+        sink.set_chroma_location(loc1.clone());
         PixelSink::begin_frame(&mut sink, 8, 8).unwrap();
         PixelSink::process(&mut sink, $Row::new(&y[0..8], &uv[0..8], 0, M, FR)).unwrap();
-        sink.set_chroma_location(loc2);
+        sink.set_chroma_location(loc2.clone());
         PixelSink::process(&mut sink, $Row::new(&y[8..16], &uv[0..8], 1, M, FR))
       }
 
@@ -1552,7 +1552,7 @@ macro_rules! nv_resample_siting_tests {
               .with_native(true)
               .with_rgb(&mut rgb)
               .unwrap();
-          let err = in_sequence_flip_row1(sink, &y, &uv, loc1, loc2).unwrap_err();
+          let err = in_sequence_flip_row1(sink, &y, &uv, loc1.clone(), loc2.clone()).unwrap_err();
           assert!(
             matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
             "native {loc1:?}->{loc2:?}: want ChromaSitingChanged, got {err:?}"
@@ -1566,7 +1566,7 @@ macro_rules! nv_resample_siting_tests {
               .with_native(false)
               .with_rgb(&mut rgb)
               .unwrap();
-          let err = in_sequence_flip_row1(sink, &y, &uv, loc1, loc2).unwrap_err();
+          let err = in_sequence_flip_row1(sink, &y, &uv, loc1.clone(), loc2.clone()).unwrap_err();
           assert!(
             matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
             "encoded-rgb {loc1:?}->{loc2:?}: want ChromaSitingChanged, got {err:?}"
@@ -1580,7 +1580,7 @@ macro_rules! nv_resample_siting_tests {
               .with_native(false)
               .with_hsv(&mut hh, &mut ss, &mut vv)
               .unwrap();
-          let err = in_sequence_flip_row1(sink, &y, &uv, loc1, loc2).unwrap_err();
+          let err = in_sequence_flip_row1(sink, &y, &uv, loc1.clone(), loc2.clone()).unwrap_err();
           assert!(
             matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
             "hsv {loc1:?}->{loc2:?}: want ChromaSitingChanged, got {err:?}"
@@ -1596,7 +1596,7 @@ macro_rules! nv_resample_siting_tests {
           .unwrap()
           .with_rgb(&mut rgb)
           .unwrap();
-          let err = in_sequence_flip_row1(sink, &y, &uv, loc1, loc2).unwrap_err();
+          let err = in_sequence_flip_row1(sink, &y, &uv, loc1.clone(), loc2.clone()).unwrap_err();
           assert!(
             matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
             "filter {loc1:?}->{loc2:?}: want ChromaSitingChanged, got {err:?}"

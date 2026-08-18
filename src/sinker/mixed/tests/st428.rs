@@ -8,7 +8,9 @@
 //! the default mode is byte-identical to a sink built without the toggle).
 
 use super::*;
-use crate::{ChromaLocation, ColorInfo, ColorSpec, DynamicRange, PixelFormat, Primaries, Transfer};
+use crate::{
+  ChromaLocation, ColorInfo, ColorMatrix, ColorSpec, DynamicRange, PixelFormat, Primaries, Transfer,
+};
 
 // ---- the selector enum -----------------------------------------------------
 
@@ -64,13 +66,14 @@ fn sink_toggle_roundtrips() {
 #[test]
 fn guard_ffmpeg_tabulated_permits_everything() {
   for matrix in [
-    ColorMatrix::ChromaDerivedNcl,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt601,
+    KernelMatrix::ChromaDerivedNcl,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt601,
   ] {
     for primaries in [Primaries::SmpteSt428, Primaries::Bt2020, Primaries::Bt709] {
       assert!(
-        st428_chroma_derived_guard(matrix, primaries, St428Interpretation::FfmpegTabulated).is_ok(),
+        st428_chroma_derived_guard(matrix, &primaries, St428Interpretation::FfmpegTabulated)
+          .is_ok(),
         "FfmpegTabulated must permit ({matrix:?}, {primaries:?})"
       );
     }
@@ -82,8 +85,8 @@ fn guard_ffmpeg_tabulated_permits_everything() {
 #[test]
 fn guard_cie_xyz_rejects_chroma_derived_over_smpte_st428() {
   let err = st428_chroma_derived_guard(
-    ColorMatrix::ChromaDerivedNcl,
-    Primaries::SmpteSt428,
+    KernelMatrix::ChromaDerivedNcl,
+    &Primaries::SmpteSt428,
     St428Interpretation::CieXyz,
   )
   .expect_err("ChromaDerivedNcl over SmpteSt428 must be rejected in CIE-XYZ mode");
@@ -101,8 +104,8 @@ fn guard_cie_xyz_ignores_non_st428_and_fixed_matrices() {
   for primaries in [Primaries::Bt2020, Primaries::Bt709, Primaries::Smpte170M] {
     assert!(
       st428_chroma_derived_guard(
-        ColorMatrix::ChromaDerivedNcl,
-        primaries,
+        KernelMatrix::ChromaDerivedNcl,
+        &primaries,
         St428Interpretation::CieXyz
       )
       .is_ok(),
@@ -111,12 +114,12 @@ fn guard_cie_xyz_ignores_non_st428_and_fixed_matrices() {
   }
   // A fixed matrix over SmpteSt428 does not derive from the primaries at all.
   for matrix in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
   ] {
     assert!(
-      st428_chroma_derived_guard(matrix, Primaries::SmpteSt428, St428Interpretation::CieXyz)
+      st428_chroma_derived_guard(matrix, &Primaries::SmpteSt428, St428Interpretation::CieXyz)
         .is_ok(),
       "CIE-XYZ must not affect the fixed {matrix:?} over SmpteSt428"
     );
@@ -144,7 +147,7 @@ fn cie_xyz_predicate_is_smpte_st428_only() {
 /// Decodes a solid 4×2 `Yuv420p` frame to packed RGB with the given matrix /
 /// primaries / interpretation, returning the sink's `process` result.
 fn decode(
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   primaries: Primaries,
   interp: St428Interpretation,
 ) -> Result<std::vec::Vec<u8>, MixedSinkerError> {
@@ -161,7 +164,7 @@ fn decode(
     ColorInfo::new(
       primaries,
       Transfer::Unspecified,
-      matrix,
+      crate::ColorMatrix::from(matrix),
       DynamicRange::Limited,
       ChromaLocation::Left,
     ),
@@ -170,7 +173,7 @@ fn decode(
     let mut sink = MixedSinker::<Yuv420p>::new(w as usize, h as usize)
       .with_rgb(&mut rgb)
       .unwrap()
-      .with_color_spec(spec)
+      .with_color_spec(&spec)
       .with_st428_interpretation(interp);
     yuv420p_to(&src, false, matrix, &mut sink)?;
   }
@@ -182,7 +185,7 @@ fn decode(
 #[test]
 fn cie_xyz_rejects_chroma_derived_smpte_st428_end_to_end() {
   let err = decode(
-    ColorMatrix::ChromaDerivedNcl,
+    KernelMatrix::ChromaDerivedNcl,
     Primaries::SmpteSt428,
     St428Interpretation::CieXyz,
   )
@@ -199,7 +202,7 @@ fn cie_xyz_rejects_chroma_derived_smpte_st428_end_to_end() {
 #[test]
 fn ffmpeg_tabulated_is_byte_identical_to_untoggled() {
   let toggled = decode(
-    ColorMatrix::ChromaDerivedNcl,
+    KernelMatrix::ChromaDerivedNcl,
     Primaries::SmpteSt428,
     St428Interpretation::FfmpegTabulated,
   )
@@ -229,8 +232,8 @@ fn ffmpeg_tabulated_is_byte_identical_to_untoggled() {
       let mut sink = MixedSinker::<Yuv420p>::new(w as usize, h as usize)
         .with_rgb(&mut rgb)
         .unwrap()
-        .with_color_spec(spec);
-      yuv420p_to(&src, false, ColorMatrix::ChromaDerivedNcl, &mut sink).unwrap();
+        .with_color_spec(&spec);
+      yuv420p_to(&src, false, KernelMatrix::ChromaDerivedNcl, &mut sink).unwrap();
     }
     rgb
   };
@@ -246,13 +249,13 @@ fn ffmpeg_tabulated_is_byte_identical_to_untoggled() {
 #[test]
 fn cie_xyz_is_a_no_op_for_non_st428_primaries() {
   let tabulated = decode(
-    ColorMatrix::ChromaDerivedNcl,
+    KernelMatrix::ChromaDerivedNcl,
     Primaries::Bt2020,
     St428Interpretation::FfmpegTabulated,
   )
   .expect("BT.2020 ChromaDerivedNcl decodes");
   let cie_xyz = decode(
-    ColorMatrix::ChromaDerivedNcl,
+    KernelMatrix::ChromaDerivedNcl,
     Primaries::Bt2020,
     St428Interpretation::CieXyz,
   )
@@ -303,7 +306,7 @@ fn top_row<'a>(
   up: &'a [u8],
   vp: &'a [u8],
   r: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
 ) -> Yuv420pRow<'a> {
   let w = TOP_W as usize;
   let cw = w / 2;
@@ -344,9 +347,9 @@ fn top_walker_decode(primaries: Primaries, interp: St428Interpretation) -> std::
     let mut sink = MixedSinker::<Yuv420p>::new(w, h)
       .with_rgb(&mut rgb)
       .unwrap()
-      .with_color_spec(top_spec(primaries))
+      .with_color_spec(&top_spec(primaries))
       .with_st428_interpretation(interp);
-    yuv420p_to(&src, false, ColorMatrix::ChromaDerivedNcl, &mut sink).unwrap();
+    yuv420p_to(&src, false, KernelMatrix::ChromaDerivedNcl, &mut sink).unwrap();
   }
   rgb
 }
@@ -364,18 +367,18 @@ fn top_delay_ncl_direct_matches_walker() {
   let (yp, up, vp) = top_frame();
   let (w, h) = (TOP_W as usize, TOP_H as usize);
   for primaries in [Primaries::Bt709, Primaries::SmpteSt428] {
-    let reference = top_walker_decode(primaries, St428Interpretation::FfmpegTabulated);
+    let reference = top_walker_decode(primaries.clone(), St428Interpretation::FfmpegTabulated);
     let mut rgb = std::vec![0u8; w * h * 3];
     {
       let mut sink = MixedSinker::<Yuv420p>::new(w, h)
         .with_rgb(&mut rgb)
         .unwrap()
-        .with_color_spec(top_spec(primaries));
+        .with_color_spec(&top_spec(primaries.clone()));
       crate::PixelSink::begin_frame(&mut sink, TOP_W, TOP_H).unwrap();
       for r in 0..h {
         crate::PixelSink::process(
           &mut sink,
-          top_row(&yp, &up, &vp, r, ColorMatrix::ChromaDerivedNcl),
+          top_row(&yp, &up, &vp, r, KernelMatrix::ChromaDerivedNcl),
         )
         .unwrap();
       }
@@ -418,17 +421,17 @@ fn top_delay_freezes_submit_colorimetry_across_cie_xyz_switch() {
     let mut sink = MixedSinker::<Yuv420p>::new(w, h)
       .with_rgb(&mut rgb)
       .unwrap()
-      .with_color_spec(top_spec(Primaries::Bt709))
+      .with_color_spec(&top_spec(Primaries::Bt709))
       .with_st428_interpretation(St428Interpretation::CieXyz);
     crate::PixelSink::begin_frame(&mut sink, TOP_W, TOP_H).unwrap();
     crate::PixelSink::process(
       &mut sink,
-      top_row(&yp, &up, &vp, 0, ColorMatrix::ChromaDerivedNcl),
+      top_row(&yp, &up, &vp, 0, KernelMatrix::ChromaDerivedNcl),
     )
     .unwrap();
     crate::PixelSink::process(
       &mut sink,
-      top_row(&yp, &up, &vp, 1, ColorMatrix::ChromaDerivedNcl),
+      top_row(&yp, &up, &vp, 1, KernelMatrix::ChromaDerivedNcl),
     )
     .unwrap();
     assert!(
@@ -439,14 +442,14 @@ fn top_delay_freezes_submit_colorimetry_across_cie_xyz_switch() {
     // Flip to SmpteSt428 (CIE-XYZ interpretation unchanged) — the SAME Top siting,
     // so the phase freeze holds. The now-active (SmpteSt428, CieXyz) would reject
     // a fresh ChromaDerivedNcl row, but must not reach back to the held one.
-    sink.set_color_spec(top_spec(Primaries::SmpteSt428));
+    sink.set_color_spec(&top_spec(Primaries::SmpteSt428));
     assert_eq!(sink.primaries(), Primaries::SmpteSt428);
 
     // The even flush row carries a FIXED matrix, which the current-row guard
     // permits even under (SmpteSt428, CieXyz); it flushes the deferred odd row.
-    crate::PixelSink::process(&mut sink, top_row(&yp, &up, &vp, 2, ColorMatrix::Bt601))
+    crate::PixelSink::process(&mut sink, top_row(&yp, &up, &vp, 2, KernelMatrix::Bt601))
       .expect("the fixed-matrix even row is permitted and flushes the held row");
-    crate::PixelSink::process(&mut sink, top_row(&yp, &up, &vp, 3, ColorMatrix::Bt601))
+    crate::PixelSink::process(&mut sink, top_row(&yp, &up, &vp, 3, KernelMatrix::Bt601))
       .expect("the trailing odd row clamps co-sited");
   }
 
@@ -456,21 +459,21 @@ fn top_delay_freezes_submit_colorimetry_across_cie_xyz_switch() {
     let mut sink = MixedSinker::<Yuv420p>::new(w, h)
       .with_rgb(&mut rgb_ref)
       .unwrap()
-      .with_color_spec(top_spec(Primaries::Bt709))
+      .with_color_spec(&top_spec(Primaries::Bt709))
       .with_st428_interpretation(St428Interpretation::CieXyz);
     crate::PixelSink::begin_frame(&mut sink, TOP_W, TOP_H).unwrap();
     crate::PixelSink::process(
       &mut sink,
-      top_row(&yp, &up, &vp, 0, ColorMatrix::ChromaDerivedNcl),
+      top_row(&yp, &up, &vp, 0, KernelMatrix::ChromaDerivedNcl),
     )
     .unwrap();
     crate::PixelSink::process(
       &mut sink,
-      top_row(&yp, &up, &vp, 1, ColorMatrix::ChromaDerivedNcl),
+      top_row(&yp, &up, &vp, 1, KernelMatrix::ChromaDerivedNcl),
     )
     .unwrap();
-    crate::PixelSink::process(&mut sink, top_row(&yp, &up, &vp, 2, ColorMatrix::Bt601)).unwrap();
-    crate::PixelSink::process(&mut sink, top_row(&yp, &up, &vp, 3, ColorMatrix::Bt601)).unwrap();
+    crate::PixelSink::process(&mut sink, top_row(&yp, &up, &vp, 2, KernelMatrix::Bt601)).unwrap();
+    crate::PixelSink::process(&mut sink, top_row(&yp, &up, &vp, 3, KernelMatrix::Bt601)).unwrap();
   }
 
   assert_eq!(

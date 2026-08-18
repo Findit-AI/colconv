@@ -54,7 +54,7 @@
 
 use super::*;
 use crate::{
-  ColorMatrix, PixelSink,
+  KernelMatrix, PixelSink,
   resample::{AreaResampler, ResampleError},
   sinker::{MixedSinker, MixedSinkerError},
   source::{Yuv422p10, Yuv444p10, yuv422p10_to, yuv444p10_to},
@@ -63,7 +63,7 @@ use crate::{
 const SRC: usize = 12;
 const CW: usize = SRC / 2;
 const OUT: usize = 6;
-const M: ColorMatrix = ColorMatrix::Bt601;
+const M: KernelMatrix = KernelMatrix::Bt601;
 const FR: bool = true;
 /// V210 byte stride for an `SRC`-wide row: `ceil(SRC / 6) * 16`.
 const STRIDE: u32 = (SRC.div_ceil(6) * 16) as u32;

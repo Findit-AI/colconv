@@ -1,7 +1,7 @@
 //! Tests for `crate::row::scalar::planar_gbr_msb`.
 
 use super::*;
-use crate::{ColorMatrix, row::scalar::planar_gbr_high_bit as low};
+use crate::{KernelMatrix, row::scalar::planar_gbr_high_bit as low};
 
 /// Re-encode a host-native u16 slice as LE-encoded byte storage. Kernels
 /// called with `BE = false` recover the intended logical values via
@@ -129,14 +129,14 @@ fn rgb_msb_matches_high_bit_on_recovered_samples() {
   for full in [true, false] {
     let mut a = [0u16; 5];
     let mut e = [0u16; 5];
-    gbr_to_luma_u16_msb_row::<10, false>(&g_hi, &b_hi, &r_hi, &mut a, w, ColorMatrix::Bt709, full);
+    gbr_to_luma_u16_msb_row::<10, false>(&g_hi, &b_hi, &r_hi, &mut a, w, KernelMatrix::Bt709, full);
     low::gbr_to_luma_u16_high_bit_row::<10, false>(
       &g_lo,
       &b_lo,
       &r_lo,
       &mut e,
       w,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       full,
     );
     assert_eq!(a, e, "luma full_range={full}");
@@ -236,7 +236,7 @@ fn luma_msb_be_matches_le() {
 
   let mut le = [0u16; 3];
   let mut be = [0u16; 3];
-  gbr_to_luma_u16_msb_row::<10, false>(&g_le, &b_le, &r_le, &mut le, w, ColorMatrix::Bt709, true);
-  gbr_to_luma_u16_msb_row::<10, true>(&g_be, &b_be, &r_be, &mut be, w, ColorMatrix::Bt709, true);
+  gbr_to_luma_u16_msb_row::<10, false>(&g_le, &b_le, &r_le, &mut le, w, KernelMatrix::Bt709, true);
+  gbr_to_luma_u16_msb_row::<10, true>(&g_be, &b_be, &r_be, &mut be, w, KernelMatrix::Bt709, true);
   assert_eq!(le, be);
 }

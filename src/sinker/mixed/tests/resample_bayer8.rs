@@ -5,9 +5,9 @@
 //! demosaiced into the source-width RGB scratch (the exact kernel the
 //! direct path runs), those RGB rows are area-binned, and every output
 //! is then derived from the finalized RGB row the **Bayer** way —
-//! Q8-coefficient luma (`LumaCoefficients`, not a `ColorMatrix`) and
-//! the OpenCV HSV kernel. Bayer carries no `ColorMatrix` / `full_range`
-//! on its row, so it cannot share the packed-RGB tail's `ColorMatrix`
+//! Q8-coefficient luma (`LumaCoefficients`, not a `KernelMatrix`) and
+//! the OpenCV HSV kernel. Bayer carries no `KernelMatrix` / `full_range`
+//! on its row, so it cannot share the packed-RGB tail's `KernelMatrix`
 //! emit; only the plumbing is shared.
 //!
 //! The parity oracle is therefore "direct demosaic of the full source

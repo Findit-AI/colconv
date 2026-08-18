@@ -1,5 +1,5 @@
 use super::super::*;
-use crate::{ColorMatrix, row::scalar};
+use crate::{KernelMatrix, row::scalar};
 
 /// Build a VUYA packed stream with Y[n] = n+1, A[n] = 2n+1, V=U=128.
 ///
@@ -33,7 +33,7 @@ fn pseudo_random_vuya(width: usize, seed: usize) -> std::vec::Vec<u8> {
 
 fn check_rgb<const ALPHA: bool, const ALPHA_SRC: bool>(
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   let p = pseudo_random_vuya(width, 0xAA55);
@@ -81,12 +81,12 @@ fn check_luma_u16(width: usize) {
 )]
 fn neon_vuya_rgb_matches_scalar_all_matrices() {
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       // All 3 valid (ALPHA, ALPHA_SRC) combinations.
@@ -106,9 +106,9 @@ fn neon_vuya_matches_scalar_widths() {
   for w in [
     1usize, 2, 3, 7, 8, 9, 15, 16, 17, 31, 32, 33, 1920, 1921, 1923,
   ] {
-    check_rgb::<false, false>(w, ColorMatrix::Bt709, false);
-    check_rgb::<true, true>(w, ColorMatrix::Bt709, true);
-    check_rgb::<true, false>(w, ColorMatrix::Bt2020Ncl, true);
+    check_rgb::<false, false>(w, KernelMatrix::Bt709, false);
+    check_rgb::<true, true>(w, KernelMatrix::Bt709, true);
+    check_rgb::<true, false>(w, KernelMatrix::Bt2020Ncl, true);
     check_luma(w);
     check_luma_u16(w);
   }
@@ -145,7 +145,7 @@ fn neon_vuya_lane_order_per_pixel_y_and_a() {
   // A-channel deinterleave. neutral U/V → chroma contribution is zero.
   let mut rgba = std::vec![0u8; W * 4];
   unsafe {
-    vuya_to_rgb_or_rgba_row::<true, true>(&packed, &mut rgba, W, ColorMatrix::Bt709, false);
+    vuya_to_rgb_or_rgba_row::<true, true>(&packed, &mut rgba, W, KernelMatrix::Bt709, false);
   }
   let alpha_out: std::vec::Vec<u8> = (0..W).map(|n| rgba[n * 4 + 3]).collect();
   let expected_alpha: std::vec::Vec<u8> = (0..W).map(|n| (n as u8) * 2 + 1).collect();
@@ -159,13 +159,13 @@ fn neon_vuya_lane_order_per_pixel_y_and_a() {
 // checked against its scalar reference over a spread of widths (covering
 // the SIMD block boundary at 16) and all colour matrices.
 
-const NEON_MATRICES: [ColorMatrix; 6] = [
-  ColorMatrix::Bt601,
-  ColorMatrix::Bt709,
-  ColorMatrix::Bt2020Ncl,
-  ColorMatrix::Smpte240m,
-  ColorMatrix::Fcc,
-  ColorMatrix::YCgCo,
+const NEON_MATRICES: [KernelMatrix; 6] = [
+  KernelMatrix::Bt601,
+  KernelMatrix::Bt709,
+  KernelMatrix::Bt2020Ncl,
+  KernelMatrix::Smpte240m,
+  KernelMatrix::Fcc,
+  KernelMatrix::YCgCo,
 ];
 const NEON_WIDTHS: [usize; 13] = [1, 2, 3, 7, 8, 15, 16, 17, 31, 32, 33, 64, 1921];
 
@@ -186,7 +186,7 @@ fn pseudo_random(width: usize, bpp: usize, seed: usize) -> std::vec::Vec<u8> {
 /// to the fused scalar (the NEON quantizer can differ ±1 LSB from scalar).
 fn neon_hsv_ref(
   w: usize,
-  _matrix: ColorMatrix,
+  _matrix: KernelMatrix,
   _full_range: bool,
   fill_rgb: impl FnOnce(&mut [u8]),
 ) -> (std::vec::Vec<u8>, std::vec::Vec<u8>, std::vec::Vec<u8>) {
@@ -234,11 +234,11 @@ fn neon_ayuv_matches_scalar() {
     // HSV contract: NEON `{fmt}_to_hsv_row` must equal the same-tier
     // two-step `rgb_to_hsv_row(NEON {fmt}_to_rgb_row(...))` (NOT the fused
     // scalar, which can differ by ±1 LSB from the NEON HSV quantizer).
-    let want = neon_hsv_ref(w, ColorMatrix::Bt709, false, |rgb| unsafe {
-      ayuv_to_rgb_row(&p, rgb, w, ColorMatrix::Bt709, false)
+    let want = neon_hsv_ref(w, KernelMatrix::Bt709, false, |rgb| unsafe {
+      ayuv_to_rgb_row(&p, rgb, w, KernelMatrix::Bt709, false)
     });
     let (mut kh, mut ks, mut kv) = (std::vec![0u8; w], std::vec![0u8; w], std::vec![0u8; w]);
-    unsafe { ayuv_to_hsv_row(&p, &mut kh, &mut ks, &mut kv, w, ColorMatrix::Bt709, false) };
+    unsafe { ayuv_to_hsv_row(&p, &mut kh, &mut ks, &mut kv, w, KernelMatrix::Bt709, false) };
     assert_eq!(want, (kh, ks, kv), "AYUV NEON hsv (w={w})");
   }
 }
@@ -275,8 +275,8 @@ fn neon_uyva_matches_scalar() {
     scalar::uyva_to_luma_u16_row(&p, &mut su, w);
     unsafe { uyva_to_luma_u16_row(&p, &mut ku, w) };
     assert_eq!(su, ku, "UYVA NEON luma_u16 (w={w})");
-    let want = neon_hsv_ref(w, ColorMatrix::Bt2020Ncl, true, |rgb| unsafe {
-      uyva_to_rgb_row(&p, rgb, w, ColorMatrix::Bt2020Ncl, true)
+    let want = neon_hsv_ref(w, KernelMatrix::Bt2020Ncl, true, |rgb| unsafe {
+      uyva_to_rgb_row(&p, rgb, w, KernelMatrix::Bt2020Ncl, true)
     });
     let (mut kh, mut ks, mut kv) = (std::vec![0u8; w], std::vec![0u8; w], std::vec![0u8; w]);
     unsafe {
@@ -286,7 +286,7 @@ fn neon_uyva_matches_scalar() {
         &mut ks,
         &mut kv,
         w,
-        ColorMatrix::Bt2020Ncl,
+        KernelMatrix::Bt2020Ncl,
         true,
       )
     };
@@ -326,11 +326,11 @@ fn neon_vyu444_matches_scalar() {
     scalar::vyu444_to_luma_u16_row(&p, &mut su, w);
     unsafe { vyu444_to_luma_u16_row(&p, &mut ku, w) };
     assert_eq!(su, ku, "VYU444 NEON luma_u16 (w={w})");
-    let want = neon_hsv_ref(w, ColorMatrix::Bt601, false, |rgb| unsafe {
-      vyu444_to_rgb_row(&p, rgb, w, ColorMatrix::Bt601, false)
+    let want = neon_hsv_ref(w, KernelMatrix::Bt601, false, |rgb| unsafe {
+      vyu444_to_rgb_row(&p, rgb, w, KernelMatrix::Bt601, false)
     });
     let (mut kh, mut ks, mut kv) = (std::vec![0u8; w], std::vec![0u8; w], std::vec![0u8; w]);
-    unsafe { vyu444_to_hsv_row(&p, &mut kh, &mut ks, &mut kv, w, ColorMatrix::Bt601, false) };
+    unsafe { vyu444_to_hsv_row(&p, &mut kh, &mut ks, &mut kv, w, KernelMatrix::Bt601, false) };
     assert_eq!(want, (kh, ks, kv), "VYU444 NEON hsv (w={w})");
   }
 }

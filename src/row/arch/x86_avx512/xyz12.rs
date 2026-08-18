@@ -45,7 +45,7 @@ use super::super::{
   x86_sse41::endian::load_endian_u16x8,
 };
 use crate::{
-  DcpTargetGamut,
+  KernelGamut,
   row::scalar::{
     self,
     xyz12::{oetf_srgb, smpte428_inverse_oetf},
@@ -278,7 +278,7 @@ pub(crate) unsafe fn xyz12_to_rgb_row<const BE: bool>(
   xyz: &[u16],
   rgb_out: &mut [u8],
   width: usize,
-  target_gamut: DcpTargetGamut,
+  target_gamut: KernelGamut,
 ) {
   debug_assert!(xyz.len() >= width * 3, "xyz row too short");
   debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
@@ -344,7 +344,7 @@ pub(crate) unsafe fn xyz12_to_rgba_row<const BE: bool>(
   xyz: &[u16],
   rgba_out: &mut [u8],
   width: usize,
-  target_gamut: DcpTargetGamut,
+  target_gamut: KernelGamut,
 ) {
   debug_assert!(xyz.len() >= width * 3, "xyz row too short");
   debug_assert!(rgba_out.len() >= width * 4, "rgba_out row too short");
@@ -407,7 +407,7 @@ pub(crate) unsafe fn xyz12_to_rgb_u16_row<const BE: bool>(
   xyz: &[u16],
   rgb_out: &mut [u16],
   width: usize,
-  target_gamut: DcpTargetGamut,
+  target_gamut: KernelGamut,
 ) {
   debug_assert!(xyz.len() >= width * 3, "xyz row too short");
   debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
@@ -467,7 +467,7 @@ pub(crate) unsafe fn xyz12_to_rgba_u16_row<const BE: bool>(
   xyz: &[u16],
   rgba_out: &mut [u16],
   width: usize,
-  target_gamut: DcpTargetGamut,
+  target_gamut: KernelGamut,
 ) {
   debug_assert!(xyz.len() >= width * 3, "xyz row too short");
   debug_assert!(rgba_out.len() >= width * 4, "rgba_out row too short");
@@ -528,7 +528,7 @@ pub(crate) unsafe fn xyz12_to_rgb_f32_row<const BE: bool>(
   xyz: &[u16],
   rgb_out: &mut [f32],
   width: usize,
-  target_gamut: DcpTargetGamut,
+  target_gamut: KernelGamut,
 ) {
   debug_assert!(xyz.len() >= width * 3, "xyz row too short");
   debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
@@ -621,7 +621,7 @@ pub(crate) unsafe fn xyz12_to_rgb_f16_row<const BE: bool>(
   xyz: &[u16],
   rgb_out: &mut [half::f16],
   width: usize,
-  target_gamut: DcpTargetGamut,
+  target_gamut: KernelGamut,
 ) {
   debug_assert!(xyz.len() >= width * 3, "xyz row too short");
   debug_assert!(rgb_out.len() >= width * 3, "rgb_out row too short");
@@ -677,7 +677,7 @@ pub(crate) unsafe fn xyz12_to_rgba_f16_row<const BE: bool>(
   xyz: &[u16],
   rgba_out: &mut [half::f16],
   width: usize,
-  target_gamut: DcpTargetGamut,
+  target_gamut: KernelGamut,
 ) {
   debug_assert!(xyz.len() >= width * 3, "xyz row too short");
   debug_assert!(rgba_out.len() >= width * 4, "rgba_out row too short");

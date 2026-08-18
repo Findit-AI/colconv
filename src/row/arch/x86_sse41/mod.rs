@@ -75,7 +75,7 @@ pub(super) use crate::row::arch::x86_common::{write_rgb_16, write_rgba_16};
 pub(super) use crate::row::arch::x86_common::{write_rgb_u16_8, write_rgba_u16_8};
 #[allow(unused_imports)]
 pub(super) use crate::{
-  ColorMatrix,
+  KernelMatrix,
   row::{
     arch::x86_common::{deinterleave_rgb_16, rgb_to_hsv_16_pixels, rgb_to_luma_16_pixels},
     scalar,

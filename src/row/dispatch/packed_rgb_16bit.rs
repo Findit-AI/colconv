@@ -37,7 +37,7 @@ use crate::row::neon_available;
 #[cfg(target_arch = "x86_64")]
 use crate::row::{avx2_available, avx512_available, sse41_available};
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   row::{rgb_row_bytes, rgb_row_elems, rgba_row_bytes, rgba_row_elems, scalar},
 };
 
@@ -291,7 +291,7 @@ pub fn rgb48_to_luma_row_endian<const BE: bool>(
   luma_out: &mut [u8],
   rgb_scratch: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) {
@@ -314,7 +314,7 @@ pub fn rgb48_to_luma_row(
   luma_out: &mut [u8],
   rgb_scratch: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) {
@@ -340,7 +340,7 @@ pub fn rgb48_to_luma_u16_row_endian<const BE: bool>(
   luma_out: &mut [u16],
   rgb_scratch: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) {
@@ -363,7 +363,7 @@ pub fn rgb48_to_luma_u16_row(
   luma_out: &mut [u16],
   rgb_scratch: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) {
@@ -645,7 +645,7 @@ pub fn bgr48_to_luma_row_endian<const BE: bool>(
   luma_out: &mut [u8],
   rgb_scratch: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) {
@@ -668,7 +668,7 @@ pub fn bgr48_to_luma_row(
   luma_out: &mut [u8],
   rgb_scratch: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) {
@@ -692,7 +692,7 @@ pub fn bgr48_to_luma_u16_row_endian<const BE: bool>(
   luma_out: &mut [u16],
   rgb_scratch: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) {
@@ -715,7 +715,7 @@ pub fn bgr48_to_luma_u16_row(
   luma_out: &mut [u16],
   rgb_scratch: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) {
@@ -997,7 +997,7 @@ pub fn rgba64_to_luma_row_endian<const BE: bool>(
   luma_out: &mut [u8],
   rgb_scratch: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) {
@@ -1020,7 +1020,7 @@ pub fn rgba64_to_luma_row(
   luma_out: &mut [u8],
   rgb_scratch: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) {
@@ -1045,7 +1045,7 @@ pub fn rgba64_to_luma_u16_row_endian<const BE: bool>(
   luma_out: &mut [u16],
   rgb_scratch: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) {
@@ -1068,7 +1068,7 @@ pub fn rgba64_to_luma_u16_row(
   luma_out: &mut [u16],
   rgb_scratch: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) {
@@ -1352,7 +1352,7 @@ pub fn bgra64_to_luma_row_endian<const BE: bool>(
   luma_out: &mut [u8],
   rgb_scratch: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) {
@@ -1375,7 +1375,7 @@ pub fn bgra64_to_luma_row(
   luma_out: &mut [u8],
   rgb_scratch: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) {
@@ -1400,7 +1400,7 @@ pub fn bgra64_to_luma_u16_row_endian<const BE: bool>(
   luma_out: &mut [u16],
   rgb_scratch: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) {
@@ -1423,7 +1423,7 @@ pub fn bgra64_to_luma_u16_row(
   luma_out: &mut [u16],
   rgb_scratch: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) {
@@ -1577,7 +1577,7 @@ mod tests {
       &mut luma,
       &mut scratch,
       4,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       true,
       false,
     );
@@ -1596,7 +1596,7 @@ mod tests {
       &mut luma,
       &mut scratch,
       4,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       true,
       false,
     );
@@ -1673,7 +1673,7 @@ mod tests {
       &mut luma,
       &mut scratch,
       4,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       true,
       false,
     );
@@ -1692,7 +1692,7 @@ mod tests {
       &mut luma,
       &mut scratch,
       4,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       true,
       false,
     );
@@ -1773,7 +1773,7 @@ mod tests {
       &mut luma,
       &mut scratch,
       4,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       true,
       false,
     );
@@ -1792,7 +1792,7 @@ mod tests {
       &mut luma,
       &mut scratch,
       4,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       true,
       false,
     );
@@ -1874,7 +1874,7 @@ mod tests {
       &mut luma,
       &mut scratch,
       4,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       true,
       false,
     );
@@ -1893,7 +1893,7 @@ mod tests {
       &mut luma,
       &mut scratch,
       4,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       true,
       false,
     );
@@ -1969,7 +1969,7 @@ mod tests {
       &mut luma,
       &mut scratch,
       1,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       true,
       false,
     );
@@ -1986,7 +1986,7 @@ mod tests {
       &mut luma,
       &mut scratch,
       1,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       true,
       false,
     );

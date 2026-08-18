@@ -35,7 +35,7 @@ fn nv16_luma_only_copies_y_plane() {
   let mut sink = MixedSinker::<Nv16>::new(16, 8)
     .with_luma(&mut luma)
     .unwrap();
-  nv16_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  nv16_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
 
   assert!(luma.iter().all(|&y| y == 42));
 }
@@ -51,7 +51,7 @@ fn nv16_rgb_only_converts_gray_to_gray() {
 
   let mut rgb = std::vec![0u8; 16 * 8 * 3];
   let mut sink = MixedSinker::<Nv16>::new(16, 8).with_rgb(&mut rgb).unwrap();
-  nv16_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  nv16_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
 
   for px in rgb.chunks(3) {
     assert!(px[0].abs_diff(128) <= 1);
@@ -81,7 +81,7 @@ fn nv16_mixed_all_three_outputs_populated() {
     .unwrap()
     .with_hsv(&mut h, &mut s, &mut v)
     .unwrap();
-  nv16_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  nv16_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
 
   assert!(luma.iter().all(|&y| y == 200));
   for px in rgb.chunks(3) {
@@ -113,8 +113,8 @@ fn nv16_with_simd_false_matches_with_simd_true() {
     .with_rgb(&mut rgb_scalar)
     .unwrap()
     .with_simd(false);
-  nv16_to(&src, false, ColorMatrix::Bt709, &mut sink_simd).unwrap();
-  nv16_to(&src, false, ColorMatrix::Bt709, &mut sink_scalar).unwrap();
+  nv16_to(&src, false, KernelMatrix::Bt709, &mut sink_simd).unwrap();
+  nv16_to(&src, false, KernelMatrix::Bt709, &mut sink_scalar).unwrap();
 
   assert_eq!(rgb_simd, rgb_scalar);
 }
@@ -169,8 +169,8 @@ fn nv16_matches_nv12_mixed_sinker_with_duplicated_chroma() {
   let mut s_nv12 = MixedSinker::<Nv12>::new(w, h)
     .with_rgb(&mut rgb_nv12)
     .unwrap();
-  nv16_to(&nv16_src, false, ColorMatrix::Bt709, &mut s_nv16).unwrap();
-  nv12_to(&nv12_src, false, ColorMatrix::Bt709, &mut s_nv12).unwrap();
+  nv16_to(&nv16_src, false, KernelMatrix::Bt709, &mut s_nv16).unwrap();
+  nv12_to(&nv12_src, false, KernelMatrix::Bt709, &mut s_nv12).unwrap();
 
   assert_eq!(rgb_nv16, rgb_nv12);
 }
@@ -197,7 +197,7 @@ fn nv16_rgba_only_converts_gray_to_gray_with_opaque_alpha() {
   let mut sink = MixedSinker::<Nv16>::new(16, 8)
     .with_rgba(&mut rgba)
     .unwrap();
-  nv16_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  nv16_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
 
   for px in rgba.chunks(4) {
     assert!(px[0].abs_diff(128) <= 1, "R");
@@ -225,7 +225,7 @@ fn nv16_with_rgb_and_with_rgba_produce_byte_identical_rgb_bytes() {
     .unwrap()
     .with_rgba(&mut rgba)
     .unwrap();
-  nv16_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  nv16_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
 
   for i in 0..(w * h) {
     assert_eq!(rgba[i * 4], rgb[i * 3], "R differs at pixel {i}");
@@ -266,10 +266,10 @@ fn nv16_rgba_simd_matches_scalar_with_random_yuv() {
   let src = Nv16Frame::new(&yp, &uvp, w as u32, h as u32, w as u32, w as u32);
 
   for &matrix in &[
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::YCgCo,
   ] {
     for &full_range in &[true, false] {
       let mut rgba_simd = std::vec![0u8; w * h * 4];
@@ -349,8 +349,8 @@ fn nv16_rgba_matches_nv12_rgba_with_duplicated_chroma() {
   let mut s_nv12 = MixedSinker::<Nv12>::new(w, h)
     .with_rgba(&mut rgba_nv12)
     .unwrap();
-  nv16_to(&nv16_src, false, ColorMatrix::Bt709, &mut s_nv16).unwrap();
-  nv12_to(&nv12_src, false, ColorMatrix::Bt709, &mut s_nv12).unwrap();
+  nv16_to(&nv16_src, false, KernelMatrix::Bt709, &mut s_nv16).unwrap();
+  nv12_to(&nv12_src, false, KernelMatrix::Bt709, &mut s_nv12).unwrap();
 
   assert_eq!(rgba_nv16, rgba_nv12);
 }
@@ -361,7 +361,7 @@ fn nv16_odd_width_sink_returns_err_at_begin_frame() {
   let mut sink = MixedSinker::<Nv16>::new(15, 8).with_rgb(&mut rgb).unwrap();
   let (yp, uvp) = solid_nv16_frame(16, 8, 0, 0, 0); // dummy 16-wide frame
   let src = Nv16Frame::new(&yp, &uvp, 16, 8, 16, 16);
-  let err = nv16_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap_err();
+  let err = nv16_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap_err();
   assert_eq!(
     err,
     MixedSinkerError::WidthAlignment(WidthAlignment::odd(15))
@@ -399,7 +399,7 @@ fn nv16_with_luma_u16_extracts_y_zero_extended() {
   let mut sink = MixedSinker::<Nv16>::new(width, height)
     .with_luma_u16(&mut luma_out)
     .unwrap();
-  nv16_to(&src, false, ColorMatrix::Bt709, &mut sink).unwrap();
+  nv16_to(&src, false, KernelMatrix::Bt709, &mut sink).unwrap();
 
   let expected: std::vec::Vec<u16> = yp.iter().map(|&y| y as u16).collect();
   assert_eq!(luma_out, expected, "Nv16 luma_u16 mismatch");
@@ -456,7 +456,7 @@ fn nv16_rgb_scratch_alloc_failure_leaves_outputs_untouched() {
     .unwrap();
 
   super::super::super::arm_rgb_scratch_alloc_failure();
-  let err = nv16_to(&src, false, ColorMatrix::Bt601, &mut sink).unwrap_err();
+  let err = nv16_to(&src, false, KernelMatrix::Bt601, &mut sink).unwrap_err();
   drop(sink);
 
   assert!(

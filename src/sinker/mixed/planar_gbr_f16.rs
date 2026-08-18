@@ -48,7 +48,7 @@ use super::{
   rgba_plane_row_slice,
 };
 use crate::{
-  ColorMatrix, PixelSink,
+  KernelMatrix, PixelSink,
   row::{
     expand_rgb_to_rgba_row, gbrapf16_to_rgba_f16_row, gbrapf32_to_rgba_f32_row,
     gbrapf32_to_rgba_u16_row, gbrpf16_to_rgb_f16_row, gbrpf16_to_rgb_row, gbrpf16_to_rgba_f16_row,
@@ -62,7 +62,7 @@ use crate::{
 
 // Float-planar GBR sources are already component RGB (no chroma matrix).
 // BT.709 full-range is the conventional default for luma derivation.
-const GBR_F16_LUMA_MATRIX: ColorMatrix = ColorMatrix::Bt709;
+const GBR_F16_LUMA_MATRIX: KernelMatrix = KernelMatrix::Bt709;
 const GBR_F16_FULL_RANGE: bool = true;
 
 // Chunk size for the inline f16→f32 widening scratch arrays (stack-allocated).

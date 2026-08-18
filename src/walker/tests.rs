@@ -5,26 +5,24 @@
 #![allow(deprecated)]
 
 use super::*;
+use crate::ColorMatrix;
 
 // ---- Structural round-trip: Options builders / getters ----------------
 
 #[test]
 fn xyz12_options_default_is_dcip3() {
   assert_eq!(Xyz12Options::default(), Xyz12Options::new());
-  assert_eq!(Xyz12Options::new().target_gamut(), DcpTargetGamut::DciP3);
+  assert_eq!(Xyz12Options::new().target_gamut(), KernelGamut::DciP3);
   // The honest default delegates to mediaframe's own gamut default.
-  assert_eq!(
-    Xyz12Options::default().target_gamut(),
-    DcpTargetGamut::default()
-  );
+  assert_eq!(Xyz12Options::default().target_gamut(), KernelGamut::DciP3);
 }
 
 #[test]
 fn xyz12_options_with_target_gamut_round_trips() {
   for g in [
-    DcpTargetGamut::DciP3,
-    DcpTargetGamut::Rec709,
-    DcpTargetGamut::Rec2020,
+    KernelGamut::DciP3,
+    KernelGamut::Rec709,
+    KernelGamut::Rec2020,
   ] {
     assert_eq!(Xyz12Options::new().with_target_gamut(g).target_gamut(), g);
   }
@@ -34,15 +32,15 @@ fn xyz12_options_with_target_gamut_round_trips() {
 fn yuv_options_default_is_limited_bt709() {
   assert_eq!(YuvOptions::default(), YuvOptions::new());
   assert!(!YuvOptions::new().full_range());
-  assert_eq!(YuvOptions::new().matrix(), ColorMatrix::Bt709);
+  assert_eq!(YuvOptions::new().matrix(), KernelMatrix::Bt709);
 }
 
 #[test]
 fn yuv_options_builders_and_mutators_round_trip() {
   // with_matrix
   assert_eq!(
-    YuvOptions::new().with_matrix(ColorMatrix::Bt601).matrix(),
-    ColorMatrix::Bt601
+    YuvOptions::new().with_matrix(KernelMatrix::Bt601).matrix(),
+    KernelMatrix::Bt601
   );
 
   // bool consuming builders
@@ -77,9 +75,9 @@ fn color_spec_pins_yuvj_to_full_regardless_of_stream_range() {
       DynamicRange::Limited,
       DynamicRange::Unspecified,
       DynamicRange::Full,
-      DynamicRange::Unknown(7),
+      DynamicRange::other("unassigned-7"),
     ] {
-      let spec = ColorSpec::resolve(fmt, stream_range, ColorMatrix::Bt601);
+      let spec = ColorSpec::resolve(fmt.clone(), stream_range.clone(), ColorMatrix::Bt601);
       assert!(
         spec.full_range(),
         "{fmt:?} pins full-range even with stream_range={stream_range:?}"
@@ -110,7 +108,7 @@ fn color_spec_leaves_yuv420p_stream_driven() {
   // Unknown ranges fall back conservatively to limited (studio swing).
   let unknown = ColorSpec::resolve(
     PixelFormat::Yuv420p,
-    DynamicRange::Unknown(42),
+    DynamicRange::other("unassigned-42"),
     ColorMatrix::Bt709,
   );
   assert!(!unknown.full_range());
@@ -149,16 +147,16 @@ fn yuv_options_from_color_spec_bridges_range_and_matrix() {
     DynamicRange::Limited,
     ColorMatrix::Bt601,
   );
-  let opts = YuvOptions::from_color_spec(spec);
+  let opts = YuvOptions::from_color_spec(&spec).unwrap();
   assert!(opts.full_range());
-  assert_eq!(opts.matrix(), ColorMatrix::Bt601);
+  assert_eq!(opts.matrix(), KernelMatrix::Bt601);
 
   // The bridge equals a direct raw construction of the resolved values.
   assert_eq!(
     opts,
     YuvOptions::new()
       .maybe_full_range(true)
-      .with_matrix(ColorMatrix::Bt601)
+      .with_matrix(KernelMatrix::Bt601)
   );
 }
 
@@ -180,16 +178,16 @@ fn color_spec_from_info_pins_yuvj_full_and_carries_metadata() {
       DynamicRange::Limited,
       DynamicRange::Unspecified,
       DynamicRange::Full,
-      DynamicRange::Unknown(7),
+      DynamicRange::other("unassigned-7"),
     ] {
       let info = ColorInfo::new(
         Primaries::Bt2020,
         Transfer::SmpteSt2084Pq,
         ColorMatrix::Bt601,
-        stream_range,
+        stream_range.clone(),
         ChromaLocation::TopLeft,
       );
-      let spec = ColorSpec::from_info(fmt, info);
+      let spec = ColorSpec::from_info(fmt.clone(), info);
       assert!(
         spec.full_range(),
         "{fmt:?} pins full-range even with stream_range={stream_range:?}"
@@ -211,14 +209,14 @@ fn color_spec_from_info_leaves_plain_format_stream_driven() {
   for (stream_range, expect_full) in [
     (DynamicRange::Limited, false),
     (DynamicRange::Unspecified, false),
-    (DynamicRange::Unknown(42), false),
+    (DynamicRange::other("unassigned-42"), false),
     (DynamicRange::Full, true),
   ] {
     let info = ColorInfo::new(
       Primaries::Bt709,
       Transfer::Bt709,
       ColorMatrix::Bt709,
-      stream_range,
+      stream_range.clone(),
       ChromaLocation::Left,
     );
     let spec = ColorSpec::from_info(PixelFormat::Yuv420p, info);
@@ -285,15 +283,16 @@ fn color_spec_resolve_equals_from_info_with_range_only_info() {
       DynamicRange::Limited,
       DynamicRange::Unspecified,
       DynamicRange::Full,
-      DynamicRange::Unknown(9),
+      DynamicRange::other("unassigned-9"),
     ] {
-      for matrix in [ColorMatrix::Bt709, ColorMatrix::Bt601] {
-        let via_resolve = ColorSpec::resolve(fmt, stream_range, matrix);
+      for matrix in [KernelMatrix::Bt709, KernelMatrix::Bt601] {
+        let via_resolve =
+          ColorSpec::resolve(fmt.clone(), stream_range.clone(), ColorMatrix::from(matrix));
         let via_info = ColorSpec::from_info(
-          fmt,
+          fmt.clone(),
           ColorInfo::UNSPECIFIED
-            .with_range(stream_range)
-            .with_matrix(matrix),
+            .with_range(stream_range.clone())
+            .with_matrix(ColorMatrix::from(matrix)),
         );
         assert_eq!(
           via_resolve, via_info,
@@ -377,7 +376,7 @@ mod xyz12_parity {
   const H: u32 = 4;
 
   /// Asserts the LE u8-RGB output of `Walker::walk` equals `xyz12_to`.
-  fn assert_parity_rgb_u8_le(gamut: DcpTargetGamut) {
+  fn assert_parity_rgb_u8_le(gamut: KernelGamut) {
     let pix = ramp_frame(W, H, pack12_le);
     let src = Xyz12LeFrame::try_new(&pix, W, H, W * 3).unwrap();
     let opts = Xyz12Options::new().with_target_gamut(gamut);
@@ -399,7 +398,7 @@ mod xyz12_parity {
   }
 
   /// Asserts the BE u16-RGB output of `Walker::walk` equals `xyz12_to`.
-  fn assert_parity_rgb_u16_be(gamut: DcpTargetGamut) {
+  fn assert_parity_rgb_u16_be(gamut: KernelGamut) {
     let pix = ramp_frame(W, H, pack12_be);
     let src = Xyz12BeFrame::try_new(&pix, W, H, W * 3).unwrap();
     let opts = Xyz12Options::new().with_target_gamut(gamut);
@@ -430,9 +429,9 @@ mod xyz12_parity {
   )]
   fn walk_rgb_u8_le_matches_direct() {
     // >=2 gamuts x LE + rgb u8.
-    assert_parity_rgb_u8_le(DcpTargetGamut::DciP3);
-    assert_parity_rgb_u8_le(DcpTargetGamut::Rec709);
-    assert_parity_rgb_u8_le(DcpTargetGamut::Rec2020);
+    assert_parity_rgb_u8_le(KernelGamut::DciP3);
+    assert_parity_rgb_u8_le(KernelGamut::Rec709);
+    assert_parity_rgb_u8_le(KernelGamut::Rec2020);
   }
 
   #[test]
@@ -442,9 +441,9 @@ mod xyz12_parity {
   )]
   fn walk_rgb_u16_be_matches_direct() {
     // >=2 gamuts x BE + rgb u16.
-    assert_parity_rgb_u16_be(DcpTargetGamut::DciP3);
-    assert_parity_rgb_u16_be(DcpTargetGamut::Rec709);
-    assert_parity_rgb_u16_be(DcpTargetGamut::Rec2020);
+    assert_parity_rgb_u16_be(KernelGamut::DciP3);
+    assert_parity_rgb_u16_be(KernelGamut::Rec709);
+    assert_parity_rgb_u16_be(KernelGamut::Rec2020);
   }
 
   /// Cross-check: the LE u16 + BE u8 corners too, so the full
@@ -455,7 +454,7 @@ mod xyz12_parity {
     ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
   )]
   fn walk_le_u16_and_be_u8_match_direct() {
-    for gamut in [DcpTargetGamut::DciP3, DcpTargetGamut::Rec709] {
+    for gamut in [KernelGamut::DciP3, KernelGamut::Rec709] {
       // LE, u16.
       {
         let pix = ramp_frame(W, H, pack12_le);
@@ -724,7 +723,7 @@ mod mono_parity {
     (data, stride)
   }
 
-  const MATRICES: [ColorMatrix; 2] = [ColorMatrix::Bt709, ColorMatrix::Bt601];
+  const MATRICES: [KernelMatrix; 2] = [KernelMatrix::Bt709, KernelMatrix::Bt601];
 
   // An instrumented sink recording each row's forwarded `(full_range, matrix)`.
   // The mono luma path expands bits to 0/255 and ignores that metadata, so a
@@ -733,7 +732,7 @@ mod mono_parity {
     ($probe:ident, $row:ident, $sink:ident) => {
       #[derive(Default)]
       struct $probe {
-        seen: std::vec::Vec<(bool, ColorMatrix)>,
+        seen: std::vec::Vec<(bool, KernelMatrix)>,
       }
       impl PixelSink for $probe {
         type Input<'r> = $row<'r>;
@@ -892,7 +891,7 @@ mod yuv_planar_parity {
   use super::*;
   use crate::sinker::MixedSinker;
 
-  const MATRICES: [ColorMatrix; 2] = [ColorMatrix::Bt709, ColorMatrix::Bt601];
+  const MATRICES: [KernelMatrix; 2] = [KernelMatrix::Bt709, KernelMatrix::Bt601];
 
   /// A deterministic, column/row-varying `u8` plane of `n` samples.
   fn ramp8(n: usize) -> std::vec::Vec<u8> {
@@ -940,9 +939,9 @@ mod yuv_planar_parity {
 
     for (fmt, stream_range, expected_fr) in cases {
       for matrix in MATRICES {
-        let spec = ColorSpec::resolve(fmt, stream_range, matrix);
+        let spec = ColorSpec::resolve(fmt.clone(), stream_range.clone(), ColorMatrix::from(matrix));
         assert_eq!(spec.full_range(), expected_fr);
-        let spec_opts = YuvOptions::from_color_spec(spec);
+        let spec_opts = YuvOptions::from_color_spec(&spec).unwrap();
 
         // The equivalent raw path sets the resolved range directly.
         let raw_opts = YuvOptions::new()
@@ -1127,7 +1126,7 @@ mod yuv_semi_planar_parity {
   use super::*;
   use crate::sinker::MixedSinker;
 
-  const MATRICES: [ColorMatrix; 2] = [ColorMatrix::Bt709, ColorMatrix::Bt601];
+  const MATRICES: [KernelMatrix; 2] = [KernelMatrix::Bt709, KernelMatrix::Bt601];
 
   fn ramp8(n: usize) -> std::vec::Vec<u8> {
     (0..n).map(|i| ((i * 23 + 5) % 251) as u8).collect()
@@ -1284,7 +1283,7 @@ mod yuv_packed_parity {
     source::{Yuyv422, yuyv422_to},
   };
 
-  const MATRICES: [ColorMatrix; 2] = [ColorMatrix::Bt709, ColorMatrix::Bt601];
+  const MATRICES: [KernelMatrix; 2] = [KernelMatrix::Bt709, KernelMatrix::Bt601];
 
   /// Packed YUYV 4:2:2 — single buffer, `width * 2` u8 per row.
   #[test]
@@ -1337,7 +1336,7 @@ mod y2xx_parity {
     source::{Y210, y210_to, y210_to_endian},
   };
 
-  const MATRICES: [ColorMatrix; 2] = [ColorMatrix::Bt709, ColorMatrix::Bt601];
+  const MATRICES: [KernelMatrix; 2] = [KernelMatrix::Bt709, KernelMatrix::Bt601];
 
   /// MSB-justified 10-bit Y210 wire samples (low 6 bits zero).
   fn y210_ramp() -> std::vec::Vec<u16> {
@@ -1450,7 +1449,7 @@ mod yuv_444_packed_parity {
 
   const W: u32 = 16;
   const H: u32 = 4;
-  const MATRICES: [ColorMatrix; 2] = [ColorMatrix::Bt709, ColorMatrix::Bt601];
+  const MATRICES: [KernelMatrix; 2] = [KernelMatrix::Bt709, KernelMatrix::Bt601];
 
   /// A deterministic, column/row-varying `u8` buffer of `n` bytes.
   fn ramp8(n: usize) -> std::vec::Vec<u8> {
@@ -1668,7 +1667,7 @@ mod v210_parity {
   const W: u32 = 12;
   const H: u32 = 4;
   const STRIDE: u32 = W.div_ceil(6) * 16;
-  const MATRICES: [ColorMatrix; 2] = [ColorMatrix::Bt709, ColorMatrix::Bt601];
+  const MATRICES: [KernelMatrix; 2] = [KernelMatrix::Bt709, KernelMatrix::Bt601];
 
   /// A deterministic, column/row-varying `u8` v210 buffer.
   fn ramp(n: usize) -> std::vec::Vec<u8> {
@@ -1755,7 +1754,7 @@ mod yuva_parity {
   use super::*;
   use crate::sinker::MixedSinker;
 
-  const MATRICES: [ColorMatrix; 2] = [ColorMatrix::Bt709, ColorMatrix::Bt601];
+  const MATRICES: [KernelMatrix; 2] = [KernelMatrix::Bt709, KernelMatrix::Bt601];
 
   fn ramp8(n: usize) -> std::vec::Vec<u8> {
     (0..n).map(|i| ((i * 31 + 9) % 251) as u8).collect()
@@ -1934,7 +1933,7 @@ mod rgb_parity {
 
   const W: u32 = 8;
   const H: u32 = 4;
-  const MATRICES: [ColorMatrix; 2] = [ColorMatrix::Bt709, ColorMatrix::Bt601];
+  const MATRICES: [KernelMatrix; 2] = [KernelMatrix::Bt709, KernelMatrix::Bt601];
 
   /// A deterministic, column/row-varying `u8` plane of `n` samples.
   fn ramp8(n: usize) -> std::vec::Vec<u8> {
@@ -2166,7 +2165,7 @@ mod x2_packed_rgb_parity {
 
   const W: u32 = 8;
   const H: u32 = 4;
-  const MATRICES: [ColorMatrix; 2] = [ColorMatrix::Bt709, ColorMatrix::Bt601];
+  const MATRICES: [KernelMatrix; 2] = [KernelMatrix::Bt709, KernelMatrix::Bt601];
 
   /// A deterministic, column/row-varying `u8` X2*10 buffer — `width * 4`
   /// bytes per row (one u32 word per pixel).
@@ -2263,7 +2262,7 @@ mod rgb_legacy_parity {
 
   const W: u32 = 8;
   const H: u32 = 4;
-  const MATRICES: [ColorMatrix; 2] = [ColorMatrix::Bt709, ColorMatrix::Bt601];
+  const MATRICES: [KernelMatrix; 2] = [KernelMatrix::Bt709, KernelMatrix::Bt601];
 
   /// Legacy 5/6/5 Rgb565 — byte-order-fixed LE, plain arm, `width * 2`
   /// bytes (`width` LE `u16` pixels) per row.
@@ -2378,7 +2377,7 @@ mod gray_parity {
 
   const W: u32 = 16;
   const H: u32 = 4;
-  const MATRICES: [ColorMatrix; 2] = [ColorMatrix::Bt709, ColorMatrix::Bt601];
+  const MATRICES: [KernelMatrix; 2] = [KernelMatrix::Bt709, KernelMatrix::Bt601];
 
   /// A deterministic, column/row-varying `u8` plane of `n` samples.
   fn ramp8(n: usize) -> std::vec::Vec<u8> {
@@ -2750,7 +2749,7 @@ mod gbr_parity {
 
   const W: u32 = 16;
   const H: u32 = 4;
-  const MATRICES: [ColorMatrix; 2] = [ColorMatrix::Bt709, ColorMatrix::Bt601];
+  const MATRICES: [KernelMatrix; 2] = [KernelMatrix::Bt709, KernelMatrix::Bt601];
 
   /// Three deterministic, distinct `u8` G/B/R planes of `W × H` samples.
   fn planes8() -> (std::vec::Vec<u8>, std::vec::Vec<u8>, std::vec::Vec<u8>) {
@@ -3360,7 +3359,7 @@ mod rgbf_parity {
 
   const W: u32 = 8;
   const H: u32 = 4;
-  const MATRICES: [ColorMatrix; 2] = [ColorMatrix::Bt709, ColorMatrix::Bt601];
+  const MATRICES: [KernelMatrix; 2] = [KernelMatrix::Bt709, KernelMatrix::Bt601];
 
   /// Deterministic finite `f32` ramp in `[0, 1]` of `n` packed R/G/B
   /// samples (no NaN/inf — the integer output stays well-defined).
@@ -3583,7 +3582,7 @@ mod rgbaf_parity {
 
   const W: u32 = 8;
   const H: u32 = 4;
-  const MATRICES: [ColorMatrix; 2] = [ColorMatrix::Bt709, ColorMatrix::Bt601];
+  const MATRICES: [KernelMatrix; 2] = [KernelMatrix::Bt709, KernelMatrix::Bt601];
 
   fn ramp_f32(n: usize) -> std::vec::Vec<f32> {
     (0..n)
@@ -3757,7 +3756,7 @@ mod grayf32_parity {
 
   const W: u32 = 16;
   const H: u32 = 4;
-  const MATRICES: [ColorMatrix; 2] = [ColorMatrix::Bt709, ColorMatrix::Bt601];
+  const MATRICES: [KernelMatrix; 2] = [KernelMatrix::Bt709, KernelMatrix::Bt601];
 
   /// Deterministic finite `f32` luma ramp in `[0, 1]` of `n` samples.
   fn ramp_f32(n: usize) -> std::vec::Vec<f32> {
@@ -3773,7 +3772,7 @@ mod grayf32_parity {
   /// it for every `BE`.
   #[derive(Default)]
   struct Grayf32Probe {
-    seen: std::vec::Vec<(bool, ColorMatrix)>,
+    seen: std::vec::Vec<(bool, KernelMatrix)>,
   }
   impl PixelSink for Grayf32Probe {
     type Input<'r> = Grayf32Row<'r>;
@@ -3932,7 +3931,7 @@ mod grayf16_parity {
 
   const W: u32 = 16;
   const H: u32 = 4;
-  const MATRICES: [ColorMatrix; 2] = [ColorMatrix::Bt709, ColorMatrix::Bt601];
+  const MATRICES: [KernelMatrix; 2] = [KernelMatrix::Bt709, KernelMatrix::Bt601];
 
   /// Deterministic finite `f16` luma ramp in `[0, 1]` of `n` samples.
   fn ramp_f16(n: usize) -> std::vec::Vec<f16> {
@@ -3946,7 +3945,7 @@ mod grayf16_parity {
   /// blanket-impls it for every `BE`.
   #[derive(Default)]
   struct Grayf16Probe {
-    seen: std::vec::Vec<(bool, ColorMatrix)>,
+    seen: std::vec::Vec<(bool, KernelMatrix)>,
   }
   impl PixelSink for Grayf16Probe {
     type Input<'r> = Grayf16Row<'r>;
@@ -4282,7 +4281,7 @@ mod yaf_parity {
 
   const W: u32 = 16;
   const H: u32 = 4;
-  const MATRICES: [ColorMatrix; 2] = [ColorMatrix::Bt709, ColorMatrix::Bt601];
+  const MATRICES: [KernelMatrix; 2] = [KernelMatrix::Bt709, KernelMatrix::Bt601];
 
   /// Deterministic finite packed `[Y, A]` f32 ramp (`W*H*2` elements).
   fn ramp_f32_packed(n: usize) -> std::vec::Vec<f32> {
@@ -4412,5 +4411,88 @@ mod yaf_parity {
     yaf16_to_endian::<_, true>(&src, opts.full_range(), opts.matrix(), &mut sd).unwrap();
 
     assert_eq!(via_walker, via_direct, "yaf16 BE parity");
+  }
+}
+
+/// The P-knife: the exchange between the open descriptor vocabulary and the
+/// closed coefficient selector, which is the one place a matrix pixon cannot
+/// decode is refused.
+///
+/// Through 0.1 the kernels carried the open `Matrix` and ended their
+/// coefficient tables with `_ => BT.709`, so every matrix below decoded as
+/// BT.709 and returned a wrong picture with no diagnostic. These assertions
+/// pin the replacement policy arm by arm.
+mod kernel_matrix_exchange {
+  use super::*;
+  use crate::KernelMatrix;
+
+  fn spec_of(matrix: ColorMatrix) -> ColorSpec {
+    ColorSpec::resolve(PixelFormat::Yuv420p, DynamicRange::Limited, matrix)
+  }
+
+  #[test]
+  fn tabulated_matrices_map_to_themselves() {
+    for k in [
+      KernelMatrix::Bt601,
+      KernelMatrix::Bt709,
+      KernelMatrix::Unspecified,
+      KernelMatrix::Fcc,
+      KernelMatrix::Bt470Bg,
+      KernelMatrix::Smpte170M,
+      KernelMatrix::Smpte240m,
+      KernelMatrix::YCgCo,
+      KernelMatrix::Bt2020Ncl,
+      KernelMatrix::ChromaDerivedNcl,
+    ] {
+      assert_eq!(
+        spec_of(ColorMatrix::from(k)).kernel_matrix(),
+        Ok(k),
+        "{k:?} must survive the exchange unchanged",
+      );
+    }
+  }
+
+  #[test]
+  fn non_affine_and_gbr_identity_take_the_documented_affine_fallback() {
+    // pixon decodes these four non-affinely from the sink's transfer /
+    // primaries (#303); the affine selector is consulted only when that tag
+    // does not resolve, and BT.709 is the fallback #303 already shipped.
+    // `Rgb` names no YCbCr basis at all — the GBR luma derivation is pinned to
+    // BT.709 regardless (see the `GBR_*_LUMA_MATRIX` constants).
+    for m in [
+      ColorMatrix::Ictcp,
+      ColorMatrix::ChromaDerivedCl,
+      ColorMatrix::IptC2,
+      ColorMatrix::Smpte2085,
+      ColorMatrix::Rgb,
+    ] {
+      assert_eq!(
+        spec_of(m.clone()).kernel_matrix(),
+        Ok(KernelMatrix::Bt709),
+        "{m:?} must take the documented BT.709 affine fallback",
+      );
+    }
+  }
+
+  #[test]
+  fn matrices_pixon_cannot_decode_are_refused() {
+    // Constant-luminance BT.2020, the two reversible YCgCo variants, and any
+    // matrix this build does not name. Each of these decoded as BT.709 through
+    // 0.1; an error is the only honest answer.
+    for m in [
+      ColorMatrix::Bt2020Cl,
+      ColorMatrix::YCgCoRe,
+      ColorMatrix::YCgCoRo,
+      ColorMatrix::other("acescct"),
+    ] {
+      assert!(
+        spec_of(m.clone()).kernel_matrix().is_err(),
+        "{m:?} must be refused, not decoded as BT.709",
+      );
+      assert!(
+        YuvOptions::from_color_spec(&spec_of(m.clone())).is_err(),
+        "{m:?} must be refused at the walker door too",
+      );
+    }
   }
 }

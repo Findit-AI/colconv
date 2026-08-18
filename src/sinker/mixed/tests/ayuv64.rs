@@ -101,7 +101,7 @@ fn ayuv64_with_rgb_smoke() {
   let src = Ayuv64Frame::try_new(&buf, 4, 1, 16).unwrap();
   let mut rgb = std::vec![0u8; 4 * 3];
   let mut sink = MixedSinker::<Ayuv64>::new(4, 1).with_rgb(&mut rgb).unwrap();
-  ayuv64_to(&src, false, ColorMatrix::Bt709, &mut sink).unwrap();
+  ayuv64_to(&src, false, KernelMatrix::Bt709, &mut sink).unwrap();
   for px in rgb.chunks(3) {
     assert!(
       px[0] >= 220,
@@ -132,7 +132,7 @@ fn ayuv64_with_rgba_passes_source_alpha_depth_converted() {
   let mut sink = MixedSinker::<Ayuv64>::new(4, 1)
     .with_rgba(&mut rgba)
     .unwrap();
-  ayuv64_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  ayuv64_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
   for px in rgba.chunks(4) {
     assert_eq!(
       px[3], 0xABu8,
@@ -160,7 +160,7 @@ fn ayuv64_with_rgb_u16_smoke() {
   let mut sink = MixedSinker::<Ayuv64>::new(4, 1)
     .with_rgb_u16(&mut rgb)
     .unwrap();
-  ayuv64_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  ayuv64_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
   for px in rgb.chunks(3) {
     assert!(
       px[0].abs_diff(32768) <= 0x200,
@@ -189,7 +189,7 @@ fn ayuv64_with_rgba_u16_passes_source_alpha_direct() {
   let mut sink = MixedSinker::<Ayuv64>::new(4, 1)
     .with_rgba_u16(&mut rgba)
     .unwrap();
-  ayuv64_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  ayuv64_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
   for px in rgba.chunks(4) {
     assert_eq!(
       px[3], 0xABCDu16,
@@ -215,7 +215,7 @@ fn ayuv64_with_luma_extracts_y_high_byte() {
   let mut sink = MixedSinker::<Ayuv64>::new(8, 2)
     .with_luma(&mut luma)
     .unwrap();
-  ayuv64_to(&src, false, ColorMatrix::Bt709, &mut sink).unwrap();
+  ayuv64_to(&src, false, KernelMatrix::Bt709, &mut sink).unwrap();
   assert!(
     luma.iter().all(|&y| y == 0xABu8),
     "luma expected 0xAB (0xABCD >> 8), got {:?}",
@@ -239,7 +239,7 @@ fn ayuv64_with_luma_u16_extracts_y_native() {
   let mut sink = MixedSinker::<Ayuv64>::new(8, 2)
     .with_luma_u16(&mut luma)
     .unwrap();
-  ayuv64_to(&src, false, ColorMatrix::Bt709, &mut sink).unwrap();
+  ayuv64_to(&src, false, KernelMatrix::Bt709, &mut sink).unwrap();
   assert!(
     luma.iter().all(|&y| y == 0xABCDu16),
     "luma_u16 expected 0xABCD, got {:?}",
@@ -266,7 +266,7 @@ fn ayuv64_with_hsv_smoke() {
   let mut sink = MixedSinker::<Ayuv64>::new(6, 2)
     .with_hsv(&mut h, &mut s, &mut v)
     .unwrap();
-  ayuv64_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  ayuv64_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
   for &sat in &s {
     assert_eq!(sat, 0, "gray must have S=0 in HSV");
   }
@@ -307,7 +307,7 @@ fn ayuv64_with_rgb_and_rgba_preserves_source_alpha() {
     .unwrap()
     .with_rgba(&mut rgba)
     .unwrap();
-  ayuv64_to(&frame, true, ColorMatrix::Bt709, &mut sinker).unwrap();
+  ayuv64_to(&frame, true, KernelMatrix::Bt709, &mut sinker).unwrap();
 
   for n in 0..width {
     // RGB and RGBA's first 3 bytes must be bit-identical (same packed input).
@@ -361,7 +361,7 @@ fn ayuv64_with_rgb_u16_and_rgba_u16_preserves_source_alpha() {
     .unwrap()
     .with_rgba_u16(&mut rgba)
     .unwrap();
-  ayuv64_to(&frame, true, ColorMatrix::Bt709, &mut sinker).unwrap();
+  ayuv64_to(&frame, true, KernelMatrix::Bt709, &mut sinker).unwrap();
 
   for n in 0..width {
     // First 3 u16 elements of RGB and RGBA must be bit-identical.
@@ -405,13 +405,13 @@ fn ayuv64_simd_vs_scalar_parity_at_1922_u8() {
   let mut sink_simd = MixedSinker::<Ayuv64>::new(w, h)
     .with_rgb(&mut rgb_simd)
     .unwrap();
-  ayuv64_to(&src, false, ColorMatrix::Bt709, &mut sink_simd).unwrap();
+  ayuv64_to(&src, false, KernelMatrix::Bt709, &mut sink_simd).unwrap();
 
   let mut sink_scalar = MixedSinker::<Ayuv64>::new(w, h)
     .with_rgb(&mut rgb_scalar)
     .unwrap()
     .with_simd(false);
-  ayuv64_to(&src, false, ColorMatrix::Bt709, &mut sink_scalar).unwrap();
+  ayuv64_to(&src, false, KernelMatrix::Bt709, &mut sink_scalar).unwrap();
 
   assert_eq!(
     rgb_simd, rgb_scalar,
@@ -442,13 +442,13 @@ fn ayuv64_simd_vs_scalar_parity_at_1922_u16() {
   let mut sink_simd = MixedSinker::<Ayuv64>::new(w, h)
     .with_rgb_u16(&mut rgb_simd)
     .unwrap();
-  ayuv64_to(&src, false, ColorMatrix::Bt709, &mut sink_simd).unwrap();
+  ayuv64_to(&src, false, KernelMatrix::Bt709, &mut sink_simd).unwrap();
 
   let mut sink_scalar = MixedSinker::<Ayuv64>::new(w, h)
     .with_rgb_u16(&mut rgb_scalar)
     .unwrap()
     .with_simd(false);
-  ayuv64_to(&src, false, ColorMatrix::Bt709, &mut sink_scalar).unwrap();
+  ayuv64_to(&src, false, KernelMatrix::Bt709, &mut sink_scalar).unwrap();
 
   assert_eq!(
     rgb_simd, rgb_scalar,
@@ -657,12 +657,12 @@ fn ayuv64_planar_parity_with_yuva444p16() {
   let mut p_sink = MixedSinker::<Yuva444p16>::new(width, height)
     .with_rgb(&mut p_rgb)
     .unwrap();
-  yuva444p16_to(&planar, full_range, ColorMatrix::Bt709, &mut p_sink).unwrap();
+  yuva444p16_to(&planar, full_range, KernelMatrix::Bt709, &mut p_sink).unwrap();
 
   let mut a_sink = MixedSinker::<Ayuv64>::new(width, height)
     .with_rgb(&mut a_rgb)
     .unwrap();
-  ayuv64_to(&packed_frame, full_range, ColorMatrix::Bt709, &mut a_sink).unwrap();
+  ayuv64_to(&packed_frame, full_range, KernelMatrix::Bt709, &mut a_sink).unwrap();
 
   assert_eq!(
     p_rgb, a_rgb,
@@ -677,12 +677,12 @@ fn ayuv64_planar_parity_with_yuva444p16() {
   let mut p_sink2 = MixedSinker::<Yuva444p16>::new(width, height)
     .with_rgba(&mut p_rgba)
     .unwrap();
-  yuva444p16_to(&planar, full_range, ColorMatrix::Bt709, &mut p_sink2).unwrap();
+  yuva444p16_to(&planar, full_range, KernelMatrix::Bt709, &mut p_sink2).unwrap();
 
   let mut a_sink2 = MixedSinker::<Ayuv64>::new(width, height)
     .with_rgba(&mut a_rgba)
     .unwrap();
-  ayuv64_to(&packed_frame, full_range, ColorMatrix::Bt709, &mut a_sink2).unwrap();
+  ayuv64_to(&packed_frame, full_range, KernelMatrix::Bt709, &mut a_sink2).unwrap();
 
   assert_eq!(
     p_rgba, a_rgba,
@@ -706,12 +706,12 @@ fn ayuv64_planar_parity_with_yuva444p16() {
   let mut p_sink3 = MixedSinker::<Yuva444p16>::new(width, height)
     .with_rgb_u16(&mut p_rgb_u16)
     .unwrap();
-  yuva444p16_to(&planar, full_range, ColorMatrix::Bt709, &mut p_sink3).unwrap();
+  yuva444p16_to(&planar, full_range, KernelMatrix::Bt709, &mut p_sink3).unwrap();
 
   let mut a_sink3 = MixedSinker::<Ayuv64>::new(width, height)
     .with_rgb_u16(&mut a_rgb_u16)
     .unwrap();
-  ayuv64_to(&packed_frame, full_range, ColorMatrix::Bt709, &mut a_sink3).unwrap();
+  ayuv64_to(&packed_frame, full_range, KernelMatrix::Bt709, &mut a_sink3).unwrap();
 
   assert_eq!(
     p_rgb_u16, a_rgb_u16,
@@ -726,12 +726,12 @@ fn ayuv64_planar_parity_with_yuva444p16() {
   let mut p_sink4 = MixedSinker::<Yuva444p16>::new(width, height)
     .with_rgba_u16(&mut p_rgba_u16)
     .unwrap();
-  yuva444p16_to(&planar, full_range, ColorMatrix::Bt709, &mut p_sink4).unwrap();
+  yuva444p16_to(&planar, full_range, KernelMatrix::Bt709, &mut p_sink4).unwrap();
 
   let mut a_sink4 = MixedSinker::<Ayuv64>::new(width, height)
     .with_rgba_u16(&mut a_rgba_u16)
     .unwrap();
-  ayuv64_to(&packed_frame, full_range, ColorMatrix::Bt709, &mut a_sink4).unwrap();
+  ayuv64_to(&packed_frame, full_range, KernelMatrix::Bt709, &mut a_sink4).unwrap();
 
   assert_eq!(
     p_rgba_u16, a_rgba_u16,
@@ -769,12 +769,12 @@ fn ayuv64_strategy_a_plus_matches_independent_kernel() {
 
   for full_range in [true, false] {
     for matrix in [
-      ColorMatrix::Bt601,
-      ColorMatrix::Bt709,
-      ColorMatrix::Bt2020Ncl,
-      ColorMatrix::Smpte240m,
-      ColorMatrix::Fcc,
-      ColorMatrix::YCgCo,
+      KernelMatrix::Bt601,
+      KernelMatrix::Bt709,
+      KernelMatrix::Bt2020Ncl,
+      KernelMatrix::Smpte240m,
+      KernelMatrix::Fcc,
+      KernelMatrix::YCgCo,
     ] {
       // Sinker combo path (A+).
       let mut sinker_rgb = std::vec![0u8; width * height * 3];
@@ -844,12 +844,12 @@ fn ayuv64_strategy_a_plus_u16_matches_independent_kernel() {
 
   for full_range in [true, false] {
     for matrix in [
-      ColorMatrix::Bt601,
-      ColorMatrix::Bt709,
-      ColorMatrix::Bt2020Ncl,
-      ColorMatrix::Smpte240m,
-      ColorMatrix::Fcc,
-      ColorMatrix::YCgCo,
+      KernelMatrix::Bt601,
+      KernelMatrix::Bt709,
+      KernelMatrix::Bt2020Ncl,
+      KernelMatrix::Smpte240m,
+      KernelMatrix::Fcc,
+      KernelMatrix::YCgCo,
     ] {
       // Sinker combo path (A+): rgb_u16 + rgba_u16.
       let mut sinker_rgb = std::vec![0u16; width * height * 3];
@@ -931,7 +931,7 @@ fn ayuv64_le_be_roundtrip_byte_identical() {
     .with_simd(false)
     .with_rgba(&mut out_le_rgba)
     .unwrap();
-  ayuv64_to(&frame_le, true, ColorMatrix::Bt709, &mut sink_le).unwrap();
+  ayuv64_to(&frame_le, true, KernelMatrix::Bt709, &mut sink_le).unwrap();
 
   let frame_be = Ayuv64BeFrame::try_new(&pix_be, 8, 4, 8 * 4).unwrap();
   let mut out_be_rgba = std::vec![0u8; 8 * 4 * 4];
@@ -939,7 +939,7 @@ fn ayuv64_le_be_roundtrip_byte_identical() {
     .with_simd(false)
     .with_rgba(&mut out_be_rgba)
     .unwrap();
-  ayuv64_to_endian(&frame_be, true, ColorMatrix::Bt709, &mut sink_be).unwrap();
+  ayuv64_to_endian(&frame_be, true, KernelMatrix::Bt709, &mut sink_be).unwrap();
 
   assert_eq!(
     out_le_rgba, out_be_rgba,
@@ -952,14 +952,14 @@ fn ayuv64_le_be_roundtrip_byte_identical() {
     .with_simd(false)
     .with_rgba_u16(&mut out_le_rgba_u16)
     .unwrap();
-  ayuv64_to(&frame_le, true, ColorMatrix::Bt709, &mut sink_le_u16).unwrap();
+  ayuv64_to(&frame_le, true, KernelMatrix::Bt709, &mut sink_le_u16).unwrap();
 
   let mut out_be_rgba_u16 = std::vec![0u16; 8 * 4 * 4];
   let mut sink_be_u16 = MixedSinker::<Ayuv64<true>>::new(8, 4)
     .with_simd(false)
     .with_rgba_u16(&mut out_be_rgba_u16)
     .unwrap();
-  ayuv64_to_endian(&frame_be, true, ColorMatrix::Bt709, &mut sink_be_u16).unwrap();
+  ayuv64_to_endian(&frame_be, true, KernelMatrix::Bt709, &mut sink_be_u16).unwrap();
 
   assert_eq!(
     out_le_rgba_u16, out_be_rgba_u16,
@@ -1004,7 +1004,7 @@ fn ayuv64_le_be_roundtrip_strategy_a_plus_byte_identical() {
     .unwrap()
     .with_rgba_u16(&mut out_le_rgba_u16)
     .unwrap();
-  ayuv64_to(&frame_le, true, ColorMatrix::Bt709, &mut sink_le).unwrap();
+  ayuv64_to(&frame_le, true, KernelMatrix::Bt709, &mut sink_le).unwrap();
 
   let frame_be = Ayuv64BeFrame::try_new(&pix_be, 8, 4, 8 * 4).unwrap();
   let mut out_be_rgb = std::vec![0u8; 8 * 4 * 3];
@@ -1021,7 +1021,7 @@ fn ayuv64_le_be_roundtrip_strategy_a_plus_byte_identical() {
     .unwrap()
     .with_rgba_u16(&mut out_be_rgba_u16)
     .unwrap();
-  ayuv64_to_endian(&frame_be, true, ColorMatrix::Bt709, &mut sink_be).unwrap();
+  ayuv64_to_endian(&frame_be, true, KernelMatrix::Bt709, &mut sink_be).unwrap();
 
   assert_eq!(out_le_rgb, out_be_rgb, "AYUV64 A+ RGB u8 LE/BE diverge");
   assert_eq!(out_le_rgba, out_be_rgba, "AYUV64 A+ RGBA u8 LE/BE diverge");
@@ -1078,7 +1078,7 @@ fn ayuv64_rgb_scratch_alloc_failure_leaves_outputs_untouched() {
     .unwrap();
 
   super::super::arm_rgb_scratch_alloc_failure();
-  let err = ayuv64_to(&src, false, ColorMatrix::Bt601, &mut sink).unwrap_err();
+  let err = ayuv64_to(&src, false, KernelMatrix::Bt601, &mut sink).unwrap_err();
   drop(sink);
 
   assert!(
@@ -1127,7 +1127,7 @@ fn ayuv64_rgb_scratch_alloc_failure_u16_color_leaves_outputs_untouched() {
     .unwrap();
 
   super::super::arm_rgb_scratch_alloc_failure();
-  let err = ayuv64_to(&src, false, ColorMatrix::Bt601, &mut sink).unwrap_err();
+  let err = ayuv64_to(&src, false, KernelMatrix::Bt601, &mut sink).unwrap_err();
   drop(sink);
 
   assert!(

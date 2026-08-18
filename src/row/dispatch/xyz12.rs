@@ -7,7 +7,7 @@
 //! kernel takes:
 //!
 //! - `BE: const bool` — wire-format endianness of the source `u16`s.
-//! - `target_gamut: DcpTargetGamut` — runtime choice of XYZ → RGB
+//! - `target_gamut: KernelGamut` — runtime choice of XYZ → RGB
 //!   matrix (DCI-P3 / Rec.709 / Rec.2020).
 //!
 //! Pipeline (per pixel): SMPTE ST 428-1 §8 inverse-OETF → 3×3 matmul
@@ -33,7 +33,7 @@ use crate::row::simd128_available;
 #[cfg(target_arch = "x86_64")]
 use crate::row::{avx2_available, avx512_available, sse41_available};
 use crate::{
-  DcpTargetGamut,
+  KernelGamut,
   row::{
     rgb_row_bytes, rgb_row_elems, rgba_row_bytes, rgba_row_elems, scalar::xyz12 as scalar_xyz12,
   },
@@ -49,7 +49,7 @@ pub fn xyz12_to_rgb_row<const BE: bool>(
   xyz: &[u16],
   rgb_out: &mut [u8],
   width: usize,
-  target_gamut: DcpTargetGamut,
+  target_gamut: KernelGamut,
   use_simd: bool,
 ) {
   let xyz_in_min = rgb_row_elems(width);
@@ -111,7 +111,7 @@ pub fn xyz12_to_rgba_row<const BE: bool>(
   xyz: &[u16],
   rgba_out: &mut [u8],
   width: usize,
-  target_gamut: DcpTargetGamut,
+  target_gamut: KernelGamut,
   use_simd: bool,
 ) {
   let xyz_in_min = rgb_row_elems(width);
@@ -175,7 +175,7 @@ pub fn xyz12_to_rgb_u16_row<const BE: bool>(
   xyz: &[u16],
   rgb_out: &mut [u16],
   width: usize,
-  target_gamut: DcpTargetGamut,
+  target_gamut: KernelGamut,
   use_simd: bool,
 ) {
   let xyz_in_min = rgb_row_elems(width);
@@ -243,7 +243,7 @@ pub fn xyz12_to_rgba_u16_row<const BE: bool>(
   xyz: &[u16],
   rgba_out: &mut [u16],
   width: usize,
-  target_gamut: DcpTargetGamut,
+  target_gamut: KernelGamut,
   use_simd: bool,
 ) {
   let xyz_in_min = rgb_row_elems(width);
@@ -318,7 +318,7 @@ pub fn xyz12_to_rgb_f32_row<const BE: bool>(
   xyz: &[u16],
   rgb_out: &mut [f32],
   width: usize,
-  target_gamut: DcpTargetGamut,
+  target_gamut: KernelGamut,
   use_simd: bool,
 ) {
   let xyz_in_min = rgb_row_elems(width);
@@ -454,7 +454,7 @@ pub fn xyz12_to_rgb_f16_row<const BE: bool>(
   xyz: &[u16],
   rgb_out: &mut [half::f16],
   width: usize,
-  target_gamut: DcpTargetGamut,
+  target_gamut: KernelGamut,
   use_simd: bool,
 ) {
   let xyz_in_min = rgb_row_elems(width);
@@ -522,7 +522,7 @@ pub fn xyz12_to_rgba_f16_row<const BE: bool>(
   xyz: &[u16],
   rgba_out: &mut [half::f16],
   width: usize,
-  target_gamut: DcpTargetGamut,
+  target_gamut: KernelGamut,
   use_simd: bool,
 ) {
   let xyz_in_min = rgb_row_elems(width);

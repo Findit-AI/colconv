@@ -20,7 +20,7 @@
 //! re-encode is exercised host-independently by the kernel-level BE oracle.
 
 use super::*;
-use crate::ChromaLocation;
+use crate::{ChromaLocation, ColorMatrix};
 
 const W: u32 = 16;
 const H: u32 = 8;
@@ -678,9 +678,9 @@ macro_rules! hibit_420_chroma_tests {
         let mut sink = MixedSinker::<$Marker>::new(W as usize, H as usize)
           .with_rgb(&mut rgb)
           .unwrap()
-          .with_chroma_location(loc)
+          .with_chroma_location(loc.clone())
           .with_simd(simd);
-        $walker(&src, false, ColorMatrix::Bt601, &mut sink).unwrap();
+        $walker(&src, false, KernelMatrix::Bt601, &mut sink).unwrap();
         rgb
       }
 
@@ -697,11 +697,11 @@ macro_rules! hibit_420_chroma_tests {
         // Top), so it LEAVES the co-sited byte-identity group.
         for loc in [
           ChromaLocation::Unspecified,
-          ChromaLocation::Unknown(99),
+          ChromaLocation::other("unassigned-99"),
           ChromaLocation::Left,
         ] {
           assert_eq!(
-            convert_rgb(loc, true),
+            convert_rgb(loc.clone(), true),
             baseline,
             "siting {loc:?} must keep the byte-identical default decode"
           );
@@ -721,7 +721,7 @@ macro_rules! hibit_420_chroma_tests {
           .with_rgb(&mut rgb)
           .unwrap()
           .with_chroma_location(ChromaLocation::Left);
-        $walker(&src, false, ColorMatrix::Bt601, &mut sink).unwrap();
+        $walker(&src, false, KernelMatrix::Bt601, &mut sink).unwrap();
         let chroma_len = sink.chroma_full_u16.len();
         drop(sink);
         assert_eq!(chroma_len, 0, "co-sited path must not grow the u16 chroma scratch");
@@ -742,7 +742,7 @@ macro_rules! hibit_420_chroma_tests {
           .with_rgb(&mut rgb)
           .unwrap()
           .with_chroma_location(ChromaLocation::Center);
-        $walker(&src, false, ColorMatrix::Bt601, &mut sink).unwrap();
+        $walker(&src, false, KernelMatrix::Bt601, &mut sink).unwrap();
         let chroma_len = sink.chroma_full_u16.len();
         drop(sink);
         assert_eq!(
@@ -765,7 +765,7 @@ macro_rules! hibit_420_chroma_tests {
         let mut ref_sink = MixedSinker::<$Ref>::new(W as usize, H as usize)
           .with_rgb(&mut rgb_ref)
           .unwrap();
-        $ref_walker(&ref_src, false, ColorMatrix::Bt601, &mut ref_sink).unwrap();
+        $ref_walker(&ref_src, false, KernelMatrix::Bt601, &mut ref_sink).unwrap();
         assert_eq!(
           convert_rgb(ChromaLocation::Center, true),
           rgb_ref,
@@ -788,14 +788,14 @@ macro_rules! hibit_420_chroma_tests {
           .with_rgb_u16(&mut rgb16)
           .unwrap()
           .with_chroma_location(ChromaLocation::Center);
-        $walker(&src, false, ColorMatrix::Bt601, &mut sink).unwrap();
+        $walker(&src, false, KernelMatrix::Bt601, &mut sink).unwrap();
 
         let ref_src = $RefFrame::new(&yp, &u444, &v444, W, H, W, W, W);
         let mut rgb16_ref = std::vec![0u16; (W * H * 3) as usize];
         let mut ref_sink = MixedSinker::<$Ref>::new(W as usize, H as usize)
           .with_rgb_u16(&mut rgb16_ref)
           .unwrap();
-        $ref_walker(&ref_src, false, ColorMatrix::Bt601, &mut ref_sink).unwrap();
+        $ref_walker(&ref_src, false, KernelMatrix::Bt601, &mut ref_sink).unwrap();
 
         assert_eq!(
           rgb16, rgb16_ref,
@@ -820,14 +820,14 @@ macro_rules! hibit_420_chroma_tests {
             .with_rgba(&mut rgba)
             .unwrap()
             .with_chroma_location(ChromaLocation::Center);
-          $walker(&src, false, ColorMatrix::Bt601, &mut sink).unwrap();
+          $walker(&src, false, KernelMatrix::Bt601, &mut sink).unwrap();
 
           let ref_src = $RefFrame::new(&yp, &u444, &v444, W, H, W, W, W);
           let mut rgba_ref = std::vec![0u8; (W * H * 4) as usize];
           let mut ref_sink = MixedSinker::<$Ref>::new(W as usize, H as usize)
             .with_rgba(&mut rgba_ref)
             .unwrap();
-          $ref_walker(&ref_src, false, ColorMatrix::Bt601, &mut ref_sink).unwrap();
+          $ref_walker(&ref_src, false, KernelMatrix::Bt601, &mut ref_sink).unwrap();
           assert_eq!(rgba, rgba_ref, "centered RGBA must equal upsample-then-4:4:4");
         }
 
@@ -839,14 +839,14 @@ macro_rules! hibit_420_chroma_tests {
             .with_rgba_u16(&mut rgba16)
             .unwrap()
             .with_chroma_location(ChromaLocation::Center);
-          $walker(&src, false, ColorMatrix::Bt601, &mut sink).unwrap();
+          $walker(&src, false, KernelMatrix::Bt601, &mut sink).unwrap();
 
           let ref_src = $RefFrame::new(&yp, &u444, &v444, W, H, W, W, W);
           let mut rgba16_ref = std::vec![0u16; (W * H * 4) as usize];
           let mut ref_sink = MixedSinker::<$Ref>::new(W as usize, H as usize)
             .with_rgba_u16(&mut rgba16_ref)
             .unwrap();
-          $ref_walker(&ref_src, false, ColorMatrix::Bt601, &mut ref_sink).unwrap();
+          $ref_walker(&ref_src, false, KernelMatrix::Bt601, &mut ref_sink).unwrap();
           assert_eq!(
             rgba16, rgba16_ref,
             "centered RGBA(u16) must equal upsample-then-4:4:4"
@@ -865,7 +865,7 @@ macro_rules! hibit_420_chroma_tests {
             .with_hsv(&mut h, &mut s, &mut v)
             .unwrap()
             .with_chroma_location(ChromaLocation::Center);
-          $walker(&src, false, ColorMatrix::Bt601, &mut sink).unwrap();
+          $walker(&src, false, KernelMatrix::Bt601, &mut sink).unwrap();
 
           let ref_src = $RefFrame::new(&yp, &u444, &v444, W, H, W, W, W);
           let (mut hr, mut sr, mut vr) = (
@@ -876,7 +876,7 @@ macro_rules! hibit_420_chroma_tests {
           let mut ref_sink = MixedSinker::<$Ref>::new(W as usize, H as usize)
             .with_hsv(&mut hr, &mut sr, &mut vr)
             .unwrap();
-          $ref_walker(&ref_src, false, ColorMatrix::Bt601, &mut ref_sink).unwrap();
+          $ref_walker(&ref_src, false, KernelMatrix::Bt601, &mut ref_sink).unwrap();
           assert_eq!(
             (h, s, v),
             (hr, sr, vr),
@@ -920,7 +920,7 @@ macro_rules! hibit_420_chroma_tests {
         let mut ref_sink = MixedSinker::<$Ref>::new(W as usize, H as usize)
           .with_rgb(&mut rgb_ref)
           .unwrap();
-        $ref_walker(&ref_src, false, ColorMatrix::Bt601, &mut ref_sink).unwrap();
+        $ref_walker(&ref_src, false, KernelMatrix::Bt601, &mut ref_sink).unwrap();
         assert_eq!(
           convert_rgb_with(ChromaLocation::Top, true, &yp, &up, &vp),
           rgb_ref,
@@ -934,13 +934,13 @@ macro_rules! hibit_420_chroma_tests {
           .with_rgb_u16(&mut rgb16)
           .unwrap()
           .with_chroma_location(ChromaLocation::Top);
-        $walker(&src, false, ColorMatrix::Bt601, &mut sink).unwrap();
+        $walker(&src, false, KernelMatrix::Bt601, &mut sink).unwrap();
         let ref_src = $RefFrame::new(&yp, &u444, &v444, W, H, W, W, W);
         let mut rgb16_ref = std::vec![0u16; (W * H * 3) as usize];
         let mut ref_sink = MixedSinker::<$Ref>::new(W as usize, H as usize)
           .with_rgb_u16(&mut rgb16_ref)
           .unwrap();
-        $ref_walker(&ref_src, false, ColorMatrix::Bt601, &mut ref_sink).unwrap();
+        $ref_walker(&ref_src, false, KernelMatrix::Bt601, &mut ref_sink).unwrap();
         assert_eq!(rgb16, rgb16_ref, "top-sited RGB u16 must equal forward-vblend-then-4:4:4");
       }
 
@@ -971,7 +971,7 @@ macro_rules! hibit_420_chroma_tests {
         let mut ref_sink = MixedSinker::<$Ref>::new(W as usize, H as usize)
           .with_rgb(&mut rgb_ref)
           .unwrap();
-        $ref_walker(&ref_src, false, ColorMatrix::Bt601, &mut ref_sink).unwrap();
+        $ref_walker(&ref_src, false, KernelMatrix::Bt601, &mut ref_sink).unwrap();
         assert_eq!(
           convert_rgb_with(ChromaLocation::TopLeft, true, &yp, &up, &vp),
           rgb_ref,
@@ -1014,7 +1014,7 @@ macro_rules! hibit_420_chroma_tests {
           let mut sink = MixedSinker::<$Marker>::new(w, H as usize)
             .with_rgb(&mut rgb)
             .unwrap()
-            .with_chroma_location(loc1)
+            .with_chroma_location(loc1.clone())
             .with_simd(true);
           crate::PixelSink::begin_frame(&mut sink, W, H).unwrap();
           let row_at = |r: usize| {
@@ -1024,7 +1024,7 @@ macro_rules! hibit_420_chroma_tests {
               &up[cr * cw..cr * cw + cw],
               &vp[cr * cw..cr * cw + cw],
               r,
-              ColorMatrix::Bt601,
+              KernelMatrix::Bt601,
               false,
             )
           };
@@ -1042,7 +1042,7 @@ macro_rules! hibit_420_chroma_tests {
             "{loc1:?}: the Top vertical phase must be frozen"
           );
           // Mid-frame flip → reject; held row survives.
-          sink.set_chroma_location(loc2);
+          sink.set_chroma_location(loc2.clone());
           let err = crate::PixelSink::process(&mut sink, row_at(2)).unwrap_err();
           assert!(
             matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
@@ -1080,7 +1080,7 @@ macro_rules! hibit_420_chroma_tests {
         let mut ref_sink = MixedSinker::<$Ref>::new(W as usize, H as usize)
           .with_rgb(&mut rgb_ref)
           .unwrap();
-        $ref_walker(&ref_src, false, ColorMatrix::Bt601, &mut ref_sink).unwrap();
+        $ref_walker(&ref_src, false, KernelMatrix::Bt601, &mut ref_sink).unwrap();
         assert_eq!(
           convert_rgb_with(ChromaLocation::Bottom, true, &yp, &up, &vp),
           rgb_ref,
@@ -1102,13 +1102,13 @@ macro_rules! hibit_420_chroma_tests {
           .with_rgb_u16(&mut rgb16)
           .unwrap()
           .with_chroma_location(ChromaLocation::Bottom);
-        $walker(&src, false, ColorMatrix::Bt601, &mut sink).unwrap();
+        $walker(&src, false, KernelMatrix::Bt601, &mut sink).unwrap();
         let ref_src = $RefFrame::new(&yp, &u444, &v444, W, H, W, W, W);
         let mut rgb16_ref = std::vec![0u16; (W * H * 3) as usize];
         let mut ref_sink = MixedSinker::<$Ref>::new(W as usize, H as usize)
           .with_rgb_u16(&mut rgb16_ref)
           .unwrap();
-        $ref_walker(&ref_src, false, ColorMatrix::Bt601, &mut ref_sink).unwrap();
+        $ref_walker(&ref_src, false, KernelMatrix::Bt601, &mut ref_sink).unwrap();
         assert_eq!(
           rgb16, rgb16_ref,
           "bottom-sited high-bit 4:2:0 RGB u16 must equal vblend-then-4:4:4"
@@ -1143,7 +1143,7 @@ macro_rules! hibit_420_chroma_tests {
         let mut ref_sink = MixedSinker::<$Ref>::new(W as usize, H as usize)
           .with_rgb(&mut rgb_ref)
           .unwrap();
-        $ref_walker(&ref_src, false, ColorMatrix::Bt601, &mut ref_sink).unwrap();
+        $ref_walker(&ref_src, false, KernelMatrix::Bt601, &mut ref_sink).unwrap();
         assert_eq!(
           convert_rgb_with(ChromaLocation::BottomLeft, true, &yp, &up, &vp),
           rgb_ref,
@@ -1156,13 +1156,13 @@ macro_rules! hibit_420_chroma_tests {
           .with_rgb_u16(&mut rgb16)
           .unwrap()
           .with_chroma_location(ChromaLocation::BottomLeft);
-        $walker(&src, false, ColorMatrix::Bt601, &mut sink).unwrap();
+        $walker(&src, false, KernelMatrix::Bt601, &mut sink).unwrap();
         let ref_src = $RefFrame::new(&yp, &u444, &v444, W, H, W, W, W);
         let mut rgb16_ref = std::vec![0u16; (W * H * 3) as usize];
         let mut ref_sink = MixedSinker::<$Ref>::new(W as usize, H as usize)
           .with_rgb_u16(&mut rgb16_ref)
           .unwrap();
-        $ref_walker(&ref_src, false, ColorMatrix::Bt601, &mut ref_sink).unwrap();
+        $ref_walker(&ref_src, false, KernelMatrix::Bt601, &mut ref_sink).unwrap();
         assert_eq!(rgb16, rgb16_ref, "bottom-left RGB u16 must equal cosited-vblend-then-4:4:4");
       }
 
@@ -1212,7 +1212,7 @@ macro_rules! hibit_420_chroma_tests {
         let ref_src = $RefFrame::new(&yp, &u444, &v444, W, H, W, W, W);
         let mut rgb_ref = std::vec![0u8; w * h * 3];
         let mut ref_sink = MixedSinker::<$Ref>::new(w, h).with_rgb(&mut rgb_ref).unwrap();
-        $ref_walker(&ref_src, false, ColorMatrix::Bt601, &mut ref_sink).unwrap();
+        $ref_walker(&ref_src, false, KernelMatrix::Bt601, &mut ref_sink).unwrap();
         drop(ref_sink);
         let mut luma = std::vec![0u8; w * h];
         let mut rgb = std::vec![0u8; w * h * 3];
@@ -1229,7 +1229,7 @@ macro_rules! hibit_420_chroma_tests {
               &up[cr * cw..cr * cw + cw],
               &vp[cr * cw..cr * cw + cw],
               r,
-              ColorMatrix::Bt601,
+              KernelMatrix::Bt601,
               false,
             );
             crate::PixelSink::process(sink, row).unwrap();
@@ -1281,7 +1281,7 @@ macro_rules! hibit_420_chroma_tests {
               &up[cr * cw..cr * cw + cw],
               &vp[cr * cw..cr * cw + cw],
               r,
-              ColorMatrix::Bt601,
+              KernelMatrix::Bt601,
               false,
             );
             crate::PixelSink::process(sink, row).unwrap();
@@ -1361,7 +1361,7 @@ macro_rules! hibit_420_chroma_tests {
             .with_rgb(&mut rgb)
             .unwrap()
             .with_chroma_location(ChromaLocation::Center);
-          $walker(&src, false, ColorMatrix::Bt601, &mut sink).unwrap();
+          $walker(&src, false, KernelMatrix::Bt601, &mut sink).unwrap();
           rgb
         };
         let up_dirty: Vec<u16> = up.iter().map(|&x| x | upper).collect();
@@ -1395,7 +1395,7 @@ macro_rules! hibit_420_chroma_tests {
             .with_rgb(&mut rgb)
             .unwrap()
             .with_chroma_location(ChromaLocation::Center);
-          $walker_be(&src, false, ColorMatrix::Bt601, &mut sink).unwrap();
+          $walker_be(&src, false, KernelMatrix::Bt601, &mut sink).unwrap();
           rgb
         };
         let up_dirty: Vec<u16> = up.iter().map(|&x| x | upper).collect();
@@ -1433,7 +1433,7 @@ macro_rules! hibit_420_chroma_tests {
           .with_chroma_location(ChromaLocation::Center);
 
         super::super::super::arm_chroma_full_alloc_failure();
-        let err = $walker(&src, false, ColorMatrix::Bt601, &mut sink).unwrap_err();
+        let err = $walker(&src, false, KernelMatrix::Bt601, &mut sink).unwrap_err();
         drop(sink);
 
         assert!(
@@ -1496,8 +1496,8 @@ macro_rules! hibit_420_chroma_tests {
           let mut sink = MixedSinker::<$Marker>::new(W as usize, H as usize)
             .with_rgb(&mut rgb)
             .unwrap()
-            .with_color_spec(spec(loc));
-          $walker(&src, false, ColorMatrix::ChromaDerivedNcl, &mut sink).unwrap();
+            .with_color_spec(&spec(loc));
+          $walker(&src, false, KernelMatrix::ChromaDerivedNcl, &mut sink).unwrap();
           rgb
         };
         // The BT.709 reference the matrix-tag fallback must equal.
@@ -1507,8 +1507,8 @@ macro_rules! hibit_420_chroma_tests {
           let mut sink = MixedSinker::<$Marker>::new(W as usize, H as usize)
             .with_rgb(&mut rgb)
             .unwrap()
-            .with_chroma_location(loc);
-          $walker(&src, false, ColorMatrix::Bt709, &mut sink).unwrap();
+            .with_chroma_location(loc.clone());
+          $walker(&src, false, KernelMatrix::Bt709, &mut sink).unwrap();
           rgb
         };
 
@@ -1552,12 +1552,12 @@ macro_rules! hibit_420_chroma_tests {
           (ChromaLocation::Left, ChromaLocation::Bottom),
           (ChromaLocation::Bottom, ChromaLocation::Center),
         ] {
-          let want = convert_rgb_with(loc1, true, &yp, &up, &vp);
+          let want = convert_rgb_with(loc1.clone(), true, &yp, &up, &vp);
           let mut rgb = std::vec![0u8; w * h * 3];
           let mut sink = MixedSinker::<$Marker>::new(w, h)
             .with_rgb(&mut rgb)
             .unwrap()
-            .with_chroma_location(loc1)
+            .with_chroma_location(loc1.clone())
             .with_simd(true);
           crate::PixelSink::begin_frame(&mut sink, W, H).unwrap();
           for r in 0..2 {
@@ -1567,7 +1567,7 @@ macro_rules! hibit_420_chroma_tests {
               &up[cr * cw..cr * cw + cw],
               &vp[cr * cw..cr * cw + cw],
               r,
-              ColorMatrix::Bt601,
+              KernelMatrix::Bt601,
               false,
             );
             crate::PixelSink::process(&mut sink, row).unwrap();
@@ -1576,13 +1576,13 @@ macro_rules! hibit_420_chroma_tests {
           let prev_len = sink.chroma_prev_u16.len();
           let prev_tag = sink.chroma_prev_row;
 
-          sink.set_chroma_location(loc2);
+          sink.set_chroma_location(loc2.clone());
           let row2 = $Row::new(
             &yp[2 * w..3 * w],
             &up[cw..2 * cw],
             &vp[cw..2 * cw],
             2,
-            ColorMatrix::Bt601,
+            KernelMatrix::Bt601,
             false,
           );
           let err = crate::PixelSink::process(&mut sink, row2).unwrap_err();
@@ -1605,7 +1605,7 @@ macro_rules! hibit_420_chroma_tests {
             "{loc1:?}->{loc2:?}: a rejected flip must not advance the lookback tag"
           );
 
-          sink.set_chroma_location(loc1);
+          sink.set_chroma_location(loc1.clone());
           for r in 2..h {
             let cr = r / 2;
             let row = $Row::new(
@@ -1613,7 +1613,7 @@ macro_rules! hibit_420_chroma_tests {
               &up[cr * cw..cr * cw + cw],
               &vp[cr * cw..cr * cw + cw],
               r,
-              ColorMatrix::Bt601,
+              KernelMatrix::Bt601,
               false,
             );
             crate::PixelSink::process(&mut sink, row).unwrap();

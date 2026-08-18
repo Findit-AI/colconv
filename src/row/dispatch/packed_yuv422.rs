@@ -18,7 +18,7 @@ use crate::row::simd128_available;
 #[cfg(target_arch = "x86_64")]
 use crate::row::{avx2_available, avx512_available, sse41_available};
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   row::{packed_yuv422_row_bytes, rgb_row_bytes, rgba_row_bytes, scalar},
 };
 
@@ -30,7 +30,7 @@ pub fn yuyv422_to_rgb_row(
   packed: &[u8],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) {
@@ -90,7 +90,7 @@ pub fn yuyv422_to_rgba_row(
   packed: &[u8],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) {
@@ -150,7 +150,7 @@ pub fn uyvy422_to_rgb_row(
   packed: &[u8],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) {
@@ -210,7 +210,7 @@ pub fn uyvy422_to_rgba_row(
   packed: &[u8],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) {
@@ -270,7 +270,7 @@ pub fn yvyu422_to_rgb_row(
   packed: &[u8],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) {
@@ -330,7 +330,7 @@ pub fn yvyu422_to_rgba_row(
   packed: &[u8],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) {
@@ -398,7 +398,7 @@ pub fn yuyv422_to_hsv_row(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) {
@@ -463,7 +463,7 @@ pub fn uyvy422_to_hsv_row(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) {
@@ -528,7 +528,7 @@ pub fn yvyu422_to_hsv_row(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) {

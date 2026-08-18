@@ -326,10 +326,13 @@ fn transfer_function_for_matrix_default_mapping() {
   use crate::ColorMatrix;
   // The sRGB identity (GBR) pairs with the sRGB curve.
   assert_eq!(
-    TransferFunction::for_matrix(ColorMatrix::Rgb),
+    TransferFunction::for_matrix(&ColorMatrix::Rgb),
     TransferFunction::Srgb,
   );
-  // Every YCbCr video matrix resolves to the BT.1886 display EOTF.
+  // Every YCbCr video matrix resolves to the BT.1886 display EOTF — the
+  // tabulated ones, the constant-luminance and perceptual ones the kernels
+  // refuse, and the open `Other` escape alike. This resolution is on the
+  // descriptor vocabulary, so it stays total.
   for matrix in [
     ColorMatrix::Bt601,
     ColorMatrix::Bt709,
@@ -341,10 +344,11 @@ fn transfer_function_for_matrix_default_mapping() {
     ColorMatrix::Bt470Bg,
     ColorMatrix::YCgCo,
     ColorMatrix::Unspecified,
-    ColorMatrix::Unknown(99),
+    ColorMatrix::Ictcp,
+    ColorMatrix::other("acescct"),
   ] {
     assert_eq!(
-      TransferFunction::for_matrix(matrix),
+      TransferFunction::for_matrix(&matrix),
       TransferFunction::Bt1886,
       "{} must resolve to BT.1886",
       matrix.as_str(),

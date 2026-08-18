@@ -65,7 +65,7 @@ fn uyva_matches_vuya_reference_all_outputs() {
   let vu = VuyaFrame::try_new(&vuya_buf, width as u32, height as u32, (width * 4) as u32).unwrap();
 
   for full_range in [true, false] {
-    let m = ColorMatrix::Bt709;
+    let m = KernelMatrix::Bt709;
     // RGB
     let (mut a_rgb, mut v_rgb) = (std::vec![0u8; n * 3], std::vec![0u8; n * 3]);
     {
@@ -126,7 +126,7 @@ fn uyva_matches_vuya_reference_all_outputs() {
   }
 
   // Luma / luma_u16 / HSV.
-  let m = ColorMatrix::Bt709;
+  let m = KernelMatrix::Bt709;
   let (mut a_l, mut v_l) = (std::vec![0u8; n], std::vec![0u8; n]);
   {
     let mut a = MixedSinker::<Uyva>::new(width, height)
@@ -190,14 +190,14 @@ fn uyva_simd_vs_scalar_parity_at_1922() {
   let mut scalar = std::vec![0u8; w * h * 4];
   {
     let mut s = MixedSinker::<Uyva>::new(w, h).with_rgba(&mut simd).unwrap();
-    uyva_to(&src, false, ColorMatrix::Bt709, &mut s).unwrap();
+    uyva_to(&src, false, KernelMatrix::Bt709, &mut s).unwrap();
   }
   {
     let mut s = MixedSinker::<Uyva>::new(w, h)
       .with_rgba(&mut scalar)
       .unwrap()
       .with_simd(false);
-    uyva_to(&src, false, ColorMatrix::Bt709, &mut s).unwrap();
+    uyva_to(&src, false, KernelMatrix::Bt709, &mut s).unwrap();
   }
   assert_eq!(simd, scalar, "UYVA SIMD ≠ scalar at width {w}");
 }
@@ -211,7 +211,7 @@ fn uyva_malformed_row_returns_row_shape_mismatch() {
   let mut sink = MixedSinker::<Uyva>::new(4, 1).with_rgb(&mut rgb).unwrap();
   sink.begin_frame(4, 1).unwrap();
   let short = std::vec![0u8; 12];
-  let row = UyvaRow::new(&short, 0, ColorMatrix::Bt709, false);
+  let row = UyvaRow::new(&short, 0, KernelMatrix::Bt709, false);
   let err = sink.process(row).unwrap_err();
   assert!(
     matches!(err, MixedSinkerError::RowShapeMismatch(e)
@@ -266,7 +266,7 @@ fn uyva_rgb_scratch_alloc_failure_leaves_outputs_untouched() {
     .unwrap();
 
   super::super::arm_rgb_scratch_alloc_failure();
-  let err = uyva_to(&src, false, ColorMatrix::Bt601, &mut sink).unwrap_err();
+  let err = uyva_to(&src, false, KernelMatrix::Bt601, &mut sink).unwrap_err();
   drop(sink);
 
   assert!(

@@ -26,7 +26,7 @@ fn main() -> Result<(), pixon::Error> {
   let (ow, oh) = (4usize, 4usize);
   let mut rgb = vec![0u8; ow * oh * 3];
   Convert::from(&frame)
-    .spec(spec)
+    .spec(spec.clone())
     .resize(ow, oh)
     .rgb(&mut rgb)
     .run()?;
@@ -44,7 +44,7 @@ fn main() -> Result<(), pixon::Error> {
   // differ slightly.
   let mut rgb_domain = vec![0u8; ow * oh * 3];
   Convert::from(&frame)
-    .spec(spec)
+    .spec(spec.clone())
     .resize(ow, oh)
     .native(false)
     .rgb(&mut rgb_domain)

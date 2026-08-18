@@ -32,7 +32,7 @@ pub(crate) unsafe fn yuv_420_to_rgb_row(
   v_half: &[u8],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // SAFETY: caller-checked AVX-512BW availability + slice bounds —
@@ -62,7 +62,7 @@ pub(crate) unsafe fn yuv_420_to_rgba_row(
   v_half: &[u8],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // SAFETY: caller-checked AVX-512BW availability + slice bounds —
@@ -96,7 +96,7 @@ pub(crate) unsafe fn yuv_420_to_rgba_with_alpha_src_row(
   a_src: &[u8],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // SAFETY: caller obligations forwarded to the shared impl.
@@ -137,7 +137,7 @@ unsafe fn yuv_420_to_rgb_or_rgba_row<const ALPHA: bool, const ALPHA_SRC: bool>(
   a_src: Option<&[u8]>,
   out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // Source alpha requires RGBA output.
@@ -319,7 +319,7 @@ pub(crate) unsafe fn yuv_410_to_rgb_row(
   v_quarter: &[u8],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // SAFETY: caller-checked AVX-512BW availability + slice bounds —
@@ -346,7 +346,7 @@ pub(crate) unsafe fn yuv_410_to_rgba_row(
   v_quarter: &[u8],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // SAFETY: caller-checked AVX-512BW availability + slice bounds —
@@ -393,7 +393,7 @@ unsafe fn yuv_410_to_rgb_or_rgba_row<const ALPHA: bool>(
   v_quarter: &[u8],
   out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert_eq!(width & 3, 0, "YUV 4:1:0 requires width % 4 == 0");
@@ -566,7 +566,7 @@ pub(crate) unsafe fn yuv_444_to_rgb_row(
   v: &[u8],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // SAFETY: caller-checked AVX-512BW availability + slice bounds —
@@ -592,7 +592,7 @@ pub(crate) unsafe fn yuv_444_to_rgba_row(
   v: &[u8],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // SAFETY: caller-checked AVX-512BW availability + slice bounds —
@@ -624,7 +624,7 @@ pub(crate) unsafe fn yuv_444_to_rgba_with_alpha_src_row(
   a_src: &[u8],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // SAFETY: caller obligations forwarded to the shared impl.
@@ -666,7 +666,7 @@ unsafe fn yuv_444_to_rgb_or_rgba_row<const ALPHA: bool, const ALPHA_SRC: bool>(
   a_src: Option<&[u8]>,
   out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // Source alpha requires RGBA output.
@@ -864,7 +864,7 @@ pub(crate) unsafe fn yuv_411_to_rgb_row(
   v_quarter: &[u8],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // SAFETY: caller-checked AVX-512BW availability + slice bounds — see
@@ -891,7 +891,7 @@ pub(crate) unsafe fn yuv_411_to_rgba_row(
   v_quarter: &[u8],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // SAFETY: caller-checked AVX-512BW availability + slice bounds — see
@@ -938,7 +938,7 @@ unsafe fn yuv_411_to_rgb_or_rgba_row<const ALPHA: bool>(
   v_quarter: &[u8],
   out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert!(y.len() >= width);
@@ -1202,7 +1202,7 @@ pub(crate) unsafe fn yuv_420_to_hsv_row(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert_eq!(width & 1, 0, "YUV 4:2:0 requires even width");
@@ -1249,7 +1249,7 @@ pub(crate) unsafe fn yuv_444_to_hsv_row(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert!(y.len() >= width, "y row too short");
@@ -1297,7 +1297,7 @@ pub(crate) unsafe fn yuv_410_to_hsv_row(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert_eq!(width & 3, 0, "YUV 4:1:0 requires width % 4 == 0");
@@ -1349,7 +1349,7 @@ pub(crate) unsafe fn yuv_411_to_hsv_row(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert!(y.len() >= width, "y row too short");

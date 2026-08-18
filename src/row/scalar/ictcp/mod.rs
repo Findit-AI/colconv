@@ -58,6 +58,7 @@
 use crate::{Transfer, resample::pq_hlg};
 
 use super::bits_mask;
+use crate::ColorMatrix;
 
 /// Which BT.2100 transfer system an [`ICtCp`](self) source is encoded in —
 /// the axis that selects **both** the inverse `ICtCp` matrix **and** the
@@ -102,7 +103,7 @@ impl IctcpTransfer {
   /// transfer. A source tagged `ColorMatrix::Ictcp` with no PQ/HLG transfer
   /// is malformed; the affine fallback is the defined, non-panicking policy.
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub(crate) const fn for_transfer(transfer: Transfer) -> Option<Self> {
+  pub(crate) const fn for_transfer(transfer: &Transfer) -> Option<Self> {
     match transfer {
       Transfer::SmpteSt2084Pq => Some(Self::Pq),
       Transfer::AribStdB67Hlg => Some(Self::Hlg),

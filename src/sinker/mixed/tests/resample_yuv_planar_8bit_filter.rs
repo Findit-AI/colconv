@@ -26,7 +26,7 @@
 //! oracle does).
 
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   resample::{
     CatmullRom, FilterKernel, FilterStream, FilteredResampler, Lanczos3, Resampler, Triangle,
   },
@@ -38,7 +38,7 @@ use crate::{
 };
 use mediaframe::frame::{Yuv410pFrame, Yuv420pFrame, Yuv422pFrame, Yuv440pFrame, Yuv444pFrame};
 
-const M: ColorMatrix = ColorMatrix::Bt601;
+const M: KernelMatrix = KernelMatrix::Bt601;
 const FR: bool = true;
 
 /// Every resampled output a filter equivalence asserts on.

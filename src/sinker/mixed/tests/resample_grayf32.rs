@@ -18,7 +18,7 @@
 //! mean.
 
 use crate::{
-  ColorMatrix, PixelSink,
+  KernelMatrix, PixelSink,
   frame::Grayf32Frame,
   resample::{AreaResampler, ResampleError},
   sinker::{MixedSinker, MixedSinkerError},
@@ -29,7 +29,7 @@ const SRC: usize = 8;
 const OUT: usize = 4;
 // Gray is luma-only; the walker still threads a matrix / range through.
 const FR: bool = true;
-const M: ColorMatrix = ColorMatrix::Bt709;
+const M: KernelMatrix = KernelMatrix::Bt709;
 
 /// Re-encode a host-native f32 slice as LE-encoded byte storage (the
 /// `grayf32le` plane contract). The `Grayf32` loader recovers the

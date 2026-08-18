@@ -22,7 +22,7 @@ use crate::row::simd128_available;
 #[cfg(target_arch = "x86_64")]
 use crate::row::{avx2_available, avx512_available, sse41_available};
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   row::{rgb_row_bytes, rgba_row_bytes, scalar},
 };
 
@@ -42,7 +42,7 @@ pub fn yuv_411_to_rgb_row(
   v_quarter: &[u8],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) {
@@ -152,7 +152,7 @@ pub fn yuv_411_to_rgba_row(
   v_quarter: &[u8],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) {
@@ -244,7 +244,7 @@ pub fn yuv_411_to_hsv_row(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) {

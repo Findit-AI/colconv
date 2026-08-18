@@ -10,7 +10,7 @@
 //! `rgba_u16`))) — the oracle mirrors the impl's exact integer ops.
 
 use crate::{
-  ColorMatrix, PixelSink,
+  KernelMatrix, PixelSink,
   resample::{AreaResampler, ResampleError},
   sinker::{AlphaMode, MixedSinker, MixedSinkerError},
   source::{
@@ -127,7 +127,7 @@ macro_rules! rgba16_resample_suite {
         let mut sink = MixedSinker::<$marker<false>>::new(SRC, SRC)
           .with_rgba_u16(&mut rgba_u16)
           .unwrap();
-        $walk(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+        $walk(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
         rgba_u16
       }
 
@@ -151,7 +151,7 @@ macro_rules! rgba16_resample_suite {
           .unwrap()
           .with_rgba_u16(&mut rgba_u16)
           .unwrap();
-          $walk(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+          $walk(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
         }
         assert_eq!(rgba_u16, block_mean_rgba(&direct_rgba_u16(&host)));
       }
@@ -179,7 +179,7 @@ macro_rules! rgba16_resample_suite {
           .unwrap()
           .with_rgba_u16(&mut rgba_u16)
           .unwrap();
-          $walk(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+          $walk(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
         }
         assert_eq!(rgba_u16, block_mean_rgba(&direct_rgba_u16(&host)));
         assert!(
@@ -230,7 +230,7 @@ macro_rules! rgba16_resample_suite {
           .unwrap()
           .with_hsv(&mut h, &mut s_, &mut v_)
           .unwrap();
-          $walk(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+          $walk(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
         }
 
         let binned = block_mean_rgba(&direct_rgba_u16(&host));
@@ -262,7 +262,7 @@ macro_rules! rgba16_resample_suite {
             .unwrap()
             .with_hsv(&mut ref_h, &mut ref_s, &mut ref_v)
             .unwrap();
-          crate::source::rgb48_to(&rgb_src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+          crate::source::rgb48_to(&rgb_src, true, KernelMatrix::Bt709, &mut sink).unwrap();
         }
         assert_eq!(luma, ref_luma, "luma");
         assert_eq!(luma_u16, ref_luma_u16, "luma_u16");
@@ -298,7 +298,7 @@ macro_rules! rgba16_resample_suite {
           .unwrap()
           .with_rgb_u16(&mut rgb_u16)
           .unwrap();
-          $walk(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+          $walk(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
         }
 
         let mut pm = direct_rgba_u16(&host);
@@ -338,7 +338,7 @@ macro_rules! rgba16_resample_suite {
           .with_alpha_mode(AlphaMode::Premultiplied)
           .with_rgba_u16(&mut rgba_u16)
           .unwrap();
-          $walk(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+          $walk(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
         }
         assert_eq!(&rgba_u16[..4], &[0, 0, 0, 0], "transparent block bled color");
         let mut pm = direct_rgba_u16(&host);
@@ -368,7 +368,7 @@ macro_rules! rgba16_resample_suite {
           .unwrap()
           .with_rgba_u16(&mut out_le)
           .unwrap();
-          $walk(&src_le, true, ColorMatrix::Bt709, &mut sink).unwrap();
+          $walk(&src_le, true, KernelMatrix::Bt709, &mut sink).unwrap();
         }
 
         let wire_be = as_wire_u16(&host, true);
@@ -383,7 +383,7 @@ macro_rules! rgba16_resample_suite {
           .unwrap()
           .with_rgba_u16(&mut out_be)
           .unwrap();
-          $walk_endian(&src_be, true, ColorMatrix::Bt709, &mut sink).unwrap();
+          $walk_endian(&src_be, true, KernelMatrix::Bt709, &mut sink).unwrap();
         }
         assert_eq!(out_le, out_be, "LE/BE parity");
       }
@@ -413,7 +413,7 @@ macro_rules! rgba16_resample_suite {
           .unwrap()
           .with_rgba_u16(&mut via_area)
           .unwrap();
-          $walk(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+          $walk(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
         }
         assert_eq!(via_area, direct_rgba_u16(&host));
       }
@@ -437,8 +437,8 @@ macro_rules! rgba16_resample_suite {
           .unwrap()
           .with_rgba_u16(&mut rgba_u16)
           .unwrap();
-          $walk(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
-          $walk(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+          $walk(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+          $walk(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
         }
         assert_eq!(rgba_u16, block_mean_rgba(&direct_rgba_u16(&host)));
       }
@@ -463,7 +463,7 @@ macro_rules! rgba16_resample_suite {
         .unwrap();
         sink.begin_frame(SRC as u32, SRC as u32).unwrap();
         let err = sink
-          .process($row::new(row3, 3, ColorMatrix::Bt709, true))
+          .process($row::new(row3, 3, KernelMatrix::Bt709, true))
           .unwrap_err();
         assert!(matches!(
           err,
@@ -497,11 +497,11 @@ macro_rules! rgba16_resample_suite {
         .unwrap();
         sink.begin_frame(SRC as u32, SRC as u32).unwrap();
         sink
-          .process($row::new(&wire[..SRC * 4], 0, ColorMatrix::Bt709, true))
+          .process($row::new(&wire[..SRC * 4], 0, KernelMatrix::Bt709, true))
           .unwrap();
         sink.set_luma(&mut luma).unwrap();
         let err = sink
-          .process($row::new(&wire[SRC * 4..2 * SRC * 4], 1, ColorMatrix::Bt709, true))
+          .process($row::new(&wire[SRC * 4..2 * SRC * 4], 1, KernelMatrix::Bt709, true))
           .unwrap_err();
         assert!(matches!(err, MixedSinkerError::ResampleOutputsChanged(_)));
         assert!(luma.iter().all(|&b| b == 0));
@@ -527,7 +527,7 @@ macro_rules! rgba16_resample_suite {
         sink.begin_frame(SRC as u32, SRC as u32).unwrap();
         let row3 = &wire[3 * SRC * 4..4 * SRC * 4];
         let err = sink
-          .process($row::new(row3, 3, ColorMatrix::Bt709, true))
+          .process($row::new(row3, 3, KernelMatrix::Bt709, true))
           .unwrap_err();
         assert!(matches!(
           err,
@@ -536,7 +536,7 @@ macro_rules! rgba16_resample_suite {
         let mut rgb_u16 = std::vec![0u16; OUT * OUT * 3];
         sink.set_rgb_u16(&mut rgb_u16).unwrap();
         sink
-          .process($row::new(&wire[..SRC * 4], 0, ColorMatrix::Bt709, true))
+          .process($row::new(&wire[..SRC * 4], 0, KernelMatrix::Bt709, true))
           .expect("row 0 must succeed after a rejected out-of-sequence first row");
       }
 
@@ -563,11 +563,11 @@ macro_rules! rgba16_resample_suite {
         .unwrap();
         sink.begin_frame(SRC as u32, SRC as u32).unwrap();
         sink
-          .process($row::new(&wire[..SRC * 4], 0, ColorMatrix::Bt709, true))
+          .process($row::new(&wire[..SRC * 4], 0, KernelMatrix::Bt709, true))
           .unwrap();
         sink.set_alpha_mode(AlphaMode::Premultiplied);
         let err = sink
-          .process($row::new(&wire[SRC * 4..2 * SRC * 4], 1, ColorMatrix::Bt709, true))
+          .process($row::new(&wire[SRC * 4..2 * SRC * 4], 1, KernelMatrix::Bt709, true))
           .unwrap_err();
         assert!(
           matches!(err, MixedSinkerError::ResampleOutputsChanged(_)),
@@ -600,11 +600,11 @@ macro_rules! rgba16_resample_suite {
         .unwrap();
         sink.begin_frame(SRC as u32, SRC as u32).unwrap();
         sink
-          .process($row::new(&wire[..SRC * 4], 0, ColorMatrix::Bt709, true))
+          .process($row::new(&wire[..SRC * 4], 0, KernelMatrix::Bt709, true))
           .unwrap();
         sink.set_alpha_mode(AlphaMode::Straight);
         let err = sink
-          .process($row::new(&wire[..SRC * 4], 0, ColorMatrix::Bt709, true))
+          .process($row::new(&wire[..SRC * 4], 0, KernelMatrix::Bt709, true))
           .unwrap_err();
         assert!(
           matches!(err, MixedSinkerError::ResampleOutputsChanged(_)),
@@ -634,14 +634,14 @@ macro_rules! rgba16_resample_suite {
         sink.begin_frame(SRC as u32, SRC as u32).unwrap();
         for y in 0..SRC {
           sink
-            .process($row::new(&wire[y * SRC * 4..(y + 1) * SRC * 4], y, ColorMatrix::Bt709, true))
+            .process($row::new(&wire[y * SRC * 4..(y + 1) * SRC * 4], y, KernelMatrix::Bt709, true))
             .unwrap();
         }
         sink.set_alpha_mode(AlphaMode::Premultiplied);
         sink.begin_frame(SRC as u32, SRC as u32).unwrap();
         for y in 0..SRC {
           sink
-            .process($row::new(&wire[y * SRC * 4..(y + 1) * SRC * 4], y, ColorMatrix::Bt709, true))
+            .process($row::new(&wire[y * SRC * 4..(y + 1) * SRC * 4], y, KernelMatrix::Bt709, true))
             .expect("a fresh frame must accept a different alpha mode");
         }
       }
@@ -668,11 +668,11 @@ macro_rules! rgba16_resample_suite {
         .unwrap();
         sink.begin_frame(SRC as u32, SRC as u32).unwrap();
         sink
-          .process($row::new(&wire[..SRC * 4], 0, ColorMatrix::Bt709, true))
+          .process($row::new(&wire[..SRC * 4], 0, KernelMatrix::Bt709, true))
           .unwrap();
         sink.set_alpha_mode(AlphaMode::Premultiplied);
         let err = sink
-          .process($row::new(&wire[..SRC * 4], 0, ColorMatrix::Bt709, true))
+          .process($row::new(&wire[..SRC * 4], 0, KernelMatrix::Bt709, true))
           .unwrap_err();
         assert!(
           matches!(err, MixedSinkerError::ResampleOutputsChanged(_)),
@@ -703,14 +703,14 @@ macro_rules! rgba16_resample_suite {
         .unwrap();
         sink.begin_frame(SRC as u32, SRC as u32).unwrap();
         sink
-          .process($row::new(&wire[3 * SRC * 4..4 * SRC * 4], 3, ColorMatrix::Bt709, true))
+          .process($row::new(&wire[3 * SRC * 4..4 * SRC * 4], 3, KernelMatrix::Bt709, true))
           .unwrap_err();
         sink
-          .process($row::new(&wire[..SRC * 4], 0, ColorMatrix::Bt709, true))
+          .process($row::new(&wire[..SRC * 4], 0, KernelMatrix::Bt709, true))
           .unwrap();
         sink.set_alpha_mode(AlphaMode::Premultiplied);
         let err = sink
-          .process($row::new(&wire[SRC * 4..2 * SRC * 4], 1, ColorMatrix::Bt709, true))
+          .process($row::new(&wire[SRC * 4..2 * SRC * 4], 1, KernelMatrix::Bt709, true))
           .unwrap_err();
         assert!(
           matches!(err, MixedSinkerError::ResampleOutputsChanged(_)),
@@ -768,7 +768,7 @@ fn rgba64_first_row_scratch_oom_leaves_stream_and_freeze_uncommitted_for_retry()
       .process(Rgba64Row::new(
         &wire[..SRC * 4],
         0,
-        ColorMatrix::Bt709,
+        KernelMatrix::Bt709,
         true,
       ))
       .unwrap_err();
@@ -796,7 +796,7 @@ fn rgba64_first_row_scratch_oom_leaves_stream_and_freeze_uncommitted_for_retry()
         .process(Rgba64Row::new(
           &wire[r * SRC * 4..(r + 1) * SRC * 4],
           r,
-          ColorMatrix::Bt709,
+          KernelMatrix::Bt709,
           true,
         ))
         .expect("frame replay after a first-row scratch OOM must succeed");

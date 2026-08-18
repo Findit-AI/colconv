@@ -5,7 +5,7 @@
 //! the direct Rgbaf32 path's kernels run over the binned row.
 
 use crate::{
-  ColorMatrix, PixelSink,
+  KernelMatrix, PixelSink,
   frame::Rgbaf32LeFrame,
   resample::{
     AreaResampler, CatmullRom, FilterKernel, FilterStream, FilteredResampler, Lanczos3,
@@ -63,7 +63,7 @@ fn rgbaf32_downscale_rgba_f32_is_exact_area_mean() {
         .unwrap()
         .with_rgba_f32(&mut rgba_f32)
         .unwrap();
-    rgbaf32_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    rgbaf32_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
   }
   for oy in 0..OUT {
     for ox in 0..OUT {
@@ -117,7 +117,7 @@ fn rgbaf32_derived_outputs_come_from_binned_rgba() {
         .unwrap()
         .with_hsv(&mut h, &mut s_, &mut v_)
         .unwrap();
-    rgbaf32_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    rgbaf32_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
   }
 
   // Reference: the full-res sink over the (exact) binned f32 RGBA.
@@ -152,7 +152,7 @@ fn rgbaf32_derived_outputs_come_from_binned_rgba() {
       .unwrap()
       .with_hsv(&mut ref_h, &mut ref_s, &mut ref_v)
       .unwrap();
-    rgbaf32_to(&binned, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    rgbaf32_to(&binned, true, KernelMatrix::Bt709, &mut sink).unwrap();
   }
   assert_eq!(rgb, ref_rgb, "rgb");
   assert_eq!(rgb_u16, ref_rgb_u16, "rgb_u16");
@@ -177,7 +177,7 @@ fn rgbaf32_identity_plan_matches_new_sink() {
     let mut sink = MixedSinker::<Rgbaf32>::new(SRC, SRC)
       .with_rgba_f32(&mut direct)
       .unwrap();
-    rgbaf32_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    rgbaf32_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
   }
   let mut via_area = vec![0.0f32; SRC * SRC * 4];
   {
@@ -186,7 +186,7 @@ fn rgbaf32_identity_plan_matches_new_sink() {
         .unwrap()
         .with_rgba_f32(&mut via_area)
         .unwrap();
-    rgbaf32_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    rgbaf32_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
   }
   assert_eq!(direct, via_area);
 }
@@ -249,7 +249,7 @@ fn assert_rgba_f32_is_per_channel_filter<K: FilterKernel + Copy>(
     .unwrap()
     .with_rgba_f32(&mut rgba_f32)
     .unwrap();
-    rgbaf32_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    rgbaf32_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
   }
   for c in 0..4 {
     let plane = channel_plane_filter(kernel, host, c, sw, sh, ow, oh);
@@ -298,7 +298,7 @@ fn rgbaf32_no_output_sink_is_a_noop() {
   let mut sink =
     MixedSinker::<Rgbaf32, AreaResampler>::with_resampler(SRC, SRC, AreaResampler::to(OUT, OUT))
       .unwrap();
-  rgbaf32_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  rgbaf32_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
   assert!(
     !sink.rgba_stream_f32_allocated(),
     "no-output sink allocated the stream"
@@ -319,7 +319,7 @@ fn rgbaf32_out_of_sequence_first_row_rejected_before_allocation() {
       .unwrap();
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   let err = sink
-    .process(Rgbaf32Row::new(row3, 3, ColorMatrix::Bt709, true))
+    .process(Rgbaf32Row::new(row3, 3, KernelMatrix::Bt709, true))
     .unwrap_err();
   assert!(
     matches!(
@@ -362,7 +362,7 @@ fn rgbaf32_first_row_scratch_oom_leaves_stream_and_freeze_uncommitted_for_retry(
       .process(Rgbaf32Row::new(
         &wire[..SRC * 4],
         0,
-        ColorMatrix::Bt709,
+        KernelMatrix::Bt709,
         true,
       ))
       .unwrap_err();
@@ -391,7 +391,7 @@ fn rgbaf32_first_row_scratch_oom_leaves_stream_and_freeze_uncommitted_for_retry(
         .process(Rgbaf32Row::new(
           &wire[r * SRC * 4..(r + 1) * SRC * 4],
           r,
-          ColorMatrix::Bt709,
+          KernelMatrix::Bt709,
           true,
         ))
         .expect("frame replay after a first-row scratch OOM must succeed");
@@ -422,7 +422,7 @@ fn rgbaf32_mid_frame_out_of_sequence_rejected() {
     .process(Rgbaf32Row::new(
       &wire[..SRC * 4],
       0,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       true,
     ))
     .unwrap();
@@ -430,7 +430,7 @@ fn rgbaf32_mid_frame_out_of_sequence_rejected() {
     .process(Rgbaf32Row::new(
       &wire[2 * SRC * 4..3 * SRC * 4],
       2,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       true,
     ))
     .unwrap_err();

@@ -24,7 +24,7 @@
 //!    in linear light and that `M . mean(xyz) == mean(M . xyz)`.
 
 use crate::{
-  DcpTargetGamut,
+  KernelGamut,
   frame::Xyz12LeFrame,
   resample::AreaResampler,
   row::scalar::{xyz12::matmul3_xyz_rgb, xyz12_constants::xyz_to_rgb_matrix},
@@ -133,7 +133,7 @@ fn varying_frame() -> Vec<u16> {
 
 /// Full-res `with_xyz_f32` of a wire frame — the production source of
 /// truth for linear XYZ (SMPTE ST 428-1 inverse-OETF, no matrix).
-fn full_res_linear_xyz(wire: &[u16], gamut: DcpTargetGamut) -> Vec<f32> {
+fn full_res_linear_xyz(wire: &[u16], gamut: KernelGamut) -> Vec<f32> {
   let src = Xyz12LeFrame::try_new(wire, SRC as u32, SRC as u32, (SRC * 3) as u32).unwrap();
   let mut xyz = vec![0.0f32; SRC * SRC * 3];
   let mut sink = MixedSinker::<Xyz12Le>::new(SRC, SRC)
@@ -167,9 +167,9 @@ fn xyz12_constant_block_outputs_match_direct_full_res() {
   // rgb_u16, rgba_u16, rgb_f32, xyz_f32, rgb_f16, rgba_f16, luma,
   // luma_u16, hsv.
   for &gamut in &[
-    DcpTargetGamut::DciP3,
-    DcpTargetGamut::Rec709,
-    DcpTargetGamut::Rec2020,
+    KernelGamut::DciP3,
+    KernelGamut::Rec709,
+    KernelGamut::Rec2020,
   ] {
     let wire = constant_block_frame();
     let src = Xyz12LeFrame::try_new(&wire, SRC as u32, SRC as u32, (SRC * 3) as u32).unwrap();
@@ -331,7 +331,7 @@ fn xyz12_downscale_xyz_f32_is_linear_light_area_mean() {
   // Varying-within-block frame: the binned xyz_f32 must equal the f64
   // block-mean of the source linear XYZ (the linear-light mean),
   // proving the bin actually averages in linear light.
-  let gamut = DcpTargetGamut::Rec709;
+  let gamut = KernelGamut::Rec709;
   let wire = varying_frame();
   let src = Xyz12LeFrame::try_new(&wire, SRC as u32, SRC as u32, (SRC * 3) as u32).unwrap();
   let src_xyz = full_res_linear_xyz(&wire, gamut);
@@ -369,7 +369,7 @@ fn xyz12_downscale_rgb_f32_is_matrix_of_binned_xyz() {
   // rgb_f32 of the binned (linear-light averaged) XYZ must equal the
   // gamut matrix applied to the linear-light block-mean — i.e. the
   // matrix commutes with the bin (`M . mean(xyz) == mean(M . xyz)`).
-  let gamut = DcpTargetGamut::DciP3;
+  let gamut = KernelGamut::DciP3;
   let wire = varying_frame();
   let src = Xyz12LeFrame::try_new(&wire, SRC as u32, SRC as u32, (SRC * 3) as u32).unwrap();
   let src_xyz = full_res_linear_xyz(&wire, gamut);
@@ -414,7 +414,7 @@ fn xyz12_downscale_preserves_hdr_and_out_of_gamut() {
   // the matrix, out-of-gamut negative R/B in linear RGB. Both must
   // survive the bin into xyz_f32 / rgb_f32 (no clamp on the float
   // paths).
-  let gamut = DcpTargetGamut::Rec709;
+  let gamut = KernelGamut::Rec709;
   let wire = constant_block_frame();
   let src = Xyz12LeFrame::try_new(&wire, SRC as u32, SRC as u32, (SRC * 3) as u32).unwrap();
 
@@ -454,7 +454,7 @@ fn xyz12_simd_downscale_matches_scalar_on_constant_blocks() {
   // (summing identical values is exact), so the SIMD-binned outputs are
   // bit-identical to the scalar-binned outputs. Guards the SIMD area
   // reduce dispatch on the linear-XYZ path.
-  let gamut = DcpTargetGamut::DciP3;
+  let gamut = KernelGamut::DciP3;
   let wire = constant_block_frame();
   let src = Xyz12LeFrame::try_new(&wire, SRC as u32, SRC as u32, (SRC * 3) as u32).unwrap();
 
@@ -488,7 +488,7 @@ fn xyz12_simd_downscale_matches_scalar_on_constant_blocks() {
 fn xyz12_identity_plan_matches_new_sink() {
   // An identity (out == src) area plan must reproduce the direct sink
   // byte-for-byte on every output.
-  let gamut = DcpTargetGamut::Rec709;
+  let gamut = KernelGamut::Rec709;
   let wire = varying_frame();
   let src = Xyz12LeFrame::try_new(&wire, SRC as u32, SRC as u32, (SRC * 3) as u32).unwrap();
 
@@ -534,7 +534,7 @@ fn xyz12_no_output_sink_is_a_noop() {
   let mut sink =
     MixedSinker::<Xyz12Le, AreaResampler>::with_resampler(SRC, SRC, AreaResampler::to(OUT, OUT))
       .unwrap();
-  xyz12_to(&src, DcpTargetGamut::DciP3, &mut sink).unwrap();
+  xyz12_to(&src, KernelGamut::DciP3, &mut sink).unwrap();
   assert!(
     !sink.xyz_stream_f32_allocated(),
     "no-output sink allocated the linear-XYZ stream"
@@ -566,7 +566,7 @@ fn xyz12_f32_only_downscale_does_not_size_the_narrow_scratch() {
       .unwrap()
       .with_rgb_f32(&mut rgb_f32)
       .unwrap();
-  xyz12_to(&src, DcpTargetGamut::DciP3, &mut sink).unwrap();
+  xyz12_to(&src, KernelGamut::DciP3, &mut sink).unwrap();
   assert_eq!(
     sink.rgb_scratch_capacity(),
     0,
@@ -580,7 +580,7 @@ fn xyz12_f32_only_downscale_does_not_size_the_narrow_scratch() {
       .unwrap()
       .with_rgb(&mut rgb)
       .unwrap();
-  xyz12_to(&src, DcpTargetGamut::DciP3, &mut sink2).unwrap();
+  xyz12_to(&src, KernelGamut::DciP3, &mut sink2).unwrap();
   assert!(
     sink2.rgb_scratch_capacity() >= OUT * 3,
     "u8 output did not size the narrow scratch"
@@ -596,7 +596,7 @@ fn xyz12_begin_frame_resets_stream_between_frames() {
   // Two consecutive frames through the same sink must each produce the
   // correct downscaled result — begin_frame resets the area stream and
   // the frozen-output snapshot so the second frame is independent.
-  let gamut = DcpTargetGamut::Rec709;
+  let gamut = KernelGamut::Rec709;
   let wire_a = constant_block_frame();
   let wire_b = varying_frame();
   let src_a = Xyz12LeFrame::try_new(&wire_a, SRC as u32, SRC as u32, (SRC * 3) as u32).unwrap();
@@ -643,7 +643,7 @@ fn xyz12_begin_frame_resets_stream_between_frames() {
   ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
 )]
 fn first_row_source_scratch_oom_leaves_stream_and_freeze_uncommitted_for_retry() {
-  let gamut = DcpTargetGamut::Rec709;
+  let gamut = KernelGamut::Rec709;
   let wire = varying_frame();
   let src = Xyz12LeFrame::try_new(&wire, SRC as u32, SRC as u32, (SRC * 3) as u32).unwrap();
   let mut xyz = std::vec![0f32; OUT * OUT * 3];
@@ -710,7 +710,7 @@ fn first_row_source_scratch_oom_leaves_stream_and_freeze_uncommitted_for_retry()
   ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
 )]
 fn first_row_emit_narrow_scratch_oom_leaves_stream_and_freeze_uncommitted_for_retry() {
-  let gamut = DcpTargetGamut::Rec709;
+  let gamut = KernelGamut::Rec709;
   let wire = varying_frame();
   let src = Xyz12LeFrame::try_new(&wire, SRC as u32, SRC as u32, (SRC * 3) as u32).unwrap();
   let mut rgb = std::vec![0u8; OUT * OUT * 3];

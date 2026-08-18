@@ -5,7 +5,7 @@
 //! CL is **not** an affine YCbCr matrix. Every
 //! [`Coefficients::for_matrix`](super::Coefficients::for_matrix) decode — and
 //! the chromaticity-derived *non*-constant-luminance sibling
-//! [`ColorMatrix::ChromaDerivedNcl`](crate::ColorMatrix::ChromaDerivedNcl),
+//! [`KernelMatrix::ChromaDerivedNcl`](crate::KernelMatrix::ChromaDerivedNcl),
 //! H.273 `= 12` — recovers `R'G'B'` from `Y',Cb,Cr` with a single Q15 matrix:
 //! the luma `Y'` is a weighted sum of the *gamma-encoded* `R'G'B'`. The
 //! constant-luminance system instead carries the luma in the **linear** domain
@@ -85,6 +85,7 @@
 use crate::{Primaries, Transfer, resample::bt2020_oetf};
 
 use super::bits_mask;
+use crate::ColorMatrix;
 
 /// The constant-luminance system an [`YcCbcCrc`](self) source decodes under —
 /// the gate that selects the BT.2020 luma weights, the OETF-derived chroma
@@ -138,7 +139,7 @@ impl ClSystem {
   /// ICtCp uses (it resolves only its PQ/HLG transfers and returns [`None`]
   /// otherwise).
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub(crate) const fn resolve(primaries: Primaries, transfer: Transfer) -> Option<Self> {
+  pub(crate) const fn resolve(primaries: &Primaries, transfer: &Transfer) -> Option<Self> {
     match (primaries, transfer) {
       (Primaries::Bt2020, Transfer::Bt2020_12Bit) => Some(Self { is_12_bit: true }),
       (Primaries::Bt2020, Transfer::Bt2020_10Bit) => Some(Self { is_12_bit: false }),
@@ -156,7 +157,7 @@ impl ClSystem {
 /// BT.2020 CL luma weights `(Kr, Kg, Kb)` — the linear-light luminance
 /// coefficients (`Yc = Kr·R + Kg·G + Kb·B`). Identical to the BT.2020
 /// non-constant-luminance weights and to
-/// [`chroma_derived_luma_weights(Primaries::Bt2020)`](super::chroma_derived_luma_weights),
+/// [`chroma_derived_luma_weights(&Primaries::Bt2020)`](super::chroma_derived_luma_weights),
 /// which [`tests`] assert; the decode uses the published literals so the
 /// per-pixel green solve is exact and `libm`-free.
 const KR: f32 = 0.2627;

@@ -24,10 +24,10 @@ use crate::row::{
   y212_to_rgb_row_endian, y216_to_hsv_row_endian, y216_to_rgb_row_endian,
 };
 
-const MATRICES: [ColorMatrix; 3] = [
-  ColorMatrix::Bt601,
-  ColorMatrix::Bt709,
-  ColorMatrix::Bt2020Ncl,
+const MATRICES: [KernelMatrix; 3] = [
+  KernelMatrix::Bt601,
+  KernelMatrix::Bt709,
+  KernelMatrix::Bt2020Ncl,
 ];
 
 /// A non-trivial, non-gray pseudo-random logical sample masked to `bits`
@@ -212,7 +212,7 @@ fn y210_hsv_only_grows_no_rgb_scratch() {
     let mut sink = MixedSinker::<Y210>::new(w, h)
       .with_hsv(&mut hh, &mut ss, &mut vv)
       .unwrap();
-    y210_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    y210_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
     sink.rgb_scratch.len()
   };
   assert_eq!(
@@ -226,7 +226,7 @@ fn y210_hsv_only_grows_no_rgb_scratch() {
     &buf[..w * 2],
     &mut rgb0,
     w,
-    ColorMatrix::Bt601,
+    KernelMatrix::Bt601,
     true,
     true,
     false,
@@ -257,7 +257,7 @@ fn y2xx_hsv_only_grows_no_rgb_scratch_all_formats() {
       let mut sink = MixedSinker::<Y212>::new(w, h)
         .with_hsv(&mut hh, &mut ss, &mut vv)
         .unwrap();
-      y212_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+      y212_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
       sink.rgb_scratch.len()
     };
     assert_eq!(scratch_len, 0, "Y212 HSV-only RGB-free");
@@ -266,7 +266,7 @@ fn y2xx_hsv_only_grows_no_rgb_scratch_all_formats() {
       &buf[..w * 2],
       &mut rgb0,
       w,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       true,
       true,
       false,
@@ -289,7 +289,7 @@ fn y2xx_hsv_only_grows_no_rgb_scratch_all_formats() {
       let mut sink = MixedSinker::<Y216>::new(w, h)
         .with_hsv(&mut hh, &mut ss, &mut vv)
         .unwrap();
-      y216_to(&src, true, ColorMatrix::Bt2020Ncl, &mut sink).unwrap();
+      y216_to(&src, true, KernelMatrix::Bt2020Ncl, &mut sink).unwrap();
       sink.rgb_scratch.len()
     };
     assert_eq!(scratch_len, 0, "Y216 HSV-only RGB-free");
@@ -298,7 +298,7 @@ fn y2xx_hsv_only_grows_no_rgb_scratch_all_formats() {
       &buf[..w * 2],
       &mut rgb0,
       w,
-      ColorMatrix::Bt2020Ncl,
+      KernelMatrix::Bt2020Ncl,
       true,
       true,
       false,
@@ -333,7 +333,7 @@ fn y212_luma_plus_hsv_only_is_correct_and_rgb_free() {
       .unwrap()
       .with_hsv(&mut hh, &mut ss, &mut vv)
       .unwrap();
-    y212_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    y212_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
     sink.rgb_scratch.len()
   };
   assert_eq!(
@@ -346,7 +346,7 @@ fn y212_luma_plus_hsv_only_is_correct_and_rgb_free() {
     &buf[..w * 2],
     &mut rgb0,
     w,
-    ColorMatrix::Bt709,
+    KernelMatrix::Bt709,
     true,
     true,
     false,

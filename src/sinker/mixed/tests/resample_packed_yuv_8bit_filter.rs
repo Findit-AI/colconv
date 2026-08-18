@@ -26,7 +26,7 @@
 //! the routing exists but no packed-RGB oracle does).
 
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   resample::{
     CatmullRom, FilterKernel, FilterStream, FilteredResampler, Lanczos3, Resampler, Triangle,
   },
@@ -36,7 +36,7 @@ use crate::{
   },
 };
 
-const M: ColorMatrix = ColorMatrix::Bt601;
+const M: KernelMatrix = KernelMatrix::Bt601;
 const FR: bool = true;
 
 /// A per-pixel `(Y, U, V)` ramp varying per pixel so every filter window

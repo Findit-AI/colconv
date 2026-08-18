@@ -43,7 +43,7 @@ fn yuv411p_luma_only_copies_y_plane() {
   let mut sink = MixedSinker::<Yuv411p>::new(16, 8)
     .with_luma(&mut luma)
     .unwrap();
-  yuv411p_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuv411p_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
 
   assert!(luma.iter().all(|&y| y == 42), "luma should be solid 42");
 }
@@ -61,7 +61,7 @@ fn yuv411p_luma_u16_zero_extends_y_plane() {
   let mut sink = MixedSinker::<Yuv411p>::new(16, 8)
     .with_luma_u16(&mut luma_u16)
     .unwrap();
-  yuv411p_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuv411p_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
 
   // 8-bit Y zero-extends into u16.
   assert!(luma_u16.iter().all(|&y| y == 200));
@@ -81,7 +81,7 @@ fn yuv411p_rgb_only_converts_gray_to_gray() {
   let mut sink = MixedSinker::<Yuv411p>::new(16, 8)
     .with_rgb(&mut rgb)
     .unwrap();
-  yuv411p_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuv411p_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
 
   for px in rgb.chunks(3) {
     assert!(px[0].abs_diff(128) <= 1);
@@ -103,7 +103,7 @@ fn yuv411p_rgba_only_with_opaque_alpha() {
   let mut sink = MixedSinker::<Yuv411p>::new(16, 8)
     .with_rgba(&mut rgba)
     .unwrap();
-  yuv411p_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuv411p_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
 
   for px in rgba.chunks(4) {
     assert!(px[0].abs_diff(200) <= 1);
@@ -133,7 +133,7 @@ fn yuv411p_strategy_a_rgb_and_rgba_match_byte_for_byte() {
   let mut sink_rgb = MixedSinker::<Yuv411p>::new(ws, hs)
     .with_rgb(&mut rgb_only)
     .unwrap();
-  yuv411p_to(&src, true, ColorMatrix::Bt601, &mut sink_rgb).unwrap();
+  yuv411p_to(&src, true, KernelMatrix::Bt601, &mut sink_rgb).unwrap();
 
   let mut rgb_combo = std::vec![0u8; ws * hs * 3];
   let mut rgba_combo = std::vec![0u8; ws * hs * 4];
@@ -142,7 +142,7 @@ fn yuv411p_strategy_a_rgb_and_rgba_match_byte_for_byte() {
     .unwrap()
     .with_rgba(&mut rgba_combo)
     .unwrap();
-  yuv411p_to(&src, true, ColorMatrix::Bt601, &mut sink_combo).unwrap();
+  yuv411p_to(&src, true, KernelMatrix::Bt601, &mut sink_combo).unwrap();
 
   assert_eq!(rgb_only, rgb_combo, "RGB-only and combo RGB must match");
   for px in 0..(ws * hs) {
@@ -169,7 +169,7 @@ fn yuv411p_hsv_only_allocates_scratch_and_produces_gray_hsv() {
   let mut sink = MixedSinker::<Yuv411p>::new(16, 8)
     .with_hsv(&mut h, &mut s, &mut v)
     .unwrap();
-  yuv411p_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuv411p_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
 
   assert!(h.iter().all(|&b| b == 0));
   assert!(s.iter().all(|&b| b == 0));
@@ -214,7 +214,11 @@ fn yuv411p_simd_matches_scalar_with_random_yuv() {
   pseudo_random_u8(&mut vp, 0x3333);
   let src = Yuv411pFrame::new(&yp, &up, &vp, w, h, w, w / 4, w / 4);
 
-  for &matrix in &[ColorMatrix::Bt601, ColorMatrix::Bt709, ColorMatrix::YCgCo] {
+  for &matrix in &[
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::YCgCo,
+  ] {
     for full_range in [true, false] {
       let mut rgb_simd = std::vec![0u8; ws * hs * 3];
       let mut rgb_scalar = std::vec![0u8; ws * hs * 3];
@@ -303,7 +307,7 @@ fn yuv411p_rgb_scratch_alloc_failure_leaves_outputs_untouched() {
     .unwrap();
 
   super::super::arm_rgb_scratch_alloc_failure();
-  let err = yuv411p_to(&src, false, ColorMatrix::Bt601, &mut sink).unwrap_err();
+  let err = yuv411p_to(&src, false, KernelMatrix::Bt601, &mut sink).unwrap_err();
   drop(sink);
 
   assert!(

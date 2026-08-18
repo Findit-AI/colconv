@@ -35,7 +35,7 @@
 //! over-native-max overshoot to clip.
 
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   frame::Y2xxFrame,
   resample::{
     CatmullRom, FilterKernel, FilterStream, FilteredResampler, Lanczos3, Resampler, Triangle,
@@ -43,7 +43,7 @@ use crate::{
   sinker::MixedSinker,
 };
 
-const M: ColorMatrix = ColorMatrix::Bt709;
+const M: KernelMatrix = KernelMatrix::Bt709;
 const FR: bool = true;
 
 /// Re-encode a host-native u16 slice as LE-wire byte storage so an

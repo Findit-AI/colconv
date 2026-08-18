@@ -22,10 +22,10 @@ use crate::row::{
   vuyx_to_hsv_row, vuyx_to_rgb_row, xv36_to_hsv_row, xv36_to_rgb_row,
 };
 
-const MATRICES: [ColorMatrix; 3] = [
-  ColorMatrix::Bt601,
-  ColorMatrix::Bt709,
-  ColorMatrix::Bt2020Ncl,
+const MATRICES: [KernelMatrix; 3] = [
+  KernelMatrix::Bt601,
+  KernelMatrix::Bt709,
+  KernelMatrix::Bt2020Ncl,
 ];
 
 /// A non-trivial, non-gray pseudo-random `u8` sample at a given position,
@@ -295,7 +295,7 @@ fn packed_yuv444_hsv_only_grows_no_rgb_scratch_all_formats() {
       let mut sink = MixedSinker::<Ayuv64>::new(w, h)
         .with_hsv(&mut hh, &mut ss, &mut vv)
         .unwrap();
-      ayuv64_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+      ayuv64_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
       sink.rgb_scratch.len()
     };
     assert_eq!(
@@ -309,7 +309,7 @@ fn packed_yuv444_hsv_only_grows_no_rgb_scratch_all_formats() {
       &buf[..w * 4],
       &mut rgb0,
       w,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       true,
       true,
       false,
@@ -337,7 +337,7 @@ fn packed_yuv444_hsv_only_grows_no_rgb_scratch_all_formats() {
       let mut sink = MixedSinker::<Xv36>::new(w, h)
         .with_hsv(&mut hh, &mut ss, &mut vv)
         .unwrap();
-      xv36_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+      xv36_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
       sink.rgb_scratch.len()
     };
     assert_eq!(
@@ -357,7 +357,7 @@ fn packed_yuv444_hsv_only_grows_no_rgb_scratch_all_formats() {
       let mut sink = MixedSinker::<Vuya>::new(w, h)
         .with_hsv(&mut hh, &mut ss, &mut vv)
         .unwrap();
-      vuya_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+      vuya_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
       sink.rgb_scratch.len()
     };
     assert_eq!(
@@ -377,7 +377,7 @@ fn packed_yuv444_hsv_only_grows_no_rgb_scratch_all_formats() {
       let mut sink = MixedSinker::<Vuyx>::new(w, h)
         .with_hsv(&mut hh, &mut ss, &mut vv)
         .unwrap();
-      vuyx_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+      vuyx_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
       sink.rgb_scratch.len()
     };
     assert_eq!(
@@ -409,7 +409,7 @@ fn vuya_luma_plus_hsv_only_is_correct_and_rgb_free() {
       .unwrap()
       .with_hsv(&mut hh, &mut ss, &mut vv)
       .unwrap();
-    vuya_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    vuya_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
     sink.rgb_scratch.len()
   };
 
@@ -423,7 +423,14 @@ fn vuya_luma_plus_hsv_only_is_correct_and_rgb_free() {
   }
   // HSV row 0 matches the two-step reference.
   let mut rgb0 = std::vec![0u8; w * 3];
-  vuya_to_rgb_row(&buf[..w * 4], &mut rgb0, w, ColorMatrix::Bt709, true, false);
+  vuya_to_rgb_row(
+    &buf[..w * 4],
+    &mut rgb0,
+    w,
+    KernelMatrix::Bt709,
+    true,
+    false,
+  );
   let (rh, rs, rv) = ref_hsv_from_rgb(&rgb0, w, true);
   assert_eq!(&hh[..w], &rh[..], "vuya row 0 H");
   assert_eq!(&ss[..w], &rs[..], "vuya row 0 S");

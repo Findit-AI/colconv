@@ -22,10 +22,10 @@ use crate::row::{
   nv24_to_hsv_row, nv24_to_rgb_row, nv42_to_hsv_row, nv42_to_rgb_row, rgb_to_hsv_row,
 };
 
-const MATRICES: [ColorMatrix; 3] = [
-  ColorMatrix::Bt601,
-  ColorMatrix::Bt709,
-  ColorMatrix::Bt2020Ncl,
+const MATRICES: [KernelMatrix; 3] = [
+  KernelMatrix::Bt601,
+  KernelMatrix::Bt709,
+  KernelMatrix::Bt2020Ncl,
 ];
 
 /// A non-trivial, non-gray pseudo-random byte at a given position so the
@@ -272,7 +272,7 @@ fn nv12_hsv_only_grows_no_rgb_scratch() {
     let mut sink = MixedSinker::<Nv12>::new(w, h)
       .with_hsv(&mut hh, &mut ss, &mut vv)
       .unwrap();
-    nv12_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    nv12_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
     sink.rgb_scratch.len()
   };
   assert_eq!(
@@ -287,7 +287,7 @@ fn nv12_hsv_only_grows_no_rgb_scratch() {
     &uv[..w],
     &mut rgb0,
     w,
-    ColorMatrix::Bt601,
+    KernelMatrix::Bt601,
     true,
     true,
   );
@@ -327,7 +327,7 @@ fn nv12_luma_plus_hsv_only_is_correct_and_rgb_free() {
       .unwrap()
       .with_hsv(&mut hh, &mut ss, &mut vv)
       .unwrap();
-    nv12_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    nv12_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
     sink.rgb_scratch.len()
   };
 
@@ -344,7 +344,7 @@ fn nv12_luma_plus_hsv_only_is_correct_and_rgb_free() {
     &uv[..w],
     &mut rgb0,
     w,
-    ColorMatrix::Bt709,
+    KernelMatrix::Bt709,
     true,
     true,
   );
@@ -381,7 +381,7 @@ fn nv_hsv_only_grows_no_rgb_scratch_all_formats() {
       let mut sink = MixedSinker::<Nv16>::new(w, h)
         .with_hsv(&mut hh, &mut ss, &mut vv)
         .unwrap();
-      nv16_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+      nv16_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
       sink.rgb_scratch.len()
     };
     assert_eq!(scratch_len, 0, "Nv16 HSV-only RGB-free");
@@ -392,7 +392,7 @@ fn nv_hsv_only_grows_no_rgb_scratch_all_formats() {
       &uv[..w],
       &mut rgb0,
       w,
-      ColorMatrix::Bt601,
+      KernelMatrix::Bt601,
       true,
       true,
     );
@@ -421,7 +421,7 @@ fn nv_hsv_only_grows_no_rgb_scratch_all_formats() {
       let mut sink = MixedSinker::<Nv21>::new(w, h)
         .with_hsv(&mut hh, &mut ss, &mut vv)
         .unwrap();
-      nv21_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+      nv21_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
       sink.rgb_scratch.len()
     };
     assert_eq!(scratch_len, 0, "Nv21 HSV-only RGB-free");
@@ -446,7 +446,7 @@ fn nv_hsv_only_grows_no_rgb_scratch_all_formats() {
       let mut sink = MixedSinker::<Nv24>::new(w, h)
         .with_hsv(&mut hh, &mut ss, &mut vv)
         .unwrap();
-      nv24_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+      nv24_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
       sink.rgb_scratch.len()
     };
     assert_eq!(scratch_len, 0, "Nv24 HSV-only RGB-free");
@@ -456,7 +456,7 @@ fn nv_hsv_only_grows_no_rgb_scratch_all_formats() {
       &uv[..2 * w],
       &mut rgb0,
       w,
-      ColorMatrix::Bt601,
+      KernelMatrix::Bt601,
       true,
       true,
     );
@@ -485,7 +485,7 @@ fn nv_hsv_only_grows_no_rgb_scratch_all_formats() {
       let mut sink = MixedSinker::<Nv42>::new(w, h)
         .with_hsv(&mut hh, &mut ss, &mut vv)
         .unwrap();
-      nv42_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+      nv42_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
       sink.rgb_scratch.len()
     };
     assert_eq!(scratch_len, 0, "Nv42 HSV-only RGB-free");

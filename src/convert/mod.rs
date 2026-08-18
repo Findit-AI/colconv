@@ -96,7 +96,13 @@ pub(crate) mod sealed {
 pub trait FromSpec: Default + sealed::SealedOptions {
   /// Builds the walk options carried by `spec`, defaulting any knob the spec
   /// does not describe.
-  fn from_spec(spec: &ColorSpec) -> Self;
+  ///
+  /// # Errors
+  ///
+  /// Returns [`UnsupportedKernelMatrixError`](crate::UnsupportedKernelMatrixError)
+  /// when the spec names a colour matrix the implementor has no decode for —
+  /// see [`ColorSpec::kernel_matrix`](crate::ColorSpec::kernel_matrix).
+  fn from_spec(spec: &ColorSpec) -> Result<Self, crate::UnsupportedKernelMatrixError>;
 }
 
 impl sealed::SealedOptions for YuvOptions {}
@@ -104,8 +110,8 @@ impl FromSpec for YuvOptions {
   /// The spec's resolved range + matrix become the YUV walk options; the rest
   /// of the spec is sink-consumed, not walker-consumed.
   #[inline]
-  fn from_spec(spec: &ColorSpec) -> Self {
-    Self::from_color_spec(*spec)
+  fn from_spec(spec: &ColorSpec) -> Result<Self, crate::UnsupportedKernelMatrixError> {
+    Self::from_color_spec(spec)
   }
 }
 
@@ -114,8 +120,8 @@ impl FromSpec for Xyz12Options {
   /// A [`ColorSpec`] carries no target RGB gamut, so the XYZ decode keeps its
   /// default target; the spec's other fields are not consumed by the XYZ path.
   #[inline]
-  fn from_spec(_spec: &ColorSpec) -> Self {
-    Self::new()
+  fn from_spec(_spec: &ColorSpec) -> Result<Self, crate::UnsupportedKernelMatrixError> {
+    Ok(Self::new())
   }
 }
 
@@ -124,7 +130,9 @@ impl FromSpec for () {
   /// The knob-free sources (a frame-intrinsic palette / conversion) have no
   /// spec-derived state.
   #[inline]
-  fn from_spec(_spec: &ColorSpec) -> Self {}
+  fn from_spec(_spec: &ColorSpec) -> Result<Self, crate::UnsupportedKernelMatrixError> {
+    Ok(())
+  }
 }
 
 /// A validated source-frame borrow that [`Convert`] can decode.
@@ -443,11 +451,11 @@ impl<Fr: Source, R: Resampler> Convert<'_, Fr, R> {
     sink.set_simd(self.simd);
     #[cfg(feature = "yuv-planar")]
     {
-      if let Some(spec) = self.spec {
+      if let Some(spec) = self.spec.as_ref() {
         sink.set_color_spec(spec);
       }
       if let Some(loc) = self.chroma_location {
-        sink.set_chroma_location(loc);
+        sink.set_chroma_location(loc.clone());
       }
       if let Some(interp) = self.st428 {
         sink.set_st428_interpretation(interp);
@@ -458,10 +466,16 @@ impl<Fr: Source, R: Resampler> Convert<'_, Fr, R> {
       sink.set_native(native);
     }
 
-    let options = self
-      .format_options
-      .or_else(|| self.spec.map(|spec| Fr::Options::from_spec(&spec)))
-      .unwrap_or_default();
+    let options = match self.format_options {
+      Some(options) => options,
+      // The spec's matrix is exchanged for the closed kernel vocabulary here,
+      // at the door: a matrix pixon has no decode for fails the whole convert
+      // before a row is read, rather than decoding as BT.709.
+      None => match self.spec.as_ref() {
+        Some(spec) => Fr::Options::from_spec(spec)?,
+        None => Fr::Options::default(),
+      },
+    };
     self.frame.walk_mixed(&options, &mut sink)
   }
 }

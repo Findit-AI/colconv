@@ -107,7 +107,7 @@ fn gbrpf32_rgb_matches_rgbf32_rgb() {
     let mut sink = MixedSinker::<Rgbf32>::new(w, h)
       .with_rgb(&mut rgb_rgbf32)
       .unwrap();
-    rgbf32_to(&rgbf32_src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    rgbf32_to(&rgbf32_src, true, KernelMatrix::Bt709, &mut sink).unwrap();
   }
 
   assert_eq!(
@@ -171,7 +171,7 @@ fn gbrpf16_rgb_matches_rgbf16_rgb() {
     let mut sink = MixedSinker::<Rgbf16>::new(w, h)
       .with_rgb(&mut rgb_rgbf16)
       .unwrap();
-    rgbf16_to(&rgbf16_src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    rgbf16_to(&rgbf16_src, true, KernelMatrix::Bt709, &mut sink).unwrap();
   }
 
   assert_eq!(

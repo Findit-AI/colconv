@@ -1,5 +1,5 @@
 use super::super::*;
-use crate::{ColorMatrix, row::scalar};
+use crate::{KernelMatrix, row::scalar};
 
 /// Build a deterministic pseudo-random AYUV64 packed stream.
 /// Returns `width * 4` u16 elements. Channels vary across the full
@@ -15,7 +15,7 @@ fn pseudo_random_ayuv64(width: usize, seed: usize) -> std::vec::Vec<u16> {
 
 fn check_rgb<const ALPHA: bool, const ALPHA_SRC: bool>(
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   let p = pseudo_random_ayuv64(width, 0xAA55);
@@ -38,7 +38,7 @@ fn check_rgb<const ALPHA: bool, const ALPHA_SRC: bool>(
 
 fn check_rgb_u16<const ALPHA: bool, const ALPHA_SRC: bool>(
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   let p = pseudo_random_ayuv64(width, 0xAA55);
@@ -95,12 +95,12 @@ fn avx512_ayuv64_rgb_matches_scalar_all_matrices() {
     return;
   }
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       // u8 path: SIMD main loop has block size 64 — width 64 = one main-loop
@@ -138,10 +138,10 @@ fn avx512_ayuv64_matches_scalar_widths() {
   for w in [
     1usize, 2, 3, 31, 32, 33, 63, 64, 65, 95, 96, 97, 1920, 1921, 1923,
   ] {
-    check_rgb::<false, false>(w, ColorMatrix::Bt709, false);
-    check_rgb::<true, true>(w, ColorMatrix::Bt709, true);
-    check_rgb_u16::<false, false>(w, ColorMatrix::Bt2020Ncl, true);
-    check_rgb_u16::<true, true>(w, ColorMatrix::Bt601, false);
+    check_rgb::<false, false>(w, KernelMatrix::Bt709, false);
+    check_rgb::<true, true>(w, KernelMatrix::Bt709, true);
+    check_rgb_u16::<false, false>(w, KernelMatrix::Bt2020Ncl, true);
+    check_rgb_u16::<true, true>(w, KernelMatrix::Bt601, false);
     check_luma(w);
     check_luma_u16(w);
   }
@@ -216,7 +216,7 @@ fn avx512_ayuv64_lane_order_per_pixel_y_and_a() {
       &packed,
       &mut rgba_out,
       W,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       true, // full_range
     );
   }
@@ -268,14 +268,14 @@ fn avx512_ayuv64_be_le_simd_parity() {
           &le,
           &mut out_le,
           w,
-          ColorMatrix::Bt709,
+          KernelMatrix::Bt709,
           false,
         );
         ayuv64_to_rgb_or_rgba_row::<false, false, true>(
           &be,
           &mut out_be,
           w,
-          ColorMatrix::Bt709,
+          KernelMatrix::Bt709,
           false,
         );
       }
@@ -293,14 +293,14 @@ fn avx512_ayuv64_be_le_simd_parity() {
           &le,
           &mut out_le,
           w,
-          ColorMatrix::Bt709,
+          KernelMatrix::Bt709,
           false,
         );
         ayuv64_to_rgb_or_rgba_row::<true, true, true>(
           &be,
           &mut out_be,
           w,
-          ColorMatrix::Bt709,
+          KernelMatrix::Bt709,
           false,
         );
       }
@@ -318,14 +318,14 @@ fn avx512_ayuv64_be_le_simd_parity() {
           &le,
           &mut out_le,
           w,
-          ColorMatrix::Bt709,
+          KernelMatrix::Bt709,
           true,
         );
         ayuv64_to_rgb_u16_or_rgba_u16_row::<false, false, true>(
           &be,
           &mut out_be,
           w,
-          ColorMatrix::Bt709,
+          KernelMatrix::Bt709,
           true,
         );
       }
@@ -343,14 +343,14 @@ fn avx512_ayuv64_be_le_simd_parity() {
           &le,
           &mut out_le,
           w,
-          ColorMatrix::Bt709,
+          KernelMatrix::Bt709,
           true,
         );
         ayuv64_to_rgb_u16_or_rgba_u16_row::<true, true, true>(
           &be,
           &mut out_be,
           w,
-          ColorMatrix::Bt709,
+          KernelMatrix::Bt709,
           true,
         );
       }

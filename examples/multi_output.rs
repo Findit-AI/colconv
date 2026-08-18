@@ -28,7 +28,7 @@ fn main() -> Result<(), pixon::Error> {
   let (mut hue, mut sat, mut val) = (vec![0u8; w * h], vec![0u8; w * h], vec![0u8; w * h]);
 
   Convert::from(&frame)
-    .spec(spec)
+    .spec(spec.clone())
     .rgb(&mut rgb)
     .rgba(&mut rgba)
     .luma(&mut luma)

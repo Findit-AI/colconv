@@ -1,5 +1,5 @@
 use super::*;
-use crate::DcpTargetGamut;
+use crate::KernelGamut;
 
 // ---- Tier 12 — Xyz12 packed-CIE-XYZ-12-bit source family --------------
 
@@ -94,7 +94,7 @@ fn xyz12_with_rgb_zero_input_zero_output() {
   let mut sink = MixedSinker::<Xyz12Le>::new(8, 4)
     .with_rgb(&mut rgb_out)
     .unwrap();
-  xyz12_to(&src, DcpTargetGamut::DciP3, &mut sink).unwrap();
+  xyz12_to(&src, KernelGamut::DciP3, &mut sink).unwrap();
 
   for px in rgb_out.chunks(3) {
     assert_eq!(px, [0, 0, 0]);
@@ -117,7 +117,7 @@ fn xyz12_with_rgb_max_input_clamps_to_255() {
   let mut sink = MixedSinker::<Xyz12Le>::new(8, 4)
     .with_rgb(&mut rgb_out)
     .unwrap();
-  xyz12_to(&src, DcpTargetGamut::DciP3, &mut sink).unwrap();
+  xyz12_to(&src, KernelGamut::DciP3, &mut sink).unwrap();
 
   for px in rgb_out.chunks(3) {
     assert_eq!(px, [255, 255, 255]);
@@ -137,7 +137,7 @@ fn xyz12_with_rgba_fills_alpha_max_u8() {
   let mut sink = MixedSinker::<Xyz12Le>::new(8, 4)
     .with_rgba(&mut rgba_out)
     .unwrap();
-  xyz12_to(&src, DcpTargetGamut::DciP3, &mut sink).unwrap();
+  xyz12_to(&src, KernelGamut::DciP3, &mut sink).unwrap();
 
   for px in rgba_out.chunks(4) {
     assert_eq!(px[3], 0xFF, "alpha");
@@ -157,7 +157,7 @@ fn xyz12_with_rgb_u16_full_range_at_max() {
   let mut sink = MixedSinker::<Xyz12Le>::new(8, 4)
     .with_rgb_u16(&mut rgb_out)
     .unwrap();
-  xyz12_to(&src, DcpTargetGamut::DciP3, &mut sink).unwrap();
+  xyz12_to(&src, KernelGamut::DciP3, &mut sink).unwrap();
 
   for px in rgb_out.chunks(3) {
     assert_eq!(px, [65535, 65535, 65535]);
@@ -177,7 +177,7 @@ fn xyz12_with_rgba_u16_fills_alpha_max() {
   let mut sink = MixedSinker::<Xyz12Le>::new(8, 4)
     .with_rgba_u16(&mut rgba_out)
     .unwrap();
-  xyz12_to(&src, DcpTargetGamut::Rec709, &mut sink).unwrap();
+  xyz12_to(&src, KernelGamut::Rec709, &mut sink).unwrap();
 
   for px in rgba_out.chunks(4) {
     assert_eq!(px[3], 0xFFFF);
@@ -199,7 +199,7 @@ fn xyz12_with_rgb_f32_preserves_negatives() {
   let mut sink = MixedSinker::<Xyz12Le>::new(4, 2)
     .with_rgb_f32(&mut rgb_out)
     .unwrap();
-  xyz12_to(&src, DcpTargetGamut::Rec709, &mut sink).unwrap();
+  xyz12_to(&src, KernelGamut::Rec709, &mut sink).unwrap();
 
   for px in rgb_out.chunks(3) {
     assert!(px[0] < 0.0, "R should be negative, got {}", px[0]);
@@ -221,7 +221,7 @@ fn xyz12_with_xyz_f32_lossless_passthrough() {
   let mut sink = MixedSinker::<Xyz12Le>::new(4, 2)
     .with_xyz_f32(&mut xyz_out)
     .unwrap();
-  xyz12_to(&src, DcpTargetGamut::DciP3, &mut sink).unwrap();
+  xyz12_to(&src, KernelGamut::DciP3, &mut sink).unwrap();
 
   // Linear XYZ pass-through: only step-1 inverse OETF applied. All
   // three channels should have identical values for an input of
@@ -248,7 +248,7 @@ fn xyz12_with_rgb_f16_rec709_mid_gray() {
   let mut sink = MixedSinker::<Xyz12Le>::new(4, 2)
     .with_rgb_f16(&mut rgb_out)
     .unwrap();
-  xyz12_to(&src, DcpTargetGamut::Rec709, &mut sink).unwrap();
+  xyz12_to(&src, KernelGamut::Rec709, &mut sink).unwrap();
 
   for px in rgb_out.chunks(3) {
     // Each channel should be a positive value in (0, 1) since OETF +
@@ -273,7 +273,7 @@ fn xyz12_with_rgba_f16_alpha_one() {
   let mut sink = MixedSinker::<Xyz12Le>::new(4, 2)
     .with_rgba_f16(&mut rgba_out)
     .unwrap();
-  xyz12_to(&src, DcpTargetGamut::DciP3, &mut sink).unwrap();
+  xyz12_to(&src, KernelGamut::DciP3, &mut sink).unwrap();
 
   for px in rgba_out.chunks(4) {
     assert_eq!(px[3].to_f32(), 1.0);
@@ -293,7 +293,7 @@ fn xyz12_with_luma_via_staging() {
   let mut sink = MixedSinker::<Xyz12Le>::new(4, 4)
     .with_luma(&mut luma_out)
     .unwrap();
-  xyz12_to(&src, DcpTargetGamut::Rec709, &mut sink).unwrap();
+  xyz12_to(&src, KernelGamut::Rec709, &mut sink).unwrap();
 
   // Mid-gray under Rec.709 → grayish output (around 113-128 u8).
   for &y in &luma_out {
@@ -315,7 +315,7 @@ fn xyz12_with_luma_u16_zero_extends() {
   let mut sink = MixedSinker::<Xyz12Le>::new(4, 4)
     .with_luma_u16(&mut luma_out)
     .unwrap();
-  xyz12_to(&src, DcpTargetGamut::Rec709, &mut sink).unwrap();
+  xyz12_to(&src, KernelGamut::Rec709, &mut sink).unwrap();
 
   for &y in &luma_out {
     // Same value as `with_luma` (u8) but zero-extended into u16.
@@ -338,7 +338,7 @@ fn xyz12_with_hsv_via_staging() {
   let mut sink = MixedSinker::<Xyz12Le>::new(4, 4)
     .with_hsv(&mut h_out, &mut s_out, &mut v_out)
     .unwrap();
-  xyz12_to(&src, DcpTargetGamut::DciP3, &mut sink).unwrap();
+  xyz12_to(&src, KernelGamut::DciP3, &mut sink).unwrap();
 
   // Mid-gray → low saturation. Hue undefined for grayscale but should
   // not panic.
@@ -363,19 +363,19 @@ fn xyz12_target_gamut_changes_output() {
     let mut sink_p3 = MixedSinker::<Xyz12Le>::new(4, 2)
       .with_rgb(&mut out_p3)
       .unwrap();
-    xyz12_to(&src, DcpTargetGamut::DciP3, &mut sink_p3).unwrap();
+    xyz12_to(&src, KernelGamut::DciP3, &mut sink_p3).unwrap();
   }
   {
     let mut sink_709 = MixedSinker::<Xyz12Le>::new(4, 2)
       .with_rgb(&mut out_709)
       .unwrap();
-    xyz12_to(&src, DcpTargetGamut::Rec709, &mut sink_709).unwrap();
+    xyz12_to(&src, KernelGamut::Rec709, &mut sink_709).unwrap();
   }
   {
     let mut sink_2020 = MixedSinker::<Xyz12Le>::new(4, 2)
       .with_rgb(&mut out_2020)
       .unwrap();
-    xyz12_to(&src, DcpTargetGamut::Rec2020, &mut sink_2020).unwrap();
+    xyz12_to(&src, KernelGamut::Rec2020, &mut sink_2020).unwrap();
   }
 
   // The three gamut matrices differ at the second-decimal level, so
@@ -403,13 +403,13 @@ fn xyz12_be_byte_swap_matches_le() {
     let mut sink_le = MixedSinker::<Xyz12Le>::new(4, 2)
       .with_rgb(&mut out_le)
       .unwrap();
-    xyz12_to(&src_le, DcpTargetGamut::DciP3, &mut sink_le).unwrap();
+    xyz12_to(&src_le, KernelGamut::DciP3, &mut sink_le).unwrap();
   }
   {
     let mut sink_be = MixedSinker::<Xyz12Be>::new(4, 2)
       .with_rgb(&mut out_be)
       .unwrap();
-    xyz12_to(&src_be, DcpTargetGamut::DciP3, &mut sink_be).unwrap();
+    xyz12_to(&src_be, KernelGamut::DciP3, &mut sink_be).unwrap();
   }
   assert_eq!(out_le, out_be);
 }
@@ -448,7 +448,7 @@ fn pattern_xyz12_frame(width: u32, height: u32, pack: fn(u16) -> u16) -> std::ve
 fn assert_xyz12_le_be_roundtrip_all_outputs(
   width: u32,
   height: u32,
-  target_gamut: DcpTargetGamut,
+  target_gamut: KernelGamut,
   simd: bool,
 ) {
   let w = width as usize;
@@ -592,7 +592,7 @@ fn assert_xyz12_le_be_roundtrip_all_outputs(
   ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
 )]
 fn xyz12_le_be_roundtrip_all_outputs_scalar_dcip3() {
-  assert_xyz12_le_be_roundtrip_all_outputs(16, 4, DcpTargetGamut::DciP3, false);
+  assert_xyz12_le_be_roundtrip_all_outputs(16, 4, KernelGamut::DciP3, false);
 }
 
 #[test]
@@ -601,7 +601,7 @@ fn xyz12_le_be_roundtrip_all_outputs_scalar_dcip3() {
   ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
 )]
 fn xyz12_le_be_roundtrip_all_outputs_scalar_rec709() {
-  assert_xyz12_le_be_roundtrip_all_outputs(16, 4, DcpTargetGamut::Rec709, false);
+  assert_xyz12_le_be_roundtrip_all_outputs(16, 4, KernelGamut::Rec709, false);
 }
 
 #[test]
@@ -610,7 +610,7 @@ fn xyz12_le_be_roundtrip_all_outputs_scalar_rec709() {
   ignore = "half::f16 uses inline assembly on aarch64 unsupported by Miri"
 )]
 fn xyz12_le_be_roundtrip_all_outputs_scalar_rec2020() {
-  assert_xyz12_le_be_roundtrip_all_outputs(16, 4, DcpTargetGamut::Rec2020, false);
+  assert_xyz12_le_be_roundtrip_all_outputs(16, 4, KernelGamut::Rec2020, false);
 }
 
 #[test]
@@ -619,7 +619,7 @@ fn xyz12_le_be_roundtrip_all_outputs_scalar_rec2020() {
   ignore = "SIMD-dispatched row kernels use intrinsics unsupported by Miri"
 )]
 fn xyz12_le_be_roundtrip_all_outputs_simd_dcip3() {
-  assert_xyz12_le_be_roundtrip_all_outputs(16, 4, DcpTargetGamut::DciP3, true);
+  assert_xyz12_le_be_roundtrip_all_outputs(16, 4, KernelGamut::DciP3, true);
 }
 
 #[test]
@@ -640,7 +640,7 @@ fn xyz12_combined_rgb_rgba_consistent() {
     .unwrap()
     .with_rgba(&mut rgba_out)
     .unwrap();
-  xyz12_to(&src, DcpTargetGamut::DciP3, &mut sink).unwrap();
+  xyz12_to(&src, KernelGamut::DciP3, &mut sink).unwrap();
 
   for x in 0..(4 * 2) {
     let rgb_idx = x * 3;
@@ -684,13 +684,13 @@ fn xyz12_dirty_low_bits_discarded_by_kernel() {
     let mut sink = MixedSinker::<Xyz12Le>::new(4, 2)
       .with_rgb(&mut out_clean)
       .unwrap();
-    xyz12_to(&src_clean, DcpTargetGamut::DciP3, &mut sink).unwrap();
+    xyz12_to(&src_clean, KernelGamut::DciP3, &mut sink).unwrap();
   }
   {
     let mut sink = MixedSinker::<Xyz12Le>::new(4, 2)
       .with_rgb(&mut out_dirty)
       .unwrap();
-    xyz12_to(&src_dirty, DcpTargetGamut::DciP3, &mut sink).unwrap();
+    xyz12_to(&src_dirty, KernelGamut::DciP3, &mut sink).unwrap();
   }
   assert_eq!(out_clean, out_dirty);
   // Mark `clean` as touched to silence the lint for symmetry; all real
@@ -715,7 +715,7 @@ fn xyz12_mid_gray_sample_is_nonzero() {
   let mut sink = MixedSinker::<Xyz12Le>::new(4, 2)
     .with_xyz_f32(&mut xyz_out)
     .unwrap();
-  xyz12_to(&src, DcpTargetGamut::DciP3, &mut sink).unwrap();
+  xyz12_to(&src, KernelGamut::DciP3, &mut sink).unwrap();
   for px in xyz_out.chunks(3) {
     assert!(px[0] > 0.1, "expected mid-gray X > 0.1, got {}", px[0]);
     assert!(px[1] > 0.1, "expected mid-gray Y > 0.1, got {}", px[1]);
@@ -767,6 +767,6 @@ fn xyz12_dimension_mismatch_rejected_at_begin_frame() {
   let mut sink = MixedSinker::<Xyz12Le>::new(8, 4)
     .with_rgb(&mut rgb_out)
     .unwrap();
-  let res = xyz12_to(&src, DcpTargetGamut::DciP3, &mut sink);
+  let res = xyz12_to(&src, KernelGamut::DciP3, &mut sink);
   assert!(matches!(res, Err(MixedSinkerError::DimensionMismatch(_))));
 }

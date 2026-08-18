@@ -50,7 +50,7 @@ fn y216_luma_only_extracts_y_bytes_downshifted() {
   let src = Y216Frame::new(&buf, 6, 8, 12);
   let mut luma = std::vec![0u8; 6 * 8];
   let mut sink = MixedSinker::<Y216>::new(6, 8).with_luma(&mut luma).unwrap();
-  y216_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  y216_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
   // 16-bit Y=51200 → 8-bit (51200 >> 8) = 200.
   assert!(luma.iter().all(|&y| y == 200), "luma {luma:?}");
 }
@@ -68,7 +68,7 @@ fn y216_luma_u16_only_extracts_y_native_depth() {
   let mut sink = MixedSinker::<Y216>::new(6, 8)
     .with_luma_u16(&mut luma)
     .unwrap();
-  y216_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  y216_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
   assert!(
     luma.iter().all(|&y| y == 51200),
     "luma_u16 {:?}",
@@ -87,7 +87,7 @@ fn y216_rgb_only_converts_gray_to_gray() {
   let src = Y216Frame::new(&buf, 12, 4, 24);
   let mut rgb = std::vec![0u8; 12 * 4 * 3];
   let mut sink = MixedSinker::<Y216>::new(12, 4).with_rgb(&mut rgb).unwrap();
-  y216_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  y216_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
   for px in rgb.chunks(3) {
     assert!(px[0].abs_diff(128) <= 2);
     assert_eq!(px[0], px[1]);
@@ -107,7 +107,7 @@ fn y216_rgba_only_converts_gray_to_gray_with_opaque_alpha() {
   let mut sink = MixedSinker::<Y216>::new(12, 4)
     .with_rgba(&mut rgba)
     .unwrap();
-  y216_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  y216_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
   for px in rgba.chunks(4) {
     assert_eq!(px[3], 0xFF);
   }
@@ -125,7 +125,7 @@ fn y216_rgb_u16_only_converts_gray_to_gray_native_depth() {
   let mut sink = MixedSinker::<Y216>::new(12, 4)
     .with_rgb_u16(&mut rgb)
     .unwrap();
-  y216_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  y216_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
   for px in rgb.chunks(3) {
     // Mid-gray at 16-bit depth ≈ 32768; allow ±256 tolerance for
     // Q15 rounding on the 16-bit pipeline.
@@ -149,7 +149,7 @@ fn y216_rgba_u16_alpha_is_max() {
   let mut sink = MixedSinker::<Y216>::new(12, 4)
     .with_rgba_u16(&mut rgba)
     .unwrap();
-  y216_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  y216_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
   for px in rgba.chunks(4) {
     assert_eq!(px[3], 0xFFFF);
   }
@@ -177,7 +177,7 @@ fn y216_with_rgb_and_with_rgba_byte_identical_u8() {
     .unwrap()
     .with_rgba(&mut rgba)
     .unwrap();
-  y216_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  y216_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
   for i in 0..(w * h) as usize {
     assert_eq!(rgba[i * 4], rgb[i * 3]);
     assert_eq!(rgba[i * 4 + 1], rgb[i * 3 + 1]);
@@ -205,7 +205,7 @@ fn y216_with_rgb_u16_and_with_rgba_u16_byte_identical() {
     .unwrap()
     .with_rgba_u16(&mut rgba)
     .unwrap();
-  y216_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  y216_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
   for i in 0..(w * h) as usize {
     assert_eq!(rgba[i * 4], rgb[i * 3]);
     assert_eq!(rgba[i * 4 + 1], rgb[i * 3 + 1]);
@@ -240,8 +240,8 @@ fn y216_with_simd_false_matches_with_simd_true() {
       .with_rgb(&mut rgb_scalar)
       .unwrap()
       .with_simd(false);
-    y216_to(&src, false, ColorMatrix::Bt709, &mut sink_simd).unwrap();
-    y216_to(&src, false, ColorMatrix::Bt709, &mut sink_scalar).unwrap();
+    y216_to(&src, false, KernelMatrix::Bt709, &mut sink_simd).unwrap();
+    y216_to(&src, false, KernelMatrix::Bt709, &mut sink_scalar).unwrap();
     assert_eq!(rgb_simd, rgb_scalar, "Y216 SIMD≠scalar at width {w}");
   }
 }
@@ -334,8 +334,8 @@ fn y216_planar_parity_with_yuv422p16() {
   let mut y_sink = MixedSinker::<Y216>::new(width, height)
     .with_rgb(&mut y_rgb)
     .unwrap();
-  yuv422p16_to(&planar, false, ColorMatrix::Bt709, &mut p_sink).unwrap();
-  y216_to(&y216, false, ColorMatrix::Bt709, &mut y_sink).unwrap();
+  yuv422p16_to(&planar, false, KernelMatrix::Bt709, &mut p_sink).unwrap();
+  y216_to(&y216, false, KernelMatrix::Bt709, &mut y_sink).unwrap();
   assert_eq!(p_rgb, y_rgb, "Y216 vs Yuv422p16 u8 RGB diverges");
 
   // u16 RGB parity (the i64 chroma path — the whole point of this oracle)
@@ -347,8 +347,8 @@ fn y216_planar_parity_with_yuv422p16() {
   let mut y_sink2 = MixedSinker::<Y216>::new(width, height)
     .with_rgb_u16(&mut y_rgb_u16)
     .unwrap();
-  yuv422p16_to(&planar, false, ColorMatrix::Bt709, &mut p_sink2).unwrap();
-  y216_to(&y216, false, ColorMatrix::Bt709, &mut y_sink2).unwrap();
+  yuv422p16_to(&planar, false, KernelMatrix::Bt709, &mut p_sink2).unwrap();
+  y216_to(&y216, false, KernelMatrix::Bt709, &mut y_sink2).unwrap();
   assert_eq!(p_rgb_u16, y_rgb_u16, "Y216 vs Yuv422p16 u16 RGB diverges");
 }
 
@@ -382,7 +382,7 @@ fn y216_le_be_roundtrip_byte_identical() {
     .unwrap()
     .with_luma_u16(&mut out_le_luma_u16)
     .unwrap();
-  y216_to(&frame_le, true, ColorMatrix::Bt709, &mut sink_le).unwrap();
+  y216_to(&frame_le, true, KernelMatrix::Bt709, &mut sink_le).unwrap();
 
   let frame_be = Y216BeFrame::try_new(&pix_be, 8, 4, 16).unwrap();
   let mut out_be_rgba = std::vec![0u8; 8 * 4 * 4];
@@ -393,7 +393,7 @@ fn y216_le_be_roundtrip_byte_identical() {
     .unwrap()
     .with_luma_u16(&mut out_be_luma_u16)
     .unwrap();
-  y216_to_endian(&frame_be, true, ColorMatrix::Bt709, &mut sink_be).unwrap();
+  y216_to_endian(&frame_be, true, KernelMatrix::Bt709, &mut sink_be).unwrap();
 
   assert_eq!(
     out_le_rgba, out_be_rgba,
@@ -446,7 +446,7 @@ fn y216_rgb_scratch_alloc_failure_leaves_outputs_untouched() {
     .unwrap();
 
   super::super::arm_rgb_scratch_alloc_failure();
-  let err = y216_to(&src, false, ColorMatrix::Bt601, &mut sink).unwrap_err();
+  let err = y216_to(&src, false, KernelMatrix::Bt601, &mut sink).unwrap_err();
   drop(sink);
 
   assert!(

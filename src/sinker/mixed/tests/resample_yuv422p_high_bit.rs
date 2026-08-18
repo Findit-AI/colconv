@@ -20,7 +20,7 @@
 //! independent-u8/u16 and native-Y-luma contracts.
 
 use crate::{
-  ColorMatrix, PixelSink,
+  KernelMatrix, PixelSink,
   frame::*,
   resample::{AreaResampler, FilteredResampler, ResampleError, Triangle},
   sinker::{MixedSinker, MixedSinkerError},
@@ -29,7 +29,7 @@ use crate::{
 const SRC: usize = 8;
 const CW: usize = SRC / 2;
 const OUT: usize = 4;
-const M: ColorMatrix = ColorMatrix::Bt601;
+const M: KernelMatrix = KernelMatrix::Bt601;
 const FR: bool = true;
 
 /// Re-encode a host-native u16 slice as host-independent LE-wire byte

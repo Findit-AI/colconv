@@ -15,7 +15,7 @@ use crate::row::simd128_available;
 #[cfg(target_arch = "x86_64")]
 use crate::row::{avx2_available, avx512_available, sse41_available};
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   row::{rgb_row_bytes, scalar},
 };
 // `rgb_row_elems` / `rgba_row_bytes` are consumed only by the
@@ -116,7 +116,7 @@ pub fn rgb_to_luma_row(
   rgb: &[u8],
   luma_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) {
@@ -189,7 +189,7 @@ pub fn rgb_to_luma_u16_row(
   rgb: &[u8],
   luma_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   _use_simd: bool,
 ) {

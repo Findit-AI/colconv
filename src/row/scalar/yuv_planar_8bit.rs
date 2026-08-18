@@ -26,7 +26,7 @@ pub(crate) fn yuv_420_to_rgb_row(
   v_half: &[u8],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   yuv_420_to_rgb_or_rgba_row::<false, false>(
@@ -46,7 +46,7 @@ pub(crate) fn yuv_420_to_rgba_row(
   v_half: &[u8],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   yuv_420_to_rgb_or_rgba_row::<true, false>(
@@ -89,7 +89,7 @@ pub(crate) fn yuv_420_to_rgba_with_alpha_src_row(
   a_src: &[u8],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   yuv_420_to_rgb_or_rgba_row::<true, true>(
@@ -137,7 +137,7 @@ pub(crate) fn yuv_420_to_rgb_or_rgba_row<const ALPHA: bool, const ALPHA_SRC: boo
   a_src: Option<&[u8]>,
   out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   yuv_420_to_rgb_or_rgba_row_with_coeffs::<ALPHA, ALPHA_SRC>(
@@ -153,10 +153,10 @@ pub(crate) fn yuv_420_to_rgb_or_rgba_row<const ALPHA: bool, const ALPHA_SRC: boo
 }
 
 /// [`yuv_420_to_rgb_or_rgba_row`] with the YCbCr→RGB [`Coefficients`]
-/// already resolved, instead of re-deriving them from a [`ColorMatrix`]
+/// already resolved, instead of re-deriving them from a [`KernelMatrix`]
 /// tag inside the kernel. This lets a caller that resolved coefficients
 /// from something *other* than the matrix tag — e.g. the primaries-derived
-/// [`ColorMatrix::ChromaDerivedNcl`] path via
+/// [`KernelMatrix::ChromaDerivedNcl`] path via
 /// [`Coefficients::for_matrix_with_primaries`] — reuse this exact reference
 /// kernel. The per-pixel math is identical to the matrix wrapper.
 #[cfg_attr(not(tarpaulin), inline(always))]
@@ -246,7 +246,7 @@ pub(crate) fn yuv_420_to_rgb_or_rgba_row_with_coeffs<const ALPHA: bool, const AL
 }
 
 /// [`yuv_420_to_rgb_row`] with caller-resolved [`Coefficients`] — the entry
-/// the [`ColorMatrix::ChromaDerivedNcl`] decode path uses so the
+/// the [`KernelMatrix::ChromaDerivedNcl`] decode path uses so the
 /// primaries-derived coefficients
 /// ([`Coefficients::for_matrix_with_primaries`]) feed the *same* scalar
 /// kernel. Output is byte-identical to [`yuv_420_to_rgb_row`] when `coeffs`
@@ -1352,7 +1352,7 @@ pub(crate) fn yuv_410_to_rgb_row(
   v_quarter: &[u8],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   yuv_410_to_rgb_or_rgba_row::<false>(y, u_quarter, v_quarter, rgb_out, width, matrix, full_range);
@@ -1370,7 +1370,7 @@ pub(crate) fn yuv_410_to_rgba_row(
   v_quarter: &[u8],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   yuv_410_to_rgb_or_rgba_row::<true>(y, u_quarter, v_quarter, rgba_out, width, matrix, full_range);
@@ -1396,7 +1396,7 @@ pub(crate) fn yuv_410_to_rgb_or_rgba_row<const ALPHA: bool>(
   v_quarter: &[u8],
   out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert_eq!(width & 3, 0, "YUV 4:1:0 requires width % 4 == 0");
@@ -1459,7 +1459,7 @@ pub(crate) fn yuv_444_to_rgb_row(
   v: &[u8],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   yuv_444_to_rgb_or_rgba_row::<false, false>(y, u, v, None, rgb_out, width, matrix, full_range);
@@ -1475,7 +1475,7 @@ pub(crate) fn yuv_444_to_rgba_row(
   v: &[u8],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   yuv_444_to_rgb_or_rgba_row::<true, false>(y, u, v, None, rgba_out, width, matrix, full_range);
@@ -1505,7 +1505,7 @@ pub(crate) fn yuv_444_to_rgba_with_alpha_src_row(
   a_src: &[u8],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   yuv_444_to_rgb_or_rgba_row::<true, true>(
@@ -1544,7 +1544,7 @@ pub(crate) fn yuv_444_to_rgb_or_rgba_row<const ALPHA: bool, const ALPHA_SRC: boo
   a_src: Option<&[u8]>,
   out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   yuv_444_to_rgb_or_rgba_row_with_coeffs::<ALPHA, ALPHA_SRC>(
@@ -1560,8 +1560,8 @@ pub(crate) fn yuv_444_to_rgb_or_rgba_row<const ALPHA: bool, const ALPHA_SRC: boo
 }
 
 /// [`yuv_444_to_rgb_or_rgba_row`] with the YCbCr→RGB [`Coefficients`]
-/// already resolved, instead of re-deriving them from a [`ColorMatrix`]
-/// tag. Lets the primaries-derived [`ColorMatrix::ChromaDerivedNcl`] path
+/// already resolved, instead of re-deriving them from a [`KernelMatrix`]
+/// tag. Lets the primaries-derived [`KernelMatrix::ChromaDerivedNcl`] path
 /// (via [`Coefficients::for_matrix_with_primaries`]) share this exact 4:4:4
 /// reference kernel — used by the centered chroma-siting (#302) decode after
 /// the half-width chroma is upsampled to full width. Per-pixel math is
@@ -1708,7 +1708,7 @@ pub(crate) fn yuv_420_to_rgb_f32_unclamped_row(
   v_half: &[u8],
   out: &mut [f32],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert_eq!(width & 1, 0, "YUV 4:2:0 requires even width");
@@ -1779,7 +1779,7 @@ pub(crate) fn yuv_444_to_rgb_f32_unclamped_row(
   v: &[u8],
   out: &mut [f32],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert!(y.len() >= width, "y row too short");
@@ -1840,7 +1840,7 @@ pub(crate) fn yuv_411_to_rgb_row(
   v_quarter: &[u8],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   yuv_411_to_rgb_or_rgba_row::<false>(y, u_quarter, v_quarter, rgb_out, width, matrix, full_range);
@@ -1859,7 +1859,7 @@ pub(crate) fn yuv_411_to_rgba_row(
   v_quarter: &[u8],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   yuv_411_to_rgb_or_rgba_row::<true>(y, u_quarter, v_quarter, rgba_out, width, matrix, full_range);
@@ -1892,7 +1892,7 @@ pub(crate) fn yuv_411_to_rgb_or_rgba_row<const ALPHA: bool>(
   v_quarter: &[u8],
   out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert!(y.len() >= width, "y row too short");
@@ -2013,7 +2013,7 @@ pub(crate) fn yuv_420_to_hsv_row(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert_eq!(width & 1, 0, "YUV 4:2:0 requires even width");
@@ -2080,7 +2080,7 @@ pub(crate) fn yuv_444_to_hsv_row(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert!(y.len() >= width, "y row too short");
@@ -2133,7 +2133,7 @@ pub(crate) fn yuv_410_to_hsv_row(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert_eq!(width & 3, 0, "YUV 4:1:0 requires width % 4 == 0");
@@ -2193,7 +2193,7 @@ pub(crate) fn yuv_411_to_hsv_row(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert!(y.len() >= width, "y row too short");

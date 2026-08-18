@@ -289,15 +289,30 @@ extern crate std;
 pub use mediaframe::{
   PixelSink,
   SourceFormat,
-  // `mediaframe::color::Matrix` is re-exported as `ColorMatrix` so pixon's
-  // public surface and every internal `crate::ColorMatrix` reference keep
-  // the disambiguated name (`videoframe::color::ColorMatrix` was renamed to
-  // `Matrix` upstream during the videoframe → mediaframe rename). `Info` is
-  // likewise re-exported as `ColorInfo` so the generic `Info` name stays out
-  // of pixon's root while `ColorSpec::from_info` can name it.
+  // Two colour-matrix vocabularies, and the split is load-bearing.
+  //
+  // `mediaframe::color::Matrix` is re-exported as `ColorMatrix`: the open,
+  // `#[non_exhaustive]` **descriptor** a stream is tagged with. It can name a
+  // matrix no kernel tabulates coefficients for, so it stays out of the
+  // kernels and lives on [`ColorSpec`] — the stream's colour description —
+  // where the non-affine decodes (#303) read it. (The name is
+  // disambiguating: `videoframe::color::ColorMatrix` was renamed to `Matrix`
+  // upstream during the videoframe → mediaframe rename.)
+  //
+  // `KernelMatrix` is the closed, `Copy` **coefficient selector** the row
+  // walkers carry and every kernel matches on exhaustively. It is re-exported
+  // under mediaframe's own name because it is mediaframe's own concept, and
+  // the exchange between the two is `TryFrom<&Matrix>` — the one place an
+  // unconvertible matrix is refused ([`UnsupportedKernelMatrixError`]).
+  // `KernelGamut` / `UnsupportedKernelGamutError` are the same pair for the
+  // XYZ12 target gamut.
+  //
+  // `Info` is likewise re-exported as `ColorInfo` so the generic `Info` name
+  // stays out of pixon's root while `ColorSpec::from_info` can name it.
   color::{
-    ChromaLocation, DcpTargetGamut, DynamicRange, Info as ColorInfo, Matrix as ColorMatrix,
-    Primaries, Transfer,
+    ChromaLocation, DcpTargetGamut, DynamicRange, Info as ColorInfo, KernelGamut, KernelMatrix,
+    Matrix as ColorMatrix, Primaries, Transfer, UnsupportedKernelGamutError,
+    UnsupportedKernelMatrixError,
   },
   frame,
   pixel_format::PixelFormat,

@@ -184,16 +184,16 @@ fn wasm_gbrpf32_to_rgba_f16_matches_scalar() {
 
 #[test]
 fn wasm_gbrpf32_to_luma_matches_scalar() {
-  use crate::ColorMatrix;
+  use crate::KernelMatrix;
   for w in [1usize, 3, 4, 5, 8, 16, 17, 33, 1921] {
     let g = gbr_plane_f32(w, 0x1A2B_3C4D);
     let b = gbr_plane_f32(w, 0x5E6F_7A8B);
     let r = gbr_plane_f32(w, 0x9CAD_BEEF);
     let mut out_scalar = std::vec![0u8; w];
     let mut out_simd = std::vec![0u8; w];
-    scalar::gbrpf32_to_luma_row::<false>(&g, &b, &r, &mut out_scalar, w, ColorMatrix::Bt709, true);
+    scalar::gbrpf32_to_luma_row::<false>(&g, &b, &r, &mut out_scalar, w, KernelMatrix::Bt709, true);
     unsafe {
-      gbrpf32_to_luma_row::<false>(&g, &b, &r, &mut out_simd, w, ColorMatrix::Bt709, true);
+      gbrpf32_to_luma_row::<false>(&g, &b, &r, &mut out_simd, w, KernelMatrix::Bt709, true);
     }
     assert_eq!(out_scalar, out_simd, "wasm gbrpf32_to_luma width={w}");
   }
@@ -203,7 +203,7 @@ fn wasm_gbrpf32_to_luma_matches_scalar() {
 
 #[test]
 fn wasm_gbrpf32_to_luma_u16_matches_scalar() {
-  use crate::ColorMatrix;
+  use crate::KernelMatrix;
   for w in [1usize, 3, 4, 5, 8, 16, 17, 33, 1921] {
     let g = gbr_plane_f32(w, 0xF1E2_D3C4);
     let b = gbr_plane_f32(w, 0xB5A6_9788);
@@ -216,11 +216,11 @@ fn wasm_gbrpf32_to_luma_u16_matches_scalar() {
       &r,
       &mut out_scalar,
       w,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       true,
     );
     unsafe {
-      gbrpf32_to_luma_u16_row::<false>(&g, &b, &r, &mut out_simd, w, ColorMatrix::Bt709, true);
+      gbrpf32_to_luma_u16_row::<false>(&g, &b, &r, &mut out_simd, w, KernelMatrix::Bt709, true);
     }
     assert_eq!(out_scalar, out_simd, "wasm gbrpf32_to_luma_u16 width={w}");
   }

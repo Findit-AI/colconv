@@ -25,7 +25,7 @@
 // `:ty` / `:path` macro fragment from the call site does not mark a call-site
 // import as used), so they are passed by full path there instead of imported.
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   resample::{AreaResampler, AreaStream, ResamplePlan},
   row::yuv_444_to_hsv_row,
   sinker::MixedSinker,
@@ -33,10 +33,10 @@ use crate::{
 };
 use mediaframe::frame::{Yuv410pFrame, Yuv411pFrame, Yuv420pFrame};
 
-const MATRICES: [ColorMatrix; 3] = [
-  ColorMatrix::Bt601,
-  ColorMatrix::Bt709,
-  ColorMatrix::Bt2020Ncl,
+const MATRICES: [KernelMatrix; 3] = [
+  KernelMatrix::Bt601,
+  KernelMatrix::Bt709,
+  KernelMatrix::Bt2020Ncl,
 ];
 
 /// A non-gray pseudo-random byte so the HSV hue / saturation branches are
@@ -90,7 +90,7 @@ fn yuv_domain_hsv_reference(
   ch: usize,
   out_w: usize,
   out_h: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
   let yb = area_bin(y, src_w, src_h, out_w, out_h);
@@ -548,7 +548,7 @@ fn luma_plus_hsv_only_rowstage_is_rgb_free_and_matches_native() {
         .unwrap()
         .with_hsv(&mut hh, &mut ss, &mut vv)
         .unwrap();
-      yuv420p_to(&frame, true, ColorMatrix::Bt709, &mut sink).unwrap();
+      yuv420p_to(&frame, true, KernelMatrix::Bt709, &mut sink).unwrap();
       sink.rgb_scratch.len()
     };
     (luma, (hh, ss, vv), scratch_len)
@@ -589,7 +589,7 @@ fn rgb_plus_hsv_rowstage_still_stages_rgb_scratch() {
         .unwrap()
         .with_hsv(&mut hh, &mut ss, &mut vv)
         .unwrap();
-    yuv420p_to(&frame, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    yuv420p_to(&frame, true, KernelMatrix::Bt601, &mut sink).unwrap();
     sink.rgb_scratch.len()
   };
   assert_eq!(
@@ -626,7 +626,7 @@ fn hsv_only_rowstage_reused_sink_resets_between_frames() {
         .with_native(false)
         .with_hsv(&mut rh, &mut rs, &mut rv)
         .unwrap();
-    yuv420p_to(&frame, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    yuv420p_to(&frame, true, KernelMatrix::Bt601, &mut sink).unwrap();
   }
 
   // Two frames in a row through the same sink; the walker calls begin_frame
@@ -640,8 +640,8 @@ fn hsv_only_rowstage_reused_sink_resets_between_frames() {
       .with_native(false)
       .with_hsv(&mut hh, &mut ss, &mut vv)
       .unwrap();
-  yuv420p_to(&frame, true, ColorMatrix::Bt601, &mut sink).unwrap();
-  yuv420p_to(&frame, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuv420p_to(&frame, true, KernelMatrix::Bt601, &mut sink).unwrap();
+  yuv420p_to(&frame, true, KernelMatrix::Bt601, &mut sink).unwrap();
   drop(sink);
   assert_eq!(
     (hh, ss, vv),

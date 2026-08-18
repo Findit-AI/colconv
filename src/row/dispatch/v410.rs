@@ -29,7 +29,7 @@ use crate::row::simd128_available;
 #[cfg(target_arch = "x86_64")]
 use crate::row::{avx2_available, avx512_available, sse41_available};
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   row::{rgb_row_bytes, rgb_row_elems, rgba_row_bytes, rgba_row_elems, scalar},
 };
 
@@ -42,7 +42,7 @@ pub fn v410_to_rgb_row(
   packed: &[u32],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
   be_input: bool,
@@ -124,7 +124,7 @@ pub fn v410_to_rgba_row(
   packed: &[u32],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
   be_input: bool,
@@ -207,7 +207,7 @@ pub fn v410_to_rgb_u16_row(
   packed: &[u32],
   rgb_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
   be_input: bool,
@@ -294,7 +294,7 @@ pub fn v410_to_rgba_u16_row(
   packed: &[u32],
   rgba_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
   be_input: bool,
@@ -545,7 +545,7 @@ pub fn v410_to_hsv_row(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
   be_input: bool,
@@ -660,7 +660,15 @@ mod tests {
     // packed buffer has only 2 elements for width=4 (needs 4).
     let packed = [0u32; 2];
     let mut rgb = [0u8; 4 * 3];
-    v410_to_rgb_row(&packed, &mut rgb, 4, ColorMatrix::Bt709, true, false, false);
+    v410_to_rgb_row(
+      &packed,
+      &mut rgb,
+      4,
+      KernelMatrix::Bt709,
+      true,
+      false,
+      false,
+    );
   }
 
   #[test]
@@ -669,7 +677,15 @@ mod tests {
     // output buffer has only 2 bytes for width=4 (needs 12).
     let packed = [0u32; 4];
     let mut rgb = [0u8; 2];
-    v410_to_rgb_row(&packed, &mut rgb, 4, ColorMatrix::Bt709, true, false, false);
+    v410_to_rgb_row(
+      &packed,
+      &mut rgb,
+      4,
+      KernelMatrix::Bt709,
+      true,
+      false,
+      false,
+    );
   }
 
   #[test]
@@ -681,7 +697,7 @@ mod tests {
 
     // u8 RGB
     let mut rgb = [0u8; 8 * 3];
-    v410_to_rgb_row(&buf, &mut rgb, 8, ColorMatrix::Bt709, true, false, false);
+    v410_to_rgb_row(&buf, &mut rgb, 8, KernelMatrix::Bt709, true, false, false);
     for px in rgb.chunks(3) {
       assert!(px[0].abs_diff(128) <= 1);
       assert_eq!(px[0], px[1]);
@@ -690,7 +706,7 @@ mod tests {
 
     // u8 RGBA — alpha = 0xFF
     let mut rgba = [0u8; 8 * 4];
-    v410_to_rgba_row(&buf, &mut rgba, 8, ColorMatrix::Bt709, true, false, false);
+    v410_to_rgba_row(&buf, &mut rgba, 8, KernelMatrix::Bt709, true, false, false);
     for px in rgba.chunks(4) {
       assert!(px[0].abs_diff(128) <= 1);
       assert_eq!(px[3], 0xFF);
@@ -702,7 +718,7 @@ mod tests {
       &buf,
       &mut rgb_u16,
       8,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       true,
       false,
       false,
@@ -719,7 +735,7 @@ mod tests {
       &buf,
       &mut rgba_u16,
       8,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       true,
       false,
       false,
@@ -757,7 +773,7 @@ mod tests {
       &le_buf,
       &mut rgb_le,
       8,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       true,
       false,
       false,
@@ -766,7 +782,7 @@ mod tests {
       &be_buf,
       &mut rgb_be,
       8,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       true,
       false,
       true,

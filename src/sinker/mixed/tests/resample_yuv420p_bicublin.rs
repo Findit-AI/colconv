@@ -30,14 +30,14 @@
 //!   unmutated and the row retryable (the filter-path atomicity contract).
 
 use crate::{
-  ColorMatrix, PixelSink,
+  KernelMatrix, PixelSink,
   resample::{AreaResampler, Bicublin, FilterStream, ResampleError, SwscaleBicubic, Triangle},
   sinker::{MixedSinker, MixedSinkerError},
   source::{Yuv420p, Yuv420pRow, Yuv422p, yuv420p_to, yuv422p_to},
 };
 use mediaframe::frame::{Yuv420pFrame, Yuv422pFrame};
 
-const M: ColorMatrix = ColorMatrix::Bt601;
+const M: KernelMatrix = KernelMatrix::Bt601;
 const FR: bool = true;
 
 /// Per-channel ramps so every filter window sees distinct neighbours (a

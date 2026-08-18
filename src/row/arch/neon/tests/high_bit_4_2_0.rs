@@ -21,7 +21,7 @@ fn p10_plane(n: usize, seed: usize) -> std::vec::Vec<u16> {
 }
 
 #[cfg(feature = "yuv-planar")]
-fn check_p10_u8_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_p10_u8_equivalence(width: usize, matrix: KernelMatrix, full_range: bool) {
   let y = p10_plane(width, 37);
   let u = p10_plane(width / 2, 53);
   let v = p10_plane(width / 2, 71);
@@ -55,7 +55,7 @@ fn check_p10_u8_equivalence(width: usize, matrix: ColorMatrix, full_range: bool)
 }
 
 #[cfg(feature = "yuv-planar")]
-fn check_p10_u16_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_p10_u16_equivalence(width: usize, matrix: KernelMatrix, full_range: bool) {
   let y = p10_plane(width, 37);
   let u = p10_plane(width / 2, 53);
   let v = p10_plane(width / 2, 71);
@@ -93,12 +93,12 @@ fn check_p10_u16_equivalence(width: usize, matrix: ColorMatrix, full_range: bool
 #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
 fn neon_p10_u8_matches_scalar_all_matrices_16() {
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       check_p10_u8_equivalence(16, m, full);
@@ -111,12 +111,12 @@ fn neon_p10_u8_matches_scalar_all_matrices_16() {
 #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
 fn neon_p10_u16_matches_scalar_all_matrices_16() {
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       check_p10_u16_equivalence(16, m, full);
@@ -129,8 +129,8 @@ fn neon_p10_u16_matches_scalar_all_matrices_16() {
 #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
 fn neon_p10_matches_scalar_odd_tail_widths() {
   for w in [18usize, 30, 34, 1922] {
-    check_p10_u8_equivalence(w, ColorMatrix::Bt601, false);
-    check_p10_u16_equivalence(w, ColorMatrix::Bt709, true);
+    check_p10_u8_equivalence(w, KernelMatrix::Bt601, false);
+    check_p10_u16_equivalence(w, KernelMatrix::Bt709, true);
   }
 }
 
@@ -138,8 +138,8 @@ fn neon_p10_matches_scalar_odd_tail_widths() {
 #[test]
 #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
 fn neon_p10_matches_scalar_1920() {
-  check_p10_u8_equivalence(1920, ColorMatrix::Bt709, false);
-  check_p10_u16_equivalence(1920, ColorMatrix::Bt2020Ncl, false);
+  check_p10_u8_equivalence(1920, KernelMatrix::Bt709, false);
+  check_p10_u16_equivalence(1920, KernelMatrix::Bt2020Ncl, false);
 }
 
 // ---- yuv420p_n<BITS> scalar-equivalence (BITS=9 coverage) -------------
@@ -157,7 +157,7 @@ fn p_n_plane<const BITS: u32>(n: usize, seed: usize) -> std::vec::Vec<u16> {
 }
 
 #[cfg(feature = "yuv-planar")]
-fn check_p_n_u8_equivalence<const BITS: u32>(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_p_n_u8_equivalence<const BITS: u32>(width: usize, matrix: KernelMatrix, full_range: bool) {
   let y = p_n_plane::<BITS>(width, 37);
   let u = p_n_plane::<BITS>(width / 2, 53);
   let v = p_n_plane::<BITS>(width / 2, 71);
@@ -183,7 +183,11 @@ fn check_p_n_u8_equivalence<const BITS: u32>(width: usize, matrix: ColorMatrix, 
 }
 
 #[cfg(feature = "yuv-planar")]
-fn check_p_n_u16_equivalence<const BITS: u32>(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_p_n_u16_equivalence<const BITS: u32>(
+  width: usize,
+  matrix: KernelMatrix,
+  full_range: bool,
+) {
   let y = p_n_plane::<BITS>(width, 37);
   let u = p_n_plane::<BITS>(width / 2, 53);
   let v = p_n_plane::<BITS>(width / 2, 71);
@@ -213,12 +217,12 @@ fn check_p_n_u16_equivalence<const BITS: u32>(width: usize, matrix: ColorMatrix,
 #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
 fn neon_yuv420p9_matches_scalar_all_matrices_and_ranges() {
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       check_p_n_u8_equivalence::<9>(16, m, full);
@@ -234,11 +238,11 @@ fn neon_yuv420p9_matches_scalar_tail_and_large_widths() {
   // Tail widths force scalar fallback past the SIMD main loop;
   // 1920 is one full HD luma row.
   for w in [18usize, 30, 34, 1922] {
-    check_p_n_u8_equivalence::<9>(w, ColorMatrix::Bt601, false);
-    check_p_n_u16_equivalence::<9>(w, ColorMatrix::Bt709, true);
+    check_p_n_u8_equivalence::<9>(w, KernelMatrix::Bt601, false);
+    check_p_n_u16_equivalence::<9>(w, KernelMatrix::Bt709, true);
   }
-  check_p_n_u8_equivalence::<9>(1920, ColorMatrix::Bt709, false);
-  check_p_n_u16_equivalence::<9>(1920, ColorMatrix::Bt2020Ncl, false);
+  check_p_n_u8_equivalence::<9>(1920, KernelMatrix::Bt709, false);
+  check_p_n_u16_equivalence::<9>(1920, KernelMatrix::Bt2020Ncl, false);
 }
 
 /// Out‑of‑range regression: every kernel AND‑masks each `u16` load
@@ -287,7 +291,11 @@ fn neon_p10_matches_scalar_on_out_of_range_samples() {
       _ => (0..width / 2).map(|i| random_variant(i, 71)).collect(),
     };
 
-    for matrix in [ColorMatrix::Bt601, ColorMatrix::Bt709, ColorMatrix::YCgCo] {
+    for matrix in [
+      KernelMatrix::Bt601,
+      KernelMatrix::Bt709,
+      KernelMatrix::YCgCo,
+    ] {
       for full_range in [true, false] {
         let mut rgb_scalar = std::vec![0u8; width * 3];
         let mut rgb_neon = std::vec![0u8; width * 3];
@@ -352,7 +360,7 @@ fn p010_plane(n: usize, seed: usize) -> std::vec::Vec<u16> {
 }
 
 #[cfg(feature = "yuv-semi-planar")]
-fn check_p010_u8_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_p010_u8_equivalence(width: usize, matrix: KernelMatrix, full_range: bool) {
   let y = p010_plane(width, 37);
   let u_plane = p010_plane(width / 2, 53);
   let v_plane = p010_plane(width / 2, 71);
@@ -378,7 +386,7 @@ fn check_p010_u8_equivalence(width: usize, matrix: ColorMatrix, full_range: bool
 }
 
 #[cfg(feature = "yuv-semi-planar")]
-fn check_p010_u16_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_p010_u16_equivalence(width: usize, matrix: KernelMatrix, full_range: bool) {
   let y = p010_plane(width, 37);
   let u_plane = p010_plane(width / 2, 53);
   let v_plane = p010_plane(width / 2, 71);
@@ -408,12 +416,12 @@ fn check_p010_u16_equivalence(width: usize, matrix: ColorMatrix, full_range: boo
 #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
 fn neon_p010_u8_matches_scalar_all_matrices_16() {
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       check_p010_u8_equivalence(16, m, full);
@@ -426,12 +434,12 @@ fn neon_p010_u8_matches_scalar_all_matrices_16() {
 #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
 fn neon_p010_u16_matches_scalar_all_matrices_16() {
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       check_p010_u16_equivalence(16, m, full);
@@ -444,8 +452,8 @@ fn neon_p010_u16_matches_scalar_all_matrices_16() {
 #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
 fn neon_p010_matches_scalar_odd_tail_widths() {
   for w in [18usize, 30, 34, 1922] {
-    check_p010_u8_equivalence(w, ColorMatrix::Bt601, false);
-    check_p010_u16_equivalence(w, ColorMatrix::Bt709, true);
+    check_p010_u8_equivalence(w, KernelMatrix::Bt601, false);
+    check_p010_u16_equivalence(w, KernelMatrix::Bt709, true);
   }
 }
 
@@ -453,8 +461,8 @@ fn neon_p010_matches_scalar_odd_tail_widths() {
 #[test]
 #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
 fn neon_p010_matches_scalar_1920() {
-  check_p010_u8_equivalence(1920, ColorMatrix::Bt709, false);
-  check_p010_u16_equivalence(1920, ColorMatrix::Bt2020Ncl, false);
+  check_p010_u8_equivalence(1920, KernelMatrix::Bt709, false);
+  check_p010_u16_equivalence(1920, KernelMatrix::Bt2020Ncl, false);
 }
 
 #[cfg(feature = "yuv-semi-planar")]
@@ -490,7 +498,11 @@ fn neon_p010_matches_scalar_on_mispacked_input() {
         .collect(),
     };
 
-    for matrix in [ColorMatrix::Bt601, ColorMatrix::Bt709, ColorMatrix::YCgCo] {
+    for matrix in [
+      KernelMatrix::Bt601,
+      KernelMatrix::Bt709,
+      KernelMatrix::YCgCo,
+    ] {
       for full_range in [true, false] {
         let mut rgb_scalar = std::vec![0u8; width * 3];
         let mut rgb_neon = std::vec![0u8; width * 3];
@@ -530,7 +542,7 @@ fn neon_p010_matches_scalar_on_mispacked_input() {
 #[cfg(feature = "yuv-planar")]
 fn check_planar_u8_neon_equivalence_n<const BITS: u32>(
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   let y = planar_n_plane::<BITS>(width, 37);
@@ -556,7 +568,7 @@ fn check_planar_u8_neon_equivalence_n<const BITS: u32>(
 #[cfg(feature = "yuv-planar")]
 fn check_planar_u16_neon_equivalence_n<const BITS: u32>(
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   let y = planar_n_plane::<BITS>(width, 37);
@@ -585,7 +597,7 @@ fn check_planar_u16_neon_equivalence_n<const BITS: u32>(
 #[cfg(feature = "yuv-semi-planar")]
 fn check_pn_u8_neon_equivalence_n<const BITS: u32>(
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   let y = p_n_packed_plane::<BITS>(width, 37);
@@ -604,7 +616,7 @@ fn check_pn_u8_neon_equivalence_n<const BITS: u32>(
 #[cfg(feature = "yuv-semi-planar")]
 fn check_pn_u16_neon_equivalence_n<const BITS: u32>(
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   let y = p_n_packed_plane::<BITS>(width, 37);
@@ -624,12 +636,12 @@ fn check_pn_u16_neon_equivalence_n<const BITS: u32>(
 #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
 fn neon_p12_matches_scalar_all_matrices() {
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       #[cfg(feature = "yuv-planar")]
@@ -649,12 +661,12 @@ fn neon_p12_matches_scalar_all_matrices() {
 #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
 fn neon_p14_matches_scalar_all_matrices() {
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       check_planar_u8_neon_equivalence_n::<14>(16, m, full);
@@ -668,13 +680,13 @@ fn neon_p14_matches_scalar_all_matrices() {
 fn neon_p12_matches_scalar_tail_widths() {
   for w in [18usize, 30, 34, 1922] {
     #[cfg(feature = "yuv-planar")]
-    check_planar_u8_neon_equivalence_n::<12>(w, ColorMatrix::Bt601, false);
+    check_planar_u8_neon_equivalence_n::<12>(w, KernelMatrix::Bt601, false);
     #[cfg(feature = "yuv-planar")]
-    check_planar_u16_neon_equivalence_n::<12>(w, ColorMatrix::Bt709, true);
+    check_planar_u16_neon_equivalence_n::<12>(w, KernelMatrix::Bt709, true);
     #[cfg(feature = "yuv-semi-planar")]
-    check_pn_u8_neon_equivalence_n::<12>(w, ColorMatrix::Bt601, false);
+    check_pn_u8_neon_equivalence_n::<12>(w, KernelMatrix::Bt601, false);
     #[cfg(feature = "yuv-semi-planar")]
-    check_pn_u16_neon_equivalence_n::<12>(w, ColorMatrix::Bt2020Ncl, false);
+    check_pn_u16_neon_equivalence_n::<12>(w, KernelMatrix::Bt2020Ncl, false);
   }
 }
 
@@ -683,8 +695,8 @@ fn neon_p12_matches_scalar_tail_widths() {
 #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
 fn neon_p14_matches_scalar_tail_widths() {
   for w in [18usize, 30, 34, 1922] {
-    check_planar_u8_neon_equivalence_n::<14>(w, ColorMatrix::Bt601, false);
-    check_planar_u16_neon_equivalence_n::<14>(w, ColorMatrix::Bt709, true);
+    check_planar_u8_neon_equivalence_n::<14>(w, KernelMatrix::Bt601, false);
+    check_planar_u16_neon_equivalence_n::<14>(w, KernelMatrix::Bt709, true);
   }
 }
 
@@ -698,7 +710,7 @@ fn neon_p14_matches_scalar_tail_widths() {
 #[cfg(feature = "yuv-planar")]
 fn check_planar_u8_neon_rgba_equivalence_n<const BITS: u32>(
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   let y = planar_n_plane::<BITS>(width, 37);
@@ -727,7 +739,7 @@ fn check_planar_u8_neon_rgba_equivalence_n<const BITS: u32>(
 #[cfg(feature = "yuv-semi-planar")]
 fn check_pn_u8_neon_rgba_equivalence_n<const BITS: u32>(
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   let y = p_n_packed_plane::<BITS>(width, 37);
@@ -751,12 +763,12 @@ fn check_pn_u8_neon_rgba_equivalence_n<const BITS: u32>(
 #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
 fn neon_yuv420p_n_rgba_matches_scalar_all_bits() {
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       check_planar_u8_neon_rgba_equivalence_n::<9>(16, m, full);
@@ -772,10 +784,10 @@ fn neon_yuv420p_n_rgba_matches_scalar_all_bits() {
 #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
 fn neon_yuv420p_n_rgba_matches_scalar_tail_and_1920() {
   for w in [18usize, 30, 34, 1920, 1922] {
-    check_planar_u8_neon_rgba_equivalence_n::<9>(w, ColorMatrix::Bt601, false);
-    check_planar_u8_neon_rgba_equivalence_n::<10>(w, ColorMatrix::Bt709, true);
-    check_planar_u8_neon_rgba_equivalence_n::<12>(w, ColorMatrix::Bt2020Ncl, false);
-    check_planar_u8_neon_rgba_equivalence_n::<14>(w, ColorMatrix::YCgCo, true);
+    check_planar_u8_neon_rgba_equivalence_n::<9>(w, KernelMatrix::Bt601, false);
+    check_planar_u8_neon_rgba_equivalence_n::<10>(w, KernelMatrix::Bt709, true);
+    check_planar_u8_neon_rgba_equivalence_n::<12>(w, KernelMatrix::Bt2020Ncl, false);
+    check_planar_u8_neon_rgba_equivalence_n::<14>(w, KernelMatrix::YCgCo, true);
   }
 }
 
@@ -784,12 +796,12 @@ fn neon_yuv420p_n_rgba_matches_scalar_tail_and_1920() {
 #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
 fn neon_pn_rgba_matches_scalar_all_bits() {
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       check_pn_u8_neon_rgba_equivalence_n::<10>(16, m, full);
@@ -803,13 +815,13 @@ fn neon_pn_rgba_matches_scalar_all_bits() {
 #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
 fn neon_pn_rgba_matches_scalar_tail_and_1920() {
   for w in [18usize, 30, 34, 1920, 1922] {
-    check_pn_u8_neon_rgba_equivalence_n::<10>(w, ColorMatrix::Bt601, false);
-    check_pn_u8_neon_rgba_equivalence_n::<12>(w, ColorMatrix::Bt709, true);
+    check_pn_u8_neon_rgba_equivalence_n::<10>(w, KernelMatrix::Bt601, false);
+    check_pn_u8_neon_rgba_equivalence_n::<12>(w, KernelMatrix::Bt709, true);
   }
 }
 
 #[cfg(feature = "yuv-planar")]
-fn check_yuv420p16_u8_neon_rgba_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_yuv420p16_u8_neon_rgba_equivalence(width: usize, matrix: KernelMatrix, full_range: bool) {
   let y = p16_plane_neon(width, 37);
   let u = p16_plane_neon(width / 2, 53);
   let v = p16_plane_neon(width / 2, 71);
@@ -826,7 +838,7 @@ fn check_yuv420p16_u8_neon_rgba_equivalence(width: usize, matrix: ColorMatrix, f
 }
 
 #[cfg(feature = "yuv-semi-planar")]
-fn check_p016_u8_neon_rgba_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_p016_u8_neon_rgba_equivalence(width: usize, matrix: KernelMatrix, full_range: bool) {
   let y = p16_plane_neon(width, 37);
   let u = p16_plane_neon(width / 2, 53);
   let v = p16_plane_neon(width / 2, 71);
@@ -848,19 +860,19 @@ fn check_p016_u8_neon_rgba_equivalence(width: usize, matrix: ColorMatrix, full_r
 #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
 fn neon_yuv420p16_rgba_matches_scalar_all_matrices() {
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       check_yuv420p16_u8_neon_rgba_equivalence(16, m, full);
     }
   }
   for w in [18usize, 30, 34, 1920, 1922] {
-    check_yuv420p16_u8_neon_rgba_equivalence(w, ColorMatrix::Bt709, false);
+    check_yuv420p16_u8_neon_rgba_equivalence(w, KernelMatrix::Bt709, false);
   }
 }
 
@@ -869,18 +881,18 @@ fn neon_yuv420p16_rgba_matches_scalar_all_matrices() {
 #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
 fn neon_p016_rgba_matches_scalar_all_matrices() {
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       check_p016_u8_neon_rgba_equivalence(16, m, full);
     }
   }
   for w in [18usize, 30, 34, 1920, 1922] {
-    check_p016_u8_neon_rgba_equivalence(w, ColorMatrix::Bt709, false);
+    check_p016_u8_neon_rgba_equivalence(w, KernelMatrix::Bt709, false);
   }
 }

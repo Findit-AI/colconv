@@ -557,7 +557,7 @@ pub(crate) fn p_n_to_rgb_row<const BITS: u32, const BE: bool>(
   uv_half: &[u16],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   p_n_to_rgb_or_rgba_row::<BITS, false, BE, false>(y, uv_half, rgb_out, width, matrix, full_range);
@@ -582,7 +582,7 @@ pub(crate) fn p_n_to_rgba_row<const BITS: u32, const BE: bool>(
   uv_half: &[u16],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   p_n_to_rgb_or_rgba_row::<BITS, true, BE, false>(y, uv_half, rgba_out, width, matrix, full_range);
@@ -601,7 +601,7 @@ pub(crate) fn nv20_to_rgb_row<const BE: bool>(
   uv_half: &[u16],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   p_n_to_rgb_or_rgba_row::<10, false, BE, true>(y, uv_half, rgb_out, width, matrix, full_range);
@@ -617,7 +617,7 @@ pub(crate) fn nv20_to_rgba_row<const BE: bool>(
   uv_half: &[u16],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   p_n_to_rgb_or_rgba_row::<10, true, BE, true>(y, uv_half, rgba_out, width, matrix, full_range);
@@ -644,7 +644,7 @@ pub(crate) fn p_n_to_rgb_or_rgba_row<
   uv_half: &[u16],
   out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // High-bit-packed Pn kernels are only defined for BITS in {10, 12}.
@@ -739,7 +739,7 @@ pub(crate) fn p_n_to_rgb_u16_row<const BITS: u32, const BE: bool>(
   uv_half: &[u16],
   rgb_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   p_n_to_rgb_or_rgba_u16_row::<BITS, false, BE, false>(
@@ -766,7 +766,7 @@ pub(crate) fn p_n_to_rgba_u16_row<const BITS: u32, const BE: bool>(
   uv_half: &[u16],
   rgba_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   p_n_to_rgb_or_rgba_u16_row::<BITS, true, BE, false>(
@@ -784,7 +784,7 @@ pub(crate) fn nv20_to_rgb_u16_row<const BE: bool>(
   uv_half: &[u16],
   rgb_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   p_n_to_rgb_or_rgba_u16_row::<10, false, BE, true>(y, uv_half, rgb_out, width, matrix, full_range);
@@ -801,7 +801,7 @@ pub(crate) fn nv20_to_rgba_u16_row<const BE: bool>(
   uv_half: &[u16],
   rgba_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   p_n_to_rgb_or_rgba_u16_row::<10, true, BE, true>(y, uv_half, rgba_out, width, matrix, full_range);
@@ -828,7 +828,7 @@ pub(crate) fn p_n_to_rgb_or_rgba_u16_row<
   uv_half: &[u16],
   out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // See `p_n_to_rgb_or_rgba_row` for the BITS range rationale. The
@@ -913,7 +913,7 @@ pub(crate) fn p_n_444_to_rgb_row<const BITS: u32, const BE: bool>(
   uv_full: &[u16],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   p_n_444_to_rgb_or_rgba_row::<BITS, false, BE, false>(
@@ -938,7 +938,7 @@ pub(crate) fn p_n_444_to_rgba_row<const BITS: u32, const BE: bool>(
   uv_full: &[u16],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   p_n_444_to_rgb_or_rgba_row::<BITS, true, BE, false>(
@@ -965,7 +965,7 @@ pub(crate) fn p_n_444_to_rgb_or_rgba_row<
   uv_full: &[u16],
   out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   const { assert!(BITS == 10 || BITS == 12) };
@@ -1022,7 +1022,7 @@ pub(crate) fn p_n_444_to_rgb_u16_row<const BITS: u32, const BE: bool>(
   uv_full: &[u16],
   rgb_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   p_n_444_to_rgb_or_rgba_u16_row::<BITS, false, BE, false>(
@@ -1047,7 +1047,7 @@ pub(crate) fn p_n_444_to_rgba_u16_row<const BITS: u32, const BE: bool>(
   uv_full: &[u16],
   rgba_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   p_n_444_to_rgb_or_rgba_u16_row::<BITS, true, BE, false>(
@@ -1074,7 +1074,7 @@ pub(crate) fn p_n_444_to_rgb_or_rgba_u16_row<
   uv_full: &[u16],
   out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   const { assert!(BITS == 10 || BITS == 12) };
@@ -1128,7 +1128,7 @@ pub(crate) fn p_n_444_16_to_rgb_row<const BE: bool>(
   uv_full: &[u16],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   p_n_444_16_to_rgb_or_rgba_row::<false, BE>(y, uv_full, rgb_out, width, matrix, full_range);
@@ -1146,7 +1146,7 @@ pub(crate) fn p_n_444_16_to_rgba_row<const BE: bool>(
   uv_full: &[u16],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   p_n_444_16_to_rgb_or_rgba_row::<true, BE>(y, uv_full, rgba_out, width, matrix, full_range);
@@ -1160,7 +1160,7 @@ pub(crate) fn p_n_444_16_to_rgb_or_rgba_row<const ALPHA: bool, const BE: bool>(
   uv_full: &[u16],
   out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   let bpp: usize = if ALPHA { 4 } else { 3 };
@@ -1210,7 +1210,7 @@ pub(crate) fn p_n_444_16_to_rgb_u16_row<const BE: bool>(
   uv_full: &[u16],
   rgb_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   p_n_444_16_to_rgb_or_rgba_u16_row::<false, BE>(y, uv_full, rgb_out, width, matrix, full_range);
@@ -1227,7 +1227,7 @@ pub(crate) fn p_n_444_16_to_rgba_u16_row<const BE: bool>(
   uv_full: &[u16],
   rgba_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   p_n_444_16_to_rgb_or_rgba_u16_row::<true, BE>(y, uv_full, rgba_out, width, matrix, full_range);
@@ -1243,7 +1243,7 @@ pub(crate) fn p_n_444_16_to_rgb_or_rgba_u16_row<const ALPHA: bool, const BE: boo
   uv_full: &[u16],
   out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   let bpp: usize = if ALPHA { 4 } else { 3 };
@@ -1317,7 +1317,7 @@ pub(crate) fn p_n_444_to_hsv_row<const BITS: u32, const BE: bool, const LOW_PACK
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   const { assert!(BITS == 10 || BITS == 12) };
@@ -1377,7 +1377,7 @@ pub(crate) fn p_n_444_16_to_hsv_row<const BE: bool>(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert!(y.len() >= width, "y row too short");
@@ -1454,7 +1454,7 @@ pub(crate) fn p_n_to_hsv_row<const BITS: u32, const BE: bool, const LOW_PACKED: 
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // Same compile-time guard as `p_n_to_rgb_or_rgba_row`: the i32 8-bit
@@ -1527,7 +1527,7 @@ pub(crate) fn nv20_to_hsv_row<const BE: bool>(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   p_n_to_hsv_row::<10, BE, true>(y, uv_half, h_out, s_out, v_out, width, matrix, full_range);

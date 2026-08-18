@@ -73,7 +73,7 @@ use super::{
   frozen_outputs_check, planar_8bit::native_preflight_core_check_only,
 };
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   resample::{AreaStream, PlanGeometry, ResampleError, ResamplePlan, try_box, try_zeroed},
   row::{
     expand_rgb_to_rgba_row, expand_rgb_u16_to_rgba_u16_row, rgb_to_hsv_row,
@@ -553,7 +553,7 @@ pub(crate) fn yuv_planar16_process_native<const BITS: u32, const BE: bool>(
   y_row: &[u16],
   u_row: &[u16],
   v_row: &[u16],
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   idx: usize,
   w: usize,
@@ -924,7 +924,7 @@ fn emit_rgb_u16<const BITS: u32>(
   v: &[u16],
   rgb_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) {
@@ -999,7 +999,7 @@ fn emit_rgb_u8<const BITS: u32>(
   v: &[u16],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) {

@@ -22,10 +22,10 @@ use crate::row::{
   yvyu422_to_rgb_row,
 };
 
-const MATRICES: [ColorMatrix; 3] = [
-  ColorMatrix::Bt601,
-  ColorMatrix::Bt709,
-  ColorMatrix::Bt2020Ncl,
+const MATRICES: [KernelMatrix; 3] = [
+  KernelMatrix::Bt601,
+  KernelMatrix::Bt709,
+  KernelMatrix::Bt2020Ncl,
 ];
 
 /// A non-trivial, non-gray pseudo-random byte at a given position so the
@@ -227,7 +227,7 @@ fn yuyv422_hsv_only_grows_no_rgb_scratch() {
     let mut sink = MixedSinker::<Yuyv422>::new(w, h)
       .with_hsv(&mut hh, &mut ss, &mut vv)
       .unwrap();
-    yuyv422_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    yuyv422_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
     sink.rgb_scratch.len()
   };
   assert_eq!(
@@ -237,7 +237,7 @@ fn yuyv422_hsv_only_grows_no_rgb_scratch() {
 
   // Cross-check row 0 against the explicit packed→RGB→HSV reference.
   let mut rgb0 = std::vec![0u8; w * 3];
-  yuyv422_to_rgb_row(&buf[..2 * w], &mut rgb0, w, ColorMatrix::Bt601, true, true);
+  yuyv422_to_rgb_row(&buf[..2 * w], &mut rgb0, w, KernelMatrix::Bt601, true, true);
   let (rh, rs, rv) = ref_hsv_from_rgb(&rgb0, w, true);
   assert_eq!(&hh[..w], &rh[..], "row 0 H");
   assert_eq!(&ss[..w], &rs[..], "row 0 S");
@@ -266,7 +266,7 @@ fn yuyv422_luma_plus_hsv_only_is_correct_and_rgb_free() {
       .unwrap()
       .with_hsv(&mut hh, &mut ss, &mut vv)
       .unwrap();
-    yuyv422_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    yuyv422_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
     sink.rgb_scratch.len()
   };
   assert_eq!(
@@ -275,7 +275,7 @@ fn yuyv422_luma_plus_hsv_only_is_correct_and_rgb_free() {
   );
   // HSV row 0 matches the two-step reference.
   let mut rgb0 = std::vec![0u8; w * 3];
-  yuyv422_to_rgb_row(&buf[..2 * w], &mut rgb0, w, ColorMatrix::Bt709, true, true);
+  yuyv422_to_rgb_row(&buf[..2 * w], &mut rgb0, w, KernelMatrix::Bt709, true, true);
   let (rh, rs, rv) = ref_hsv_from_rgb(&rgb0, w, true);
   assert_eq!(&hh[..w], &rh[..], "row 0 H");
   assert_eq!(&ss[..w], &rs[..], "row 0 S");
@@ -301,12 +301,12 @@ fn packed_yuv_hsv_only_grows_no_rgb_scratch_all_formats() {
       let mut sink = MixedSinker::<Uyvy422>::new(w, h)
         .with_hsv(&mut hh, &mut ss, &mut vv)
         .unwrap();
-      uyvy422_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+      uyvy422_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
       sink.rgb_scratch.len()
     };
     assert_eq!(scratch_len, 0, "Uyvy422 HSV-only RGB-free");
     let mut rgb0 = std::vec![0u8; w * 3];
-    uyvy422_to_rgb_row(&buf[..2 * w], &mut rgb0, w, ColorMatrix::Bt601, true, true);
+    uyvy422_to_rgb_row(&buf[..2 * w], &mut rgb0, w, KernelMatrix::Bt601, true, true);
     let (rh, rs, rv) = ref_hsv_from_rgb(&rgb0, w, true);
     assert_eq!(&hh[..w], &rh[..], "uyvy422 row 0 H");
     assert_eq!(&ss[..w], &rs[..], "uyvy422 row 0 S");
@@ -324,12 +324,12 @@ fn packed_yuv_hsv_only_grows_no_rgb_scratch_all_formats() {
       let mut sink = MixedSinker::<Yvyu422>::new(w, h)
         .with_hsv(&mut hh, &mut ss, &mut vv)
         .unwrap();
-      yvyu422_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+      yvyu422_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
       sink.rgb_scratch.len()
     };
     assert_eq!(scratch_len, 0, "Yvyu422 HSV-only RGB-free");
     let mut rgb0 = std::vec![0u8; w * 3];
-    yvyu422_to_rgb_row(&buf[..2 * w], &mut rgb0, w, ColorMatrix::Bt601, true, true);
+    yvyu422_to_rgb_row(&buf[..2 * w], &mut rgb0, w, KernelMatrix::Bt601, true, true);
     let (rh, rs, rv) = ref_hsv_from_rgb(&rgb0, w, true);
     assert_eq!(&hh[..w], &rh[..], "yvyu422 row 0 H");
     assert_eq!(&ss[..w], &rs[..], "yvyu422 row 0 S");
@@ -348,7 +348,7 @@ fn packed_yuv_hsv_only_grows_no_rgb_scratch_all_formats() {
       let mut sink = MixedSinker::<Uyyvyy411>::new(w, h)
         .with_hsv(&mut hh, &mut ss, &mut vv)
         .unwrap();
-      uyyvyy411_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+      uyyvyy411_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
       sink.rgb_scratch.len()
     };
     assert_eq!(scratch_len, 0, "Uyyvyy411 HSV-only RGB-free");
@@ -357,7 +357,7 @@ fn packed_yuv_hsv_only_grows_no_rgb_scratch_all_formats() {
       &buf[..row_bytes],
       &mut rgb0,
       w,
-      ColorMatrix::Bt601,
+      KernelMatrix::Bt601,
       true,
       true,
     );

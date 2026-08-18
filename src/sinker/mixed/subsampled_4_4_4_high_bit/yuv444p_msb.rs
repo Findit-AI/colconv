@@ -19,7 +19,7 @@ use super::super::{
   rgb_row_buf_or_scratch, rgba_plane_row_slice, rgba_u16_plane_row_slice,
 };
 use crate::{
-  ColorMatrix, PixelSink,
+  KernelMatrix, PixelSink,
   resample::{
     AveragingDomain, InsertionContext, InsertionPoint, ResamplePlan, select_insertion_point,
   },
@@ -110,7 +110,7 @@ fn yuv444p_msb_process_native<const BITS: u32, const BE: bool>(
   y_row: &[u16],
   u_row: &[u16],
   v_row: &[u16],
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   idx: usize,
   w: usize,

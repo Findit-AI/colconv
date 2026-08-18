@@ -27,7 +27,7 @@ use super::super::{
 };
 #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   resample::{
     AveragingDomain, InsertionContext, InsertionPoint, PlanGeometry, ResampleError, ResamplePlan,
     select_insertion_point,
@@ -187,7 +187,7 @@ fn p2xx_process_native<const BITS: u32, const BE: bool, const LOW_PACKED: bool>(
   y_row: &[u16],
   uv_half: &[u16],
   chroma_h_phase: f64,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   idx: usize,
   w: usize,
@@ -448,7 +448,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P210<BE>, R> {
     // only consumer (`chroma_422_center_sited_h` + the 4:4:4 P-format kernels
     // need `yuv-planar`); a semi-planar-only build keeps the default decode.
     #[cfg(feature = "yuv-planar")]
-    let chroma_location = self.chroma_location;
+    let chroma_location = self.chroma_location.clone();
 
     let Self {
       rgb,
@@ -523,7 +523,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P210<BE>, R> {
       // decode 4:4:4 via the `p410` full-chroma kernels — the co-sited arms keep
       // the fused `p010` half-chroma decode.
       #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
-      let center_sited = chroma_422_center_sited_h(chroma_location);
+      let center_sited = chroma_422_center_sited_h(&chroma_location);
       #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
       let chroma_h_phase = if center_sited {
         YUV422P_CENTERED_H_PHASE
@@ -931,7 +931,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P210<BE>, R> {
     // fused decode (the fused P-format kernels de-interleave + upsample chroma
     // in-register, exactly as before).
     #[cfg(feature = "yuv-planar")]
-    let center_sited = chroma_422_center_sited_h(chroma_location);
+    let center_sited = chroma_422_center_sited_h(&chroma_location);
 
     // Per-frame chroma-siting freeze (RFC #238, mirroring the resample-path guard
     // + the Nv20 sibling's direct-path freeze in this file): the first
@@ -1360,7 +1360,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P212<BE>, R> {
     // only consumer (`chroma_422_center_sited_h` + the 4:4:4 P-format kernels
     // need `yuv-planar`); a semi-planar-only build keeps the default decode.
     #[cfg(feature = "yuv-planar")]
-    let chroma_location = self.chroma_location;
+    let chroma_location = self.chroma_location.clone();
 
     let Self {
       rgb,
@@ -1422,7 +1422,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P212<BE>, R> {
       // decode 4:4:4 via the `p412` full-chroma kernels — the co-sited arms keep
       // the fused `p012` half-chroma decode.
       #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
-      let center_sited = chroma_422_center_sited_h(chroma_location);
+      let center_sited = chroma_422_center_sited_h(&chroma_location);
       #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
       let chroma_h_phase = if center_sited {
         YUV422P_CENTERED_H_PHASE
@@ -1825,7 +1825,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P212<BE>, R> {
     // fused decode (the fused P-format kernels de-interleave + upsample chroma
     // in-register, exactly as before).
     #[cfg(feature = "yuv-planar")]
-    let center_sited = chroma_422_center_sited_h(chroma_location);
+    let center_sited = chroma_422_center_sited_h(&chroma_location);
 
     // Per-frame chroma-siting freeze (RFC #238, mirroring the resample-path guard
     // + the Nv20 sibling's direct-path freeze in this file): the first
@@ -2254,7 +2254,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P216<BE>, R> {
     // only consumer (`chroma_422_center_sited_h` + the 4:4:4 P-format kernels
     // need `yuv-planar`); a semi-planar-only build keeps the default decode.
     #[cfg(feature = "yuv-planar")]
-    let chroma_location = self.chroma_location;
+    let chroma_location = self.chroma_location.clone();
 
     let Self {
       rgb,
@@ -2317,7 +2317,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P216<BE>, R> {
       // decode 4:4:4 via the `p416` full-chroma kernels — the co-sited arms keep
       // the fused `p016` half-chroma decode.
       #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
-      let center_sited = chroma_422_center_sited_h(chroma_location);
+      let center_sited = chroma_422_center_sited_h(&chroma_location);
       #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
       let chroma_h_phase = if center_sited {
         YUV422P_CENTERED_H_PHASE
@@ -2720,7 +2720,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P216<BE>, R> {
     // fused decode (the fused P-format kernels de-interleave + upsample chroma
     // in-register, exactly as before).
     #[cfg(feature = "yuv-planar")]
-    let center_sited = chroma_422_center_sited_h(chroma_location);
+    let center_sited = chroma_422_center_sited_h(&chroma_location);
 
     // Per-frame chroma-siting freeze (RFC #238, mirroring the resample-path guard
     // + the Nv20 sibling's direct-path freeze in this file): the first
@@ -3158,7 +3158,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Nv20<BE>, R> {
     // + the low-packed 4:4:4 kernels); a semi-planar-only build keeps the
     // default fused decode.
     #[cfg(feature = "yuv-planar")]
-    let chroma_location = self.chroma_location;
+    let chroma_location = self.chroma_location.clone();
 
     let Self {
       rgb,
@@ -3224,7 +3224,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Nv20<BE>, R> {
       // low-packed `nv20_444_*` full-chroma kernels — the co-sited arms keep the
       // fused `nv20_*` half-chroma decode.
       #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
-      let center_sited = chroma_422_center_sited_h(chroma_location);
+      let center_sited = chroma_422_center_sited_h(&chroma_location);
       #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
       let chroma_h_phase = if center_sited {
         YUV422P_CENTERED_H_PHASE
@@ -3635,7 +3635,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Nv20<BE>, R> {
     // vertical / `Bottom` phase). `yuv-planar` gates both halves (the
     // predicate + the low-packed 4:4:4 kernels).
     #[cfg(feature = "yuv-planar")]
-    let center_sited = chroma_422_center_sited_h(chroma_location);
+    let center_sited = chroma_422_center_sited_h(&chroma_location);
 
     // Per-frame chroma-siting freeze (RFC #238, mirroring the resample-path
     // guard + the planar Yuv422p direct-path freeze): the first output-bearing

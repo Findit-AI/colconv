@@ -22,7 +22,7 @@
 //! `expand_rgb_u16_to_rgba_u16_row` helpers.
 
 use crate::{
-  ColorMatrix, PixelSink,
+  KernelMatrix, PixelSink,
   frame::V30XFrame,
   resample::{AreaResampler, ResampleError},
   sinker::{MixedSinker, MixedSinkerError},
@@ -31,7 +31,7 @@ use crate::{
 
 const SRC: usize = 8;
 const OUT: usize = 4;
-const M: ColorMatrix = ColorMatrix::Bt601;
+const M: KernelMatrix = KernelMatrix::Bt601;
 const FR: bool = true;
 const SHIFT: u32 = 2; // 10-bit native → u8.
 

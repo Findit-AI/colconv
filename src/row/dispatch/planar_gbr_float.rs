@@ -42,7 +42,7 @@ use crate::row::{avx2_available, avx512_available, f16c_available, sse41_availab
 #[cfg(target_arch = "aarch64")]
 use crate::row::{fp16_available, neon_available};
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   row::{
     rgb_row_bytes, rgb_row_elems, rgba_row_bytes, rgba_row_elems,
     scalar::{planar_gbr_f16 as scalar_f16, planar_gbr_float as scalar},
@@ -539,7 +539,7 @@ pub(crate) fn gbrpf32_to_luma_row<const BE: bool>(
   r: &[f32],
   out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) {
@@ -597,7 +597,7 @@ pub(crate) fn gbrpf32_to_luma_u16_row<const BE: bool>(
   r: &[f32],
   out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) {

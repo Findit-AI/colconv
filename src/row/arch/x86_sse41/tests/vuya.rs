@@ -1,5 +1,5 @@
 use super::super::*;
-use crate::{ColorMatrix, row::scalar};
+use crate::{KernelMatrix, row::scalar};
 
 /// Build a VUYA packed stream with Y[n] = n+1, A[n] = 2n+1, V=U=128.
 ///
@@ -33,7 +33,7 @@ fn pseudo_random_vuya(width: usize, seed: usize) -> std::vec::Vec<u8> {
 
 fn check_rgb<const ALPHA: bool, const ALPHA_SRC: bool>(
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   let p = pseudo_random_vuya(width, 0xAA55);
@@ -86,9 +86,9 @@ fn sse41_vuya_matches_scalar_widths() {
   for w in [
     1usize, 2, 3, 7, 8, 9, 15, 16, 17, 31, 32, 33, 1920, 1921, 1923,
   ] {
-    check_rgb::<false, false>(w, ColorMatrix::Bt709, false);
-    check_rgb::<true, true>(w, ColorMatrix::Bt709, true);
-    check_rgb::<true, false>(w, ColorMatrix::Bt2020Ncl, true);
+    check_rgb::<false, false>(w, KernelMatrix::Bt709, false);
+    check_rgb::<true, true>(w, KernelMatrix::Bt709, true);
+    check_rgb::<true, false>(w, KernelMatrix::Bt2020Ncl, true);
     check_luma(w);
     check_luma_u16(w);
   }
@@ -104,12 +104,12 @@ fn sse41_vuya_rgb_matches_scalar_all_matrices() {
     return;
   }
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       check_rgb::<false, false>(16, m, full);
@@ -150,7 +150,7 @@ fn sse41_vuya_lane_order_per_pixel_y_and_a() {
   // A-channel deinterleave. neutral U/V → chroma contribution is zero.
   let mut rgba = std::vec![0u8; W * 4];
   unsafe {
-    vuya_to_rgb_or_rgba_row::<true, true>(&packed, &mut rgba, W, ColorMatrix::Bt709, false);
+    vuya_to_rgb_or_rgba_row::<true, true>(&packed, &mut rgba, W, KernelMatrix::Bt709, false);
   }
   let alpha_out: std::vec::Vec<u8> = (0..W).map(|n| rgba[n * 4 + 3]).collect();
   let expected_alpha: std::vec::Vec<u8> = (0..W).map(|n| (n as u8) * 2 + 1).collect();
@@ -182,7 +182,7 @@ fn pseudo_random_vyu444(width: usize, seed: usize) -> std::vec::Vec<u8> {
 fn sse41_vyu444_hsv_ref(
   packed: &[u8],
   w: usize,
-  m: ColorMatrix,
+  m: KernelMatrix,
   fr: bool,
 ) -> (std::vec::Vec<u8>, std::vec::Vec<u8>, std::vec::Vec<u8>) {
   let mut rgb = std::vec![0u8; w * 3];
@@ -213,12 +213,12 @@ fn sse41_vyu444_matches_scalar() {
   ] {
     let p = pseudo_random_vyu444(w, 0xC0DE);
     for m in [
-      ColorMatrix::Bt601,
-      ColorMatrix::Bt709,
-      ColorMatrix::Bt2020Ncl,
-      ColorMatrix::Smpte240m,
-      ColorMatrix::Fcc,
-      ColorMatrix::YCgCo,
+      KernelMatrix::Bt601,
+      KernelMatrix::Bt709,
+      KernelMatrix::Bt2020Ncl,
+      KernelMatrix::Smpte240m,
+      KernelMatrix::Fcc,
+      KernelMatrix::YCgCo,
     ] {
       for fr in [false, true] {
         let mut s = std::vec![0u8; w * 3];
@@ -246,9 +246,9 @@ fn sse41_vyu444_matches_scalar() {
     unsafe { vyu444_to_luma_u16_row(&p, &mut ku, w) };
     assert_eq!(su, ku, "SSE4.1 VYU444 luma_u16 (w={w})");
 
-    let want = sse41_vyu444_hsv_ref(&p, w, ColorMatrix::Bt601, false);
+    let want = sse41_vyu444_hsv_ref(&p, w, KernelMatrix::Bt601, false);
     let (mut kh, mut ks, mut kv) = (std::vec![0u8; w], std::vec![0u8; w], std::vec![0u8; w]);
-    unsafe { vyu444_to_hsv_row(&p, &mut kh, &mut ks, &mut kv, w, ColorMatrix::Bt601, false) };
+    unsafe { vyu444_to_hsv_row(&p, &mut kh, &mut ks, &mut kv, w, KernelMatrix::Bt601, false) };
     assert_eq!(want, (kh, ks, kv), "SSE4.1 VYU444 hsv (w={w})");
   }
 }

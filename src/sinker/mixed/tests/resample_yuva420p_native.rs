@@ -26,7 +26,7 @@
 //! (luma / alpha are bit-identical: both bin the same native plane).
 
 use crate::{
-  ColorMatrix, PixelSink,
+  KernelMatrix, PixelSink,
   resample::{AreaResampler, ResampleError},
   sinker::{AlphaMode, MixedSinker, MixedSinkerError},
   source::{Yuva420p, Yuva420pRow, yuva420p_to},
@@ -37,7 +37,7 @@ const SRC: usize = 8;
 const OUT: usize = 4;
 const CW: usize = SRC / 2; // chroma width (half)
 const CH: usize = SRC / 2; // chroma height (half)
-const M: ColorMatrix = ColorMatrix::Bt709;
+const M: KernelMatrix = KernelMatrix::Bt709;
 const FR: bool = true;
 
 /// In-gamut per-channel tolerance between the native (average-in-YUV) and

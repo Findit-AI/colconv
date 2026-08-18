@@ -12,7 +12,7 @@
 //! independence, straight vs premultiplied colour, the α patch).
 
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   frame::Yaf32Frame,
   resample::{AreaResampler, FilteredResampler, ResampleError, Triangle},
   sinker::{AlphaMode, MixedSinker, MixedSinkerError},
@@ -22,7 +22,7 @@ use crate::{
 const SRC: usize = 8;
 const OUT: usize = 4;
 const FR: bool = true;
-const M: ColorMatrix = ColorMatrix::Bt709;
+const M: KernelMatrix = KernelMatrix::Bt709;
 
 /// Per-output-block luma in `[0, 15/16]`.
 fn y_block(oy: usize, ox: usize) -> f32 {

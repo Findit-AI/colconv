@@ -29,7 +29,7 @@
 //! rows (its `2·` scale cancels the plan's `src_h = sh`).
 
 use crate::{
-  ChromaLocation, ColorInfo, ColorMatrix, ColorSpec, DynamicRange, PixelFormat, PixelSink,
+  ChromaLocation, ColorInfo, ColorSpec, DynamicRange, KernelMatrix, PixelFormat, PixelSink,
   Primaries, Transfer,
   resample::{AreaResampler, AveragingDomain, LinearMode},
   sinker::MixedSinker,
@@ -37,7 +37,7 @@ use crate::{
 };
 use mediaframe::frame::{Yuv420pFrame, Yuv444pFrame};
 
-const M: ColorMatrix = ColorMatrix::Bt601;
+const M: KernelMatrix = KernelMatrix::Bt601;
 const FR: bool = true;
 
 /// Round `a / d` half-up (ties toward `+∞`) — the production
@@ -232,7 +232,7 @@ fn run(
       MixedSinker::<Yuv420p, AreaResampler>::with_resampler(sw, sh, AreaResampler::to(ow, oh))
         .unwrap()
         .with_native(native)
-        .with_chroma_location(loc)
+        .with_chroma_location(loc.clone())
         .with_simd(simd)
         .with_rgb(&mut rgb)
         .unwrap()
@@ -579,8 +579,8 @@ fn cosited_group_is_byte_identical_across_tiers() {
       native,
       true,
     );
-    for loc in [ChromaLocation::Left, ChromaLocation::Unknown(7)] {
-      let got = run(&y, &u, &v, 8, 8, 4, 4, loc, native, true);
+    for loc in [ChromaLocation::Left, ChromaLocation::other("unassigned-7")] {
+      let got = run(&y, &u, &v, 8, 8, 4, 4, loc.clone(), native, true);
       assert_eq!(got.0, base.0, "rgb {loc:?} native={native}");
       assert_eq!(got.1, base.1, "rgba {loc:?} native={native}");
       assert_eq!(got.2, base.2, "hsv {loc:?} native={native}");
@@ -606,7 +606,7 @@ fn centered_native_equals_code_domain_oracle() {
     let (y, u, v) = ramp(sw, sh);
     let o = native_oracle(&y, &u, &v, sw, sh, ow, oh, true);
     let loc = ChromaLocation::Center;
-    let n = run(&y, &u, &v, sw, sh, ow, oh, loc, true, true);
+    let n = run(&y, &u, &v, sw, sh, ow, oh, loc.clone(), true, true);
     assert_eq!(n.0, o.0, "rgb {loc:?} {sw}x{sh}->{ow}x{oh}");
     assert_eq!(n.1, o.1, "rgba {loc:?} {sw}x{sh}->{ow}x{oh}");
     assert_eq!(n.2, o.2, "hsv {loc:?} {sw}x{sh}->{ow}x{oh}");
@@ -642,7 +642,7 @@ fn centered_encoded_output_equals_rgb_reconstruct_then_bin() {
     let (y, u, v) = ramp(sw, sh);
     let oracle = encoded_oracle_rgb(&y, &u, &v, sw, sh, ow, oh, true);
     let loc = ChromaLocation::Center;
-    let got = run(&y, &u, &v, sw, sh, ow, oh, loc, false, true);
+    let got = run(&y, &u, &v, sw, sh, ow, oh, loc.clone(), false, true);
     assert_eq!(got.0, oracle, "rgb {loc:?} {sw}x{sh}->{ow}x{oh}");
   }
 }
@@ -863,7 +863,7 @@ fn bottom_linear_final_even_row_tail_alloc_failure_retries_with_blend() {
         MixedSinker::<Yuv420p, AreaResampler>::with_resampler(sw, sh, AreaResampler::to(ow, oh))
           .unwrap()
           .with_averaging_domain(AveragingDomain::Linear)
-          .with_chroma_location(loc)
+          .with_chroma_location(loc.clone())
           .with_rgb(&mut rgb)
           .unwrap();
       sink.begin_frame(sw as u32, sh as u32).unwrap();
@@ -994,9 +994,9 @@ fn run_reuse_native(
     let f = Yuv420pFrame::new(
       y, u, v, sw as u32, sh as u32, sw as u32, cw as u32, cw as u32,
     );
-    sink.set_chroma_location(loc1);
+    sink.set_chroma_location(loc1.clone());
     yuv420p_to(&f, FR, M, &mut sink).unwrap();
-    sink.set_chroma_location(loc2);
+    sink.set_chroma_location(loc2.clone());
     yuv420p_to(&f, FR, M, &mut sink).unwrap();
   }
   (rgb, rgba, (hh, ss, vv), luma, luma_u16)
@@ -1022,7 +1022,7 @@ fn run_hsv_only(
       MixedSinker::<Yuv420p, AreaResampler>::with_resampler(sw, sh, AreaResampler::to(ow, oh))
         .unwrap()
         .with_native(false)
-        .with_chroma_location(loc)
+        .with_chroma_location(loc.clone())
         .with_simd(simd)
         .with_hsv(&mut hh, &mut ss, &mut vv)
         .unwrap();
@@ -1061,9 +1061,9 @@ fn run_reuse_hsv_only(
     let f = Yuv420pFrame::new(
       y, u, v, sw as u32, sh as u32, sw as u32, cw as u32, cw as u32,
     );
-    sink.set_chroma_location(loc1);
+    sink.set_chroma_location(loc1.clone());
     yuv420p_to(&f, FR, M, &mut sink).unwrap();
-    sink.set_chroma_location(loc2);
+    sink.set_chroma_location(loc2.clone());
     yuv420p_to(&f, FR, M, &mut sink).unwrap();
   }
   (hh, ss, vv)
@@ -1090,15 +1090,15 @@ fn native_join_rebuilds_on_siting_change_across_frames() {
     (ChromaLocation::Top, ChromaLocation::Bottom),
     (ChromaLocation::Bottom, ChromaLocation::Top),
   ] {
-    let reused = run_reuse_native(&y, &u, &v, 8, 8, 4, 4, a, b, true);
-    let fresh = run(&y, &u, &v, 8, 8, 4, 4, b, true, true);
+    let reused = run_reuse_native(&y, &u, &v, 8, 8, 4, 4, a.clone(), b.clone(), true);
+    let fresh = run(&y, &u, &v, 8, 8, 4, 4, b.clone(), true, true);
     assert_eq!(
       reused.0, fresh.0,
       "native rgb {a:?}->{b:?} stale-phase carryover"
     );
     assert_eq!(reused.1, fresh.1, "native rgba {a:?}->{b:?}");
     assert_eq!(reused.2, fresh.2, "native hsv {a:?}->{b:?}");
-    let stale = run(&y, &u, &v, 8, 8, 4, 4, a, true, true);
+    let stale = run(&y, &u, &v, 8, 8, 4, 4, a.clone(), true, true);
     assert_ne!(
       fresh.0, stale.0,
       "sitings {a:?} vs {b:?} must differ (non-vacuous)"
@@ -1119,10 +1119,10 @@ fn hsv_only_join_rebuilds_on_siting_change_across_frames() {
     (ChromaLocation::Left, ChromaLocation::Center),
     (ChromaLocation::Center, ChromaLocation::Left),
   ] {
-    let reused = run_reuse_hsv_only(&y, &u, &v, 8, 8, 4, 4, a, b, true);
-    let fresh = run_hsv_only(&y, &u, &v, 8, 8, 4, 4, b, true);
+    let reused = run_reuse_hsv_only(&y, &u, &v, 8, 8, 4, 4, a.clone(), b.clone(), true);
+    let fresh = run_hsv_only(&y, &u, &v, 8, 8, 4, 4, b.clone(), true);
     assert_eq!(reused, fresh, "hsv-only {a:?}->{b:?} stale-phase carryover");
-    let stale = run_hsv_only(&y, &u, &v, 8, 8, 4, 4, a, true);
+    let stale = run_hsv_only(&y, &u, &v, 8, 8, 4, 4, a.clone(), true);
     assert_ne!(
       fresh, stale,
       "sitings {a:?} vs {b:?} must differ (non-vacuous)"
@@ -1145,14 +1145,14 @@ fn apply_siting<R>(
       ColorInfo::new(
         Primaries::Unspecified,
         Transfer::Unspecified,
-        M,
+        crate::ColorMatrix::from(M),
         DynamicRange::Limited,
         loc,
       ),
     );
-    sink.set_color_spec(spec);
+    sink.set_color_spec(&spec);
   } else {
-    sink.set_chroma_location(loc);
+    sink.set_chroma_location(loc.clone());
   }
 }
 
@@ -1223,7 +1223,7 @@ fn run_reuse_native_setter_after(
     let f = Yuv420pFrame::new(
       y, u, v, sw as u32, sh as u32, sw as u32, cw as u32, cw as u32,
     );
-    sink.set_chroma_location(loc1);
+    sink.set_chroma_location(loc1.clone());
     yuv420p_to(&f, FR, M, &mut sink).unwrap();
     PixelSink::begin_frame(&mut sink, sw as u32, sh as u32).unwrap();
     apply_siting(&mut sink, loc2, via_color_spec); // AFTER begin_frame, before row 0
@@ -1260,7 +1260,7 @@ fn run_reuse_hsv_setter_after(
     let f = Yuv420pFrame::new(
       y, u, v, sw as u32, sh as u32, sw as u32, cw as u32, cw as u32,
     );
-    sink.set_chroma_location(loc1);
+    sink.set_chroma_location(loc1.clone());
     yuv420p_to(&f, FR, M, &mut sink).unwrap();
     PixelSink::begin_frame(&mut sink, sw as u32, sh as u32).unwrap();
     apply_siting(&mut sink, loc2, via_color_spec);
@@ -1283,9 +1283,20 @@ fn native_join_rebuilds_on_siting_change_after_begin_frame() {
       (ChromaLocation::Left, ChromaLocation::Center),
       (ChromaLocation::Center, ChromaLocation::Left),
     ] {
-      let reused =
-        run_reuse_native_setter_after(&y, &u, &v, 8, 8, 4, 4, a, b, via_color_spec, true);
-      let fresh = run(&y, &u, &v, 8, 8, 4, 4, b, true, true);
+      let reused = run_reuse_native_setter_after(
+        &y,
+        &u,
+        &v,
+        8,
+        8,
+        4,
+        4,
+        a.clone(),
+        b.clone(),
+        via_color_spec,
+        true,
+      );
+      let fresh = run(&y, &u, &v, 8, 8, 4, 4, b.clone(), true, true);
       assert_eq!(
         reused.0, fresh.0,
         "native rgb {a:?}->{b:?} color_spec={via_color_spec}: stale after begin_frame"
@@ -1312,8 +1323,20 @@ fn hsv_only_join_rebuilds_on_siting_change_after_begin_frame() {
       (ChromaLocation::Left, ChromaLocation::Center),
       (ChromaLocation::Center, ChromaLocation::Left),
     ] {
-      let reused = run_reuse_hsv_setter_after(&y, &u, &v, 8, 8, 4, 4, a, b, via_color_spec, true);
-      let fresh = run_hsv_only(&y, &u, &v, 8, 8, 4, 4, b, true);
+      let reused = run_reuse_hsv_setter_after(
+        &y,
+        &u,
+        &v,
+        8,
+        8,
+        4,
+        4,
+        a.clone(),
+        b.clone(),
+        via_color_spec,
+        true,
+      );
+      let fresh = run_hsv_only(&y, &u, &v, 8, 8, 4, 4, b.clone(), true);
       assert_eq!(
         reused, fresh,
         "hsv-only {a:?}->{b:?} color_spec={via_color_spec}: stale after begin_frame"
@@ -1449,7 +1472,7 @@ fn run_linear_420(
         .with_averaging_domain(AveragingDomain::Linear)
         .with_native(false)
         .with_linear_mode(mode)
-        .with_chroma_location(loc)
+        .with_chroma_location(loc.clone())
         .with_simd(simd)
         .with_rgb(&mut rgb)
         .unwrap();
@@ -1603,7 +1626,7 @@ fn bottom_filter_equals_reconstruct_then_filter() {
         FilteredResampler::new(ow, oh, Triangle),
       )
       .unwrap()
-      .with_chroma_location(loc)
+      .with_chroma_location(loc.clone())
       .with_simd(true)
       .with_rgb(&mut rgb)
       .unwrap();
@@ -1662,11 +1685,11 @@ fn in_sequence_flip_row1<R>(
   loc2: ChromaLocation,
 ) -> Result<(), super::super::MixedSinkerError> {
   let cw = 4usize;
-  sink.set_chroma_location(loc1);
+  sink.set_chroma_location(loc1.clone());
   PixelSink::begin_frame(&mut sink, 8, 8).unwrap();
   let row0 = Yuv420pRow::new(&y[0..8], &u[0..cw], &v[0..cw], 0, M, FR);
   PixelSink::process(&mut sink, row0).unwrap();
-  sink.set_chroma_location(loc2);
+  sink.set_chroma_location(loc2.clone());
   let row1 = Yuv420pRow::new(&y[8..16], &u[0..cw], &v[0..cw], 1, M, FR);
   PixelSink::process(&mut sink, row1)
 }
@@ -1716,7 +1739,7 @@ fn in_sequence_mid_frame_phase_change_rejected_across_tiers() {
       .with_native(true)
       .with_rgb(&mut rgb)
       .unwrap();
-    let err = in_sequence_flip_row1(sink, &y, &u, &v, loc1, loc2).unwrap_err();
+    let err = in_sequence_flip_row1(sink, &y, &u, &v, loc1.clone(), loc2.clone()).unwrap_err();
     assert!(
       matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
       "native {loc1:?}->{loc2:?}: want ChromaSitingChanged, got {err:?}"
@@ -1729,7 +1752,7 @@ fn in_sequence_mid_frame_phase_change_rejected_across_tiers() {
       .with_native(false)
       .with_rgb(&mut rgb)
       .unwrap();
-    let err = in_sequence_flip_row1(sink, &y, &u, &v, loc1, loc2).unwrap_err();
+    let err = in_sequence_flip_row1(sink, &y, &u, &v, loc1.clone(), loc2.clone()).unwrap_err();
     assert!(
       matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
       "encoded-rgb {loc1:?}->{loc2:?}: want ChromaSitingChanged, got {err:?}"
@@ -1742,7 +1765,7 @@ fn in_sequence_mid_frame_phase_change_rejected_across_tiers() {
       .with_native(false)
       .with_hsv(&mut hh, &mut ss, &mut vv)
       .unwrap();
-    let err = in_sequence_flip_row1(sink, &y, &u, &v, loc1, loc2).unwrap_err();
+    let err = in_sequence_flip_row1(sink, &y, &u, &v, loc1.clone(), loc2.clone()).unwrap_err();
     assert!(
       matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
       "hsv {loc1:?}->{loc2:?}: want ChromaSitingChanged, got {err:?}"
@@ -1756,7 +1779,7 @@ fn in_sequence_mid_frame_phase_change_rejected_across_tiers() {
       .with_native(false)
       .with_rgb(&mut rgb)
       .unwrap();
-    let err = in_sequence_flip_row1(sink, &y, &u, &v, loc1, loc2).unwrap_err();
+    let err = in_sequence_flip_row1(sink, &y, &u, &v, loc1.clone(), loc2.clone()).unwrap_err();
     assert!(
       matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
       "linear {loc1:?}->{loc2:?}: want ChromaSitingChanged, got {err:?}"
@@ -1773,7 +1796,7 @@ fn in_sequence_mid_frame_phase_change_rejected_across_tiers() {
       .unwrap()
       .with_rgb(&mut rgb)
       .unwrap();
-    let err = in_sequence_flip_row1(sink, &y, &u, &v, loc1, loc2).unwrap_err();
+    let err = in_sequence_flip_row1(sink, &y, &u, &v, loc1.clone(), loc2.clone()).unwrap_err();
     assert!(
       matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
       "filter {loc1:?}->{loc2:?}: want ChromaSitingChanged, got {err:?}"
@@ -2755,7 +2778,7 @@ fn run_linear_420_top(
         .with_averaging_domain(AveragingDomain::Linear)
         .with_native(false)
         .with_linear_mode(mode)
-        .with_chroma_location(loc)
+        .with_chroma_location(loc.clone())
         .with_simd(simd)
         .with_rgb(&mut rgb)
         .unwrap();
@@ -2840,7 +2863,7 @@ fn top_linear_final_even_row_tail_alloc_failure_retries_atomically() {
           .unwrap()
           .with_averaging_domain(AveragingDomain::Linear)
           .with_native(false)
-          .with_chroma_location(loc)
+          .with_chroma_location(loc.clone())
           .with_rgb(&mut rgb)
           .unwrap();
       sink.begin_frame(sw as u32, sh as u32).unwrap();
@@ -2905,7 +2928,7 @@ fn top_filter_equals_reconstruct_then_filter() {
         FilteredResampler::new(ow, oh, Triangle),
       )
       .unwrap()
-      .with_chroma_location(loc)
+      .with_chroma_location(loc.clone())
       .with_simd(true)
       .with_rgb(&mut rgb)
       .unwrap();

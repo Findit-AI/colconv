@@ -32,7 +32,7 @@
 //! directly here (not only via the shared-tail packed-RGBA suite).
 
 use crate::{
-  ColorMatrix, PixelSink,
+  KernelMatrix, PixelSink,
   frame::Ya8Frame,
   resample::{AreaResampler, ResampleError},
   sinker::{AlphaMode, MixedSinker, MixedSinkerError},
@@ -45,7 +45,7 @@ const FR: bool = true;
 /// Limited (studio) range — exercises the native-Y luma path against the
 /// range-dependent `rgb_to_luma*` it must NOT use.
 const FR_LIMITED: bool = false;
-const M: ColorMatrix = ColorMatrix::Bt709;
+const M: KernelMatrix = KernelMatrix::Bt709;
 
 /// Pseudo-random packed `[Y, A]` plane (`SRC * SRC * 2` bytes); alpha
 /// varies (not all-opaque).

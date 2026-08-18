@@ -24,8 +24,9 @@
 mod tests;
 
 use crate::{
-  ChromaLocation, ColorInfo, ColorMatrix, DcpTargetGamut, DynamicRange, PixelFormat, PixelSink,
-  Primaries, Transfer,
+  ChromaLocation, ColorInfo, ColorMatrix, DcpTargetGamut, DynamicRange, KernelGamut, KernelMatrix,
+  PixelFormat, PixelSink, Primaries, Transfer, UnsupportedKernelGamutError,
+  UnsupportedKernelMatrixError,
 };
 #[cfg(feature = "xyz")]
 use crate::{
@@ -693,9 +694,16 @@ macro_rules! walker {
 
 /// Conversion options for the XYZ12 ([`Xyz12`]) source — the target RGB
 /// gamut its inverse-OETF + 3×3 matrix converts into.
+///
+/// The gamut is a [`KernelGamut`]: the **closed** set the XYZ → RGB matrix
+/// and luma basis are tabulated for. A caller holding the open descriptor
+/// [`DcpTargetGamut`] exchanges it at the door with
+/// [`for_target_gamut`](Self::for_target_gamut), which refuses a gamut this
+/// build does not name rather than converting it as if it were one of the
+/// three that are tabulated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Xyz12Options {
-  target_gamut: DcpTargetGamut,
+  target_gamut: KernelGamut,
 }
 
 impl Xyz12Options {
@@ -705,20 +713,33 @@ impl Xyz12Options {
   #[inline(always)]
   pub const fn new() -> Self {
     Self {
-      target_gamut: DcpTargetGamut::DciP3,
+      target_gamut: KernelGamut::DciP3,
     }
+  }
+
+  /// Builds options from the open descriptor gamut — the exchange door.
+  ///
+  /// # Errors
+  ///
+  /// Returns [`UnsupportedKernelGamutError`] for a [`DcpTargetGamut`] that
+  /// names no tabulated XYZ → RGB matrix ([`DcpTargetGamut::Other`]).
+  #[inline]
+  pub fn for_target_gamut(gamut: &DcpTargetGamut) -> Result<Self, UnsupportedKernelGamutError> {
+    Ok(Self {
+      target_gamut: KernelGamut::try_from(gamut)?,
+    })
   }
 
   /// The target RGB gamut the XYZ → RGB matrix converts into.
   #[inline(always)]
-  pub const fn target_gamut(&self) -> DcpTargetGamut {
+  pub const fn target_gamut(&self) -> KernelGamut {
     self.target_gamut
   }
 
   /// Sets the target RGB gamut (consuming builder).
   #[must_use]
   #[inline(always)]
-  pub const fn with_target_gamut(mut self, target_gamut: DcpTargetGamut) -> Self {
+  pub const fn with_target_gamut(mut self, target_gamut: KernelGamut) -> Self {
     self.target_gamut = target_gamut;
     self
   }
@@ -732,21 +753,27 @@ impl Default for Xyz12Options {
 }
 
 /// Conversion options shared by the YUV-family sources — the
-/// quantisation range (`full_range`) and the YCbCr [`ColorMatrix`].
+/// quantisation range (`full_range`) and the YCbCr [`KernelMatrix`].
+///
+/// The matrix here is the **closed** coefficient selector, not the open
+/// [`ColorMatrix`] descriptor: this value is handed straight to a walker,
+/// which stamps it on every row, and a row must never carry a matrix no
+/// kernel has coefficients for. The exchange happens once, at
+/// [`from_color_spec`](Self::from_color_spec).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct YuvOptions {
   full_range: bool,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
 }
 
 impl YuvOptions {
-  /// Creates options for limited-range [`ColorMatrix::Bt709`] — the
+  /// Creates options for limited-range [`KernelMatrix::Bt709`] — the
   /// implicit default of the common HD YUV pipeline.
   #[inline(always)]
   pub const fn new() -> Self {
     Self {
       full_range: false,
-      matrix: ColorMatrix::Bt709,
+      matrix: KernelMatrix::Bt709,
     }
   }
 
@@ -754,26 +781,34 @@ impl YuvOptions {
   /// entry point.
   ///
   /// The spec's resolved [`full_range`](ColorSpec::full_range) and
-  /// [`matrix`](ColorSpec::matrix) become this `YuvOptions`. Because a
-  /// `ColorSpec` can only be produced by [`ColorSpec::resolve`] — which
-  /// honours a format's *pinned* range — this is the constructor a caller
-  /// cannot use to decode a range-pinned source (a `yuvj*` alias) with the
-  /// wrong range. It feeds the **same** kernels as the raw builders, so it
+  /// [`kernel_matrix`](ColorSpec::kernel_matrix) become this `YuvOptions`.
+  /// Because a `ColorSpec` can only be produced by [`ColorSpec::resolve`] —
+  /// which honours a format's *pinned* range — this is the constructor a
+  /// caller cannot use to decode a range-pinned source (a `yuvj*` alias) with
+  /// the wrong range. It feeds the **same** kernels as the raw builders, so it
   /// carries zero per-pixel cost.
   ///
   /// Only the **walker-consumed** half of the spec lands here: the
-  /// [`chroma_location`](ColorSpec::chroma_location) is *intentionally not*
-  /// carried, because mediaframe's YUV walker row threads only range +
-  /// matrix to the kernels, never the siting. It is **sink-consumed** instead
-  /// — pass the same `spec` to
+  /// [`chroma_location`](ColorSpec::chroma_location), the
+  /// [`transfer`](ColorSpec::transfer), the [`primaries`](ColorSpec::primaries)
+  /// and the open [`matrix`](ColorSpec::matrix) descriptor are *intentionally
+  /// not* carried, because a walker row threads only range + kernel matrix to
+  /// the kernels. They are **sink-consumed** instead — pass the same `spec` to
   /// [`MixedSinker::with_color_spec`](crate::sinker::MixedSinker::with_color_spec)
-  /// to drive siting-aware 4:2:0 upsampling (#302).
-  #[inline(always)]
-  pub const fn from_color_spec(spec: ColorSpec) -> Self {
-    Self {
+  /// to drive siting-aware 4:2:0 upsampling (#302) and the non-affine decodes
+  /// (#303).
+  ///
+  /// # Errors
+  ///
+  /// Returns [`UnsupportedKernelMatrixError`] for a spec whose matrix names no
+  /// decode pixon implements — see [`ColorSpec::kernel_matrix`] for the exact
+  /// table.
+  #[inline]
+  pub fn from_color_spec(spec: &ColorSpec) -> Result<Self, UnsupportedKernelMatrixError> {
+    Ok(Self {
       full_range: spec.full_range,
-      matrix: spec.matrix,
-    }
+      matrix: spec.kernel_matrix()?,
+    })
   }
 
   /// Whether the source samples are full-range (`true`) or
@@ -785,7 +820,7 @@ impl YuvOptions {
 
   /// The YCbCr matrix the source was encoded with.
   #[inline(always)]
-  pub const fn matrix(&self) -> ColorMatrix {
+  pub const fn matrix(&self) -> KernelMatrix {
     self.matrix
   }
 
@@ -834,7 +869,7 @@ impl YuvOptions {
   /// Sets the YCbCr matrix (consuming builder).
   #[must_use]
   #[inline(always)]
-  pub const fn with_matrix(mut self, matrix: ColorMatrix) -> Self {
+  pub const fn with_matrix(mut self, matrix: KernelMatrix) -> Self {
     self.matrix = matrix;
     self
   }
@@ -880,7 +915,7 @@ impl Default for YuvOptions {
 /// [`resolve`](Self::resolve) leaves the three `Unspecified`.
 ///
 /// ```
-/// use pixon::{ColorMatrix, ColorSpec, DynamicRange, PixelFormat, YuvOptions};
+/// use pixon::{ColorMatrix, ColorSpec, DynamicRange, KernelMatrix, PixelFormat, YuvOptions};
 ///
 /// // A `yuvj420p` source pins full-range: the stream's claimed range loses.
 /// let spec = ColorSpec::resolve(PixelFormat::Yuvj420p, DynamicRange::Limited, ColorMatrix::Bt601);
@@ -891,9 +926,16 @@ impl Default for YuvOptions {
 /// let spec = ColorSpec::resolve(PixelFormat::Yuv420p, DynamicRange::Limited, ColorMatrix::Bt601);
 /// assert!(!spec.full_range());
 ///
-/// let opts = YuvOptions::from_color_spec(spec);
+/// // The walker-facing half exchanges the descriptor for the closed
+/// // coefficient selector, refusing a matrix pixon cannot decode.
+/// let opts = YuvOptions::from_color_spec(&spec).unwrap();
 /// assert!(!opts.full_range());
-/// assert_eq!(opts.matrix(), ColorMatrix::Bt601);
+/// assert_eq!(opts.matrix(), KernelMatrix::Bt601);
+///
+/// // ...and a matrix with no pixon decode is refused rather than silently
+/// // converted as BT.709.
+/// let cl = ColorSpec::resolve(PixelFormat::Yuv420p, DynamicRange::Limited, ColorMatrix::Bt2020Cl);
+/// assert!(YuvOptions::from_color_spec(&cl).is_err());
 /// ```
 ///
 /// [`from_info`](Self::from_info) pins the range exactly like `resolve`
@@ -918,7 +960,12 @@ impl Default for YuvOptions {
 /// assert_eq!(spec.transfer(), Transfer::Iec6196621);
 /// assert_eq!(spec.chroma_location(), ChromaLocation::Left);
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// `Copy` is deliberately absent: as of mediaframe 0.3 the four colour
+/// vocabularies this carries ([`ColorMatrix`], [`Primaries`], [`Transfer`],
+/// [`ChromaLocation`]) each own an open `Other(..)` escape and so are `Clone`
+/// but not `Copy`. The **kernel-facing** half of a spec keeps `Copy` — that is
+/// [`YuvOptions`], built once through [`kernel_matrix`](Self::kernel_matrix).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ColorSpec {
   format: PixelFormat,
   full_range: bool,
@@ -952,7 +999,7 @@ impl ColorSpec {
   /// [`chroma_location`](Self::chroma_location) `Unspecified`; use
   /// [`from_info`](Self::from_info) to carry those through as well.
   #[inline]
-  pub const fn resolve(fmt: PixelFormat, stream_range: DynamicRange, matrix: ColorMatrix) -> Self {
+  pub fn resolve(fmt: PixelFormat, stream_range: DynamicRange, matrix: ColorMatrix) -> Self {
     // Delegate to `from_info` so the format-pinned-range rule lives in one
     // place: an all-`Unspecified` `ColorInfo` carrying just the stream range
     // and matrix reproduces the original range-only resolution.
@@ -982,7 +1029,7 @@ impl ColorSpec {
   /// in one value (siting-aware chroma upsampling is what will read
   /// `chroma_location`).
   #[inline]
-  pub const fn from_info(fmt: PixelFormat, stream: ColorInfo) -> Self {
+  pub fn from_info(fmt: PixelFormat, stream: ColorInfo) -> Self {
     let (format, pinned) = fmt.canonical();
     let range = match pinned {
       Some(pinned_range) => pinned_range,
@@ -1001,8 +1048,8 @@ impl ColorSpec {
   /// The canonical decode format the source alias resolves to (e.g.
   /// `Gray8a` → `Ya8`). A non-alias format resolves to itself.
   #[inline(always)]
-  pub const fn format(&self) -> PixelFormat {
-    self.format
+  pub fn format(&self) -> PixelFormat {
+    self.format.clone()
   }
 
   /// Whether the resolved range is full (`true`) or limited/studio
@@ -1012,11 +1059,61 @@ impl ColorSpec {
     self.full_range
   }
 
-  /// The YCbCr matrix carried through from [`resolve`](Self::resolve) /
-  /// [`from_info`](Self::from_info). Consumed by the YCbCr→RGB kernels.
+  /// The **descriptor** matrix carried through from
+  /// [`resolve`](Self::resolve) / [`from_info`](Self::from_info) — the open
+  /// [`ColorMatrix`] the source is tagged with, verbatim.
+  ///
+  /// This is the tag, not the coefficient selector. The sink reads it to pick
+  /// a non-affine decode (#303); the kernels read
+  /// [`kernel_matrix`](Self::kernel_matrix) instead.
   #[inline(always)]
-  pub const fn matrix(&self) -> ColorMatrix {
-    self.matrix
+  pub fn matrix(&self) -> ColorMatrix {
+    self.matrix.clone()
+  }
+
+  /// The **coefficient selector** the YCbCr→RGB kernels consume — the
+  /// [`matrix`](Self::matrix) descriptor exchanged for the closed
+  /// [`KernelMatrix`] vocabulary.
+  ///
+  /// This is the one door where a matrix pixon cannot decode is refused, and
+  /// past it the wrong coefficient set is unrepresentable. The exchange is not
+  /// simply [`KernelMatrix::try_from`], because pixon decodes four matrices
+  /// mediaframe tabulates no *affine* coefficients for:
+  ///
+  /// - the ten [`KernelMatrix`] members map to themselves;
+  /// - [`Ictcp`](ColorMatrix::Ictcp), [`ChromaDerivedCl`](ColorMatrix::ChromaDerivedCl),
+  ///   [`IptC2`](ColorMatrix::IptC2) and [`Smpte2085`](ColorMatrix::Smpte2085)
+  ///   map to [`KernelMatrix::Bt709`]. pixon decodes all four **non-affinely**
+  ///   from the sink's signalled transfer / primaries (#303), so the affine
+  ///   selector is consulted only on the documented fallback path where that
+  ///   tag does not resolve (an ICtCp source with no PQ/HLG transfer, say) —
+  ///   the behaviour these matrices have had since #303;
+  /// - [`Rgb`](ColorMatrix::Rgb) maps to [`KernelMatrix::Bt709`]. The GBR
+  ///   identity names no YCbCr basis at all; the only kernel that consults a
+  ///   matrix for a GBR source is the luma derivation, which pixon pins to
+  ///   BT.709 regardless (see the `GBR_*_LUMA_MATRIX` constants);
+  /// - everything else — [`Bt2020Cl`](ColorMatrix::Bt2020Cl),
+  ///   [`YCgCoRe`](ColorMatrix::YCgCoRe), [`YCgCoRo`](ColorMatrix::YCgCoRo) and
+  ///   the open [`Other`](ColorMatrix::Other) escape — is **refused**. pixon
+  ///   implements none of them, and decoding a constant-luminance or
+  ///   reversible-YCgCo source with BT.709 coefficients yields a wrong picture
+  ///   with no diagnostic. Before 0.2 that is exactly what happened.
+  ///
+  /// # Errors
+  ///
+  /// Returns [`UnsupportedKernelMatrixError`] for the refused matrices above.
+  #[inline]
+  pub fn kernel_matrix(&self) -> Result<KernelMatrix, UnsupportedKernelMatrixError> {
+    match &self.matrix {
+      // pixon's own non-affine decodes (#303) plus the GBR identity: the
+      // affine selector is a documented fallback for these, not a guess.
+      ColorMatrix::Ictcp
+      | ColorMatrix::ChromaDerivedCl
+      | ColorMatrix::IptC2
+      | ColorMatrix::Smpte2085
+      | ColorMatrix::Rgb => Ok(KernelMatrix::Bt709),
+      other => KernelMatrix::try_from(other),
+    }
   }
 
   /// The colour [`Primaries`] carried from the source's
@@ -1026,8 +1123,8 @@ impl ColorSpec {
   /// Carried-for-completeness metadata: the YCbCr→RGB conversion does not
   /// consume it yet.
   #[inline(always)]
-  pub const fn primaries(&self) -> Primaries {
-    self.primaries
+  pub fn primaries(&self) -> Primaries {
+    self.primaries.clone()
   }
 
   /// The [`Transfer`] characteristics carried from the
@@ -1037,8 +1134,8 @@ impl ColorSpec {
   /// Carried-for-completeness metadata: the YCbCr→RGB conversion does not
   /// consume it yet.
   #[inline(always)]
-  pub const fn transfer(&self) -> Transfer {
-    self.transfer
+  pub fn transfer(&self) -> Transfer {
+    self.transfer.clone()
   }
 
   /// The [`ChromaLocation`] carried from the
@@ -1048,8 +1145,8 @@ impl ColorSpec {
   /// Carried-for-completeness metadata today; siting-aware chroma
   /// upsampling is what will consume it.
   #[inline(always)]
-  pub const fn chroma_location(&self) -> ChromaLocation {
-    self.chroma_location
+  pub fn chroma_location(&self) -> ChromaLocation {
+    self.chroma_location.clone()
   }
 }
 

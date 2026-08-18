@@ -42,7 +42,7 @@
 //!   default-on flag, and the native/row-stage route-freeze (#186) contracts.
 
 use crate::{
-  ColorMatrix, PixelSink,
+  KernelMatrix, PixelSink,
   resample::AreaResampler,
   sinker::{MixedSinker, MixedSinkerError},
   source::{Uyyvyy411, Uyyvyy411Row, Yuv444p, uyyvyy411_to, yuv444p_to},
@@ -56,7 +56,7 @@ use mediaframe::frame::{Uyyvyy411Frame, Yuv444pFrame};
 /// this bound only documents the row-stage semantic gap.
 const TOL_U8: u8 = 5;
 
-const M: ColorMatrix = ColorMatrix::Bt601;
+const M: KernelMatrix = KernelMatrix::Bt601;
 
 /// Byte stride of a `w`-wide UYYVYY411 row: `w * 3 / 2` (12 bpp, no padding).
 const fn stride(w: usize) -> u32 {
@@ -200,7 +200,7 @@ fn run(
   ow: usize,
   oh: usize,
   full_range: bool,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   native: bool,
 ) -> (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u16>) {
   let n = ow * oh;
@@ -239,7 +239,7 @@ fn oracle(
   ow: usize,
   oh: usize,
   full_range: bool,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
 ) -> (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u16>) {
   let cw = w / 4;
   let yl = logical_y(packed, w, h);
@@ -322,9 +322,9 @@ fn native_within_tolerance_of_row_stage() {
   for (ow, oh) in [(8, 5), (4, 4), (7, 6), (5, 3)] {
     for full_range in [false, true] {
       for matrix in [
-        ColorMatrix::Bt601,
-        ColorMatrix::Bt709,
-        ColorMatrix::Bt2020Ncl,
+        KernelMatrix::Bt601,
+        KernelMatrix::Bt709,
+        KernelMatrix::Bt2020Ncl,
       ] {
         let native = run(&packed, w, h, ow, oh, full_range, matrix, true);
         let row = run(&packed, w, h, ow, oh, full_range, matrix, false);
@@ -371,9 +371,9 @@ fn native_solid_frame_exact() {
     let mut sink = MixedSinker::<Uyyvyy411>::new(w, h)
       .with_rgb(&mut full_rgb)
       .unwrap();
-    uyyvyy411_to(&frame, false, ColorMatrix::Bt709, &mut sink).unwrap();
+    uyyvyy411_to(&frame, false, KernelMatrix::Bt709, &mut sink).unwrap();
   }
-  let out = run(&packed, w, h, 4, 4, false, ColorMatrix::Bt709, true);
+  let out = run(&packed, w, h, 4, 4, false, KernelMatrix::Bt709, true);
   for px in out.0.chunks_exact(3) {
     assert_eq!(
       (px[0], px[1], px[2]),

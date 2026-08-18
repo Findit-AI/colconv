@@ -2,7 +2,7 @@ use super::{super::*, packed_yuv411_buffer};
 
 // ---- Tier 5.25 packed YUV 4:1:1 simd128 scalar-equivalence ---------
 
-fn check_uyyvyy411_rgb(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_uyyvyy411_rgb(width: usize, matrix: KernelMatrix, full_range: bool) {
   let p = packed_yuv411_buffer(width, 37);
   let mut s = std::vec![0u8; width * 3];
   let mut k = std::vec![0u8; width * 3];
@@ -16,7 +16,7 @@ fn check_uyyvyy411_rgb(width: usize, matrix: ColorMatrix, full_range: bool) {
   );
 }
 
-fn check_uyyvyy411_rgba(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_uyyvyy411_rgba(width: usize, matrix: KernelMatrix, full_range: bool) {
   let p = packed_yuv411_buffer(width, 37);
   let mut s = std::vec![0u8; width * 4];
   let mut k = std::vec![0u8; width * 4];
@@ -34,12 +34,12 @@ fn check_uyyvyy411_rgba(width: usize, matrix: ColorMatrix, full_range: bool) {
 #[cfg_attr(miri, ignore = "simd128 SIMD intrinsics unsupported by Miri")]
 fn simd128_uyyvyy411_rgb_matches_scalar_all_matrices() {
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       check_uyyvyy411_rgb(16, m, full);
@@ -52,10 +52,10 @@ fn simd128_uyyvyy411_rgb_matches_scalar_all_matrices() {
 #[cfg_attr(miri, ignore = "simd128 SIMD intrinsics unsupported by Miri")]
 fn simd128_uyyvyy411_matches_scalar_widths() {
   for w in [4usize, 8, 12, 16, 20, 28, 32, 48, 64, 128, 1920] {
-    check_uyyvyy411_rgb(w, ColorMatrix::Bt709, false);
-    check_uyyvyy411_rgba(w, ColorMatrix::Bt709, true);
-    check_uyyvyy411_rgb(w, ColorMatrix::Bt2020Ncl, true);
-    check_uyyvyy411_rgba(w, ColorMatrix::Bt2020Ncl, false);
+    check_uyyvyy411_rgb(w, KernelMatrix::Bt709, false);
+    check_uyyvyy411_rgba(w, KernelMatrix::Bt709, true);
+    check_uyyvyy411_rgb(w, KernelMatrix::Bt2020Ncl, true);
+    check_uyyvyy411_rgba(w, KernelMatrix::Bt2020Ncl, false);
   }
 }
 

@@ -83,8 +83,9 @@ fn decode_rgb(
     let mut sink = MixedSinker::<crate::source::Yuv444p12>::new(w, h)
       .with_rgb(&mut rgb)
       .unwrap()
-      .with_color_spec(spec);
-    crate::source::yuv444p12_to(&src, full_range, matrix, &mut sink).unwrap();
+      .with_color_spec(&spec);
+    crate::source::yuv444p12_to(&src, full_range, spec.kernel_matrix().unwrap(), &mut sink)
+      .unwrap();
   }
   rgb
 }
@@ -127,8 +128,9 @@ fn decode_rgb_u16(
     let mut sink = MixedSinker::<crate::source::Yuv444p12>::new(w, h)
       .with_rgb_u16(&mut rgb)
       .unwrap()
-      .with_color_spec(spec);
-    crate::source::yuv444p12_to(&src, full_range, matrix, &mut sink).unwrap();
+      .with_color_spec(&spec);
+    crate::source::yuv444p12_to(&src, full_range, spec.kernel_matrix().unwrap(), &mut sink)
+      .unwrap();
   }
   rgb
 }
@@ -179,14 +181,16 @@ fn decode_rgba_u16(
       .unwrap()
       .with_rgb_u16(&mut rgb)
       .unwrap()
-      .with_color_spec(spec);
-    crate::source::yuv444p12_to(&src, full_range, ColorMatrix::Smpte2085, &mut sink).unwrap();
+      .with_color_spec(&spec);
+    crate::source::yuv444p12_to(&src, full_range, spec.kernel_matrix().unwrap(), &mut sink)
+      .unwrap();
   } else {
     let mut sink = MixedSinker::<crate::source::Yuv444p12>::new(w, h)
       .with_rgba_u16(&mut rgba)
       .unwrap()
-      .with_color_spec(spec);
-    crate::source::yuv444p12_to(&src, full_range, ColorMatrix::Smpte2085, &mut sink).unwrap();
+      .with_color_spec(&spec);
+    crate::source::yuv444p12_to(&src, full_range, spec.kernel_matrix().unwrap(), &mut sink)
+      .unwrap();
   }
   rgba
 }
@@ -414,8 +418,9 @@ fn decode_hsv(
       let mut sink = MixedSinker::<crate::source::Yuv444p12>::new(w, h)
         .with_hsv(&mut hh, &mut ss, &mut vv)
         .unwrap()
-        .with_color_spec(spec);
-      crate::source::yuv444p12_to(&src, full_range, matrix, &mut sink).unwrap();
+        .with_color_spec(&spec);
+      crate::source::yuv444p12_to(&src, full_range, spec.kernel_matrix().unwrap(), &mut sink)
+        .unwrap();
     }
     HsvCo::RgbU8 => {
       let mut sink = MixedSinker::<crate::source::Yuv444p12>::new(w, h)
@@ -423,8 +428,9 @@ fn decode_hsv(
         .unwrap()
         .with_hsv(&mut hh, &mut ss, &mut vv)
         .unwrap()
-        .with_color_spec(spec);
-      crate::source::yuv444p12_to(&src, full_range, matrix, &mut sink).unwrap();
+        .with_color_spec(&spec);
+      crate::source::yuv444p12_to(&src, full_range, spec.kernel_matrix().unwrap(), &mut sink)
+        .unwrap();
     }
     HsvCo::RgbU16 => {
       let mut sink = MixedSinker::<crate::source::Yuv444p12>::new(w, h)
@@ -432,8 +438,9 @@ fn decode_hsv(
         .unwrap()
         .with_hsv(&mut hh, &mut ss, &mut vv)
         .unwrap()
-        .with_color_spec(spec);
-      crate::source::yuv444p12_to(&src, full_range, matrix, &mut sink).unwrap();
+        .with_color_spec(&spec);
+      crate::source::yuv444p12_to(&src, full_range, spec.kernel_matrix().unwrap(), &mut sink)
+        .unwrap();
     }
   }
   (hh, ss, vv)
@@ -455,7 +462,7 @@ fn smpte2085_hsv_only_uses_non_affine_decode() {
     2248,
     true,
     ColorMatrix::Smpte2085,
-    tf,
+    tf.clone(),
     HsvCo::None,
   );
   let via_rgb = decode_hsv(
@@ -464,7 +471,7 @@ fn smpte2085_hsv_only_uses_non_affine_decode() {
     2248,
     true,
     ColorMatrix::Smpte2085,
-    tf,
+    tf.clone(),
     HsvCo::RgbU8,
   );
   let via_rgb16 = decode_hsv(
@@ -544,8 +551,8 @@ fn resample_rgb(
   .unwrap()
   .with_rgb(&mut rgb)
   .unwrap()
-  .with_color_spec(spec);
-  crate::source::yuv444p12_to(&src, true, ColorMatrix::Smpte2085, &mut sink)
+  .with_color_spec(&spec);
+  crate::source::yuv444p12_to(&src, true, spec.kernel_matrix().unwrap(), &mut sink)
 }
 
 /// A resolved SMPTE 2085 frame (PQ transfer) + a resize plan must return the

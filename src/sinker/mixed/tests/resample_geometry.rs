@@ -152,7 +152,7 @@ fn plan_error_surfaces_as_mixed_sinker_error() {
 
 // ---- End-to-end fused downscale (Yuv420p row-stage tier) ----------------
 
-use crate::{ColorMatrix, frame::Yuv420pFrame, source::yuv420p_to};
+use crate::{KernelMatrix, frame::Yuv420pFrame, source::yuv420p_to};
 
 /// 8x8 frame whose Y plane is the row-major ramp `8*row + col` with
 /// neutral chroma: full-range luma equals the Y plane verbatim, so
@@ -173,7 +173,7 @@ fn downscale_yuv420p_gradient_luma_integer_ratio() {
       .unwrap()
       .with_luma(&mut luma)
       .unwrap();
-  yuv420p_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuv420p_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
 
   // 2x2 block mean of the ramp is `16r + 2c + 4.5`; round-half-up.
   for r in 0..OUT {
@@ -194,7 +194,7 @@ fn downscale_yuv420p_gradient_luma_fractional_ratio() {
       .unwrap()
       .with_luma(&mut luma)
       .unwrap();
-  yuv420p_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuv420p_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
 
   // Independent reference: direct 2-D area mean over the ramp with the
   // exact coverage weights (x3 grid), denominator 64, round-half-up.
@@ -235,7 +235,7 @@ fn downscale_yuv420p_solid_matches_full_res_conversion() {
     .unwrap()
     .with_hsv(&mut full_h, &mut full_s, &mut full_v)
     .unwrap();
-  yuv420p_to(&src, false, ColorMatrix::Bt709, &mut full).unwrap();
+  yuv420p_to(&src, false, KernelMatrix::Bt709, &mut full).unwrap();
 
   let mut rgb = vec![0u8; OUT * OUT * 3];
   let mut rgba = vec![0u8; OUT * OUT * 4];
@@ -257,7 +257,7 @@ fn downscale_yuv420p_solid_matches_full_res_conversion() {
       .unwrap()
       .with_hsv(&mut h, &mut s, &mut v)
       .unwrap();
-  yuv420p_to(&src, false, ColorMatrix::Bt709, &mut sink).unwrap();
+  yuv420p_to(&src, false, KernelMatrix::Bt709, &mut sink).unwrap();
 
   let (er, eg, eb) = (full_rgb[0], full_rgb[1], full_rgb[2]);
   for px in rgb.chunks_exact(3) {
@@ -284,7 +284,7 @@ fn downscale_luma_only_works_without_rgb_buffers() {
       .unwrap()
       .with_luma(&mut luma)
       .unwrap();
-  yuv420p_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuv420p_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
   assert_eq!(luma[0], 5);
 }
 
@@ -301,8 +301,8 @@ fn downscale_state_resets_between_frames() {
       .unwrap()
       .with_luma(&mut luma)
       .unwrap();
-  yuv420p_to(&src1, true, ColorMatrix::Bt601, &mut sink).unwrap();
-  yuv420p_to(&src2, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuv420p_to(&src1, true, KernelMatrix::Bt601, &mut sink).unwrap();
+  yuv420p_to(&src2, true, KernelMatrix::Bt601, &mut sink).unwrap();
   assert!(
     luma.iter().all(|&l| l == 40),
     "second frame must not inherit state"
@@ -322,7 +322,7 @@ fn direct_out_of_order_process_rejected_under_resampling() {
   let v = [128u8; SRC / 2];
   // Row 3 before rows 0..3: the stream must reject, not corrupt.
   let err = sink
-    .process(Yuv420pRow::new(&y, &u, &v, 3, ColorMatrix::Bt601, true))
+    .process(Yuv420pRow::new(&y, &u, &v, 3, KernelMatrix::Bt601, true))
     .unwrap_err();
   assert!(matches!(
     err,
@@ -344,7 +344,7 @@ fn rejected_first_row_does_not_poison_output_retry_row_stage() {
   let mut sink = downscaled().with_luma(&mut luma).unwrap();
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   let err = sink
-    .process(Yuv420pRow::new(&y, &u, &v, 3, ColorMatrix::Bt601, true))
+    .process(Yuv420pRow::new(&y, &u, &v, 3, KernelMatrix::Bt601, true))
     .unwrap_err();
   assert!(matches!(
     err,
@@ -353,7 +353,7 @@ fn rejected_first_row_does_not_poison_output_retry_row_stage() {
   let mut rgb = vec![0u8; OUT * OUT * 3];
   sink.set_rgb(&mut rgb).unwrap();
   sink
-    .process(Yuv420pRow::new(&y, &u, &v, 0, ColorMatrix::Bt601, true))
+    .process(Yuv420pRow::new(&y, &u, &v, 0, KernelMatrix::Bt601, true))
     .expect("row 0 must succeed after a rejected out-of-sequence first row");
 }
 
@@ -371,7 +371,7 @@ fn rejected_first_row_does_not_poison_output_retry_native() {
   let mut sink = downscaled().with_native(true).with_luma(&mut luma).unwrap();
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   let err = sink
-    .process(Yuv420pRow::new(&y, &u, &v, 3, ColorMatrix::Bt601, true))
+    .process(Yuv420pRow::new(&y, &u, &v, 3, KernelMatrix::Bt601, true))
     .unwrap_err();
   assert!(matches!(
     err,
@@ -380,7 +380,7 @@ fn rejected_first_row_does_not_poison_output_retry_native() {
   let mut rgb = vec![0u8; OUT * OUT * 3];
   sink.set_rgb(&mut rgb).unwrap();
   sink
-    .process(Yuv420pRow::new(&y, &u, &v, 0, ColorMatrix::Bt601, true))
+    .process(Yuv420pRow::new(&y, &u, &v, 0, KernelMatrix::Bt601, true))
     .expect("row 0 must succeed after a rejected out-of-sequence first row");
 }
 
@@ -408,7 +408,7 @@ fn native_first_build_scratch_oom_leaves_freeze_unfrozen_for_retry() {
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   crate::sinker::mixed::arm_native_rgb_scratch_failure();
   let err = sink
-    .process(Yuv420pRow::new(&y, &u, &v, 0, ColorMatrix::Bt601, true))
+    .process(Yuv420pRow::new(&y, &u, &v, 0, KernelMatrix::Bt601, true))
     .unwrap_err();
   assert!(
     matches!(
@@ -421,7 +421,7 @@ fn native_first_build_scratch_oom_leaves_freeze_unfrozen_for_retry() {
   // luma added (changed output set) is ACCEPTED, not ResampleOutputsChanged.
   sink.set_luma(&mut luma).unwrap();
   sink
-    .process(Yuv420pRow::new(&y, &u, &v, 0, ColorMatrix::Bt601, true))
+    .process(Yuv420pRow::new(&y, &u, &v, 0, KernelMatrix::Bt601, true))
     .expect("row 0 must succeed after a first-build scratch OOM (freeze uncommitted)");
 }
 
@@ -457,7 +457,7 @@ fn native_colour_capability_rebuild_scratch_oom_leaves_freeze_unfrozen_for_retry
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   for r in 0..SRC {
     sink
-      .process(Yuv420pRow::new(&y, &u, &v, r, ColorMatrix::Bt601, true))
+      .process(Yuv420pRow::new(&y, &u, &v, r, KernelMatrix::Bt601, true))
       .expect("luma-only frame builds the native join");
   }
   // Frame 2: attach RGB → the row-0 rebuild must build the chroma half and grow
@@ -466,7 +466,7 @@ fn native_colour_capability_rebuild_scratch_oom_leaves_freeze_unfrozen_for_retry
   sink.set_rgb(&mut rgb).unwrap();
   crate::sinker::mixed::arm_native_rgb_scratch_failure();
   let err = sink
-    .process(Yuv420pRow::new(&y, &u, &v, 0, ColorMatrix::Bt601, true))
+    .process(Yuv420pRow::new(&y, &u, &v, 0, KernelMatrix::Bt601, true))
     .unwrap_err();
   assert!(
     matches!(
@@ -482,7 +482,7 @@ fn native_colour_capability_rebuild_scratch_oom_leaves_freeze_unfrozen_for_retry
   // rejected this retry as ResampleOutputsChanged.
   sink.set_hsv(&mut hh, &mut ss, &mut vv).unwrap();
   sink
-    .process(Yuv420pRow::new(&y, &u, &v, 0, ColorMatrix::Bt601, true))
+    .process(Yuv420pRow::new(&y, &u, &v, 0, KernelMatrix::Bt601, true))
     .expect("row 0 with a changed output set must succeed after a rebuild scratch OOM");
 }
 
@@ -505,12 +505,12 @@ fn no_output_first_row_does_not_poison_output_retry_native() {
   let mut sink = downscaled().with_native(true);
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   sink
-    .process(Yuv420pRow::new(&y, &u, &v, 0, ColorMatrix::Bt601, true))
+    .process(Yuv420pRow::new(&y, &u, &v, 0, KernelMatrix::Bt601, true))
     .expect("a no-output native row must be a no-op Ok");
   let mut luma = vec![0u8; OUT * OUT];
   sink.set_luma(&mut luma).unwrap();
   sink
-    .process(Yuv420pRow::new(&y, &u, &v, 0, ColorMatrix::Bt601, true))
+    .process(Yuv420pRow::new(&y, &u, &v, 0, KernelMatrix::Bt601, true))
     .expect("row 0 must succeed after a no-output native call (no poisoned snapshot)");
 }
 
@@ -531,12 +531,12 @@ fn mid_frame_output_reconfiguration_rejected_atomically() {
     let mut sink = downscaled().with_luma(&mut luma).unwrap();
     sink.begin_frame(SRC as u32, SRC as u32).unwrap();
     sink
-      .process(Yuv420pRow::new(&y, &u, &v, 0, ColorMatrix::Bt601, true))
+      .process(Yuv420pRow::new(&y, &u, &v, 0, KernelMatrix::Bt601, true))
       .unwrap();
     sink.set_rgb(&mut rgb).unwrap();
     // Row 1 would have completed luma output row 0.
     let err = sink
-      .process(Yuv420pRow::new(&y, &u, &v, 1, ColorMatrix::Bt601, true))
+      .process(Yuv420pRow::new(&y, &u, &v, 1, KernelMatrix::Bt601, true))
       .unwrap_err();
     assert!(matches!(err, MixedSinkerError::ResampleOutputsChanged(_)));
   }
@@ -553,16 +553,16 @@ fn mid_frame_output_reconfiguration_rejected_atomically() {
     let mut sink = downscaled().with_luma(&mut luma).unwrap();
     sink.begin_frame(SRC as u32, SRC as u32).unwrap();
     sink
-      .process(Yuv420pRow::new(&y, &u, &v, 0, ColorMatrix::Bt601, true))
+      .process(Yuv420pRow::new(&y, &u, &v, 0, KernelMatrix::Bt601, true))
       .unwrap();
     sink.set_rgb(&mut rgb).unwrap();
     sink
-      .process(Yuv420pRow::new(&y, &u, &v, 1, ColorMatrix::Bt601, true))
+      .process(Yuv420pRow::new(&y, &u, &v, 1, KernelMatrix::Bt601, true))
       .unwrap_err();
     sink.begin_frame(SRC as u32, SRC as u32).unwrap();
     for row in 0..SRC {
       sink
-        .process(Yuv420pRow::new(&y, &u, &v, row, ColorMatrix::Bt601, true))
+        .process(Yuv420pRow::new(&y, &u, &v, row, KernelMatrix::Bt601, true))
         .unwrap();
     }
   }
@@ -587,12 +587,12 @@ fn same_group_mid_frame_attachment_rejected_atomically() {
     sink.begin_frame(SRC as u32, SRC as u32).unwrap();
     for row in 0..2 {
       sink
-        .process(Yuv420pRow::new(&y, &u, &v, row, ColorMatrix::Bt601, true))
+        .process(Yuv420pRow::new(&y, &u, &v, row, KernelMatrix::Bt601, true))
         .unwrap();
     }
     sink.set_hsv(&mut h, &mut s_, &mut v_).unwrap();
     let err = sink
-      .process(Yuv420pRow::new(&y, &u, &v, 2, ColorMatrix::Bt601, true))
+      .process(Yuv420pRow::new(&y, &u, &v, 2, KernelMatrix::Bt601, true))
       .unwrap_err();
     assert!(matches!(err, MixedSinkerError::ResampleOutputsChanged(_)));
   }
@@ -606,12 +606,12 @@ fn same_group_mid_frame_attachment_rejected_atomically() {
     sink.begin_frame(SRC as u32, SRC as u32).unwrap();
     for row in 0..2 {
       sink
-        .process(Yuv420pRow::new(&y, &u, &v, row, ColorMatrix::Bt601, true))
+        .process(Yuv420pRow::new(&y, &u, &v, row, KernelMatrix::Bt601, true))
         .unwrap();
     }
     sink.set_luma_u16(&mut luma16).unwrap();
     let err = sink
-      .process(Yuv420pRow::new(&y, &u, &v, 2, ColorMatrix::Bt601, true))
+      .process(Yuv420pRow::new(&y, &u, &v, 2, KernelMatrix::Bt601, true))
       .unwrap_err();
     assert!(matches!(err, MixedSinkerError::ResampleOutputsChanged(_)));
   }
@@ -636,12 +636,12 @@ fn same_channel_buffer_replacement_rejected_atomically() {
     sink.begin_frame(SRC as u32, SRC as u32).unwrap();
     for row in 0..2 {
       sink
-        .process(Yuv420pRow::new(&y, &u, &v, row, ColorMatrix::Bt601, true))
+        .process(Yuv420pRow::new(&y, &u, &v, row, KernelMatrix::Bt601, true))
         .unwrap();
     }
     sink.set_rgb(&mut rgb_b).unwrap();
     let err = sink
-      .process(Yuv420pRow::new(&y, &u, &v, 2, ColorMatrix::Bt601, true))
+      .process(Yuv420pRow::new(&y, &u, &v, 2, KernelMatrix::Bt601, true))
       .unwrap_err();
     assert!(matches!(err, MixedSinkerError::ResampleOutputsChanged(_)));
   }
@@ -666,12 +666,12 @@ fn same_channel_buffer_replacement_rejected_atomically() {
     sink.begin_frame(SRC as u32, SRC as u32).unwrap();
     for row in 0..2 {
       sink
-        .process(Yuv420pRow::new(&y, &u, &v, row, ColorMatrix::Bt601, true))
+        .process(Yuv420pRow::new(&y, &u, &v, row, KernelMatrix::Bt601, true))
         .unwrap();
     }
     sink.set_hsv(&mut h_b, &mut s_b, &mut v_b).unwrap();
     let err = sink
-      .process(Yuv420pRow::new(&y, &u, &v, 2, ColorMatrix::Bt601, true))
+      .process(Yuv420pRow::new(&y, &u, &v, 2, KernelMatrix::Bt601, true))
       .unwrap_err();
     assert!(matches!(err, MixedSinkerError::ResampleOutputsChanged(_)));
   }
@@ -720,7 +720,7 @@ fn run_downscale(out_w: usize, out_h: usize, native: bool) -> DownscaleOutputs {
     .unwrap()
     .with_hsv(&mut h, &mut s_, &mut v_)
     .unwrap();
-    yuv420p_to(&src, false, ColorMatrix::Bt709, &mut sink).unwrap();
+    yuv420p_to(&src, false, KernelMatrix::Bt709, &mut sink).unwrap();
   }
   (rgb, rgba, luma, h, v_)
 }
@@ -778,7 +778,7 @@ fn native_solid_frame_exact_all_outputs() {
   let mut full = MixedSinker::<Yuv420p>::new(SRC, SRC)
     .with_rgb(&mut full_rgb)
     .unwrap();
-  yuv420p_to(&src, false, ColorMatrix::Bt709, &mut full).unwrap();
+  yuv420p_to(&src, false, KernelMatrix::Bt709, &mut full).unwrap();
 
   let mut rgb = vec![0u8; OUT * OUT * 3];
   let mut luma = vec![0u8; OUT * OUT];
@@ -791,7 +791,7 @@ fn native_solid_frame_exact_all_outputs() {
         .unwrap()
         .with_luma(&mut luma)
         .unwrap();
-    yuv420p_to(&src, false, ColorMatrix::Bt709, &mut sink).unwrap();
+    yuv420p_to(&src, false, KernelMatrix::Bt709, &mut sink).unwrap();
   }
   for px in rgb.chunks_exact(3) {
     assert_eq!(
@@ -820,7 +820,7 @@ fn native_misaligned_chroma_upsample_matches_row_stage() {
         .with_native(native)
         .with_rgb(&mut rgb)
         .unwrap();
-    yuv420p_to(&src, false, ColorMatrix::Bt709, &mut sink).unwrap();
+    yuv420p_to(&src, false, KernelMatrix::Bt709, &mut sink).unwrap();
     rgb
   };
   let native = run(true);
@@ -851,7 +851,7 @@ fn native_odd_height_color_matches_row_stage() {
         .with_native(native)
         .with_rgb(&mut rgb)
         .unwrap();
-    yuv420p_to(&src, false, ColorMatrix::Bt709, &mut sink).unwrap();
+    yuv420p_to(&src, false, KernelMatrix::Bt709, &mut sink).unwrap();
     rgb
   };
   let native = run(true);
@@ -897,7 +897,7 @@ fn native_saturated_divergence_is_characterized() {
         .unwrap()
         .with_luma(&mut luma)
         .unwrap();
-    yuv420p_to(&src, false, ColorMatrix::Bt709, &mut sink).unwrap();
+    yuv420p_to(&src, false, KernelMatrix::Bt709, &mut sink).unwrap();
     (rgb, luma)
   };
   let (n_rgb, n_luma) = run(true);
@@ -927,7 +927,7 @@ fn native_saturated_divergence_is_characterized() {
         .with_native(native)
         .with_rgb(&mut rgb)
         .unwrap();
-    yuv420p_to(&src, false, ColorMatrix::Bt2020Ncl, &mut sink).unwrap();
+    yuv420p_to(&src, false, KernelMatrix::Bt2020Ncl, &mut sink).unwrap();
     rgb
   };
   let n = run(true);
@@ -955,7 +955,7 @@ fn native_join_upgrades_when_color_attaches_next_frame() {
   let mut full = MixedSinker::<Yuv420p>::new(SRC, SRC)
     .with_rgb(&mut full_rgb)
     .unwrap();
-  yuv420p_to(&src, false, ColorMatrix::Bt709, &mut full).unwrap();
+  yuv420p_to(&src, false, KernelMatrix::Bt709, &mut full).unwrap();
 
   let mut luma = vec![0u8; OUT * OUT];
   let mut rgb = vec![0u8; OUT * OUT * 3];
@@ -968,11 +968,11 @@ fn native_join_upgrades_when_color_attaches_next_frame() {
         .unwrap()
         .with_luma(&mut luma)
         .unwrap();
-    yuv420p_to(&src, false, ColorMatrix::Bt709, &mut sink).unwrap();
+    yuv420p_to(&src, false, KernelMatrix::Bt709, &mut sink).unwrap();
 
     sink.set_rgb(&mut rgb).unwrap();
     sink.set_hsv(&mut h, &mut s_, &mut v_).unwrap();
-    yuv420p_to(&src, false, ColorMatrix::Bt709, &mut sink).unwrap();
+    yuv420p_to(&src, false, KernelMatrix::Bt709, &mut sink).unwrap();
   }
   assert!(luma.iter().all(|&l| l == 120));
   for px in rgb.chunks_exact(3) {
@@ -994,7 +994,7 @@ fn identity_area_full_pipeline_matches_new_sink() {
   let mut sink = MixedSinker::<Yuv420p>::new(SRC, SRC)
     .with_rgb(&mut direct)
     .unwrap();
-  yuv420p_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuv420p_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
 
   let mut via_area = vec![0u8; SRC * SRC * 3];
   let mut sink =
@@ -1002,7 +1002,7 @@ fn identity_area_full_pipeline_matches_new_sink() {
       .unwrap()
       .with_rgb(&mut via_area)
       .unwrap();
-  yuv420p_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuv420p_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
 
   assert_eq!(direct, via_area);
 }
@@ -1031,12 +1031,12 @@ fn native_to_rowstage_route_flip_mid_frame_rejected() {
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   // Row 0 freezes the route = native.
   sink
-    .process(Yuv420pRow::new(&y, &u, &v, 0, ColorMatrix::Bt601, true))
+    .process(Yuv420pRow::new(&y, &u, &v, 0, KernelMatrix::Bt601, true))
     .expect("native row 0 freezes the route and succeeds");
   // Flip to the row-stage tier and feed the next in-sequence row.
   sink.set_native(false);
   let err = sink
-    .process(Yuv420pRow::new(&y, &u, &v, 1, ColorMatrix::Bt601, true))
+    .process(Yuv420pRow::new(&y, &u, &v, 1, KernelMatrix::Bt601, true))
     .unwrap_err();
   assert!(
     matches!(err, MixedSinkerError::NativeRouteChanged(_)),
@@ -1063,12 +1063,12 @@ fn rowstage_to_native_route_flip_mid_frame_rejected() {
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   // Row 0 freezes the route = row-stage.
   sink
-    .process(Yuv420pRow::new(&y, &u, &v, 0, ColorMatrix::Bt601, true))
+    .process(Yuv420pRow::new(&y, &u, &v, 0, KernelMatrix::Bt601, true))
     .expect("row-stage row 0 freezes the route and succeeds");
   // Flip to the native tier and feed the next in-sequence row.
   sink.set_native(true);
   let err = sink
-    .process(Yuv420pRow::new(&y, &u, &v, 1, ColorMatrix::Bt601, true))
+    .process(Yuv420pRow::new(&y, &u, &v, 1, KernelMatrix::Bt601, true))
     .unwrap_err();
   assert!(
     matches!(err, MixedSinkerError::NativeRouteChanged(_)),
@@ -1091,11 +1091,11 @@ fn route_constant_succeeds_and_resets_across_frames() {
   let mut luma = vec![0u8; OUT * OUT];
   let mut sink = downscaled().with_native(true).with_luma(&mut luma).unwrap();
   // Frame 1: native, route constant across every row — no false rejection.
-  yuv420p_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuv420p_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
   // Frame 2: flip to row-stage for the WHOLE frame. `begin_frame` (driven
   // by the walker) cleared the frozen route, so this is allowed.
   sink.set_native(false);
-  yuv420p_to(&src, true, ColorMatrix::Bt601, &mut sink)
+  yuv420p_to(&src, true, KernelMatrix::Bt601, &mut sink)
     .expect("a new frame may pick the other tier; the route reset per frame");
 }
 
@@ -1134,7 +1134,7 @@ fn no_output_call_after_frozen_route_is_a_noop() {
   // route-invisible.
   sink.set_native(false);
   sink
-    .process(Yuv420pRow::new(&y, &u, &v, 0, ColorMatrix::Bt601, true))
+    .process(Yuv420pRow::new(&y, &u, &v, 0, KernelMatrix::Bt601, true))
     .expect("a no-output call after a frozen route must be a true no-op, not NativeRouteChanged");
   assert_eq!(
     sink.frozen_native_route,
@@ -1148,13 +1148,13 @@ fn no_output_call_after_frozen_route_is_a_noop() {
   sink.set_native(true);
   sink.set_luma(&mut luma).unwrap();
   sink
-    .process(Yuv420pRow::new(&y, &u, &v, 0, ColorMatrix::Bt601, true))
+    .process(Yuv420pRow::new(&y, &u, &v, 0, KernelMatrix::Bt601, true))
     .expect("an output-bearing row under the original native route succeeds");
   // ...while an OUTPUT-bearing flip to the OTHER route now rejects,
   // confirming the frozen route stayed native.
   sink.set_native(false);
   let err = sink
-    .process(Yuv420pRow::new(&y, &u, &v, 1, ColorMatrix::Bt601, true))
+    .process(Yuv420pRow::new(&y, &u, &v, 1, KernelMatrix::Bt601, true))
     .unwrap_err();
   assert!(
     matches!(err, MixedSinkerError::NativeRouteChanged(_)),

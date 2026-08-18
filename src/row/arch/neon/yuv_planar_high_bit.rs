@@ -1,4 +1,4 @@
-use crate::{ColorMatrix, row::scalar};
+use crate::{KernelMatrix, row::scalar};
 
 use super::*;
 
@@ -45,7 +45,7 @@ pub(crate) unsafe fn yuv_420p_n_to_rgb_row<const BITS: u32, const BE: bool>(
   v_half: &[u16],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // SAFETY: caller obligations forwarded to the shared impl.
@@ -75,7 +75,7 @@ pub(crate) unsafe fn yuv_420p_n_to_rgba_row<const BITS: u32, const BE: bool>(
   v_half: &[u16],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // SAFETY: caller obligations forwarded to the shared impl.
@@ -108,7 +108,7 @@ pub(crate) unsafe fn yuv_420p_n_to_rgba_with_alpha_src_row<const BITS: u32, cons
   a_src: &[u16],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // SAFETY: caller obligations forwarded to the shared impl.
@@ -160,7 +160,7 @@ pub(crate) unsafe fn yuv_420p_n_to_rgb_or_rgba_row<
   a_src: Option<&[u16]>,
   out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   const { assert!(BITS == 9 || BITS == 10 || BITS == 12 || BITS == 14) };
@@ -373,7 +373,7 @@ pub(crate) unsafe fn yuv_420p_n_to_rgb_u16_row<const BITS: u32, const BE: bool>(
   v_half: &[u16],
   rgb_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   unsafe {
@@ -399,7 +399,7 @@ pub(crate) unsafe fn yuv_420p_n_to_rgba_u16_row<const BITS: u32, const BE: bool>
   v_half: &[u16],
   rgba_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   unsafe {
@@ -432,7 +432,7 @@ pub(crate) unsafe fn yuv_420p_n_to_rgba_u16_with_alpha_src_row<const BITS: u32, 
   a_src: &[u16],
   rgba_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // SAFETY: caller obligations forwarded to the shared impl.
@@ -484,7 +484,7 @@ pub(crate) unsafe fn yuv_420p_n_to_rgb_or_rgba_u16_row<
   a_src: Option<&[u16]>,
   out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   const { assert!(BITS == 9 || BITS == 10 || BITS == 12 || BITS == 14) };
@@ -669,7 +669,7 @@ pub(crate) unsafe fn yuv_444p_n_to_rgb_row<const BITS: u32, const BE: bool>(
   v: &[u16],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // SAFETY: caller obligations forwarded to the shared impl.
@@ -699,7 +699,7 @@ pub(crate) unsafe fn yuv_444p_n_to_rgba_row<const BITS: u32, const BE: bool>(
   v: &[u16],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // SAFETY: caller obligations forwarded to the shared impl.
@@ -721,7 +721,7 @@ pub(crate) unsafe fn yuv_444p_n_msb_to_rgb_row<const BITS: u32, const BE: bool>(
   v: &[u16],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // SAFETY: caller obligations forwarded to the shared impl.
@@ -743,7 +743,7 @@ pub(crate) unsafe fn yuv_444p_n_msb_to_rgba_row<const BITS: u32, const BE: bool>
   v: &[u16],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // SAFETY: caller obligations forwarded to the shared impl.
@@ -776,7 +776,7 @@ pub(crate) unsafe fn yuv_444p_n_to_rgba_with_alpha_src_row<const BITS: u32, cons
   a_src: &[u16],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // SAFETY: caller obligations forwarded to the shared impl.
@@ -855,7 +855,7 @@ pub(crate) unsafe fn yuv_444p_n_to_rgb_or_rgba_row<
   v: &[u16],
   out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   a_src: Option<&[u16]>,
 ) {
@@ -1069,7 +1069,7 @@ pub(crate) unsafe fn yuv_444p_n_to_rgb_u16_row<const BITS: u32, const BE: bool>(
   v: &[u16],
   rgb_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // SAFETY: caller obligations forwarded to the shared impl.
@@ -1091,7 +1091,7 @@ pub(crate) unsafe fn yuv_444p_n_msb_to_rgb_u16_row<const BITS: u32, const BE: bo
   v: &[u16],
   rgb_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // SAFETY: caller obligations forwarded to the shared impl.
@@ -1113,7 +1113,7 @@ pub(crate) unsafe fn yuv_444p_n_msb_to_rgba_u16_row<const BITS: u32, const BE: b
   v: &[u16],
   rgba_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // SAFETY: caller obligations forwarded to the shared impl.
@@ -1143,7 +1143,7 @@ pub(crate) unsafe fn yuv_444p_n_to_rgba_u16_row<const BITS: u32, const BE: bool>
   v: &[u16],
   rgba_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // SAFETY: caller obligations forwarded to the shared impl.
@@ -1177,7 +1177,7 @@ pub(crate) unsafe fn yuv_444p_n_to_rgba_u16_with_alpha_src_row<const BITS: u32, 
   a_src: &[u16],
   rgba_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // SAFETY: caller obligations forwarded to the shared impl.
@@ -1228,7 +1228,7 @@ pub(crate) unsafe fn yuv_444p_n_to_rgb_or_rgba_u16_row<
   v: &[u16],
   out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   a_src: Option<&[u16]>,
 ) {
@@ -1456,7 +1456,7 @@ pub(crate) unsafe fn yuv_420p_n_to_hsv_row<const BITS: u32, const BE: bool>(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert_eq!(width & 1, 0, "YUV 4:2:0 requires even width");
@@ -1506,7 +1506,7 @@ pub(crate) unsafe fn yuv_444p_n_to_hsv_row<const BITS: u32, const BE: bool>(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert!(y.len() >= width, "y row too short");
@@ -1554,7 +1554,7 @@ pub(crate) unsafe fn yuv_444p_n_msb_to_hsv_row<const BITS: u32, const BE: bool>(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert!(y.len() >= width, "y row too short");

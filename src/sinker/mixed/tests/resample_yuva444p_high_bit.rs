@@ -33,14 +33,14 @@
 //! varies.
 
 use crate::{
-  ColorMatrix, PixelSink,
+  KernelMatrix, PixelSink,
   resample::{AreaResampler, FilteredResampler, ResampleError, Triangle},
   sinker::{AlphaMode, MixedSinker, MixedSinkerError},
 };
 
 const SRC: usize = 8;
 const OUT: usize = 4;
-const M: ColorMatrix = ColorMatrix::Bt709;
+const M: KernelMatrix = KernelMatrix::Bt709;
 const FR: bool = true;
 const FR_LIMITED: bool = false;
 

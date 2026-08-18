@@ -17,7 +17,7 @@
 //! active here. Oracles are built from `Vuyx`'s own direct kernels only.
 
 use crate::{
-  ColorMatrix, PixelSink,
+  KernelMatrix, PixelSink,
   frame::VuyxFrame,
   resample::{AreaResampler, ResampleError},
   sinker::{MixedSinker, MixedSinkerError},
@@ -28,7 +28,7 @@ use super::force_row_stage;
 
 const SRC: usize = 8;
 const OUT: usize = 4;
-const M: ColorMatrix = ColorMatrix::Bt601;
+const M: KernelMatrix = KernelMatrix::Bt601;
 const FR: bool = true;
 
 /// Packs logical `(V, U, Y, X)` byte planes into a `Vuyx` row (X is

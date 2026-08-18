@@ -18,7 +18,7 @@
 //! no extra native-depth clamp.
 
 use crate::{
-  ColorMatrix, PixelSink,
+  KernelMatrix, PixelSink,
   resample::{
     CatmullRom, FilterStream, FilteredResampler, Lanczos3, ResampleError, Resampler, Triangle,
   },
@@ -160,7 +160,7 @@ macro_rules! rgba_u16_filter_suite {
           .unwrap()
           .with_rgba_u16(&mut rgba_u16)
           .unwrap();
-          $walk(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+          $walk(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
         }
         rgba_u16
       }
@@ -230,7 +230,7 @@ macro_rules! rgba_u16_filter_suite {
           .unwrap()
           .with_rgb_u16(&mut rgb_u16)
           .unwrap();
-          $walk(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+          $walk(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
         }
         let drop_alpha: Vec<u16> = rgba_u16
           .chunks_exact(4)
@@ -265,7 +265,7 @@ macro_rules! rgba_u16_filter_suite {
           .unwrap()
           .with_rgba(&mut rgba)
           .unwrap();
-          $walk(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+          $walk(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
         }
         let narrowed: Vec<u8> = rgba_u16.iter().map(|&v| (v >> 8) as u8).collect();
         assert_eq!(rgba, narrowed, "u8 rgba is the >>8 narrowing of the filtered rgba_u16");
@@ -294,7 +294,7 @@ macro_rules! rgba_u16_filter_suite {
         .with_alpha_mode(AlphaMode::Premultiplied)
         .with_rgba_u16(&mut rgba_u16)
         .unwrap();
-        let err = $walk(&src, true, ColorMatrix::Bt709, &mut sink).unwrap_err();
+        let err = $walk(&src, true, KernelMatrix::Bt709, &mut sink).unwrap_err();
         assert!(
           matches!(
             err,
@@ -326,7 +326,7 @@ macro_rules! rgba_u16_filter_suite {
           .unwrap()
           .with_rgba_u16(&mut rgba_u16)
           .unwrap();
-          $walk(&src, true, ColorMatrix::Bt709, &mut sink)
+          $walk(&src, true, KernelMatrix::Bt709, &mut sink)
             .expect("a filter plan must be accepted for real-alpha packed RGBA u16");
         }
         let mut rgb_u16 = std::vec![0u16; 4 * 4 * 3];
@@ -339,7 +339,7 @@ macro_rules! rgba_u16_filter_suite {
           .unwrap()
           .with_rgb_u16(&mut rgb_u16)
           .unwrap();
-          $walk(&src, true, ColorMatrix::Bt709, &mut sink)
+          $walk(&src, true, KernelMatrix::Bt709, &mut sink)
             .expect("a filter plan must be accepted for an rgb_u16-only sink too");
         }
       }
@@ -366,7 +366,7 @@ macro_rules! rgba_u16_filter_suite {
         .unwrap();
         sink.begin_frame(8, 8).unwrap();
         let err = sink
-          .process($row::new(row3, 3, ColorMatrix::Bt709, true))
+          .process($row::new(row3, 3, KernelMatrix::Bt709, true))
           .unwrap_err();
         assert!(matches!(
           err,
@@ -397,8 +397,8 @@ macro_rules! rgba_u16_filter_suite {
           .unwrap()
           .with_rgba_u16(&mut rgba_u16)
           .unwrap();
-          $walk(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
-          $walk(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+          $walk(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+          $walk(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
         }
         assert_eq!(rgba_u16, first, "second frame must reproduce after reset");
       }

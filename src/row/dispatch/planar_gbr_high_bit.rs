@@ -30,7 +30,7 @@ use crate::row::simd128_available;
 #[cfg(target_arch = "x86_64")]
 use crate::row::{avx2_available, avx512_available, sse41_available};
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   row::{rgb_row_bytes, rgb_row_elems, rgba_row_bytes, rgba_row_elems, scalar},
 };
 
@@ -546,7 +546,7 @@ pub fn gbr_to_luma_u16_high_bit_row<const BITS: u32, const BE: bool>(
   r: &[u16],
   luma_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   _use_simd: bool,
 ) {

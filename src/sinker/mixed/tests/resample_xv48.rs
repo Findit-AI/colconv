@@ -11,7 +11,7 @@
 //! suite additionally pins LE/BE parity (scalar + SIMD).
 
 use crate::{
-  ColorMatrix, PixelSink,
+  KernelMatrix, PixelSink,
   frame::{Xv48BeFrame, Xv48Frame, Xv48LeFrame},
   resample::{AreaResampler, ResampleError},
   sinker::{MixedSinker, MixedSinkerError},
@@ -22,7 +22,7 @@ use super::{as_be_u16, as_le_u16, force_row_stage};
 
 const SRC: usize = 8;
 const OUT: usize = 4;
-const M: ColorMatrix = ColorMatrix::Bt709;
+const M: KernelMatrix = KernelMatrix::Bt709;
 const FR: bool = true;
 const SHIFT: u32 = 8; // 16-bit native → u8.
 

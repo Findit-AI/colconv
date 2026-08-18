@@ -42,7 +42,7 @@ fn uyyvyy411_luma_only_extracts_y_bytes() {
   let mut sink = MixedSinker::<Uyyvyy411>::new(16, 8)
     .with_luma(&mut luma)
     .unwrap();
-  uyyvyy411_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  uyyvyy411_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
 
   assert!(luma.iter().all(|&y| y == 42));
 }
@@ -60,7 +60,7 @@ fn uyyvyy411_luma_u16_zero_extends_y_bytes() {
   let mut sink = MixedSinker::<Uyyvyy411>::new(16, 8)
     .with_luma_u16(&mut luma)
     .unwrap();
-  uyyvyy411_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  uyyvyy411_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
 
   assert!(luma.iter().all(|&y| y == 200));
 }
@@ -78,7 +78,7 @@ fn uyyvyy411_rgb_only_converts_gray_to_gray() {
   let mut sink = MixedSinker::<Uyyvyy411>::new(16, 8)
     .with_rgb(&mut rgb)
     .unwrap();
-  uyyvyy411_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  uyyvyy411_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
 
   for px in rgb.chunks(3) {
     assert!(px[0].abs_diff(128) <= 1);
@@ -100,7 +100,7 @@ fn uyyvyy411_rgba_only_converts_gray_to_gray_with_opaque_alpha() {
   let mut sink = MixedSinker::<Uyyvyy411>::new(16, 8)
     .with_rgba(&mut rgba)
     .unwrap();
-  uyyvyy411_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  uyyvyy411_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
 
   for px in rgba.chunks(4) {
     assert!(px[0].abs_diff(128) <= 1, "R");
@@ -131,7 +131,7 @@ fn uyyvyy411_mixed_all_outputs_populated() {
     .unwrap()
     .with_hsv(&mut h, &mut s, &mut v)
     .unwrap();
-  uyyvyy411_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  uyyvyy411_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
 
   assert!(luma.iter().all(|&y| y == 200));
   for px in rgb.chunks(3) {
@@ -164,7 +164,7 @@ fn uyyvyy411_with_rgb_and_with_rgba_produce_byte_identical_rgb_bytes() {
     .unwrap()
     .with_rgba(&mut rgba)
     .unwrap();
-  uyyvyy411_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  uyyvyy411_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
 
   for i in 0..(ws * hs) {
     assert_eq!(rgba[i * 4], rgb[i * 3], "R differs at pixel {i}");
@@ -196,8 +196,8 @@ fn uyyvyy411_with_simd_false_matches_with_simd_true() {
       .with_rgb(&mut rgb_scalar)
       .unwrap()
       .with_simd(false);
-    uyyvyy411_to(&src, false, ColorMatrix::Bt709, &mut sink_simd).unwrap();
-    uyyvyy411_to(&src, false, ColorMatrix::Bt709, &mut sink_scalar).unwrap();
+    uyyvyy411_to(&src, false, KernelMatrix::Bt709, &mut sink_simd).unwrap();
+    uyyvyy411_to(&src, false, KernelMatrix::Bt709, &mut sink_scalar).unwrap();
 
     assert_eq!(rgb_simd, rgb_scalar, "Uyyvyy411 SIMD≠scalar at width {w}");
   }
@@ -211,7 +211,7 @@ fn uyyvyy411_width_mismatch_returns_err() {
     .unwrap();
   let buf = solid_uyyvyy411_frame(20, 8, 0, 0, 0);
   let src = Uyyvyy411Frame::new(&buf, 20, 8, 30);
-  let err = uyyvyy411_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap_err();
+  let err = uyyvyy411_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap_err();
   assert!(matches!(err, MixedSinkerError::DimensionMismatch(_)));
 }
 
@@ -272,7 +272,7 @@ fn uyyvyy411_rgb_scratch_alloc_failure_leaves_outputs_untouched() {
     .unwrap();
 
   super::super::arm_rgb_scratch_alloc_failure();
-  let err = uyyvyy411_to(&src, false, ColorMatrix::Bt601, &mut sink).unwrap_err();
+  let err = uyyvyy411_to(&src, false, KernelMatrix::Bt601, &mut sink).unwrap_err();
   drop(sink);
 
   assert!(

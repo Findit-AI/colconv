@@ -24,7 +24,7 @@ pub(crate) unsafe fn nv12_to_rgb_row(
   uv_half: &[u8],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   unsafe {
@@ -50,7 +50,7 @@ pub(crate) unsafe fn nv21_to_rgb_row(
   vu_half: &[u8],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   unsafe {
@@ -76,7 +76,7 @@ pub(crate) unsafe fn nv12_to_rgba_row(
   uv_half: &[u8],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   unsafe {
@@ -101,7 +101,7 @@ pub(crate) unsafe fn nv21_to_rgba_row(
   vu_half: &[u8],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   unsafe {
@@ -131,7 +131,7 @@ unsafe fn nv12_or_nv21_to_rgb_or_rgba_row_impl<const SWAP_UV: bool, const ALPHA:
   uv_or_vu_half: &[u8],
   out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert_eq!(width & 1, 0, "NV12/NV21 require even width");
@@ -300,7 +300,7 @@ pub(crate) unsafe fn nv24_to_rgb_row(
   uv: &[u8],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // SAFETY: caller obligations forwarded to the shared impl.
@@ -321,7 +321,7 @@ pub(crate) unsafe fn nv42_to_rgb_row(
   vu: &[u8],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // SAFETY: caller obligations forwarded to the shared impl.
@@ -342,7 +342,7 @@ pub(crate) unsafe fn nv24_to_rgba_row(
   uv: &[u8],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // SAFETY: caller obligations forwarded to the shared impl.
@@ -363,7 +363,7 @@ pub(crate) unsafe fn nv42_to_rgba_row(
   vu: &[u8],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // SAFETY: caller obligations forwarded to the shared impl.
@@ -389,7 +389,7 @@ unsafe fn nv24_or_nv42_to_rgb_or_rgba_row_impl<const SWAP_UV: bool, const ALPHA:
   uv_or_vu: &[u8],
   out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   let bpp: usize = if ALPHA { 4 } else { 3 };
@@ -669,7 +669,7 @@ pub(crate) unsafe fn nv12_to_hsv_row(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert_eq!(width & 1, 0, "NV12/NV16 require even width");
@@ -707,7 +707,7 @@ pub(crate) unsafe fn nv21_to_hsv_row(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert_eq!(width & 1, 0, "NV21 requires even width");
@@ -744,7 +744,7 @@ pub(crate) unsafe fn nv24_to_hsv_row(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert!(y.len() >= width, "y row too short");
@@ -780,7 +780,7 @@ pub(crate) unsafe fn nv42_to_hsv_row(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert!(y.len() >= width, "y row too short");

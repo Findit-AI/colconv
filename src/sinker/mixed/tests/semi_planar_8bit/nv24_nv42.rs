@@ -62,7 +62,7 @@ fn nv24_luma_only_copies_y_plane() {
   let mut sink = MixedSinker::<Nv24>::new(16, 8)
     .with_luma(&mut luma)
     .unwrap();
-  nv24_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  nv24_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
 
   assert!(luma.iter().all(|&y| y == 42));
 }
@@ -78,7 +78,7 @@ fn nv24_rgb_only_converts_gray_to_gray() {
 
   let mut rgb = std::vec![0u8; 16 * 8 * 3];
   let mut sink = MixedSinker::<Nv24>::new(16, 8).with_rgb(&mut rgb).unwrap();
-  nv24_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  nv24_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
 
   for px in rgb.chunks(3) {
     assert!(px[0].abs_diff(128) <= 1);
@@ -108,7 +108,7 @@ fn nv24_mixed_all_three_outputs_populated() {
     .unwrap()
     .with_hsv(&mut h, &mut s, &mut v)
     .unwrap();
-  nv24_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  nv24_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
 
   assert!(luma.iter().all(|&y| y == 200));
   for px in rgb.chunks(3) {
@@ -132,7 +132,7 @@ fn nv24_accepts_odd_width() {
 
   let mut rgb = std::vec![0u8; 17 * 8 * 3];
   let mut sink = MixedSinker::<Nv24>::new(17, 8).with_rgb(&mut rgb).unwrap();
-  nv24_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  nv24_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
 
   for px in rgb.chunks(3) {
     assert!(px[0].abs_diff(200) <= 1);
@@ -167,7 +167,7 @@ fn nv42_rgb_only_converts_gray_to_gray() {
 
   let mut rgb = std::vec![0u8; 16 * 8 * 3];
   let mut sink = MixedSinker::<Nv42>::new(16, 8).with_rgb(&mut rgb).unwrap();
-  nv42_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  nv42_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
 
   for px in rgb.chunks(3) {
     assert!(px[0].abs_diff(128) <= 1);
@@ -208,8 +208,8 @@ fn nv42_matches_nv24_mixed_sinker_with_swapped_chroma() {
   let mut s_nv42 = MixedSinker::<Nv42>::new(w, h)
     .with_rgb(&mut rgb_nv42)
     .unwrap();
-  nv24_to(&nv24_src, false, ColorMatrix::Bt709, &mut s_nv24).unwrap();
-  nv42_to(&nv42_src, false, ColorMatrix::Bt709, &mut s_nv42).unwrap();
+  nv24_to(&nv24_src, false, KernelMatrix::Bt709, &mut s_nv24).unwrap();
+  nv42_to(&nv42_src, false, KernelMatrix::Bt709, &mut s_nv42).unwrap();
 
   assert_eq!(rgb_nv24, rgb_nv42);
 }
@@ -244,8 +244,8 @@ fn nv24_with_simd_false_matches_with_simd_true() {
       .with_rgb(&mut rgb_scalar)
       .unwrap()
       .with_simd(false);
-    nv24_to(&src, false, ColorMatrix::Bt709, &mut sink_simd).unwrap();
-    nv24_to(&src, false, ColorMatrix::Bt709, &mut sink_scalar).unwrap();
+    nv24_to(&src, false, KernelMatrix::Bt709, &mut sink_simd).unwrap();
+    nv24_to(&src, false, KernelMatrix::Bt709, &mut sink_scalar).unwrap();
 
     assert_eq!(rgb_simd, rgb_scalar, "NV24 SIMD≠scalar at width {w}");
   }
@@ -277,8 +277,8 @@ fn nv42_with_simd_false_matches_with_simd_true() {
       .with_rgb(&mut rgb_scalar)
       .unwrap()
       .with_simd(false);
-    nv42_to(&src, false, ColorMatrix::Bt709, &mut sink_simd).unwrap();
-    nv42_to(&src, false, ColorMatrix::Bt709, &mut sink_scalar).unwrap();
+    nv42_to(&src, false, KernelMatrix::Bt709, &mut sink_simd).unwrap();
+    nv42_to(&src, false, KernelMatrix::Bt709, &mut sink_scalar).unwrap();
 
     assert_eq!(rgb_simd, rgb_scalar, "NV42 SIMD≠scalar at width {w}");
   }
@@ -292,7 +292,7 @@ fn nv24_width_mismatch_returns_err() {
   // mismatch in `begin_frame`.
   let (yp, uvp) = solid_nv24_frame(17, 8, 0, 0, 0);
   let src = Nv24Frame::new(&yp, &uvp, 17, 8, 17, 34);
-  let err = nv24_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap_err();
+  let err = nv24_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap_err();
   assert!(matches!(err, MixedSinkerError::DimensionMismatch(_)));
 }
 
@@ -311,7 +311,7 @@ fn nv24_rgba_only_converts_gray_to_gray_with_opaque_alpha() {
   let mut sink = MixedSinker::<Nv24>::new(16, 8)
     .with_rgba(&mut rgba)
     .unwrap();
-  nv24_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  nv24_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
 
   for px in rgba.chunks(4) {
     assert!(px[0].abs_diff(128) <= 1, "R");
@@ -346,7 +346,7 @@ fn nv24_with_rgb_and_with_rgba_produce_byte_identical_rgb_bytes() {
     .unwrap()
     .with_rgba(&mut rgba)
     .unwrap();
-  nv24_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  nv24_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
 
   for i in 0..(ws * hs) {
     assert_eq!(rgba[i * 4], rgb[i * 3], "R differs at pixel {i}");
@@ -386,10 +386,10 @@ fn nv24_rgba_simd_matches_scalar_with_random_yuv() {
   let src = Nv24Frame::new(&yp, &uvp, w as u32, h as u32, w as u32, (2 * w) as u32);
 
   for &matrix in &[
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::YCgCo,
   ] {
     for &full_range in &[true, false] {
       let mut rgba_simd = std::vec![0u8; w * h * 4];
@@ -427,7 +427,7 @@ fn nv42_rgba_only_converts_gray_to_gray_with_opaque_alpha() {
   let mut sink = MixedSinker::<Nv42>::new(16, 8)
     .with_rgba(&mut rgba)
     .unwrap();
-  nv42_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  nv42_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
 
   for px in rgba.chunks(4) {
     assert!(px[0].abs_diff(128) <= 1);
@@ -457,7 +457,7 @@ fn nv42_with_rgb_and_with_rgba_produce_byte_identical_rgb_bytes() {
     .unwrap()
     .with_rgba(&mut rgba)
     .unwrap();
-  nv42_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  nv42_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
 
   for i in 0..(ws * hs) {
     assert_eq!(rgba[i * 4], rgb[i * 3]);
@@ -495,10 +495,10 @@ fn nv42_rgba_simd_matches_scalar_with_random_yuv() {
   let src = Nv42Frame::new(&yp, &vup, w as u32, h as u32, w as u32, (2 * w) as u32);
 
   for &matrix in &[
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::YCgCo,
   ] {
     for &full_range in &[true, false] {
       let mut rgba_simd = std::vec![0u8; w * h * 4];
@@ -576,7 +576,7 @@ fn strategy_a_rgb_and_rgba_byte_identical_for_all_wired_families() {
       .unwrap()
       .with_rgba(&mut rgba)
       .unwrap();
-    yuv420p_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    yuv420p_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
     assert_match(&rgb, &rgba, "Yuv420p");
   }
 
@@ -590,7 +590,7 @@ fn strategy_a_rgb_and_rgba_byte_identical_for_all_wired_families() {
       .unwrap()
       .with_rgba(&mut rgba)
       .unwrap();
-    yuv422p_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    yuv422p_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
     assert_match(&rgb, &rgba, "Yuv422p");
   }
 
@@ -604,7 +604,7 @@ fn strategy_a_rgb_and_rgba_byte_identical_for_all_wired_families() {
       .unwrap()
       .with_rgba(&mut rgba)
       .unwrap();
-    yuv444p_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    yuv444p_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
     assert_match(&rgb, &rgba, "Yuv444p");
   }
 
@@ -618,7 +618,7 @@ fn strategy_a_rgb_and_rgba_byte_identical_for_all_wired_families() {
       .unwrap()
       .with_rgba(&mut rgba)
       .unwrap();
-    nv12_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    nv12_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
     assert_match(&rgb, &rgba, "Nv12");
   }
 
@@ -632,7 +632,7 @@ fn strategy_a_rgb_and_rgba_byte_identical_for_all_wired_families() {
       .unwrap()
       .with_rgba(&mut rgba)
       .unwrap();
-    nv21_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    nv21_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
     assert_match(&rgb, &rgba, "Nv21");
   }
 
@@ -646,7 +646,7 @@ fn strategy_a_rgb_and_rgba_byte_identical_for_all_wired_families() {
       .unwrap()
       .with_rgba(&mut rgba)
       .unwrap();
-    nv16_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    nv16_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
     assert_match(&rgb, &rgba, "Nv16");
   }
 
@@ -660,7 +660,7 @@ fn strategy_a_rgb_and_rgba_byte_identical_for_all_wired_families() {
       .unwrap()
       .with_rgba(&mut rgba)
       .unwrap();
-    nv24_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    nv24_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
     assert_match(&rgb, &rgba, "Nv24");
   }
 
@@ -674,7 +674,7 @@ fn strategy_a_rgb_and_rgba_byte_identical_for_all_wired_families() {
       .unwrap()
       .with_rgba(&mut rgba)
       .unwrap();
-    nv42_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    nv42_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
     assert_match(&rgb, &rgba, "Nv42");
   }
 
@@ -688,7 +688,7 @@ fn strategy_a_rgb_and_rgba_byte_identical_for_all_wired_families() {
       .unwrap()
       .with_rgba(&mut rgba)
       .unwrap();
-    yuv440p_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    yuv440p_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
     assert_match(&rgb, &rgba, "Yuv440p");
   }
 
@@ -702,7 +702,7 @@ fn strategy_a_rgb_and_rgba_byte_identical_for_all_wired_families() {
       .unwrap()
       .with_rgba(&mut rgba)
       .unwrap();
-    yuyv422_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    yuyv422_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
     assert_match(&rgb, &rgba, "Yuyv422");
   }
 
@@ -716,7 +716,7 @@ fn strategy_a_rgb_and_rgba_byte_identical_for_all_wired_families() {
       .unwrap()
       .with_rgba(&mut rgba)
       .unwrap();
-    uyvy422_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    uyvy422_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
     assert_match(&rgb, &rgba, "Uyvy422");
   }
 
@@ -730,7 +730,7 @@ fn strategy_a_rgb_and_rgba_byte_identical_for_all_wired_families() {
       .unwrap()
       .with_rgba(&mut rgba)
       .unwrap();
-    yvyu422_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    yvyu422_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
     assert_match(&rgb, &rgba, "Yvyu422");
   }
 
@@ -746,7 +746,7 @@ fn strategy_a_rgb_and_rgba_byte_identical_for_all_wired_families() {
       .unwrap()
       .with_rgba(&mut rgba)
       .unwrap();
-    v210_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    v210_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
     assert_match(&rgb, &rgba, "V210");
   }
 
@@ -760,7 +760,7 @@ fn strategy_a_rgb_and_rgba_byte_identical_for_all_wired_families() {
       .unwrap()
       .with_rgba(&mut rgba)
       .unwrap();
-    y210_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    y210_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
     assert_match(&rgb, &rgba, "Y210");
   }
 
@@ -774,7 +774,7 @@ fn strategy_a_rgb_and_rgba_byte_identical_for_all_wired_families() {
       .unwrap()
       .with_rgba(&mut rgba)
       .unwrap();
-    y212_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    y212_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
     assert_match(&rgb, &rgba, "Y212");
   }
 
@@ -788,7 +788,7 @@ fn strategy_a_rgb_and_rgba_byte_identical_for_all_wired_families() {
       .unwrap()
       .with_rgba(&mut rgba)
       .unwrap();
-    y216_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    y216_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
     assert_match(&rgb, &rgba, "Y216");
   }
 
@@ -804,7 +804,7 @@ fn strategy_a_rgb_and_rgba_byte_identical_for_all_wired_families() {
       .unwrap()
       .with_rgba(&mut rgba)
       .unwrap();
-    v410_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    v410_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
     assert_match(&rgb, &rgba, "V410");
   }
 
@@ -821,7 +821,7 @@ fn strategy_a_rgb_and_rgba_byte_identical_for_all_wired_families() {
       .unwrap()
       .with_rgba(&mut rgba)
       .unwrap();
-    v30x_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    v30x_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
     assert_match(&rgb, &rgba, "V30X");
   }
 
@@ -838,7 +838,7 @@ fn strategy_a_rgb_and_rgba_byte_identical_for_all_wired_families() {
       .unwrap()
       .with_rgba(&mut rgba)
       .unwrap();
-    xv36_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    xv36_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
     assert_match(&rgb, &rgba, "Xv36");
   }
 
@@ -856,7 +856,7 @@ fn strategy_a_rgb_and_rgba_byte_identical_for_all_wired_families() {
       .unwrap()
       .with_rgba(&mut rgba)
       .unwrap();
-    vuyx_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    vuyx_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
     assert_match(&rgb, &rgba, "Vuyx");
   }
 }
@@ -910,7 +910,7 @@ fn strategy_a_rgb_u16_and_rgba_u16_byte_identical_for_all_wired_families() {
       .unwrap()
       .with_rgba_u16(&mut rgba)
       .unwrap();
-    v210_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    v210_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
     assert_match_u16(&rgb, &rgba, "V210", 1023);
   }
 
@@ -924,7 +924,7 @@ fn strategy_a_rgb_u16_and_rgba_u16_byte_identical_for_all_wired_families() {
       .unwrap()
       .with_rgba_u16(&mut rgba)
       .unwrap();
-    y210_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    y210_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
     assert_match_u16(&rgb, &rgba, "Y210", 1023);
   }
 
@@ -938,7 +938,7 @@ fn strategy_a_rgb_u16_and_rgba_u16_byte_identical_for_all_wired_families() {
       .unwrap()
       .with_rgba_u16(&mut rgba)
       .unwrap();
-    y212_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    y212_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
     assert_match_u16(&rgb, &rgba, "Y212", 4095);
   }
 
@@ -952,7 +952,7 @@ fn strategy_a_rgb_u16_and_rgba_u16_byte_identical_for_all_wired_families() {
       .unwrap()
       .with_rgba_u16(&mut rgba)
       .unwrap();
-    y216_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    y216_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
     assert_match_u16(&rgb, &rgba, "Y216", 0xFFFF);
   }
 
@@ -967,7 +967,7 @@ fn strategy_a_rgb_u16_and_rgba_u16_byte_identical_for_all_wired_families() {
       .unwrap()
       .with_rgba_u16(&mut rgba)
       .unwrap();
-    v410_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    v410_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
     assert_match_u16(&rgb, &rgba, "V410", 0x3FF);
   }
 
@@ -982,7 +982,7 @@ fn strategy_a_rgb_u16_and_rgba_u16_byte_identical_for_all_wired_families() {
       .unwrap()
       .with_rgba_u16(&mut rgba)
       .unwrap();
-    v30x_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    v30x_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
     assert_match_u16(&rgb, &rgba, "V30X", 0x3FF);
   }
 
@@ -997,7 +997,7 @@ fn strategy_a_rgb_u16_and_rgba_u16_byte_identical_for_all_wired_families() {
       .unwrap()
       .with_rgba_u16(&mut rgba)
       .unwrap();
-    xv36_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    xv36_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
     assert_match_u16(&rgb, &rgba, "Xv36", 0x0FFF);
   }
 }
@@ -1033,7 +1033,7 @@ fn nv24_with_luma_u16_extracts_y_zero_extended() {
   let mut sink = MixedSinker::<Nv24>::new(width, height)
     .with_luma_u16(&mut luma_out)
     .unwrap();
-  nv24_to(&src, false, ColorMatrix::Bt709, &mut sink).unwrap();
+  nv24_to(&src, false, KernelMatrix::Bt709, &mut sink).unwrap();
 
   let expected: std::vec::Vec<u16> = yp.iter().map(|&y| y as u16).collect();
   assert_eq!(luma_out, expected, "Nv24 luma_u16 mismatch");
@@ -1081,7 +1081,7 @@ fn nv42_with_luma_u16_extracts_y_zero_extended() {
   let mut sink = MixedSinker::<Nv42>::new(width, height)
     .with_luma_u16(&mut luma_out)
     .unwrap();
-  nv42_to(&src, false, ColorMatrix::Bt709, &mut sink).unwrap();
+  nv42_to(&src, false, KernelMatrix::Bt709, &mut sink).unwrap();
 
   let expected: std::vec::Vec<u16> = yp.iter().map(|&y| y as u16).collect();
   assert_eq!(luma_out, expected, "Nv42 luma_u16 mismatch");
@@ -1138,7 +1138,7 @@ fn nv24_rgb_scratch_alloc_failure_leaves_outputs_untouched() {
     .unwrap();
 
   super::super::super::arm_rgb_scratch_alloc_failure();
-  let err = nv24_to(&src, false, ColorMatrix::Bt601, &mut sink).unwrap_err();
+  let err = nv24_to(&src, false, KernelMatrix::Bt601, &mut sink).unwrap_err();
   drop(sink);
 
   assert!(
@@ -1184,7 +1184,7 @@ fn nv42_rgb_scratch_alloc_failure_leaves_outputs_untouched() {
     .unwrap();
 
   super::super::super::arm_rgb_scratch_alloc_failure();
-  let err = nv42_to(&src, false, ColorMatrix::Bt601, &mut sink).unwrap_err();
+  let err = nv42_to(&src, false, KernelMatrix::Bt601, &mut sink).unwrap_err();
   drop(sink);
 
   assert!(

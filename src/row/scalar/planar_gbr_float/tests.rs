@@ -1,7 +1,7 @@
 //! Tests for `crate::row::scalar::planar_gbr_float`.
 
 use super::*;
-use crate::ColorMatrix;
+use crate::KernelMatrix;
 
 // ---- helpers: host-independent f32 LE / BE byte-storage encoders -----------
 
@@ -147,7 +147,7 @@ fn ref_gbrpf32_to_luma(
   b: &[f32],
   r: &[f32],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) -> std::vec::Vec<u8> {
   let mut luma = std::vec![0u8; width];
@@ -175,7 +175,7 @@ fn ref_gbrpf32_to_luma_u16(
   b: &[f32],
   r: &[f32],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) -> std::vec::Vec<u16> {
   let mut luma = std::vec![0u16; width];
@@ -682,7 +682,7 @@ fn gbrpf32_to_luma_zero_gives_zero() {
   let b = [0.0f32];
   let r = [0.0f32];
   let mut out = [0xFFu8; 1];
-  gbrpf32_to_luma_row::<false>(&g, &b, &r, &mut out, 1, ColorMatrix::Bt709, true);
+  gbrpf32_to_luma_row::<false>(&g, &b, &r, &mut out, 1, KernelMatrix::Bt709, true);
   assert_eq!(out[0], 0);
 }
 
@@ -692,7 +692,7 @@ fn gbrpf32_to_luma_max_gives_255() {
   let b = as_le_f32(&[1.0f32]);
   let r = as_le_f32(&[1.0f32]);
   let mut out = [0u8; 1];
-  gbrpf32_to_luma_row::<false>(&g, &b, &r, &mut out, 1, ColorMatrix::Bt709, true);
+  gbrpf32_to_luma_row::<false>(&g, &b, &r, &mut out, 1, KernelMatrix::Bt709, true);
   assert_eq!(out[0], 255);
 }
 
@@ -715,7 +715,7 @@ fn gbrpf32_to_luma_be_parity() {
     &r_le,
     &mut le_out,
     4,
-    ColorMatrix::Bt709,
+    KernelMatrix::Bt709,
     true,
   );
   gbrpf32_to_luma_row::<true>(
@@ -724,7 +724,7 @@ fn gbrpf32_to_luma_be_parity() {
     &r_be,
     &mut be_out,
     4,
-    ColorMatrix::Bt709,
+    KernelMatrix::Bt709,
     true,
   );
   let expected = ref_gbrpf32_to_luma(
@@ -732,7 +732,7 @@ fn gbrpf32_to_luma_be_parity() {
     &b_intended,
     &r_intended,
     4,
-    ColorMatrix::Bt709,
+    KernelMatrix::Bt709,
     true,
   );
   assert_eq!(le_out, expected, "LE path must match scalar reference");
@@ -748,7 +748,7 @@ fn gbrpf32_to_luma_u16_zero_gives_zero() {
   let b = [0.0f32];
   let r = [0.0f32];
   let mut out = [0xFFFFu16; 1];
-  gbrpf32_to_luma_u16_row::<false>(&g, &b, &r, &mut out, 1, ColorMatrix::Bt709, true);
+  gbrpf32_to_luma_u16_row::<false>(&g, &b, &r, &mut out, 1, KernelMatrix::Bt709, true);
   assert_eq!(out[0], 0);
 }
 
@@ -758,7 +758,7 @@ fn gbrpf32_to_luma_u16_max_gives_255_zero_extended() {
   let b = as_le_f32(&[1.0f32]);
   let r = as_le_f32(&[1.0f32]);
   let mut out = [0u16; 1];
-  gbrpf32_to_luma_u16_row::<false>(&g, &b, &r, &mut out, 1, ColorMatrix::Bt709, true);
+  gbrpf32_to_luma_u16_row::<false>(&g, &b, &r, &mut out, 1, KernelMatrix::Bt709, true);
   assert_eq!(out[0], 255, "luma_u16 is zero-extended u8 luma");
 }
 
@@ -781,7 +781,7 @@ fn gbrpf32_to_luma_u16_be_parity() {
     &r_le,
     &mut le_out,
     4,
-    ColorMatrix::Bt709,
+    KernelMatrix::Bt709,
     true,
   );
   gbrpf32_to_luma_u16_row::<true>(
@@ -790,7 +790,7 @@ fn gbrpf32_to_luma_u16_be_parity() {
     &r_be,
     &mut be_out,
     4,
-    ColorMatrix::Bt709,
+    KernelMatrix::Bt709,
     true,
   );
   let expected = ref_gbrpf32_to_luma_u16(
@@ -798,7 +798,7 @@ fn gbrpf32_to_luma_u16_be_parity() {
     &b_intended,
     &r_intended,
     4,
-    ColorMatrix::Bt709,
+    KernelMatrix::Bt709,
     true,
   );
   assert_eq!(le_out, expected, "LE path must match scalar reference");

@@ -55,7 +55,7 @@ fn gbrap32_channel_reorder_u8() {
   let mut sink = MixedSinker::<crate::source::Gbrap32>::new(w, h)
     .with_rgb(&mut out)
     .unwrap();
-  crate::source::gbrap32_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  crate::source::gbrap32_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
   for i in 0..w * h {
     assert_eq!(out[i * 3], 200, "R[{i}]");
     assert_eq!(out[i * 3 + 1], 100, "G[{i}]");
@@ -81,7 +81,7 @@ fn gbrap32_all_max_saturates_u8_and_u16() {
     .unwrap()
     .with_rgba_u16(&mut u16out)
     .unwrap();
-  crate::source::gbrap32_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  crate::source::gbrap32_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
   assert!(u8out.iter().all(|&v| v == 0xFF), "u8 must saturate to 0xFF");
   assert!(
     u16out.iter().all(|&v| v == 0xFFFF),
@@ -113,7 +113,7 @@ fn gbrap32_narrow_drops_low_bits() {
     .unwrap()
     .with_rgba_u16(&mut u16out)
     .unwrap();
-  crate::source::gbrap32_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  crate::source::gbrap32_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
   // u8: high byte (>> 24).
   assert_eq!(u8out[0], 0xCA, "R u8 = R>>24");
   assert_eq!(u8out[1], 0x12, "G u8 = G>>24");
@@ -153,7 +153,7 @@ fn gbrap32_strategy_a_plus_u8_matches_standalone() {
   let mut sink_ref = MixedSinker::<crate::source::Gbrap32>::new(w, h)
     .with_rgba(&mut rgba_ref)
     .unwrap();
-  crate::source::gbrap32_to(&src, false, ColorMatrix::Bt709, &mut sink_ref).unwrap();
+  crate::source::gbrap32_to(&src, false, KernelMatrix::Bt709, &mut sink_ref).unwrap();
 
   let src2 = gbrap32_frame(&g, &b, &r, &a, w as u32, h as u32);
   let mut rgb_combo = std::vec![0u8; n * 3];
@@ -163,7 +163,7 @@ fn gbrap32_strategy_a_plus_u8_matches_standalone() {
     .unwrap()
     .with_rgba(&mut rgba_combo)
     .unwrap();
-  crate::source::gbrap32_to(&src2, false, ColorMatrix::Bt709, &mut sink_combo).unwrap();
+  crate::source::gbrap32_to(&src2, false, KernelMatrix::Bt709, &mut sink_combo).unwrap();
 
   assert_eq!(rgba_ref, rgba_combo, "Strategy A+ u8 RGBA mismatch");
 }
@@ -192,7 +192,7 @@ fn gbrap32_strategy_a_plus_u16_matches_standalone() {
   let mut sink_ref = MixedSinker::<crate::source::Gbrap32>::new(w, h)
     .with_rgba_u16(&mut ref_u16)
     .unwrap();
-  crate::source::gbrap32_to(&src, true, ColorMatrix::Bt709, &mut sink_ref).unwrap();
+  crate::source::gbrap32_to(&src, true, KernelMatrix::Bt709, &mut sink_ref).unwrap();
 
   let src2 = gbrap32_frame(&g, &b, &r, &a, w as u32, h as u32);
   let mut rgb_u16 = std::vec![0u16; n * 3];
@@ -202,7 +202,7 @@ fn gbrap32_strategy_a_plus_u16_matches_standalone() {
     .unwrap()
     .with_rgba_u16(&mut combo_u16)
     .unwrap();
-  crate::source::gbrap32_to(&src2, true, ColorMatrix::Bt709, &mut sink_combo).unwrap();
+  crate::source::gbrap32_to(&src2, true, KernelMatrix::Bt709, &mut sink_combo).unwrap();
 
   assert_eq!(ref_u16, combo_u16, "Strategy A+ u16 RGBA mismatch");
 }
@@ -245,7 +245,7 @@ macro_rules! gbrap32_simd_matches_scalar {
           .unwrap()
           .with_luma_u16(&mut luma_u16_simd)
           .unwrap();
-        crate::source::gbrap32_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+        crate::source::gbrap32_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
       }
 
       let mut rgb_scal = std::vec![0u8; n * 3];
@@ -266,7 +266,7 @@ macro_rules! gbrap32_simd_matches_scalar {
           .unwrap()
           .with_luma_u16(&mut luma_u16_scal)
           .unwrap();
-        crate::source::gbrap32_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+        crate::source::gbrap32_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
       }
 
       assert_eq!(rgb_simd, rgb_scal, "rgb SIMD≠scalar w={}", $w);
@@ -321,7 +321,7 @@ fn gbrap32_le_be_roundtrip() {
       .with_simd(use_simd)
       .with_rgba_u16(&mut out_le)
       .unwrap();
-    crate::source::gbrap32_to(&frame_le, true, ColorMatrix::Bt709, &mut sink_le).unwrap();
+    crate::source::gbrap32_to(&frame_le, true, KernelMatrix::Bt709, &mut sink_le).unwrap();
 
     let frame_be = crate::frame::Gbrap32BeFrame::try_new(
       &g_be, &g_be, &g_be, &g_be, w as u32, h as u32, stride, stride, stride, stride,
@@ -332,7 +332,7 @@ fn gbrap32_le_be_roundtrip() {
       .with_simd(use_simd)
       .with_rgba_u16(&mut out_be)
       .unwrap();
-    crate::source::gbrap32_to_endian::<_, true>(&frame_be, true, ColorMatrix::Bt709, &mut sink_be)
+    crate::source::gbrap32_to_endian::<_, true>(&frame_be, true, KernelMatrix::Bt709, &mut sink_be)
       .unwrap();
 
     assert_eq!(
@@ -363,7 +363,7 @@ fn gbrap32_luma_u16_neutral_grey() {
   let mut sink = MixedSinker::<crate::source::Gbrap32>::new(w, h)
     .with_luma_u16(&mut luma)
     .unwrap();
-  crate::source::gbrap32_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  crate::source::gbrap32_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
   for &y in &luma {
     assert!(
       (y as i32 - 0x6789).abs() <= 1,
@@ -413,7 +413,7 @@ fn gbrap32_rgb_scratch_alloc_failure_leaves_outputs_untouched() {
     .unwrap();
 
   super::super::arm_rgb_scratch_alloc_failure();
-  let err = crate::source::gbrap32_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap_err();
+  let err = crate::source::gbrap32_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap_err();
   drop(sink);
 
   assert!(

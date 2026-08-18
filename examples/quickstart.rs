@@ -28,7 +28,7 @@ fn main() -> Result<(), pixon::Error> {
 
   let mut rgb = vec![0u8; w * h * 3];
   Convert::from(&frame) // dimensions + format come from the frame
-    .spec(spec) //          colorimetry comes from the spec
+    .spec(spec.clone()) //          colorimetry comes from the spec
     .rgb(&mut rgb) //       attach any subset of outputs
     .run()?; //             the only fallible call
 

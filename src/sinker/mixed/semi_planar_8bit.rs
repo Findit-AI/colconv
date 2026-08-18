@@ -42,7 +42,7 @@ use super::{
 };
 #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   resample::{
     AveragingDomain, InsertionContext, InsertionPoint, PlanGeometry, ResampleError, ResamplePlan,
     select_insertion_point,
@@ -137,7 +137,7 @@ fn semi_planar_process_native(
   chroma_h_phase: f64,
   chroma_v_phase: f64,
   chroma_v_top: bool,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   idx: usize,
   w: usize,
@@ -327,7 +327,7 @@ fn semi_planar_process_native_non420(
   chroma_w: usize,
   swap_uv: bool,
   chroma_h_phase: f64,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   idx: usize,
   w: usize,
@@ -585,7 +585,7 @@ fn nv_yuv444_identity_color_row(
   one_plane_end: usize,
   w: usize,
   h: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) -> Result<(), MixedSinkerError> {
@@ -788,7 +788,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv12, R> {
     // only consumer (`chroma_420_center_sited_h` + the 4:4:4 kernels need
     // `yuv-planar`); a semi-planar-only build keeps the default decode.
     #[cfg(feature = "yuv-planar")]
-    let chroma_location = self.chroma_location;
+    let chroma_location = self.chroma_location.clone();
 
     // Defense-in-depth shape check (see Yuv420p impl above). An NV12
     // UV row is `width` bytes of interleaved U / V payload — same
@@ -910,9 +910,9 @@ impl<R> PixelSink for MixedSinker<'_, Nv12, R> {
       // vertical box blend) and decode 4:4:4. `convert_rgb` above is the co-sited
       // fused decode.
       #[cfg(feature = "yuv-planar")]
-      let center_sited = chroma_420_center_sited_h(chroma_location);
+      let center_sited = chroma_420_center_sited_h(&chroma_location);
       #[cfg(feature = "yuv-planar")]
-      let bottom_v = chroma_420_bottom_sited_v(chroma_location);
+      let bottom_v = chroma_420_bottom_sited_v(&chroma_location);
       // RFC #238 Top (`v = 0`, FORWARD fold). `Top` shares `Center`'s centered
       // horizontal phase, `TopLeft` the co-sited one; both fold the forward
       // vertical triangle. Disjoint from `bottom_v`. The native tier folds it into
@@ -921,7 +921,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv12, R> {
       // FORWARD one-row delay (mirror of `Bottom`'s backward `chroma_prev`
       // lookback).
       #[cfg(feature = "yuv-planar")]
-      let top_v = chroma_420_top_sited_v(chroma_location);
+      let top_v = chroma_420_top_sited_v(&chroma_location);
       #[cfg(feature = "yuv-planar")]
       let chroma_h_phase = if center_sited {
         YUV422P_CENTERED_H_PHASE
@@ -1816,9 +1816,9 @@ impl<R> PixelSink for MixedSinker<'_, Nv12, R> {
     // at the phase-0.5 position; the default / co-sited path keeps the
     // byte-identical fused nearest-neighbor decode.
     #[cfg(feature = "yuv-planar")]
-    let center_sited = chroma_420_center_sited_h(chroma_location);
+    let center_sited = chroma_420_center_sited_h(&chroma_location);
     #[cfg(feature = "yuv-planar")]
-    let bottom_v = chroma_420_bottom_sited_v(chroma_location);
+    let bottom_v = chroma_420_bottom_sited_v(&chroma_location);
     // Top-sited vertical phase (RFC #238): `Top` / `TopLeft` (`v = 0`) box-blend
     // the ODD output row's chroma with the NEXT chroma row — which a
     // row-at-a-time stream has not been fed when the odd row arrives — so the
@@ -1827,7 +1827,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv12, R> {
     // row supplies the next chroma. Handled in its own branch below; the luma
     // plane is siting-independent and written in order regardless.
     #[cfg(feature = "yuv-planar")]
-    let top_v = chroma_420_top_sited_v(chroma_location);
+    let top_v = chroma_420_top_sited_v(&chroma_location);
 
     // Per-frame chroma-siting freeze (RFC #238, mirroring the resample-path guard
     // above): the first output-bearing row pins the effective 4:2:0 phase — the
@@ -2402,7 +2402,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv16, R> {
     // only consumer (`chroma_422_center_sited_h` + the 4:4:4 kernels need
     // `yuv-planar`); a semi-planar-only build keeps the default decode.
     #[cfg(feature = "yuv-planar")]
-    let chroma_location = self.chroma_location;
+    let chroma_location = self.chroma_location.clone();
 
     let Self {
       rgb,
@@ -2470,7 +2470,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv16, R> {
       // reconstruct full-width chroma (de-interleave + phase-0.5 upsample) and
       // decode 4:4:4. `convert_rgb` above is the co-sited fused decode.
       #[cfg(feature = "yuv-planar")]
-      let center_sited = chroma_422_center_sited_h(chroma_location);
+      let center_sited = chroma_422_center_sited_h(&chroma_location);
       #[cfg(feature = "yuv-planar")]
       let chroma_h_phase = if center_sited {
         YUV422P_CENTERED_H_PHASE
@@ -2854,7 +2854,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv16, R> {
     // the phase-0.5 position; the default / co-sited path keeps the byte-identical
     // fused nearest-neighbor decode.
     #[cfg(feature = "yuv-planar")]
-    let center_sited = chroma_422_center_sited_h(chroma_location);
+    let center_sited = chroma_422_center_sited_h(&chroma_location);
 
     // Per-frame chroma-siting freeze (RFC #238, mirroring the resample-path guard
     // above): the first output-bearing row pins the phase; a later row whose siting
@@ -3237,7 +3237,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv21, R> {
     // Chroma siting (#302) — see the Nv12 impl. `Copy`; read before the
     // split-borrow, gated like its `yuv-planar` consumer.
     #[cfg(feature = "yuv-planar")]
-    let chroma_location = self.chroma_location;
+    let chroma_location = self.chroma_location.clone();
 
     // Defense in depth: same shape check as the Nv12 impl. A VU row
     // has `width` bytes of interleaved V / U payload — same length
@@ -3352,16 +3352,16 @@ impl<R> PixelSink for MixedSinker<'_, Nv21, R> {
       // full-width chroma (de-interleave + phase-0.5 upsample) and decode 4:4:4.
       // `convert_rgb` above is the co-sited fused decode.
       #[cfg(feature = "yuv-planar")]
-      let center_sited = chroma_420_center_sited_h(chroma_location);
+      let center_sited = chroma_420_center_sited_h(&chroma_location);
       #[cfg(feature = "yuv-planar")]
-      let bottom_v = chroma_420_bottom_sited_v(chroma_location);
+      let bottom_v = chroma_420_bottom_sited_v(&chroma_location);
       // RFC #238 Top (`v = 0`, FORWARD fold). `Top` shares `Center`'s centered
       // horizontal phase, `TopLeft` the co-sited one; both fold the forward
       // vertical triangle. The native tier folds it into `area_chroma_420`'s
       // vertical weights via `chroma_v_top`; the filter and row-stage tiers
       // reconstruct each row's chroma through a FORWARD one-row delay.
       #[cfg(feature = "yuv-planar")]
-      let top_v = chroma_420_top_sited_v(chroma_location);
+      let top_v = chroma_420_top_sited_v(&chroma_location);
       #[cfg(feature = "yuv-planar")]
       let chroma_h_phase = if center_sited {
         YUV422P_CENTERED_H_PHASE
@@ -4239,9 +4239,9 @@ impl<R> PixelSink for MixedSinker<'_, Nv21, R> {
     // Chroma siting (#302) — the centered horizontal sitings reconstruct
     // chroma at phase-0.5; the default / co-sited path stays byte-identical.
     #[cfg(feature = "yuv-planar")]
-    let center_sited = chroma_420_center_sited_h(chroma_location);
+    let center_sited = chroma_420_center_sited_h(&chroma_location);
     #[cfg(feature = "yuv-planar")]
-    let bottom_v = chroma_420_bottom_sited_v(chroma_location);
+    let bottom_v = chroma_420_bottom_sited_v(&chroma_location);
     // Top-sited vertical phase (RFC #238): `Top` / `TopLeft` (`v = 0`) box-blend
     // the ODD output row's chroma with the NEXT chroma row — which a
     // row-at-a-time stream has not been fed when the odd row arrives — so the
@@ -4250,7 +4250,7 @@ impl<R> PixelSink for MixedSinker<'_, Nv21, R> {
     // row supplies the next chroma. Handled in its own branch below; the luma
     // plane is siting-independent and written in order regardless.
     #[cfg(feature = "yuv-planar")]
-    let top_v = chroma_420_top_sited_v(chroma_location);
+    let top_v = chroma_420_top_sited_v(&chroma_location);
 
     // Per-frame chroma-siting freeze (RFC #238, mirroring the resample-path guard
     // above): the first output-bearing row pins the effective 4:2:0 phase — the

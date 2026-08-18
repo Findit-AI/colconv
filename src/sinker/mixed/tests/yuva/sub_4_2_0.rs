@@ -42,7 +42,7 @@ fn yuva420p_rgba_u8_with_source_alpha_passes_through() {
   let mut sink = MixedSinker::<Yuva420p>::new(16, 8)
     .with_rgba(&mut rgba)
     .unwrap();
-  yuva420p_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuva420p_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
 
   for px in rgba.chunks(4) {
     assert!(px[0].abs_diff(128) <= 1, "got {px:?}");
@@ -65,7 +65,7 @@ fn yuva420p_rgba_u8_fully_opaque_alpha_yields_0xff() {
   let mut sink = MixedSinker::<Yuva420p>::new(16, 8)
     .with_rgba(&mut rgba)
     .unwrap();
-  yuva420p_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuva420p_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
 
   for px in rgba.chunks(4) {
     assert_eq!(px[3], 0xFF);
@@ -85,7 +85,7 @@ fn yuva420p_rgba_u8_zero_alpha_yields_0() {
   let mut sink = MixedSinker::<Yuva420p>::new(16, 8)
     .with_rgba(&mut rgba)
     .unwrap();
-  yuva420p_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuva420p_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
 
   for px in rgba.chunks(4) {
     assert_eq!(px[3], 0);
@@ -120,13 +120,13 @@ fn yuva420p_with_rgb_alpha_drop_matches_yuv420p() {
   let mut s_yuv = MixedSinker::<Yuv420p>::new(16, 8)
     .with_rgb(&mut rgb_yuv)
     .unwrap();
-  yuv420p_to(&yuv, true, ColorMatrix::Bt709, &mut s_yuv).unwrap();
+  yuv420p_to(&yuv, true, KernelMatrix::Bt709, &mut s_yuv).unwrap();
 
   let mut rgb_yuva = std::vec![0u8; 16 * 8 * 3];
   let mut s_yuva = MixedSinker::<Yuva420p>::new(16, 8)
     .with_rgb(&mut rgb_yuva)
     .unwrap();
-  yuva420p_to(&yuva, true, ColorMatrix::Bt709, &mut s_yuva).unwrap();
+  yuva420p_to(&yuva, true, KernelMatrix::Bt709, &mut s_yuva).unwrap();
 
   assert_eq!(rgb_yuv, rgb_yuva);
 }
@@ -149,7 +149,7 @@ fn yuva420p_with_rgb_and_with_rgba_combine() {
     .unwrap()
     .with_rgba(&mut rgba)
     .unwrap();
-  yuva420p_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  yuva420p_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
 
   for (rgb_px, rgba_px) in rgb.chunks(3).zip(rgba.chunks(4)) {
     assert_eq!(rgb_px[0], rgba_px[0]);
@@ -195,7 +195,7 @@ fn yuva420p9_rgba_u8_with_source_alpha_passes_through() {
   let mut sink = MixedSinker::<Yuva420p9>::new(16, 8)
     .with_rgba(&mut rgba)
     .unwrap();
-  yuva420p9_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuva420p9_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
 
   for px in rgba.chunks(4) {
     assert!(px[0].abs_diff(128) <= 1, "got {px:?}");
@@ -216,7 +216,7 @@ fn yuva420p9_rgba_u16_native_depth() {
   let mut sink = MixedSinker::<Yuva420p9>::new(16, 8)
     .with_rgba_u16(&mut rgba)
     .unwrap();
-  yuva420p9_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuva420p9_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
 
   for px in rgba.chunks(4) {
     assert_eq!(px[3], 128, "alpha at native depth");
@@ -236,7 +236,7 @@ fn yuva420p9_rgba_fully_opaque_max() {
   let mut s_u8 = MixedSinker::<Yuva420p9>::new(16, 8)
     .with_rgba(&mut rgba_u8)
     .unwrap();
-  yuva420p9_to(&src, true, ColorMatrix::Bt601, &mut s_u8).unwrap();
+  yuva420p9_to(&src, true, KernelMatrix::Bt601, &mut s_u8).unwrap();
   for px in rgba_u8.chunks(4) {
     assert_eq!(px[3], 0xFF, "511 >> 1 = 255");
   }
@@ -245,7 +245,7 @@ fn yuva420p9_rgba_fully_opaque_max() {
   let mut s_u16 = MixedSinker::<Yuva420p9>::new(16, 8)
     .with_rgba_u16(&mut rgba_u16)
     .unwrap();
-  yuva420p9_to(&src, true, ColorMatrix::Bt601, &mut s_u16).unwrap();
+  yuva420p9_to(&src, true, KernelMatrix::Bt601, &mut s_u16).unwrap();
   for px in rgba_u16.chunks(4) {
     assert_eq!(px[3], 511);
   }
@@ -264,7 +264,7 @@ fn yuva420p9_rgba_zero_alpha() {
   let mut sink = MixedSinker::<Yuva420p9>::new(16, 8)
     .with_rgba(&mut rgba)
     .unwrap();
-  yuva420p9_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuva420p9_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
   for px in rgba.chunks(4) {
     assert_eq!(px[3], 0);
   }
@@ -285,7 +285,7 @@ fn yuva420p9_rgba_overrange_alpha_masked() {
   let mut s_u8 = MixedSinker::<Yuva420p9>::new(16, 8)
     .with_rgba(&mut rgba_u8)
     .unwrap();
-  yuva420p9_to(&src, true, ColorMatrix::Bt601, &mut s_u8).unwrap();
+  yuva420p9_to(&src, true, KernelMatrix::Bt601, &mut s_u8).unwrap();
   for px in rgba_u8.chunks(4) {
     assert_eq!(px[3], 128, "0x0500 & 0x1FF = 256, 256 >> 1 = 128");
   }
@@ -294,7 +294,7 @@ fn yuva420p9_rgba_overrange_alpha_masked() {
   let mut s_u16 = MixedSinker::<Yuva420p9>::new(16, 8)
     .with_rgba_u16(&mut rgba_u16)
     .unwrap();
-  yuva420p9_to(&src, true, ColorMatrix::Bt601, &mut s_u16).unwrap();
+  yuva420p9_to(&src, true, KernelMatrix::Bt601, &mut s_u16).unwrap();
   for px in rgba_u16.chunks(4) {
     assert_eq!(px[3], 256);
   }
@@ -339,13 +339,13 @@ fn yuva420p9_with_rgb_alpha_drop_matches_yuv420p9() {
   let mut s_yuv = MixedSinker::<Yuv420p9>::new(16, 8)
     .with_rgb(&mut rgb_yuv)
     .unwrap();
-  yuv420p9_to(&yuv, true, ColorMatrix::Bt709, &mut s_yuv).unwrap();
+  yuv420p9_to(&yuv, true, KernelMatrix::Bt709, &mut s_yuv).unwrap();
 
   let mut rgb_yuva = std::vec![0u8; 16 * 8 * 3];
   let mut s_yuva = MixedSinker::<Yuva420p9>::new(16, 8)
     .with_rgb(&mut rgb_yuva)
     .unwrap();
-  yuva420p9_to(&yuva, true, ColorMatrix::Bt709, &mut s_yuva).unwrap();
+  yuva420p9_to(&yuva, true, KernelMatrix::Bt709, &mut s_yuva).unwrap();
 
   assert_eq!(rgb_yuv, rgb_yuva);
 }
@@ -386,7 +386,7 @@ fn yuva420p10_rgba_u8_with_source_alpha_passes_through() {
   let mut sink = MixedSinker::<Yuva420p10>::new(16, 8)
     .with_rgba(&mut rgba)
     .unwrap();
-  yuva420p10_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuva420p10_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
 
   for px in rgba.chunks(4) {
     assert!(px[0].abs_diff(128) <= 1, "got {px:?}");
@@ -407,7 +407,7 @@ fn yuva420p10_rgba_u16_native_depth() {
   let mut sink = MixedSinker::<Yuva420p10>::new(16, 8)
     .with_rgba_u16(&mut rgba)
     .unwrap();
-  yuva420p10_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuva420p10_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
 
   for px in rgba.chunks(4) {
     assert_eq!(px[3], 256);
@@ -427,7 +427,7 @@ fn yuva420p10_rgba_fully_opaque_max() {
   let mut s_u8 = MixedSinker::<Yuva420p10>::new(16, 8)
     .with_rgba(&mut rgba_u8)
     .unwrap();
-  yuva420p10_to(&src, true, ColorMatrix::Bt601, &mut s_u8).unwrap();
+  yuva420p10_to(&src, true, KernelMatrix::Bt601, &mut s_u8).unwrap();
   for px in rgba_u8.chunks(4) {
     assert_eq!(px[3], 0xFF);
   }
@@ -436,7 +436,7 @@ fn yuva420p10_rgba_fully_opaque_max() {
   let mut s_u16 = MixedSinker::<Yuva420p10>::new(16, 8)
     .with_rgba_u16(&mut rgba_u16)
     .unwrap();
-  yuva420p10_to(&src, true, ColorMatrix::Bt601, &mut s_u16).unwrap();
+  yuva420p10_to(&src, true, KernelMatrix::Bt601, &mut s_u16).unwrap();
   for px in rgba_u16.chunks(4) {
     assert_eq!(px[3], 1023);
   }
@@ -455,7 +455,7 @@ fn yuva420p10_rgba_zero_alpha() {
   let mut sink = MixedSinker::<Yuva420p10>::new(16, 8)
     .with_rgba(&mut rgba)
     .unwrap();
-  yuva420p10_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuva420p10_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
   for px in rgba.chunks(4) {
     assert_eq!(px[3], 0);
   }
@@ -475,7 +475,7 @@ fn yuva420p10_rgba_overrange_alpha_masked() {
   let mut sink = MixedSinker::<Yuva420p10>::new(16, 8)
     .with_rgba_u16(&mut rgba_u16)
     .unwrap();
-  yuva420p10_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuva420p10_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
   for px in rgba_u16.chunks(4) {
     assert_eq!(px[3], 1023, "0xFFFF & 0x3FF = 1023");
   }
@@ -507,13 +507,13 @@ fn yuva420p10_with_rgb_alpha_drop_matches_yuv420p10() {
   let mut s_yuv = MixedSinker::<Yuv420p10>::new(16, 8)
     .with_rgb(&mut rgb_yuv)
     .unwrap();
-  yuv420p10_to(&yuv, true, ColorMatrix::Bt709, &mut s_yuv).unwrap();
+  yuv420p10_to(&yuv, true, KernelMatrix::Bt709, &mut s_yuv).unwrap();
 
   let mut rgb_yuva = std::vec![0u8; 16 * 8 * 3];
   let mut s_yuva = MixedSinker::<Yuva420p10>::new(16, 8)
     .with_rgb(&mut rgb_yuva)
     .unwrap();
-  yuva420p10_to(&yuva, true, ColorMatrix::Bt709, &mut s_yuva).unwrap();
+  yuva420p10_to(&yuva, true, KernelMatrix::Bt709, &mut s_yuva).unwrap();
 
   assert_eq!(rgb_yuv, rgb_yuva);
 }
@@ -534,7 +534,7 @@ fn yuva420p10_with_rgb_and_with_rgba_combine() {
     .unwrap()
     .with_rgba(&mut rgba)
     .unwrap();
-  yuva420p10_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  yuva420p10_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
 
   for (rgb_px, rgba_px) in rgb.chunks(3).zip(rgba.chunks(4)) {
     assert_eq!(rgb_px[0], rgba_px[0]);
@@ -580,7 +580,7 @@ fn yuva420p12_rgba_u8_with_source_alpha_passes_through() {
   let mut sink = MixedSinker::<Yuva420p12>::new(16, 8)
     .with_rgba(&mut rgba)
     .unwrap();
-  yuva420p12_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuva420p12_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
 
   for px in rgba.chunks(4) {
     assert!(px[0].abs_diff(128) <= 1, "got {px:?}");
@@ -601,7 +601,7 @@ fn yuva420p12_rgba_u16_native_depth() {
   let mut sink = MixedSinker::<Yuva420p12>::new(16, 8)
     .with_rgba_u16(&mut rgba)
     .unwrap();
-  yuva420p12_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuva420p12_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
 
   for px in rgba.chunks(4) {
     assert_eq!(px[3], 1024);
@@ -621,7 +621,7 @@ fn yuva420p12_rgba_fully_opaque_max() {
   let mut s_u8 = MixedSinker::<Yuva420p12>::new(16, 8)
     .with_rgba(&mut rgba_u8)
     .unwrap();
-  yuva420p12_to(&src, true, ColorMatrix::Bt601, &mut s_u8).unwrap();
+  yuva420p12_to(&src, true, KernelMatrix::Bt601, &mut s_u8).unwrap();
   for px in rgba_u8.chunks(4) {
     assert_eq!(px[3], 0xFF);
   }
@@ -630,7 +630,7 @@ fn yuva420p12_rgba_fully_opaque_max() {
   let mut s_u16 = MixedSinker::<Yuva420p12>::new(16, 8)
     .with_rgba_u16(&mut rgba_u16)
     .unwrap();
-  yuva420p12_to(&src, true, ColorMatrix::Bt601, &mut s_u16).unwrap();
+  yuva420p12_to(&src, true, KernelMatrix::Bt601, &mut s_u16).unwrap();
   for px in rgba_u16.chunks(4) {
     assert_eq!(px[3], 4095);
   }
@@ -649,7 +649,7 @@ fn yuva420p12_rgba_zero_alpha() {
   let mut sink = MixedSinker::<Yuva420p12>::new(16, 8)
     .with_rgba(&mut rgba)
     .unwrap();
-  yuva420p12_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuva420p12_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
   for px in rgba.chunks(4) {
     assert_eq!(px[3], 0);
   }
@@ -669,7 +669,7 @@ fn yuva420p12_rgba_overrange_alpha_masked() {
   let mut sink = MixedSinker::<Yuva420p12>::new(16, 8)
     .with_rgba_u16(&mut rgba_u16)
     .unwrap();
-  yuva420p12_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuva420p12_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
   for px in rgba_u16.chunks(4) {
     assert_eq!(px[3], 4095, "0xFFFF & 0xFFF = 4095");
   }
@@ -700,13 +700,13 @@ fn yuva420p12_with_rgb_alpha_drop_matches_yuv420p12() {
   let mut s_yuv = MixedSinker::<Yuv420p12>::new(16, 8)
     .with_rgb(&mut rgb_yuv)
     .unwrap();
-  yuv420p12_to(&yuv, true, ColorMatrix::Bt709, &mut s_yuv).unwrap();
+  yuv420p12_to(&yuv, true, KernelMatrix::Bt709, &mut s_yuv).unwrap();
 
   let mut rgb_yuva = std::vec![0u8; 16 * 8 * 3];
   let mut s_yuva = MixedSinker::<Yuva420p12>::new(16, 8)
     .with_rgb(&mut rgb_yuva)
     .unwrap();
-  yuva420p12_to(&yuva, true, ColorMatrix::Bt709, &mut s_yuva).unwrap();
+  yuva420p12_to(&yuva, true, KernelMatrix::Bt709, &mut s_yuva).unwrap();
 
   assert_eq!(rgb_yuv, rgb_yuva);
 }
@@ -727,7 +727,7 @@ fn yuva420p12_with_rgb_and_with_rgba_combine() {
     .unwrap()
     .with_rgba(&mut rgba)
     .unwrap();
-  yuva420p12_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  yuva420p12_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
 
   for (rgb_px, rgba_px) in rgb.chunks(3).zip(rgba.chunks(4)) {
     assert_eq!(rgb_px[0], rgba_px[0]);
@@ -767,7 +767,7 @@ fn yuva420p12_overrange_y_masked_and_consistent() {
       .unwrap()
       .with_luma_u16(&mut luma_u16)
       .unwrap();
-    yuva420p12_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    yuva420p12_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
     (rgba, luma, luma_u16)
   };
   let (rgba_o, luma_o, lu16_o) = direct(&yo, &uo, &vo, &ao);
@@ -796,7 +796,7 @@ fn yuva420p12_overrange_y_masked_and_consistent() {
         .unwrap()
         .with_luma_u16(&mut luma_u16)
         .unwrap();
-    yuva420p12_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    yuva420p12_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
     (rgba, luma, luma_u16)
   };
   let (rgba_o, luma_o, lu16_o) = area(&yo, &uo, &vo, &ao);
@@ -827,7 +827,7 @@ fn yuva420p12_overrange_y_masked_and_consistent() {
     .unwrap()
     .with_luma_u16(&mut luma_u16)
     .unwrap();
-    yuva420p12_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    yuva420p12_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
     (rgba, luma, luma_u16)
   };
   let (rgba_o, luma_o, lu16_o) = filter(&yo, &uo, &vo, &ao);
@@ -877,7 +877,7 @@ fn yuva420p16_rgba_u8_with_source_alpha_passes_through() {
   let mut sink = MixedSinker::<Yuva420p16>::new(16, 8)
     .with_rgba(&mut rgba)
     .unwrap();
-  yuva420p16_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuva420p16_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
 
   for px in rgba.chunks(4) {
     assert!(px[0].abs_diff(0x80) <= 1, "got {px:?}");
@@ -898,7 +898,7 @@ fn yuva420p16_rgba_u16_native_depth() {
   let mut sink = MixedSinker::<Yuva420p16>::new(16, 8)
     .with_rgba_u16(&mut rgba)
     .unwrap();
-  yuva420p16_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuva420p16_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
 
   for px in rgba.chunks(4) {
     assert_eq!(px[3], 0x8000, "alpha at native u16 depth (no shift)");
@@ -918,7 +918,7 @@ fn yuva420p16_rgba_fully_opaque_max() {
   let mut s_u8 = MixedSinker::<Yuva420p16>::new(16, 8)
     .with_rgba(&mut rgba_u8)
     .unwrap();
-  yuva420p16_to(&src, true, ColorMatrix::Bt601, &mut s_u8).unwrap();
+  yuva420p16_to(&src, true, KernelMatrix::Bt601, &mut s_u8).unwrap();
   for px in rgba_u8.chunks(4) {
     assert_eq!(px[3], 0xFF);
   }
@@ -927,7 +927,7 @@ fn yuva420p16_rgba_fully_opaque_max() {
   let mut s_u16 = MixedSinker::<Yuva420p16>::new(16, 8)
     .with_rgba_u16(&mut rgba_u16)
     .unwrap();
-  yuva420p16_to(&src, true, ColorMatrix::Bt601, &mut s_u16).unwrap();
+  yuva420p16_to(&src, true, KernelMatrix::Bt601, &mut s_u16).unwrap();
   for px in rgba_u16.chunks(4) {
     assert_eq!(px[3], 0xFFFF);
   }
@@ -946,7 +946,7 @@ fn yuva420p16_rgba_zero_alpha() {
   let mut sink = MixedSinker::<Yuva420p16>::new(16, 8)
     .with_rgba(&mut rgba)
     .unwrap();
-  yuva420p16_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuva420p16_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
   for px in rgba.chunks(4) {
     assert_eq!(px[3], 0);
   }
@@ -991,13 +991,13 @@ fn yuva420p16_with_rgb_alpha_drop_matches_yuv420p16() {
   let mut s_yuv = MixedSinker::<Yuv420p16>::new(16, 8)
     .with_rgb(&mut rgb_yuv)
     .unwrap();
-  yuv420p16_to(&yuv, true, ColorMatrix::Bt709, &mut s_yuv).unwrap();
+  yuv420p16_to(&yuv, true, KernelMatrix::Bt709, &mut s_yuv).unwrap();
 
   let mut rgb_yuva = std::vec![0u8; 16 * 8 * 3];
   let mut s_yuva = MixedSinker::<Yuva420p16>::new(16, 8)
     .with_rgb(&mut rgb_yuva)
     .unwrap();
-  yuva420p16_to(&yuva, true, ColorMatrix::Bt709, &mut s_yuva).unwrap();
+  yuva420p16_to(&yuva, true, KernelMatrix::Bt709, &mut s_yuva).unwrap();
 
   assert_eq!(rgb_yuv, rgb_yuva);
 }
@@ -1042,12 +1042,12 @@ fn yuva420p_strategy_a_plus_matches_independent_kernel() {
 
   for full_range in [true, false] {
     for matrix in [
-      ColorMatrix::Bt601,
-      ColorMatrix::Bt709,
-      ColorMatrix::Bt2020Ncl,
-      ColorMatrix::Smpte240m,
-      ColorMatrix::Fcc,
-      ColorMatrix::YCgCo,
+      KernelMatrix::Bt601,
+      KernelMatrix::Bt709,
+      KernelMatrix::Bt2020Ncl,
+      KernelMatrix::Smpte240m,
+      KernelMatrix::Fcc,
+      KernelMatrix::YCgCo,
     ] {
       // Sinker combo path (A+).
       let mut sinker_rgb = std::vec![0u8; width * height * 3];
@@ -1139,12 +1139,12 @@ fn yuva420p9_strategy_a_plus_matches_independent_kernel() {
   .unwrap();
   for full_range in [true, false] {
     for matrix in [
-      ColorMatrix::Bt601,
-      ColorMatrix::Bt709,
-      ColorMatrix::Bt2020Ncl,
-      ColorMatrix::Smpte240m,
-      ColorMatrix::Fcc,
-      ColorMatrix::YCgCo,
+      KernelMatrix::Bt601,
+      KernelMatrix::Bt709,
+      KernelMatrix::Bt2020Ncl,
+      KernelMatrix::Smpte240m,
+      KernelMatrix::Fcc,
+      KernelMatrix::YCgCo,
     ] {
       let mut sinker_rgb = std::vec![0u8; width * height * 3];
       let mut sinker_rgba = std::vec![0u8; width * height * 4];
@@ -1228,12 +1228,12 @@ fn yuva420p9_strategy_a_plus_u16_matches_independent_kernel() {
   .unwrap();
   for full_range in [true, false] {
     for matrix in [
-      ColorMatrix::Bt601,
-      ColorMatrix::Bt709,
-      ColorMatrix::Bt2020Ncl,
-      ColorMatrix::Smpte240m,
-      ColorMatrix::Fcc,
-      ColorMatrix::YCgCo,
+      KernelMatrix::Bt601,
+      KernelMatrix::Bt709,
+      KernelMatrix::Bt2020Ncl,
+      KernelMatrix::Smpte240m,
+      KernelMatrix::Fcc,
+      KernelMatrix::YCgCo,
     ] {
       let mut sinker_rgb = std::vec![0u16; width * height * 3];
       let mut sinker_rgba = std::vec![0u16; width * height * 4];
@@ -1319,12 +1319,12 @@ fn yuva420p10_strategy_a_plus_matches_independent_kernel() {
   .unwrap();
   for full_range in [true, false] {
     for matrix in [
-      ColorMatrix::Bt601,
-      ColorMatrix::Bt709,
-      ColorMatrix::Bt2020Ncl,
-      ColorMatrix::Smpte240m,
-      ColorMatrix::Fcc,
-      ColorMatrix::YCgCo,
+      KernelMatrix::Bt601,
+      KernelMatrix::Bt709,
+      KernelMatrix::Bt2020Ncl,
+      KernelMatrix::Smpte240m,
+      KernelMatrix::Fcc,
+      KernelMatrix::YCgCo,
     ] {
       let mut sinker_rgb = std::vec![0u8; width * height * 3];
       let mut sinker_rgba = std::vec![0u8; width * height * 4];
@@ -1408,12 +1408,12 @@ fn yuva420p10_strategy_a_plus_u16_matches_independent_kernel() {
   .unwrap();
   for full_range in [true, false] {
     for matrix in [
-      ColorMatrix::Bt601,
-      ColorMatrix::Bt709,
-      ColorMatrix::Bt2020Ncl,
-      ColorMatrix::Smpte240m,
-      ColorMatrix::Fcc,
-      ColorMatrix::YCgCo,
+      KernelMatrix::Bt601,
+      KernelMatrix::Bt709,
+      KernelMatrix::Bt2020Ncl,
+      KernelMatrix::Smpte240m,
+      KernelMatrix::Fcc,
+      KernelMatrix::YCgCo,
     ] {
       let mut sinker_rgb = std::vec![0u16; width * height * 3];
       let mut sinker_rgba = std::vec![0u16; width * height * 4];
@@ -1501,12 +1501,12 @@ fn yuva420p16_strategy_a_plus_matches_independent_kernel() {
   .unwrap();
   for full_range in [true, false] {
     for matrix in [
-      ColorMatrix::Bt601,
-      ColorMatrix::Bt709,
-      ColorMatrix::Bt2020Ncl,
-      ColorMatrix::Smpte240m,
-      ColorMatrix::Fcc,
-      ColorMatrix::YCgCo,
+      KernelMatrix::Bt601,
+      KernelMatrix::Bt709,
+      KernelMatrix::Bt2020Ncl,
+      KernelMatrix::Smpte240m,
+      KernelMatrix::Fcc,
+      KernelMatrix::YCgCo,
     ] {
       let mut sinker_rgb = std::vec![0u8; width * height * 3];
       let mut sinker_rgba = std::vec![0u8; width * height * 4];
@@ -1590,12 +1590,12 @@ fn yuva420p16_strategy_a_plus_u16_matches_independent_kernel() {
   .unwrap();
   for full_range in [true, false] {
     for matrix in [
-      ColorMatrix::Bt601,
-      ColorMatrix::Bt709,
-      ColorMatrix::Bt2020Ncl,
-      ColorMatrix::Smpte240m,
-      ColorMatrix::Fcc,
-      ColorMatrix::YCgCo,
+      KernelMatrix::Bt601,
+      KernelMatrix::Bt709,
+      KernelMatrix::Bt2020Ncl,
+      KernelMatrix::Smpte240m,
+      KernelMatrix::Fcc,
+      KernelMatrix::YCgCo,
     ] {
       let mut sinker_rgb = std::vec![0u16; width * height * 3];
       let mut sinker_rgba = std::vec![0u16; width * height * 4];
@@ -1685,7 +1685,7 @@ fn yuva420p_direct_luma_u16_with_hsv_no_rgb_buffer_writes_both() {
       .unwrap()
       .with_hsv(&mut hh, &mut ss, &mut vv)
       .unwrap();
-    yuva420p_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    yuva420p_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
     // White-box: the direct HSV path is RGB-free — the rgb scratch is
     // never grown.
     assert_eq!(
@@ -1709,7 +1709,7 @@ fn yuva420p_direct_luma_u16_with_hsv_no_rgb_buffer_writes_both() {
       .unwrap()
       .with_hsv(&mut oh, &mut os, &mut ov)
       .unwrap();
-    yuva420p_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    yuva420p_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
   }
   assert_eq!(hh, oh, "direct H == rgb-attached H");
   assert_eq!(ss, os, "direct S == rgb-attached S");

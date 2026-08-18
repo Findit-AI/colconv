@@ -50,7 +50,7 @@
 use core::arch::x86_64::*;
 
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   row::{
     arch::x86_avx512::endian,
     scalar::{planar_gbr_f16 as scalar_f16, planar_gbr_float as scalar},
@@ -597,7 +597,7 @@ pub(crate) unsafe fn gbrpf32_to_luma_row<const BE: bool>(
   r: &[f32],
   out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert!(g.len() >= width, "g row too short");
@@ -648,7 +648,7 @@ pub(crate) unsafe fn gbrpf32_to_luma_u16_row<const BE: bool>(
   r: &[f32],
   out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert!(g.len() >= width, "g row too short");
@@ -1651,7 +1651,7 @@ pub(crate) unsafe fn gbrpf16_to_luma_row_f16c<const BE: bool>(
   r: &[half::f16],
   out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert!(g.len() >= width, "g row too short");
@@ -1703,7 +1703,7 @@ pub(crate) unsafe fn gbrpf16_to_luma_u16_row_f16c<const BE: bool>(
   r: &[half::f16],
   out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert!(g.len() >= width, "g row too short");

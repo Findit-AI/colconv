@@ -12,7 +12,7 @@ fn monoblack_walker_to_rgb() {
     let mut sinker = MixedSinker::<Monoblack>::new(8, 2)
       .with_rgb(&mut rgb)
       .expect("attach rgb");
-    monoblack_to(&frame, true, ColorMatrix::Bt709, &mut sinker).expect("walk ok");
+    monoblack_to(&frame, true, KernelMatrix::Bt709, &mut sinker).expect("walk ok");
   }
 
   assert_eq!(rgb[0], 255);
@@ -37,7 +37,7 @@ fn monoblack_walker_to_rgba() {
     let mut sinker = MixedSinker::<Monoblack>::new(8, 1)
       .with_rgba(&mut rgba)
       .expect("attach rgba");
-    monoblack_to(&frame, true, ColorMatrix::Bt709, &mut sinker).expect("walk ok");
+    monoblack_to(&frame, true, KernelMatrix::Bt709, &mut sinker).expect("walk ok");
   }
 
   for chunk in rgba.chunks_exact(4) {
@@ -58,7 +58,7 @@ fn monoblack_walker_to_luma() {
     let mut sinker = MixedSinker::<Monoblack>::new(8, 1)
       .with_luma(&mut luma)
       .expect("attach luma");
-    monoblack_to(&frame, true, ColorMatrix::Bt709, &mut sinker).expect("walk ok");
+    monoblack_to(&frame, true, KernelMatrix::Bt709, &mut sinker).expect("walk ok");
   }
 
   assert_eq!(luma, vec![255, 0, 255, 0, 255, 0, 255, 0]);
@@ -74,7 +74,7 @@ fn monoblack_walker_to_luma_u16() {
     let mut sinker = MixedSinker::<Monoblack>::new(8, 1)
       .with_luma_u16(&mut luma_u16)
       .expect("attach luma_u16");
-    monoblack_to(&frame, true, ColorMatrix::Bt709, &mut sinker).expect("walk ok");
+    monoblack_to(&frame, true, KernelMatrix::Bt709, &mut sinker).expect("walk ok");
   }
 
   assert_eq!(luma_u16[0], 0x00FF);
@@ -93,7 +93,7 @@ fn monoblack_walker_to_rgb_u16() {
     let mut sinker = MixedSinker::<Monoblack>::new(8, 1)
       .with_rgb_u16(&mut rgb_u16)
       .expect("attach rgb_u16");
-    monoblack_to(&frame, true, ColorMatrix::Bt709, &mut sinker).expect("walk ok");
+    monoblack_to(&frame, true, KernelMatrix::Bt709, &mut sinker).expect("walk ok");
   }
 
   for chunk in rgb_u16.chunks_exact(3) {
@@ -113,7 +113,7 @@ fn monoblack_walker_to_rgba_u16() {
     let mut sinker = MixedSinker::<Monoblack>::new(8, 1)
       .with_rgba_u16(&mut rgba_u16)
       .expect("attach rgba_u16");
-    monoblack_to(&frame, true, ColorMatrix::Bt709, &mut sinker).expect("walk ok");
+    monoblack_to(&frame, true, KernelMatrix::Bt709, &mut sinker).expect("walk ok");
   }
 
   for chunk in rgba_u16.chunks_exact(4) {
@@ -136,7 +136,7 @@ fn monoblack_walker_to_hsv() {
     let mut sinker = MixedSinker::<Monoblack>::new(8, 1)
       .with_hsv(&mut h, &mut s, &mut v)
       .expect("attach hsv");
-    monoblack_to(&frame, true, ColorMatrix::Bt709, &mut sinker).expect("walk ok");
+    monoblack_to(&frame, true, KernelMatrix::Bt709, &mut sinker).expect("walk ok");
   }
 
   assert_eq!(h, vec![0; 8]);
@@ -154,7 +154,7 @@ fn monowhite_walker_to_luma() {
     let mut sinker = MixedSinker::<Monowhite>::new(8, 1)
       .with_luma(&mut luma)
       .expect("attach luma");
-    monowhite_to(&frame, true, ColorMatrix::Bt709, &mut sinker).expect("walk ok");
+    monowhite_to(&frame, true, KernelMatrix::Bt709, &mut sinker).expect("walk ok");
   }
 
   assert_eq!(luma, vec![0, 255, 0, 255, 0, 255, 0, 255]);
@@ -170,7 +170,7 @@ fn monowhite_walker_to_rgb() {
     let mut sinker = MixedSinker::<Monowhite>::new(8, 1)
       .with_rgb(&mut rgb)
       .expect("attach rgb");
-    monowhite_to(&frame, true, ColorMatrix::Bt709, &mut sinker).expect("walk ok");
+    monowhite_to(&frame, true, KernelMatrix::Bt709, &mut sinker).expect("walk ok");
   }
 
   for chunk in rgb[0..12].chunks_exact(3) {
@@ -195,7 +195,7 @@ fn monowhite_walker_to_rgba() {
     let mut sinker = MixedSinker::<Monowhite>::new(8, 1)
       .with_rgba(&mut rgba)
       .expect("attach rgba");
-    monowhite_to(&frame, true, ColorMatrix::Bt709, &mut sinker).expect("walk ok");
+    monowhite_to(&frame, true, KernelMatrix::Bt709, &mut sinker).expect("walk ok");
   }
 
   for chunk in rgba.chunks_exact(4) {
@@ -216,7 +216,7 @@ fn monowhite_walker_to_luma_u16() {
     let mut sinker = MixedSinker::<Monowhite>::new(8, 1)
       .with_luma_u16(&mut luma_u16)
       .expect("attach luma_u16");
-    monowhite_to(&frame, true, ColorMatrix::Bt709, &mut sinker).expect("walk ok");
+    monowhite_to(&frame, true, KernelMatrix::Bt709, &mut sinker).expect("walk ok");
   }
 
   for val in &luma_u16 {
@@ -234,7 +234,7 @@ fn monowhite_walker_to_rgb_u16() {
     let mut sinker = MixedSinker::<Monowhite>::new(8, 1)
       .with_rgb_u16(&mut rgb_u16)
       .expect("attach rgb_u16");
-    monowhite_to(&frame, true, ColorMatrix::Bt709, &mut sinker).expect("walk ok");
+    monowhite_to(&frame, true, KernelMatrix::Bt709, &mut sinker).expect("walk ok");
   }
 
   assert_eq!(rgb_u16[0], 0);
@@ -257,7 +257,7 @@ fn monowhite_walker_to_rgba_u16() {
     let mut sinker = MixedSinker::<Monowhite>::new(8, 1)
       .with_rgba_u16(&mut rgba_u16)
       .expect("attach rgba_u16");
-    monowhite_to(&frame, true, ColorMatrix::Bt709, &mut sinker).expect("walk ok");
+    monowhite_to(&frame, true, KernelMatrix::Bt709, &mut sinker).expect("walk ok");
   }
 
   for chunk in rgba_u16.chunks_exact(4) {
@@ -280,7 +280,7 @@ fn monowhite_walker_to_hsv() {
     let mut sinker = MixedSinker::<Monowhite>::new(8, 1)
       .with_hsv(&mut h, &mut s, &mut v)
       .expect("attach hsv");
-    monowhite_to(&frame, true, ColorMatrix::Bt709, &mut sinker).expect("walk ok");
+    monowhite_to(&frame, true, KernelMatrix::Bt709, &mut sinker).expect("walk ok");
   }
 
   assert_eq!(h, vec![0; 8]);
@@ -298,7 +298,7 @@ fn monoblack_multiple_rows() {
     let mut sinker = MixedSinker::<Monoblack>::new(8, 3)
       .with_luma(&mut luma)
       .expect("attach luma");
-    monoblack_to(&frame, true, ColorMatrix::Bt709, &mut sinker).expect("walk ok");
+    monoblack_to(&frame, true, KernelMatrix::Bt709, &mut sinker).expect("walk ok");
   }
 
   assert_eq!(&luma[0..8], vec![255, 0, 255, 0, 255, 0, 255, 0].as_slice());
@@ -322,7 +322,7 @@ fn monoblack_partial_byte_width() {
     let mut sinker = MixedSinker::<Monoblack>::new(5, 2)
       .with_luma(&mut luma)
       .expect("attach luma");
-    monoblack_to(&frame, true, ColorMatrix::Bt709, &mut sinker).expect("walk ok");
+    monoblack_to(&frame, true, KernelMatrix::Bt709, &mut sinker).expect("walk ok");
   }
 
   assert_eq!(&luma[0..5], vec![255, 255, 0, 0, 0].as_slice());
@@ -339,7 +339,7 @@ fn monowhite_partial_byte_width() {
     let mut sinker = MixedSinker::<Monowhite>::new(5, 2)
       .with_luma(&mut luma)
       .expect("attach luma");
-    monowhite_to(&frame, true, ColorMatrix::Bt709, &mut sinker).expect("walk ok");
+    monowhite_to(&frame, true, KernelMatrix::Bt709, &mut sinker).expect("walk ok");
   }
 
   assert_eq!(&luma[0..5], vec![0, 0, 255, 255, 255].as_slice());
@@ -356,7 +356,7 @@ fn monoblack_both_polarities_in_frame() {
     let mut sinker = MixedSinker::<Monoblack>::new(8, 2)
       .with_luma(&mut luma)
       .expect("attach luma");
-    monoblack_to(&frame, true, ColorMatrix::Bt709, &mut sinker).expect("walk ok");
+    monoblack_to(&frame, true, KernelMatrix::Bt709, &mut sinker).expect("walk ok");
   }
 
   assert_eq!(&luma[0..8], vec![255; 8].as_slice());
@@ -373,7 +373,7 @@ fn monowhite_both_polarities_in_frame() {
     let mut sinker = MixedSinker::<Monowhite>::new(8, 2)
       .with_luma(&mut luma)
       .expect("attach luma");
-    monowhite_to(&frame, true, ColorMatrix::Bt709, &mut sinker).expect("walk ok");
+    monowhite_to(&frame, true, KernelMatrix::Bt709, &mut sinker).expect("walk ok");
   }
 
   assert_eq!(&luma[0..8], vec![0; 8].as_slice());
