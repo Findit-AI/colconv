@@ -253,7 +253,7 @@ fn p010_hsv_only_grows_no_rgb_scratch() {
     let mut sink = MixedSinker::<P010>::new(w, h)
       .with_hsv(&mut hh, &mut ss, &mut vv)
       .unwrap();
-    p010_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
+    p010_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
     sink.rgb_scratch.len()
   };
   assert_eq!(
@@ -299,7 +299,7 @@ fn p0xx_hsv_only_grows_no_rgb_scratch_all_formats() {
       let mut sink = MixedSinker::<P012>::new(w, h)
         .with_hsv(&mut hh, &mut ss, &mut vv)
         .unwrap();
-      p012_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+      p012_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
       sink.rgb_scratch.len()
     };
     assert_eq!(scratch_len, 0, "P012 HSV-only RGB-free");
@@ -317,7 +317,7 @@ fn p0xx_hsv_only_grows_no_rgb_scratch_all_formats() {
       let mut sink = MixedSinker::<P016>::new(w, h)
         .with_hsv(&mut hh, &mut ss, &mut vv)
         .unwrap();
-      p016_to(&src, true, KernelMatrix::Bt2020Ncl, &mut sink).unwrap();
+      p016_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt2020Ncl)).unwrap();
       sink.rgb_scratch.len()
     };
     assert_eq!(scratch_len, 0, "P016 HSV-only RGB-free");
@@ -347,7 +347,7 @@ fn p012_luma_plus_hsv_only_is_correct_and_rgb_free() {
       .unwrap()
       .with_hsv(&mut hh, &mut ss, &mut vv)
       .unwrap();
-    p012_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+    p012_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
     sink.rgb_scratch.len()
   };
   assert_eq!(

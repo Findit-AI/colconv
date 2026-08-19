@@ -279,7 +279,7 @@ fn id_411(w: usize, h: usize, loc: ChromaLocation, simd: bool) -> (Vec<u8>, Vec<
       .unwrap()
       .with_luma(&mut luma)
       .unwrap();
-    yuv411p_to(&f, FR, M, &mut sink).unwrap();
+    yuv411p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   let hsv: Vec<u8> = hh.iter().chain(&ss).chain(&vv).copied().collect();
   (rgb, hsv, luma)
@@ -318,7 +318,7 @@ fn rs_411(
       .unwrap()
       .with_luma(&mut luma)
       .unwrap();
-    yuv411p_to(&f, FR, M, &mut sink).unwrap();
+    yuv411p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   let hsv: Vec<u8> = hh.iter().chain(&ss).chain(&vv).copied().collect();
   (rgb, hsv, luma)
@@ -351,7 +351,7 @@ fn yuv444_decode(y: &[u8], u: &[u8], v: &[u8], w: usize, h: usize) -> (Vec<u8>, 
       .unwrap()
       .with_hsv(&mut hh, &mut ss, &mut vv)
       .unwrap();
-    yuv444p_to(&f, FR, M, &mut sink).unwrap();
+    yuv444p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   let hsv: Vec<u8> = hh.iter().chain(&ss).chain(&vv).copied().collect();
   (rgb, hsv)
@@ -584,7 +584,7 @@ fn rs_411_mid_frame_siting_flip_is_rejected() {
       .unwrap();
   PixelSink::begin_frame(&mut sink, 16, 8).unwrap();
   for r in 0..2 {
-    let row = Yuv411pRow::new(
+    let row = Yuv411pRow::for_tests(
       &yp[r * 16..r * 16 + 16],
       &up[r * cw..r * cw + cw],
       &vp[r * cw..r * cw + cw],
@@ -595,7 +595,7 @@ fn rs_411_mid_frame_siting_flip_is_rejected() {
     PixelSink::process(&mut sink, row).unwrap();
   }
   sink.set_chroma_location(ChromaLocation::Left);
-  let bad = Yuv411pRow::new(
+  let bad = Yuv411pRow::for_tests(
     &yp[2 * 16..3 * 16],
     &up[2 * cw..3 * cw],
     &vp[2 * cw..3 * cw],
@@ -611,7 +611,7 @@ fn rs_411_mid_frame_siting_flip_is_rejected() {
   // The rejected row mutated no state: a fresh frame at the new siting works.
   PixelSink::begin_frame(&mut sink, 16, 8).unwrap();
   for r in 0..8 {
-    let row = Yuv411pRow::new(
+    let row = Yuv411pRow::for_tests(
       &yp[r * 16..r * 16 + 16],
       &up[r * cw..r * cw + cw],
       &vp[r * cw..r * cw + cw],
@@ -648,7 +648,7 @@ fn id_411_mid_frame_siting_flip_is_rejected() {
     PixelSink::begin_frame(&mut sink, w as u32, h as u32).unwrap();
     // Rows 0,1 decode centered and freeze the phase for the frame.
     for r in 0..2 {
-      let row = Yuv411pRow::new(
+      let row = Yuv411pRow::for_tests(
         &yp[r * w..r * w + w],
         &up[r * cw..r * cw + cw],
         &vp[r * cw..r * cw + cw],
@@ -662,7 +662,7 @@ fn id_411_mid_frame_siting_flip_is_rejected() {
     // output write on the identity path (not silently mixed with the frozen
     // centered rows).
     sink.set_chroma_location(ChromaLocation::Left);
-    let bad = Yuv411pRow::new(
+    let bad = Yuv411pRow::for_tests(
       &yp[2 * w..3 * w],
       &up[2 * cw..3 * cw],
       &vp[2 * cw..3 * cw],
@@ -679,7 +679,7 @@ fn id_411_mid_frame_siting_flip_is_rejected() {
     // frame completes at the frozen centered phase.
     sink.set_chroma_location(ChromaLocation::Center);
     for r in 2..h {
-      let row = Yuv411pRow::new(
+      let row = Yuv411pRow::for_tests(
         &yp[r * w..r * w + w],
         &up[r * cw..r * cw + cw],
         &vp[r * cw..r * cw + cw],
@@ -738,7 +738,7 @@ fn id_410(w: usize, h: usize, loc: ChromaLocation, simd: bool) -> (Vec<u8>, Vec<
       .unwrap()
       .with_luma(&mut luma)
       .unwrap();
-    yuv410p_to(&f, FR, M, &mut sink).unwrap();
+    yuv410p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   let hsv: Vec<u8> = hh.iter().chain(&ss).chain(&vv).copied().collect();
   (rgb, hsv, luma)
@@ -792,7 +792,7 @@ fn rs_410(
       .unwrap()
       .with_luma(&mut luma)
       .unwrap();
-    yuv410p_to(&f, FR, M, &mut sink).unwrap();
+    yuv410p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   let hsv: Vec<u8> = hh.iter().chain(&ss).chain(&vv).copied().collect();
   (rgb, hsv, luma)
@@ -908,7 +908,7 @@ fn rs_410_mid_frame_siting_flip_is_rejected() {
   PixelSink::begin_frame(&mut sink, 16, 8).unwrap();
   for r in 0..2 {
     let cr = r / 4;
-    let row = Yuv410pRow::new(
+    let row = Yuv410pRow::for_tests(
       &yp[r * 16..r * 16 + 16],
       &up[cr * cw..cr * cw + cw],
       &vp[cr * cw..cr * cw + cw],
@@ -919,7 +919,7 @@ fn rs_410_mid_frame_siting_flip_is_rejected() {
     PixelSink::process(&mut sink, row).unwrap();
   }
   sink.set_chroma_location(ChromaLocation::Left);
-  let bad = Yuv410pRow::new(&yp[2 * 16..3 * 16], &up[0..cw], &vp[0..cw], 2, M, FR);
+  let bad = Yuv410pRow::for_tests(&yp[2 * 16..3 * 16], &up[0..cw], &vp[0..cw], 2, M, FR);
   let err = PixelSink::process(&mut sink, bad).unwrap_err();
   assert!(
     matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
@@ -953,7 +953,7 @@ fn id_410_mid_frame_siting_flip_is_rejected() {
     // Rows 0,1 decode centered (chroma row 0) and freeze the phase for the frame.
     for r in 0..2 {
       let cr = r / 4;
-      let row = Yuv410pRow::new(
+      let row = Yuv410pRow::for_tests(
         &yp[r * w..r * w + w],
         &up[cr * cw..cr * cw + cw],
         &vp[cr * cw..cr * cw + cw],
@@ -966,7 +966,7 @@ fn id_410_mid_frame_siting_flip_is_rejected() {
     // A mid-frame flip to a co-sited phase is rejected before any reservation or
     // output write on the identity path.
     sink.set_chroma_location(ChromaLocation::Left);
-    let bad = Yuv410pRow::new(&yp[2 * w..3 * w], &up[0..cw], &vp[0..cw], 2, M, FR);
+    let bad = Yuv410pRow::for_tests(&yp[2 * w..3 * w], &up[0..cw], &vp[0..cw], 2, M, FR);
     let err = PixelSink::process(&mut sink, bad).unwrap_err();
     assert!(
       matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
@@ -977,7 +977,7 @@ fn id_410_mid_frame_siting_flip_is_rejected() {
     sink.set_chroma_location(ChromaLocation::Center);
     for r in 2..h {
       let cr = r / 4;
-      let row = Yuv410pRow::new(
+      let row = Yuv410pRow::for_tests(
         &yp[r * w..r * w + w],
         &up[cr * cw..cr * cw + cw],
         &vp[cr * cw..cr * cw + cw],
@@ -1036,7 +1036,7 @@ fn id_packed(w: usize, h: usize, loc: ChromaLocation, simd: bool) -> (Vec<u8>, V
       .unwrap()
       .with_luma(&mut luma)
       .unwrap();
-    uyyvyy411_to(&f, FR, M, &mut sink).unwrap();
+    uyyvyy411_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   let hsv: Vec<u8> = hh.iter().chain(&ss).chain(&vv).copied().collect();
   (rgb, hsv, luma)
@@ -1069,7 +1069,7 @@ fn rs_packed(
         .unwrap()
         .with_luma(&mut luma)
         .unwrap();
-    uyyvyy411_to(&f, FR, M, &mut sink).unwrap();
+    uyyvyy411_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   (rgb, luma)
 }
@@ -1215,11 +1215,11 @@ fn packed_resample_mid_frame_flip_is_rejected() {
       .unwrap();
   PixelSink::begin_frame(&mut sink, 16, 8).unwrap();
   for r in 0..2 {
-    let row = Uyyvyy411Row::new(&packed[r * stride..r * stride + stride], r, M, FR);
+    let row = Uyyvyy411Row::for_tests(&packed[r * stride..r * stride + stride], r, M, FR);
     PixelSink::process(&mut sink, row).unwrap();
   }
   sink.set_chroma_location(ChromaLocation::Left);
-  let bad = Uyyvyy411Row::new(&packed[2 * stride..3 * stride], 2, M, FR);
+  let bad = Uyyvyy411Row::for_tests(&packed[2 * stride..3 * stride], 2, M, FR);
   let err = PixelSink::process(&mut sink, bad).unwrap_err();
   assert!(
     matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
@@ -1253,13 +1253,13 @@ fn id_packed_mid_frame_siting_flip_is_rejected() {
     PixelSink::begin_frame(&mut sink, w as u32, h as u32).unwrap();
     // Rows 0,1 decode centered and freeze the phase for the frame.
     for r in 0..2 {
-      let row = Uyyvyy411Row::new(&packed[r * stride..r * stride + stride], r, M, FR);
+      let row = Uyyvyy411Row::for_tests(&packed[r * stride..r * stride + stride], r, M, FR);
       PixelSink::process(&mut sink, row).unwrap();
     }
     // A mid-frame flip to a co-sited phase is rejected before any reservation or
     // output write on the packed identity path.
     sink.set_chroma_location(ChromaLocation::Left);
-    let bad = Uyyvyy411Row::new(&packed[2 * stride..3 * stride], 2, M, FR);
+    let bad = Uyyvyy411Row::for_tests(&packed[2 * stride..3 * stride], 2, M, FR);
     let err = PixelSink::process(&mut sink, bad).unwrap_err();
     assert!(
       matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
@@ -1269,7 +1269,7 @@ fn id_packed_mid_frame_siting_flip_is_rejected() {
     // frame completes at the frozen centered phase.
     sink.set_chroma_location(ChromaLocation::Center);
     for r in 2..h {
-      let row = Uyyvyy411Row::new(&packed[r * stride..r * stride + stride], r, M, FR);
+      let row = Uyyvyy411Row::for_tests(&packed[r * stride..r * stride + stride], r, M, FR);
       PixelSink::process(&mut sink, row).unwrap();
     }
   }

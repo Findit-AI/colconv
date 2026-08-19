@@ -174,8 +174,9 @@ fn decode(
       .with_rgb(&mut rgb)
       .unwrap()
       .with_color_spec(&spec)
+      .unwrap()
       .with_st428_interpretation(interp);
-    yuv420p_to(&src, false, matrix, &mut sink)?;
+    yuv420p_to(&src, false, sink.set_kernel_matrix(matrix))?;
   }
   Ok(rgb)
 }
@@ -232,8 +233,14 @@ fn ffmpeg_tabulated_is_byte_identical_to_untoggled() {
       let mut sink = MixedSinker::<Yuv420p>::new(w as usize, h as usize)
         .with_rgb(&mut rgb)
         .unwrap()
-        .with_color_spec(&spec);
-      yuv420p_to(&src, false, KernelMatrix::ChromaDerivedNcl, &mut sink).unwrap();
+        .with_color_spec(&spec)
+        .unwrap();
+      yuv420p_to(
+        &src,
+        false,
+        sink.set_kernel_matrix(KernelMatrix::ChromaDerivedNcl),
+      )
+      .unwrap();
     }
     rgb
   };
@@ -311,7 +318,7 @@ fn top_row<'a>(
   let w = TOP_W as usize;
   let cw = w / 2;
   let cr = r / 2;
-  Yuv420pRow::new(
+  Yuv420pRow::for_tests(
     &yp[r * w..r * w + w],
     &up[cr * cw..cr * cw + cw],
     &vp[cr * cw..cr * cw + cw],
@@ -348,8 +355,14 @@ fn top_walker_decode(primaries: Primaries, interp: St428Interpretation) -> std::
       .with_rgb(&mut rgb)
       .unwrap()
       .with_color_spec(&top_spec(primaries))
+      .unwrap()
       .with_st428_interpretation(interp);
-    yuv420p_to(&src, false, KernelMatrix::ChromaDerivedNcl, &mut sink).unwrap();
+    yuv420p_to(
+      &src,
+      false,
+      sink.set_kernel_matrix(KernelMatrix::ChromaDerivedNcl),
+    )
+    .unwrap();
   }
   rgb
 }
@@ -373,7 +386,8 @@ fn top_delay_ncl_direct_matches_walker() {
       let mut sink = MixedSinker::<Yuv420p>::new(w, h)
         .with_rgb(&mut rgb)
         .unwrap()
-        .with_color_spec(&top_spec(primaries.clone()));
+        .with_color_spec(&top_spec(primaries.clone()))
+        .unwrap();
       crate::PixelSink::begin_frame(&mut sink, TOP_W, TOP_H).unwrap();
       for r in 0..h {
         crate::PixelSink::process(
@@ -422,6 +436,7 @@ fn top_delay_freezes_submit_colorimetry_across_cie_xyz_switch() {
       .with_rgb(&mut rgb)
       .unwrap()
       .with_color_spec(&top_spec(Primaries::Bt709))
+      .unwrap()
       .with_st428_interpretation(St428Interpretation::CieXyz);
     crate::PixelSink::begin_frame(&mut sink, TOP_W, TOP_H).unwrap();
     crate::PixelSink::process(
@@ -442,7 +457,9 @@ fn top_delay_freezes_submit_colorimetry_across_cie_xyz_switch() {
     // Flip to SmpteSt428 (CIE-XYZ interpretation unchanged) — the SAME Top siting,
     // so the phase freeze holds. The now-active (SmpteSt428, CieXyz) would reject
     // a fresh ChromaDerivedNcl row, but must not reach back to the held one.
-    sink.set_color_spec(&top_spec(Primaries::SmpteSt428));
+    sink
+      .set_color_spec(&top_spec(Primaries::SmpteSt428))
+      .unwrap();
     assert_eq!(sink.primaries(), Primaries::SmpteSt428);
 
     // The even flush row carries a FIXED matrix, which the current-row guard
@@ -460,6 +477,7 @@ fn top_delay_freezes_submit_colorimetry_across_cie_xyz_switch() {
       .with_rgb(&mut rgb_ref)
       .unwrap()
       .with_color_spec(&top_spec(Primaries::Bt709))
+      .unwrap()
       .with_st428_interpretation(St428Interpretation::CieXyz);
     crate::PixelSink::begin_frame(&mut sink, TOP_W, TOP_H).unwrap();
     crate::PixelSink::process(

@@ -40,14 +40,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
       let mut sink =
         MixedSinker::<Yuv420p, AreaResampler>::with_resampler(sw, sh, AreaResampler::to(ow, oh))?
-          .with_color_spec(&spec)
+          .with_color_spec(&spec)?
           .with_averaging_domain(domain)
           .with_linear_mode(mode)
           .with_rgb(&mut rgb)?;
       if let Some(tf) = tf {
         sink.set_transfer_function(tf);
       }
-      yuv420p_to(&frame, spec.full_range(), spec.kernel_matrix()?, &mut sink)?;
+      yuv420p_to(&frame, spec.full_range(), &mut sink)?;
     }
     Ok(rgb)
   };
@@ -88,10 +88,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   let mut luma16 = vec![0u16; 4 * 4];
   {
     let mut sink = MixedSinker::<Yuv420p, Bicublin>::with_resampler(sw, sh, Bicublin::to(4, 4))?
-      .with_color_spec(&spec)
+      .with_color_spec(&spec)?
       .with_rgb(&mut rgb)?
       .with_luma_u16(&mut luma16)?;
-    yuv420p_to(&frame, spec.full_range(), spec.kernel_matrix()?, &mut sink)?;
+    yuv420p_to(&frame, spec.full_range(), &mut sink)?;
   }
   println!(
     "8x8 -> 4x4 BICUBLIN, first pixel: rgb({}, {}, {}), luma16={}",

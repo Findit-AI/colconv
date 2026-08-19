@@ -140,7 +140,7 @@ fn direct_full(packed: &[u32]) -> (Vec<u8>, Vec<u16>, Vec<u16>) {
       .unwrap()
       .with_luma_u16(&mut y_u16)
       .unwrap();
-    v30x_to(&src, FR, M, &mut sink).unwrap();
+    v30x_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   (rgb_u8, rgb_u16, y_u16)
 }
@@ -183,7 +183,7 @@ fn v30x_uniform_gray_downscale_leaves_colour_outputs_unchanged() {
         .unwrap()
         .with_hsv(&mut hh, &mut ss, &mut vv)
         .unwrap();
-    v30x_to(&v30x_frame(&packed), FR, M, &mut sink).unwrap();
+    v30x_to(&v30x_frame(&packed), FR, sink.set_kernel_matrix(M)).unwrap();
   }
 
   // Every direct u8 pixel is identical; the resampled u8 RGB must equal
@@ -246,7 +246,7 @@ fn v30x_downscale_rgb_u16_is_native_depth_block_mean() {
         .unwrap()
         .with_rgb_u16(&mut rgb_u16)
         .unwrap();
-    v30x_to(&v30x_frame(&packed), FR, M, &mut sink).unwrap();
+    v30x_to(&v30x_frame(&packed), FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(
     rgb_u16,
@@ -275,7 +275,7 @@ fn v30x_downscale_luma_is_native_depth_block_mean_of_y() {
         .unwrap()
         .with_luma_u16(&mut luma_u16)
         .unwrap();
-    v30x_to(&v30x_frame(&packed), FR, M, &mut sink).unwrap();
+    v30x_to(&v30x_frame(&packed), FR, sink.set_kernel_matrix(M)).unwrap();
   }
   let y_binned = block_mean_u16(&full_y);
   assert_eq!(
@@ -331,7 +331,7 @@ fn v30x_all_outputs_match_their_own_native_depth_block_mean() {
         .unwrap()
         .with_hsv(&mut hh, &mut ss, &mut vv)
         .unwrap();
-    v30x_to(&v30x_frame(&packed), FR, M, &mut sink).unwrap();
+    v30x_to(&v30x_frame(&packed), FR, sink.set_kernel_matrix(M)).unwrap();
   }
 
   let rgb_ref = block_mean_rgb_u8(&full_rgb);
@@ -391,7 +391,7 @@ fn v30x_luma_taken_from_native_y_under_saturated_chroma() {
         .unwrap()
         .with_luma_u16(&mut luma_u16)
         .unwrap();
-    v30x_to(&v30x_frame(&packed), FR, M, &mut sink).unwrap();
+    v30x_to(&v30x_frame(&packed), FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert!(
     luma_u16.iter().all(|&p| p == yc),
@@ -414,7 +414,7 @@ fn v30x_identity_plan_matches_new_sink() {
     let mut sink = MixedSinker::<V30X>::new(SRC, SRC)
       .with_rgb_u16(&mut direct)
       .unwrap();
-    v30x_to(&v30x_frame(&packed), FR, M, &mut sink).unwrap();
+    v30x_to(&v30x_frame(&packed), FR, sink.set_kernel_matrix(M)).unwrap();
   }
   let mut via_area = vec![0u16; SRC * SRC * 3];
   {
@@ -423,7 +423,7 @@ fn v30x_identity_plan_matches_new_sink() {
         .unwrap()
         .with_rgb_u16(&mut via_area)
         .unwrap();
-    v30x_to(&v30x_frame(&packed), FR, M, &mut sink).unwrap();
+    v30x_to(&v30x_frame(&packed), FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(direct, via_area, "identity plan must match the direct sink");
 }
@@ -435,7 +435,7 @@ fn v30x_no_outputs_is_a_no_op() {
   let mut sink =
     MixedSinker::<V30X, AreaResampler>::with_resampler(SRC, SRC, AreaResampler::to(OUT, OUT))
       .unwrap();
-  v30x_to(&v30x_frame(&packed), FR, M, &mut sink).unwrap();
+  v30x_to(&v30x_frame(&packed), FR, sink.set_kernel_matrix(M)).unwrap();
   assert!(
     !sink.rgb_stream_allocated(),
     "u8 stream allocated for a no-op"
@@ -473,8 +473,8 @@ fn v30x_resets_streams_across_frames() {
         .unwrap()
         .with_rgb_u16(&mut rgb_u16)
         .unwrap();
-    v30x_to(&v30x_frame(&p1), FR, M, &mut sink).unwrap();
-    v30x_to(&v30x_frame(&p2), FR, M, &mut sink).unwrap();
+    v30x_to(&v30x_frame(&p1), FR, sink.set_kernel_matrix(M)).unwrap();
+    v30x_to(&v30x_frame(&p2), FR, sink.set_kernel_matrix(M)).unwrap();
   }
   let (_r, _r16, full_y2) = direct_full(&p2);
   assert_eq!(
@@ -504,7 +504,9 @@ fn v30x_out_of_sequence_first_row_rejected_before_allocation() {
       .with_rgb_u16(&mut rgb_u16)
       .unwrap();
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
-  let err = sink.process(V30XRow::new(row3, 3, M, FR)).unwrap_err();
+  let err = sink
+    .process(V30XRow::for_tests(row3, 3, M, FR))
+    .unwrap_err();
   assert!(
     matches!(
       err,
@@ -553,10 +555,10 @@ fn v30x_rejects_mid_frame_out_of_sequence() {
       .unwrap();
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   sink
-    .process(V30XRow::new(&packed[..SRC], 0, M, FR))
+    .process(V30XRow::for_tests(&packed[..SRC], 0, M, FR))
     .unwrap();
   let err = sink
-    .process(V30XRow::new(&packed[2 * SRC..3 * SRC], 2, M, FR))
+    .process(V30XRow::for_tests(&packed[2 * SRC..3 * SRC], 2, M, FR))
     .unwrap_err();
   assert!(
     matches!(
@@ -584,11 +586,11 @@ fn v30x_rejects_mid_frame_output_change() {
       .unwrap();
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   sink
-    .process(V30XRow::new(&packed[..SRC], 0, M, FR))
+    .process(V30XRow::for_tests(&packed[..SRC], 0, M, FR))
     .unwrap();
   sink.set_luma_u16(&mut luma_u16).unwrap();
   let err = sink
-    .process(V30XRow::new(&packed[SRC..2 * SRC], 1, M, FR))
+    .process(V30XRow::for_tests(&packed[SRC..2 * SRC], 1, M, FR))
     .unwrap_err();
   assert!(
     matches!(err, MixedSinkerError::ResampleOutputsChanged(_)),
@@ -625,7 +627,7 @@ fn v30x_resample_simd_matches_scalar() {
         .unwrap()
         .with_luma_u16(&mut luma_u16)
         .unwrap();
-    v30x_to(&v30x_frame(&packed), FR, M, &mut sink).unwrap();
+    v30x_to(&v30x_frame(&packed), FR, sink.set_kernel_matrix(M)).unwrap();
     (rgb, rgb_u16, luma_u16)
   };
   assert_eq!(run(true), run(false), "V30X resample SIMD != scalar");

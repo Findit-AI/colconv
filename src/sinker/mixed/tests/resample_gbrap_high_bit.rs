@@ -16,9 +16,11 @@
 //!   the **native** max `(1 << BITS) - 1` (transparent pixels never bleed);
 //! - LE and BE wire encodings produce byte-identical output.
 //!
-//! `GbrapNRow::new` is `pub(crate)` in `mediaframe`, so (as with the
+//! `Gbrap{N}Row::new` is `pub(crate)` in `mediaframe`, so (as with the
 //! `resample_gbrp` / `resample_gbr_high_bit` suites) a high-bit GBR+alpha
-//! row can only reach `process` through the in-order walker; the mid-frame
+//! row reaches `process` through the in-order walker here. mediaframe 0.4's
+//! `#[doc(hidden)] for_tests` door makes a direct call constructible; the
+//! mid-frame
 //! alpha-mode-freeze / out-of-sequence rejections are covered by the
 //! shared-tail `resample_packed_rgba_16bit` suite against the exact same
 //! `check_frozen_alpha_mode` / `packed_rgba_u16_resample` functions.
@@ -181,7 +183,7 @@ macro_rules! gbrap_high_bit_resample_suite {
         let mut sink = MixedSinker::<crate::source::$marker<false>>::new(SRC, SRC)
           .with_rgba_u16(&mut rgba_u16)
           .unwrap();
-        crate::source::$walk(&src, true, MATRIX, &mut sink).unwrap();
+        crate::source::$walk(&src, true, sink.set_kernel_matrix(MATRIX)).unwrap();
         rgba_u16
       }
 
@@ -211,7 +213,7 @@ macro_rules! gbrap_high_bit_resample_suite {
           .unwrap()
           .with_rgba_u16(&mut rgba_u16)
           .unwrap();
-          crate::source::$walk(&src, true, MATRIX, &mut sink).unwrap();
+          crate::source::$walk(&src, true, sink.set_kernel_matrix(MATRIX)).unwrap();
         }
         assert_eq!(rgba_u16, block_mean_rgba(&direct_rgba_u16(&host)));
       }
@@ -245,7 +247,7 @@ macro_rules! gbrap_high_bit_resample_suite {
           .unwrap()
           .with_rgba_u16(&mut rgba_u16)
           .unwrap();
-          crate::source::$walk(&src, true, MATRIX, &mut sink).unwrap();
+          crate::source::$walk(&src, true, sink.set_kernel_matrix(MATRIX)).unwrap();
         }
         assert_eq!(rgba_u16, block_mean_rgba(&direct_rgba_u16(&host)), "block mean");
         assert!(
@@ -303,7 +305,7 @@ macro_rules! gbrap_high_bit_resample_suite {
           .unwrap()
           .with_hsv(&mut h, &mut s, &mut v)
           .unwrap();
-          crate::source::$walk(&src, true, MATRIX, &mut sink).unwrap();
+          crate::source::$walk(&src, true, sink.set_kernel_matrix(MATRIX)).unwrap();
         }
 
         let binned = block_mean_rgba(&direct_rgba_u16(&host));
@@ -345,7 +347,7 @@ macro_rules! gbrap_high_bit_resample_suite {
             .unwrap()
             .with_hsv(&mut h_ref, &mut s_ref, &mut v_ref)
             .unwrap();
-          crate::source::$gbrp_walk(&binned_src, true, MATRIX, &mut sink).unwrap();
+          crate::source::$gbrp_walk(&binned_src, true, sink.set_kernel_matrix(MATRIX)).unwrap();
         }
         assert_eq!(luma, luma_ref, "luma (narrowed)");
         assert_eq!(lu16, lu16_ref, "luma_u16 (native, full parity)");
@@ -387,7 +389,7 @@ macro_rules! gbrap_high_bit_resample_suite {
           .unwrap()
           .with_rgba(&mut rgba)
           .unwrap();
-          crate::source::$walk(&src, true, MATRIX, &mut sink).unwrap();
+          crate::source::$walk(&src, true, sink.set_kernel_matrix(MATRIX)).unwrap();
         }
 
         let mut pm = direct_rgba_u16(&host);
@@ -434,7 +436,7 @@ macro_rules! gbrap_high_bit_resample_suite {
           .with_alpha_mode(AlphaMode::Premultiplied)
           .with_rgba_u16(&mut rgba_u16)
           .unwrap();
-          crate::source::$walk(&src, true, MATRIX, &mut sink).unwrap();
+          crate::source::$walk(&src, true, sink.set_kernel_matrix(MATRIX)).unwrap();
         }
         assert_eq!(&rgba_u16[..4], &[0, 0, 0, 0], "transparent block bled color");
 
@@ -475,7 +477,7 @@ macro_rules! gbrap_high_bit_resample_suite {
           .unwrap()
           .with_rgba(&mut rgba)
           .unwrap();
-          crate::source::$walk(&src, true, MATRIX, &mut sink).unwrap();
+          crate::source::$walk(&src, true, sink.set_kernel_matrix(MATRIX)).unwrap();
           (rgba_u16, rgba)
         };
         let render_be = || {
@@ -502,7 +504,7 @@ macro_rules! gbrap_high_bit_resample_suite {
           .unwrap()
           .with_rgba(&mut rgba)
           .unwrap();
-          crate::source::$walk_endian(&src, true, MATRIX, &mut sink).unwrap();
+          crate::source::$walk_endian(&src, true, sink.set_kernel_matrix(MATRIX)).unwrap();
           (rgba_u16, rgba)
         };
         assert_eq!(render_le(), render_be(), "LE/BE outputs diverge");
@@ -541,7 +543,7 @@ macro_rules! gbrap_high_bit_resample_suite {
           .unwrap()
           .with_rgba_u16(&mut rgba_u16)
           .unwrap();
-          crate::source::$walk(&src, true, MATRIX, &mut sink).unwrap();
+          crate::source::$walk(&src, true, sink.set_kernel_matrix(MATRIX)).unwrap();
         }
         assert_eq!(rgba_u16, direct_rgba_u16(&host), "identity plan == direct");
       }
@@ -572,8 +574,8 @@ macro_rules! gbrap_high_bit_resample_suite {
           .unwrap()
           .with_rgba_u16(&mut rgba_u16)
           .unwrap();
-          crate::source::$walk(&src, true, MATRIX, &mut sink).unwrap();
-          crate::source::$walk(&src, true, MATRIX, &mut sink).unwrap();
+          crate::source::$walk(&src, true, sink.set_kernel_matrix(MATRIX)).unwrap();
+          crate::source::$walk(&src, true, sink.set_kernel_matrix(MATRIX)).unwrap();
         }
         assert_eq!(rgba_u16, block_mean_rgba(&direct_rgba_u16(&host)));
       }
@@ -607,9 +609,9 @@ macro_rules! gbrap_high_bit_resample_suite {
           .unwrap()
           .with_rgba_u16(&mut rgba_u16)
           .unwrap();
-          crate::source::$walk(&src, true, MATRIX, &mut sink).unwrap();
+          crate::source::$walk(&src, true, sink.set_kernel_matrix(MATRIX)).unwrap();
           sink.set_alpha_mode(AlphaMode::Premultiplied);
-          crate::source::$walk(&src, true, MATRIX, &mut sink)
+          crate::source::$walk(&src, true, sink.set_kernel_matrix(MATRIX))
             .expect("a fresh frame must accept a different alpha mode");
         }
         let mut pm = direct_rgba_u16(&host);
@@ -750,7 +752,7 @@ mod gbrap10_filter {
         .unwrap()
         .with_rgba_u16(&mut rgba_u16)
         .unwrap();
-      crate::source::gbrap10_to(&src, true, MATRIX, &mut sink)
+      crate::source::gbrap10_to(&src, true, sink.set_kernel_matrix(MATRIX))
         .expect("GbrapN filter plan must be accepted (routed)");
     }
     assert!(
@@ -809,7 +811,7 @@ mod gbrap10_filter {
         .unwrap()
         .with_rgba(&mut rgba_u8)
         .unwrap();
-      crate::source::gbrap10_to(&src, true, MATRIX, &mut sink).unwrap();
+      crate::source::gbrap10_to(&src, true, sink.set_kernel_matrix(MATRIX)).unwrap();
     }
 
     // (a) Every native sample (alpha included) is within the 10-bit range.
@@ -922,7 +924,7 @@ mod filter_native_luma_u16 {
               .unwrap()
               .with_luma_u16(&mut luma_u16)
               .unwrap();
-            crate::source::$walk(&src, true, MATRIX, &mut sink).unwrap();
+            crate::source::$walk(&src, true, sink.set_kernel_matrix(MATRIX)).unwrap();
           }
           (rgba_u16, luma_u16)
         }
@@ -1038,7 +1040,7 @@ mod filter_parity {
         .unwrap()
         .with_rgba_u16(&mut out)
         .unwrap();
-      crate::source::rgba64_to(&src, true, MATRIX, &mut sink).unwrap();
+      crate::source::rgba64_to(&src, true, sink.set_kernel_matrix(MATRIX)).unwrap();
     }
     for v in &mut out {
       *v = (*v).min(native_max);
@@ -1090,7 +1092,7 @@ mod filter_parity {
               .unwrap()
               .with_rgba_u16(&mut out)
               .unwrap();
-            crate::source::$walker(&src, true, MATRIX, &mut sink).unwrap();
+            crate::source::$walker(&src, true, sink.set_kernel_matrix(MATRIX)).unwrap();
           }
           out
         }

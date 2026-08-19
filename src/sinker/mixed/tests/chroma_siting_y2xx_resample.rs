@@ -259,7 +259,7 @@ macro_rules! hibit_422_packed_resample_siting {
           let f =
             Y2xxFrame::<$bits, false>::try_new(&packed, SRC as u32, SRC as u32, (2 * SRC) as u32)
               .unwrap();
-          $w(&f, FR, M, &mut sink).unwrap();
+          $w(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgb16)
       }
@@ -291,7 +291,7 @@ macro_rules! hibit_422_packed_resample_siting {
           let f =
             Y2xxFrame::<$bits, false>::try_new(&packed, SRC as u32, SRC as u32, (2 * SRC) as u32)
               .unwrap();
-          $w(&f, FR, M, &mut sink).unwrap();
+          $w(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgb16)
       }
@@ -323,7 +323,7 @@ macro_rules! hibit_422_packed_resample_siting {
           let f =
             Y2xxFrame::<$bits, true>::try_new(&packed, SRC as u32, SRC as u32, (2 * SRC) as u32)
               .unwrap();
-          $wbe::<_, true>(&f, FR, M, &mut sink).unwrap();
+          $wbe::<_, true>(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgb16)
       }
@@ -358,7 +358,7 @@ macro_rules! hibit_422_packed_resample_siting {
           let f = $F422::new(
             y, u, v, SRC as u32, SRC as u32, SRC as u32, CW as u32, CW as u32,
           );
-          $w422(&f, FR, M, &mut sink).unwrap();
+          $w422(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgb16)
       }
@@ -382,7 +382,7 @@ macro_rules! hibit_422_packed_resample_siting {
           let f = $F444::new(
             &yb, &ub, &vb, OUT as u32, OUT as u32, OUT as u32, OUT as u32, OUT as u32,
           );
-          $w444(&f, FR, M, &mut sink).unwrap();
+          $w444(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgb16)
       }
@@ -423,7 +423,7 @@ macro_rules! hibit_422_packed_resample_siting {
           .unwrap()
           .with_rgb_u16(&mut rgb16)
           .unwrap();
-          $w444(&f, FR, M, &mut sink).unwrap();
+          $w444(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         } else {
           let mut sink = MixedSinker::<$M444, AreaResampler>::with_resampler(
             SRC,
@@ -437,7 +437,7 @@ macro_rules! hibit_422_packed_resample_siting {
           .unwrap()
           .with_rgb_u16(&mut rgb16)
           .unwrap();
-          $w444(&f, FR, M, &mut sink).unwrap();
+          $w444(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgb16)
       }
@@ -620,10 +620,10 @@ macro_rules! hibit_422_packed_resample_siting {
         let packed = pack_packed(y, u, v);
         sink.set_chroma_location(loc1.clone());
         PixelSink::begin_frame(&mut sink, SRC as u32, SRC as u32).unwrap();
-        let row0 = $Row::new(&packed[0..2 * SRC], 0, M, FR);
+        let row0 = $Row::for_tests(&packed[0..2 * SRC], 0, M, FR);
         PixelSink::process(&mut sink, row0).unwrap();
         sink.set_chroma_location(loc2.clone());
-        let row1 = $Row::new(&packed[2 * SRC..4 * SRC], 1, M, FR);
+        let row1 = $Row::for_tests(&packed[2 * SRC..4 * SRC], 1, M, FR);
         PixelSink::process(&mut sink, row1)
       }
 

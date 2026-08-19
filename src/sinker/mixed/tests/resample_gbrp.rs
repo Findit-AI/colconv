@@ -10,7 +10,8 @@
 //! tail's `resample_rgb24` / `resample_padding_byte` suites against the
 //! exact same shared `resample_preflight_check_only` / `frozen_outputs_check`
 //! transactional preflight;
-//! `GbrpRow::new` is `pub(crate)` in `mediaframe`, so a `Gbrp` row can
+//! `GbrpRow::new` is `pub(crate)` in `mediaframe` and the 8-bit GBR rows carry
+//! no `for_tests` door, so a `Gbrp` row can
 //! only reach `process` through the in-order `gbrp_to` walker and a
 //! direct out-of-order `process` call cannot be constructed here.
 
@@ -105,7 +106,7 @@ fn gbrp_downscale_rgb_is_exact_area_mean() {
         .unwrap()
         .with_rgb(&mut out)
         .unwrap();
-    gbrp_to(&src, true, MATRIX, &mut sink).unwrap();
+    gbrp_to(&src, true, sink.set_kernel_matrix(MATRIX)).unwrap();
   }
   for oy in 0..OUT {
     for ox in 0..OUT {
@@ -161,7 +162,7 @@ fn gbrp_all_outputs_match_direct_conversion_of_prebinned_frame() {
         .unwrap()
         .with_hsv(&mut h_o, &mut s_o, &mut v_o)
         .unwrap();
-    gbrp_to(&src, true, MATRIX, &mut sink).unwrap();
+    gbrp_to(&src, true, sink.set_kernel_matrix(MATRIX)).unwrap();
   }
 
   // Oracle: build the binned RGB by exact block-mean, scatter it back to
@@ -198,7 +199,7 @@ fn gbrp_all_outputs_match_direct_conversion_of_prebinned_frame() {
       .unwrap()
       .with_hsv(&mut h_ref, &mut s_ref, &mut v_ref)
       .unwrap();
-    gbrp_to(&binned_src, true, MATRIX, &mut sink).unwrap();
+    gbrp_to(&binned_src, true, sink.set_kernel_matrix(MATRIX)).unwrap();
   }
 
   assert_eq!(rgba_o, rgba_ref, "rgba (alpha forced 0xFF)");
@@ -224,7 +225,7 @@ fn gbrp_identity_plan_matches_new_sink() {
     let mut sink = MixedSinker::<Gbrp>::new(SRC, SRC)
       .with_rgb(&mut direct)
       .unwrap();
-    gbrp_to(&src, true, MATRIX, &mut sink).unwrap();
+    gbrp_to(&src, true, sink.set_kernel_matrix(MATRIX)).unwrap();
   }
   let mut via_area = std::vec![0u8; SRC * SRC * 3];
   {
@@ -233,7 +234,7 @@ fn gbrp_identity_plan_matches_new_sink() {
         .unwrap()
         .with_rgb(&mut via_area)
         .unwrap();
-    gbrp_to(&src, true, MATRIX, &mut sink).unwrap();
+    gbrp_to(&src, true, sink.set_kernel_matrix(MATRIX)).unwrap();
   }
   assert_eq!(direct, via_area, "identity-plan resample == direct sink");
 }
@@ -254,7 +255,7 @@ fn gbrp_resample_no_outputs_is_a_no_op() {
   let mut sink =
     MixedSinker::<Gbrp, AreaResampler>::with_resampler(SRC, SRC, AreaResampler::to(OUT, OUT))
       .unwrap();
-  gbrp_to(&src, true, MATRIX, &mut sink).unwrap();
+  gbrp_to(&src, true, sink.set_kernel_matrix(MATRIX)).unwrap();
 }
 
 #[test]
@@ -283,15 +284,13 @@ fn gbrp_resample_reuses_stream_across_frames() {
     gbrp_to(
       &gbrp_frame(&g1, &b1, &r1, SRC, SRC),
       true,
-      MATRIX,
-      &mut sink,
+      sink.set_kernel_matrix(MATRIX),
     )
     .unwrap();
     gbrp_to(
       &gbrp_frame(&g2, &b2, &r2, SRC, SRC),
       true,
-      MATRIX,
-      &mut sink,
+      sink.set_kernel_matrix(MATRIX),
     )
     .unwrap();
   }
@@ -354,7 +353,7 @@ where
     .unwrap()
     .with_luma(&mut luma_a)
     .unwrap();
-    gbrp_to(&gbrp_src, true, MATRIX, &mut sink).unwrap();
+    gbrp_to(&gbrp_src, true, sink.set_kernel_matrix(MATRIX)).unwrap();
   }
 
   let (mut rgb_b, mut rgba_b, mut luma_b) = (
@@ -375,7 +374,7 @@ where
     .unwrap()
     .with_luma(&mut luma_b)
     .unwrap();
-    rgb24_to(&rgb_src, true, MATRIX, &mut sink).unwrap();
+    rgb24_to(&rgb_src, true, sink.set_kernel_matrix(MATRIX)).unwrap();
   }
 
   assert_eq!(rgb_a, rgb_b, "{label}: rgb");
@@ -429,7 +428,8 @@ fn gbrp_filter_plan_no_longer_rejected() {
   .unwrap()
   .with_rgb(&mut out)
   .unwrap();
-  gbrp_to(&src, true, MATRIX, &mut sink).expect("Gbrp filter plan must be accepted (routed)");
+  gbrp_to(&src, true, sink.set_kernel_matrix(MATRIX))
+    .expect("Gbrp filter plan must be accepted (routed)");
   assert!(
     out.iter().any(|&px| px != 0xAB),
     "routed filter plan must write the output buffer"

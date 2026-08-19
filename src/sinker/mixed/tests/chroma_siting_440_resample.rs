@@ -268,7 +268,7 @@ fn run(
     let f = Yuv440pFrame::new(
       y, u, v, sw as u32, sh as u32, sw as u32, sw as u32, sw as u32,
     );
-    yuv440p_to(&f, FR, M, &mut sink).unwrap();
+    yuv440p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   (rgb, rgba, (hh, ss, vv), luma, luma_u16)
 }
@@ -313,7 +313,7 @@ fn bottom_native_oracle(
     let f = Yuv444pFrame::new(
       &yb, &ub, &vb, ow as u32, oh as u32, ow as u32, ow as u32, ow as u32,
     );
-    yuv444p_to(&f, FR, M, &mut sink).unwrap();
+    yuv444p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   (rgb, rgba, (hh, ss, vv), luma, luma_u16)
 }
@@ -347,7 +347,7 @@ fn encoded_oracle_rgb_bottom(
     let f = Yuv444pFrame::new(
       y, &uf, &vf, sw as u32, sh as u32, sw as u32, sw as u32, sw as u32,
     );
-    yuv444p_to(&f, FR, M, &mut sink).unwrap();
+    yuv444p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   rgb
 }
@@ -366,7 +366,7 @@ fn direct_bottom_rgb(y: &[u8], u: &[u8], v: &[u8], sw: usize, sh: usize, simd: b
     let f = Yuv440pFrame::new(
       y, u, v, sw as u32, sh as u32, sw as u32, sw as u32, sw as u32,
     );
-    yuv440p_to(&f, FR, M, &mut sink).unwrap();
+    yuv440p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   rgb
 }
@@ -556,7 +556,7 @@ fn bottom_filter_equals_reconstruct_then_filter() {
       let f = Yuv440pFrame::new(
         &y, &u, &v, sw as u32, sh as u32, sw as u32, sw as u32, sw as u32,
       );
-      yuv440p_to(&f, FR, M, &mut sink).unwrap();
+      yuv440p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
     }
     rgb
   };
@@ -576,7 +576,7 @@ fn bottom_filter_equals_reconstruct_then_filter() {
     let f = Yuv444pFrame::new(
       &y, &uf, &vf, sw as u32, sh as u32, sw as u32, sw as u32, sw as u32,
     );
-    yuv444p_to(&f, FR, M, &mut sink).unwrap();
+    yuv444p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(got, oracle, "filter-tier bottom == reconstruct-then-filter");
   assert_ne!(
@@ -609,7 +609,7 @@ fn bottom_linear_equals_reconstruct_then_linear() {
     let f = Yuv440pFrame::new(
       &y, &u, &v, sw as u32, sh as u32, sw as u32, sw as u32, sw as u32,
     );
-    yuv440p_to(&f, FR, M, &mut sink).unwrap();
+    yuv440p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   let (uf, vf) = recon_full_bottom(&u, &v, sw, sh);
   let mut oracle = vec![0u8; ow * oh * 3];
@@ -623,7 +623,7 @@ fn bottom_linear_equals_reconstruct_then_linear() {
     let f = Yuv444pFrame::new(
       &y, &uf, &vf, sw as u32, sh as u32, sw as u32, sw as u32, sw as u32,
     );
-    yuv444p_to(&f, FR, M, &mut sink).unwrap();
+    yuv444p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(got, oracle, "linear-tier bottom == reconstruct-then-linear");
 }
@@ -702,10 +702,10 @@ fn in_sequence_flip_row1<R>(
 ) -> Result<(), super::super::MixedSinkerError> {
   sink.set_chroma_location(loc1.clone());
   PixelSink::begin_frame(&mut sink, 8, 8).unwrap();
-  let row0 = Yuv440pRow::new(&y[0..8], &u[0..8], &v[0..8], 0, M, FR);
+  let row0 = Yuv440pRow::for_tests(&y[0..8], &u[0..8], &v[0..8], 0, M, FR);
   PixelSink::process(&mut sink, row0).unwrap();
   sink.set_chroma_location(loc2.clone());
-  let row1 = Yuv440pRow::new(&y[8..16], &u[0..8], &v[0..8], 1, M, FR);
+  let row1 = Yuv440pRow::for_tests(&y[8..16], &u[0..8], &v[0..8], 1, M, FR);
   PixelSink::process(&mut sink, row1)
 }
 
@@ -823,9 +823,9 @@ fn run_reuse_native(
         .unwrap();
     let f = Yuv440pFrame::new(y, u, v, 8, 8, 8, 8, 8);
     sink.set_chroma_location(loc1.clone());
-    yuv440p_to(&f, FR, M, &mut sink).unwrap();
+    yuv440p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
     sink.set_chroma_location(loc2.clone());
-    yuv440p_to(&f, FR, M, &mut sink).unwrap();
+    yuv440p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   rgb
 }
@@ -845,7 +845,7 @@ fn run_hsv_only(y: &[u8], u: &[u8], v: &[u8], loc: ChromaLocation) -> (Vec<u8>, 
         .with_hsv(&mut hh, &mut ss, &mut vv)
         .unwrap();
     let f = Yuv440pFrame::new(y, u, v, 8, 8, 8, 8, 8);
-    yuv440p_to(&f, FR, M, &mut sink).unwrap();
+    yuv440p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   (hh, ss, vv)
 }
@@ -868,9 +868,9 @@ fn run_reuse_hsv(
         .unwrap();
     let f = Yuv440pFrame::new(y, u, v, 8, 8, 8, 8, 8);
     sink.set_chroma_location(loc1.clone());
-    yuv440p_to(&f, FR, M, &mut sink).unwrap();
+    yuv440p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
     sink.set_chroma_location(loc2.clone());
-    yuv440p_to(&f, FR, M, &mut sink).unwrap();
+    yuv440p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   (hh, ss, vv)
 }
@@ -1032,7 +1032,7 @@ fn top_native_oracle(
     let f = Yuv444pFrame::new(
       &yb, &ub, &vb, ow as u32, oh as u32, ow as u32, ow as u32, ow as u32,
     );
-    yuv444p_to(&f, FR, M, &mut sink).unwrap();
+    yuv444p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   (rgb, rgba, (hh, ss, vv), luma, luma_u16)
 }
@@ -1064,7 +1064,7 @@ fn encoded_oracle_rgb_top(
     let f = Yuv444pFrame::new(
       y, &uf, &vf, sw as u32, sh as u32, sw as u32, sw as u32, sw as u32,
     );
-    yuv444p_to(&f, FR, M, &mut sink).unwrap();
+    yuv444p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   rgb
 }
@@ -1082,7 +1082,7 @@ fn direct_top_rgb(y: &[u8], u: &[u8], v: &[u8], sw: usize, sh: usize, simd: bool
     let f = Yuv440pFrame::new(
       y, u, v, sw as u32, sh as u32, sw as u32, sw as u32, sw as u32,
     );
-    yuv440p_to(&f, FR, M, &mut sink).unwrap();
+    yuv440p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   rgb
 }
@@ -1180,7 +1180,7 @@ fn top_filter_equals_reconstruct_then_filter() {
       let f = Yuv440pFrame::new(
         &y, &u, &v, sw as u32, sh as u32, sw as u32, sw as u32, sw as u32,
       );
-      yuv440p_to(&f, FR, M, &mut sink).unwrap();
+      yuv440p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
     }
     rgb
   };
@@ -1200,7 +1200,7 @@ fn top_filter_equals_reconstruct_then_filter() {
     let f = Yuv444pFrame::new(
       &y, &uf, &vf, sw as u32, sh as u32, sw as u32, sw as u32, sw as u32,
     );
-    yuv444p_to(&f, FR, M, &mut sink).unwrap();
+    yuv444p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(got, oracle, "filter-tier top == reconstruct-then-filter");
   assert_ne!(
@@ -1233,7 +1233,7 @@ fn top_linear_equals_reconstruct_then_linear() {
     let f = Yuv440pFrame::new(
       &y, &u, &v, sw as u32, sh as u32, sw as u32, sw as u32, sw as u32,
     );
-    yuv440p_to(&f, FR, M, &mut sink).unwrap();
+    yuv440p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   let (uf, vf) = recon_full_top(&u, &v, sw, sh);
   let mut oracle = vec![0u8; ow * oh * 3];
@@ -1247,7 +1247,7 @@ fn top_linear_equals_reconstruct_then_linear() {
     let f = Yuv444pFrame::new(
       &y, &uf, &vf, sw as u32, sh as u32, sw as u32, sw as u32, sw as u32,
     );
-    yuv444p_to(&f, FR, M, &mut sink).unwrap();
+    yuv444p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(got, oracle, "linear-tier top == reconstruct-then-linear");
 }
@@ -1282,7 +1282,7 @@ fn top_encoded_identity_matches_direct_decode() {
     .with_rgb(&mut filt)
     .unwrap();
     let f = Yuv440pFrame::new(&y, &u, &v, 8, 8, 8, 8, 8);
-    yuv440p_to(&f, FR, M, &mut sink).unwrap();
+    yuv440p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(
     filt, direct,

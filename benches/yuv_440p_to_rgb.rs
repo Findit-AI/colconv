@@ -72,7 +72,14 @@ fn bench(c: &mut Criterion) {
             .with_simd(use_simd)
             .with_rgb(&mut rgb)
             .unwrap();
-          yuv440p_to(&frame, FULL_RANGE, MATRIX, &mut sinker).unwrap();
+          yuv440p_to(
+            &frame,
+            FULL_RANGE,
+            sinker
+              .set_color_spec(&pixon::ColorSpec::of_matrix(MATRIX))
+              .unwrap(),
+          )
+          .unwrap();
           black_box(&rgb);
         });
       });

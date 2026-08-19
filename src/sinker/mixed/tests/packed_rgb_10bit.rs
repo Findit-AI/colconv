@@ -42,7 +42,7 @@ fn x2rgb10_with_rgb_downshifts_to_8bit() {
   let mut sink = MixedSinker::<X2Rgb10>::new(16, 4)
     .with_rgb(&mut rgb_out)
     .unwrap();
-  x2rgb10_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+  x2rgb10_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   for px in rgb_out.chunks(3) {
     assert_eq!(px, [0xFF, 0x80, 0x20]);
@@ -62,7 +62,7 @@ fn x2rgb10_with_rgba_forces_alpha_to_ff() {
   let mut sink = MixedSinker::<X2Rgb10>::new(16, 4)
     .with_rgba(&mut rgba_out)
     .unwrap();
-  x2rgb10_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+  x2rgb10_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   for px in rgba_out.chunks(4) {
     assert_eq!(px, [0xFF, 0x80, 0x20, 0xFF]);
@@ -82,7 +82,7 @@ fn x2rgb10_with_rgb_u16_preserves_native_precision() {
   let mut sink = MixedSinker::<X2Rgb10>::new(16, 4)
     .with_rgb_u16(&mut rgb_out)
     .unwrap();
-  x2rgb10_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+  x2rgb10_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   for px in rgb_out.chunks(3) {
     assert_eq!(px, [0x3FC, 0x200, 0x080]);
@@ -104,7 +104,7 @@ fn x2bgr10_with_rgb_swaps_channels() {
   let mut sink = MixedSinker::<X2Bgr10>::new(16, 4)
     .with_rgb(&mut rgb_out)
     .unwrap();
-  x2bgr10_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+  x2bgr10_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   for px in rgb_out.chunks(3) {
     assert_eq!(px, [0xFF, 0x80, 0x20]);
@@ -124,7 +124,7 @@ fn x2bgr10_with_rgba_swaps_and_forces_alpha() {
   let mut sink = MixedSinker::<X2Bgr10>::new(16, 4)
     .with_rgba(&mut rgba_out)
     .unwrap();
-  x2bgr10_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+  x2bgr10_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   for px in rgba_out.chunks(4) {
     assert_eq!(px, [0xFF, 0x80, 0x20, 0xFF]);
@@ -164,7 +164,7 @@ fn x2rgb10_simd_matches_scalar_with_random_input() {
     .unwrap()
     .with_luma(&mut luma_simd)
     .unwrap();
-  x2rgb10_to(&src, true, KernelMatrix::Bt709, &mut s_simd).unwrap();
+  x2rgb10_to(&src, true, s_simd.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   let mut s_scalar = MixedSinker::<X2Rgb10>::new(w, h)
     .with_rgb(&mut rgb_scalar)
@@ -176,7 +176,7 @@ fn x2rgb10_simd_matches_scalar_with_random_input() {
     .with_luma(&mut luma_scalar)
     .unwrap();
   s_scalar.set_simd(false);
-  x2rgb10_to(&src, true, KernelMatrix::Bt709, &mut s_scalar).unwrap();
+  x2rgb10_to(&src, true, s_scalar.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   assert_eq!(rgb_simd, rgb_scalar, "RGB output diverges");
   assert_eq!(rgba_simd, rgba_scalar, "RGBA output diverges");
@@ -214,7 +214,7 @@ fn x2bgr10_simd_matches_scalar_with_random_input() {
     .unwrap()
     .with_luma(&mut luma_simd)
     .unwrap();
-  x2bgr10_to(&src, true, KernelMatrix::Bt709, &mut s_simd).unwrap();
+  x2bgr10_to(&src, true, s_simd.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   let mut s_scalar = MixedSinker::<X2Bgr10>::new(w, h)
     .with_rgb(&mut rgb_scalar)
@@ -226,7 +226,7 @@ fn x2bgr10_simd_matches_scalar_with_random_input() {
     .with_luma(&mut luma_scalar)
     .unwrap();
   s_scalar.set_simd(false);
-  x2bgr10_to(&src, true, KernelMatrix::Bt709, &mut s_scalar).unwrap();
+  x2bgr10_to(&src, true, s_scalar.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   assert_eq!(rgb_simd, rgb_scalar, "RGB output diverges");
   assert_eq!(rgba_simd, rgba_scalar, "RGBA output diverges");
@@ -272,7 +272,12 @@ fn x2rgb10_le_be_roundtrip_byte_identical() {
     .with_simd(false)
     .with_rgba(&mut out_le)
     .unwrap();
-  x2rgb10_to(&frame_le, true, KernelMatrix::Bt709, &mut sink_le).unwrap();
+  x2rgb10_to(
+    &frame_le,
+    true,
+    sink_le.set_kernel_matrix(KernelMatrix::Bt709),
+  )
+  .unwrap();
 
   let frame_be = X2Rgb10BeFrame::try_new(&pix_be, 16, 4, 64).unwrap();
   let mut out_be = vec![0u8; 16 * 4 * 4];
@@ -280,7 +285,12 @@ fn x2rgb10_le_be_roundtrip_byte_identical() {
     .with_simd(false)
     .with_rgba(&mut out_be)
     .unwrap();
-  x2rgb10_to_endian(&frame_be, true, KernelMatrix::Bt709, &mut sink_be).unwrap();
+  x2rgb10_to_endian(
+    &frame_be,
+    true,
+    sink_be.set_kernel_matrix(KernelMatrix::Bt709),
+  )
+  .unwrap();
 
   assert_eq!(
     out_le, out_be,
@@ -302,7 +312,12 @@ fn x2bgr10_le_be_roundtrip_byte_identical() {
     .with_simd(false)
     .with_rgba(&mut out_le)
     .unwrap();
-  x2bgr10_to(&frame_le, true, KernelMatrix::Bt709, &mut sink_le).unwrap();
+  x2bgr10_to(
+    &frame_le,
+    true,
+    sink_le.set_kernel_matrix(KernelMatrix::Bt709),
+  )
+  .unwrap();
 
   let frame_be = X2Bgr10BeFrame::try_new(&pix_be, 16, 4, 64).unwrap();
   let mut out_be = vec![0u8; 16 * 4 * 4];
@@ -310,7 +325,12 @@ fn x2bgr10_le_be_roundtrip_byte_identical() {
     .with_simd(false)
     .with_rgba(&mut out_be)
     .unwrap();
-  x2bgr10_to_endian(&frame_be, true, KernelMatrix::Bt709, &mut sink_be).unwrap();
+  x2bgr10_to_endian(
+    &frame_be,
+    true,
+    sink_be.set_kernel_matrix(KernelMatrix::Bt709),
+  )
+  .unwrap();
 
   assert_eq!(
     out_le, out_be,

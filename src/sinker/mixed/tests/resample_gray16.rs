@@ -93,7 +93,7 @@ fn gray16_downscale_luma_u16_is_exact_area_mean() {
         .unwrap()
         .with_luma_u16(&mut luma_u16)
         .unwrap();
-    gray16_to(&src, FR, M, &mut sink).unwrap();
+    gray16_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(
     luma_u16,
@@ -144,7 +144,7 @@ fn gray16_all_outputs_match_direct_over_binned_luma() {
         .unwrap()
         .with_hsv(&mut h, &mut s_, &mut v_)
         .unwrap();
-    gray16_to(&src, FR, M, &mut sink).unwrap();
+    gray16_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
   }
 
   // Reference: the direct sink over the exact binned u16 luma plane.
@@ -176,7 +176,7 @@ fn gray16_all_outputs_match_direct_over_binned_luma() {
       .unwrap()
       .with_hsv(&mut ref_h, &mut ref_s, &mut ref_v)
       .unwrap();
-    gray16_to(&binned_frame, FR, M, &mut sink).unwrap();
+    gray16_to(&binned_frame, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(luma, ref_luma, "luma");
   assert_eq!(luma_u16, ref_luma_u16, "luma_u16");
@@ -218,7 +218,7 @@ fn gray16_le_be_resample_outputs_identical() {
         .unwrap()
         .with_rgba(&mut le_rgba)
         .unwrap();
-    gray16_to(&frame, FR, M, &mut sink).unwrap();
+    gray16_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   }
 
   let mut be_luma_u16 = vec![0u16; OUT * OUT];
@@ -238,7 +238,7 @@ fn gray16_le_be_resample_outputs_identical() {
     .unwrap()
     .with_rgba(&mut be_rgba)
     .unwrap();
-    gray16_to_endian::<_, true>(&frame, FR, M, &mut sink).unwrap();
+    gray16_to_endian::<_, true>(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   }
 
   assert_eq!(le_luma_u16, be_luma_u16, "luma_u16 LE/BE diverge");
@@ -270,7 +270,7 @@ fn gray16_standalone_rgba_matches_direct_over_binned_luma() {
         .unwrap()
         .with_rgba(&mut rgba)
         .unwrap();
-    gray16_to(&src, FR, M, &mut sink).unwrap();
+    gray16_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   let binned_pix = as_le_u16(&block_mean_2x2(&plane));
   let mut ref_rgba = vec![0u8; OUT * OUT * 4];
@@ -279,7 +279,7 @@ fn gray16_standalone_rgba_matches_direct_over_binned_luma() {
     let mut sink = MixedSinker::<Gray16>::new(OUT, OUT)
       .with_rgba(&mut ref_rgba)
       .unwrap();
-    gray16_to(&binned, FR, M, &mut sink).unwrap();
+    gray16_to(&binned, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(rgba, ref_rgba, "standalone rgba");
 }
@@ -302,7 +302,7 @@ fn gray16_standalone_rgba_u16_matches_direct_over_binned_luma() {
         .unwrap()
         .with_rgba_u16(&mut rgba_u16)
         .unwrap();
-    gray16_to(&src, FR, M, &mut sink).unwrap();
+    gray16_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   let binned_pix = as_le_u16(&block_mean_2x2(&plane));
   let mut ref_rgba_u16 = vec![0u16; OUT * OUT * 4];
@@ -311,7 +311,7 @@ fn gray16_standalone_rgba_u16_matches_direct_over_binned_luma() {
     let mut sink = MixedSinker::<Gray16>::new(OUT, OUT)
       .with_rgba_u16(&mut ref_rgba_u16)
       .unwrap();
-    gray16_to(&binned, FR, M, &mut sink).unwrap();
+    gray16_to(&binned, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(rgba_u16, ref_rgba_u16, "standalone rgba_u16");
 }
@@ -341,7 +341,7 @@ fn gray16_hsv_plus_rgba_matches_direct_over_binned_luma() {
         .unwrap()
         .with_hsv(&mut h, &mut s_, &mut v_)
         .unwrap();
-    gray16_to(&src, FR, M, &mut sink).unwrap();
+    gray16_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     // Regression: this case must not reserve RGB scratch — it derives
     // HSV+RGBA from luma and never reads the scratch, so reserving it
     // could spuriously AllocationFail under memory pressure.
@@ -363,7 +363,7 @@ fn gray16_hsv_plus_rgba_matches_direct_over_binned_luma() {
       .unwrap()
       .with_hsv(&mut ref_h, &mut ref_s, &mut ref_v)
       .unwrap();
-    gray16_to(&binned, FR, M, &mut sink).unwrap();
+    gray16_to(&binned, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(rgba, ref_rgba, "hsv+rgba: rgba");
   assert_eq!(h, ref_h, "hsv+rgba: h");
@@ -386,7 +386,7 @@ fn gray16_identity_plan_matches_new_sink() {
     let mut sink = MixedSinker::<Gray16>::new(SRC, SRC)
       .with_rgb_u16(&mut direct)
       .unwrap();
-    gray16_to(&src, FR, M, &mut sink).unwrap();
+    gray16_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   let mut via_area = vec![0u16; SRC * SRC * 3];
   {
@@ -395,7 +395,7 @@ fn gray16_identity_plan_matches_new_sink() {
         .unwrap()
         .with_rgb_u16(&mut via_area)
         .unwrap();
-    gray16_to(&src, FR, M, &mut sink).unwrap();
+    gray16_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(direct, via_area, "identity plan must match the direct sink");
 }
@@ -425,15 +425,13 @@ fn gray16_resample_reuses_luma_stream_across_frames() {
     gray16_to(
       &Gray16Frame::new(&pix1, SRC as u32, SRC as u32, SRC as u32),
       FR,
-      M,
-      &mut sink,
+      sink.set_kernel_matrix(M),
     )
     .unwrap();
     gray16_to(
       &Gray16Frame::new(&pix2, SRC as u32, SRC as u32, SRC as u32),
       FR,
-      M,
-      &mut sink,
+      sink.set_kernel_matrix(M),
     )
     .unwrap();
   }
@@ -453,7 +451,7 @@ fn gray16_resample_no_outputs_is_a_no_op() {
     MixedSinker::<Gray16, AreaResampler>::with_resampler(SRC, SRC, AreaResampler::to(OUT, OUT))
       .unwrap();
   // No outputs attached: a legal no-op, accepted without error.
-  gray16_to(&src, FR, M, &mut sink).unwrap();
+  gray16_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
   // A no-output call has no stream to sequence and never allocates.
   assert!(
     !sink.luma_stream_u16_allocated(),
@@ -475,7 +473,9 @@ fn gray16_out_of_sequence_first_row_rejected_before_allocation() {
       .unwrap();
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   // Feed row 3 first — the stream expects strict sequencing from 0.
-  let err = sink.process(Gray16Row::new(row3, 3, M, FR)).unwrap_err();
+  let err = sink
+    .process(Gray16Row::for_tests(row3, 3, M, FR))
+    .unwrap_err();
   assert!(
     matches!(
       err,
@@ -510,7 +510,7 @@ fn gray16_rejected_first_row_does_not_poison_output_retry() {
       .unwrap();
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   let err = sink
-    .process(Gray16Row::new(&pix[3 * SRC..4 * SRC], 3, M, FR))
+    .process(Gray16Row::for_tests(&pix[3 * SRC..4 * SRC], 3, M, FR))
     .unwrap_err();
   assert!(
     matches!(
@@ -522,7 +522,7 @@ fn gray16_rejected_first_row_does_not_poison_output_retry() {
   let mut rgb_u16 = vec![0u16; OUT * OUT * 3];
   sink.set_rgb_u16(&mut rgb_u16).unwrap();
   sink
-    .process(Gray16Row::new(&pix[..SRC], 0, M, FR))
+    .process(Gray16Row::for_tests(&pix[..SRC], 0, M, FR))
     .expect("row 0 must succeed after a rejected out-of-sequence first row");
 }
 
@@ -537,10 +537,12 @@ fn gray16_resample_rejects_mid_frame_out_of_sequence() {
       .with_luma_u16(&mut luma_u16)
       .unwrap();
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
-  sink.process(Gray16Row::new(&pix[..SRC], 0, M, FR)).unwrap();
+  sink
+    .process(Gray16Row::for_tests(&pix[..SRC], 0, M, FR))
+    .unwrap();
   // Skip row 1 — feeding row 2 next is out of sequence.
   let err = sink
-    .process(Gray16Row::new(&pix[2 * SRC..3 * SRC], 2, M, FR))
+    .process(Gray16Row::for_tests(&pix[2 * SRC..3 * SRC], 2, M, FR))
     .unwrap_err();
   assert!(
     matches!(
@@ -563,11 +565,13 @@ fn gray16_resample_rejects_mid_frame_output_change() {
       .with_rgb_u16(&mut rgb_u16)
       .unwrap();
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
-  sink.process(Gray16Row::new(&pix[..SRC], 0, M, FR)).unwrap();
+  sink
+    .process(Gray16Row::for_tests(&pix[..SRC], 0, M, FR))
+    .unwrap();
   // Attaching a new output mid-frame trips the frozen-output check.
   sink.set_luma_u16(&mut luma_u16).unwrap();
   let err = sink
-    .process(Gray16Row::new(&pix[SRC..2 * SRC], 1, M, FR))
+    .process(Gray16Row::for_tests(&pix[SRC..2 * SRC], 1, M, FR))
     .unwrap_err();
   assert!(
     matches!(err, MixedSinkerError::ResampleOutputsChanged(_)),
@@ -606,7 +610,7 @@ fn gray16_first_row_scratch_oom_leaves_stream_and_freeze_uncommitted_for_retry()
     // the insert-before-scratch shape would have left the stream committed).
     crate::sinker::mixed::arm_source_luma_u16_scratch_failure();
     let err = sink
-      .process(Gray16Row::new(&pix[..SRC], 0, M, FR))
+      .process(Gray16Row::for_tests(&pix[..SRC], 0, M, FR))
       .unwrap_err();
     assert!(
       matches!(
@@ -628,7 +632,7 @@ fn gray16_first_row_scratch_oom_leaves_stream_and_freeze_uncommitted_for_retry()
     sink.set_rgb(&mut rgb).unwrap();
     for r in 0..SRC {
       sink
-        .process(Gray16Row::new(&pix[r * SRC..(r + 1) * SRC], r, M, FR))
+        .process(Gray16Row::for_tests(&pix[r * SRC..(r + 1) * SRC], r, M, FR))
         .expect("frame replay after a first-row scratch OOM must succeed");
     }
   }
@@ -773,7 +777,7 @@ fn gray16_filter_outputs<K: FilterKernel + Copy>(
     .unwrap()
     .with_hsv(&mut o.hp, &mut o.sp, &mut o.vp)
     .unwrap();
-    gray16_to(&src, FR, M, &mut sink).unwrap();
+    gray16_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   o
 }
@@ -830,7 +834,7 @@ fn assert_gray16_filter_matches_oracle<K: FilterKernel + Copy>(
       .unwrap()
       .with_hsv(&mut ref_h, &mut ref_s, &mut ref_v)
       .unwrap();
-    gray16_to(&binned, FR, M, &mut sink).unwrap();
+    gray16_to(&binned, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(got.luma, ref_luma, "{ctx} luma (>> 8)");
   assert_eq!(got.rgb, ref_rgb, "{ctx} rgb");
@@ -891,7 +895,7 @@ fn gray16_filter_plan_is_accepted() {
     .unwrap()
     .with_luma_u16(&mut luma_u16)
     .unwrap();
-    gray16_to(&src, FR, M, &mut sink).expect("filter plan must be accepted");
+    gray16_to(&src, FR, sink.set_kernel_matrix(M)).expect("filter plan must be accepted");
   }
   let y_ref = native_luma_filter(Triangle, &plane, FW, FH, FOUT_DOWN, FOUT_DOWN);
   assert_eq!(
@@ -927,7 +931,7 @@ fn gray16_filter_le_be_parity() {
     .unwrap()
     .with_rgb_u16(&mut le_rgb_u16)
     .unwrap();
-    gray16_to(&frame, FR, M, &mut sink).unwrap();
+    gray16_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   let mut be_luma_u16 = vec![0u16; FOUT_DOWN * FOUT_DOWN];
   let mut be_rgb_u16 = vec![0u16; FOUT_DOWN * FOUT_DOWN * 3];
@@ -943,7 +947,7 @@ fn gray16_filter_le_be_parity() {
     .unwrap()
     .with_rgb_u16(&mut be_rgb_u16)
     .unwrap();
-    gray16_to_endian::<_, true>(&frame, FR, M, &mut sink).unwrap();
+    gray16_to_endian::<_, true>(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(le_luma_u16, be_luma_u16, "filter luma_u16 LE/BE diverge");
   assert_eq!(le_rgb_u16, be_rgb_u16, "filter rgb_u16 LE/BE diverge");

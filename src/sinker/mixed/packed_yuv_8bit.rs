@@ -846,6 +846,10 @@ impl<R> PixelSink for MixedSinker<'_, Yuyv422, R> {
   type Input<'r> = Yuyv422Row<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     check_dimensions_match(self.width, self.height, width, height)?;
     if self.width & 1 != 0 {
@@ -1693,6 +1697,10 @@ impl<R> PixelSink for MixedSinker<'_, Uyvy422, R> {
   type Input<'r> = Uyvy422Row<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     check_dimensions_match(self.width, self.height, width, height)?;
     if self.width & 1 != 0 {
@@ -2461,6 +2469,10 @@ impl<R> PixelSink for MixedSinker<'_, Yvyu422, R> {
   type Input<'r> = Yvyu422Row<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     check_dimensions_match(self.width, self.height, width, height)?;
     if self.width & 1 != 0 {

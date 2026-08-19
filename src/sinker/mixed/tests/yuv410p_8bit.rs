@@ -31,7 +31,7 @@ fn luma_only_copies_y_plane() {
   let mut sink = MixedSinker::<Yuv410p>::new(16, 8)
     .with_luma(&mut luma)
     .unwrap();
-  yuv410p_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
+  yuv410p_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
 
   assert!(luma.iter().all(|&y| y == 42), "luma should be solid 42");
 }
@@ -49,7 +49,7 @@ fn luma_u16_zero_extends_y_plane() {
   let mut sink = MixedSinker::<Yuv410p>::new(16, 8)
     .with_luma_u16(&mut luma)
     .unwrap();
-  yuv410p_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
+  yuv410p_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
 
   assert!(luma.iter().all(|&y| y == 200u16));
 }
@@ -68,7 +68,7 @@ fn rgb_only_converts_gray_to_gray() {
   let mut sink = MixedSinker::<Yuv410p>::new(16, 8)
     .with_rgb(&mut rgb)
     .unwrap();
-  yuv410p_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
+  yuv410p_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
 
   for px in rgb.chunks(3) {
     assert!(px[0].abs_diff(128) <= 1);
@@ -90,7 +90,7 @@ fn rgba_only_converts_gray_to_gray_with_opaque_alpha() {
   let mut sink = MixedSinker::<Yuv410p>::new(16, 8)
     .with_rgba(&mut rgba)
     .unwrap();
-  yuv410p_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
+  yuv410p_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
 
   for px in rgba.chunks(4) {
     assert!(px[0].abs_diff(128) <= 1, "R");
@@ -115,7 +115,7 @@ fn hsv_only_produces_gray_hsv() {
   let mut sink = MixedSinker::<Yuv410p>::new(16, 8)
     .with_hsv(&mut h, &mut s, &mut v)
     .unwrap();
-  yuv410p_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
+  yuv410p_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
 
   assert!(h.iter().all(|&b| b == 0));
   assert!(s.iter().all(|&b| b == 0));
@@ -149,7 +149,7 @@ fn mixed_all_outputs_populated() {
     .unwrap()
     .with_hsv(&mut h, &mut s, &mut v)
     .unwrap();
-  yuv410p_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
+  yuv410p_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
 
   // Luma = Y plane verbatim.
   assert!(luma.iter().all(|&y| y == 200));
@@ -204,7 +204,7 @@ fn vertical_chroma_subsampling_4x_each_chroma_row_covers_4_y_rows() {
   let mut sink = MixedSinker::<Yuv410p>::new(w, h)
     .with_rgb(&mut rgb)
     .unwrap();
-  yuv410p_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
+  yuv410p_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
 
   // Y rows 0..=3 should all share the same RGB color (chroma block 0).
   let row_bytes = w * 3;
@@ -261,7 +261,7 @@ fn horizontal_chroma_subsampling_4x_each_chroma_sample_covers_4_y_columns() {
   let mut sink = MixedSinker::<Yuv410p>::new(w, h)
     .with_rgb(&mut rgb)
     .unwrap();
-  yuv410p_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
+  yuv410p_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
 
   // Within row 0, columns 0..=3 should all share RGB; columns 4..=7
   // should share a different RGB; etc.
@@ -318,13 +318,18 @@ fn rgb_simd_matches_scalar_pseudo_random() {
   let mut sink_simd = MixedSinker::<Yuv410p>::new(w as usize, h as usize)
     .with_rgb(&mut rgb_simd)
     .unwrap();
-  yuv410p_to(&src, true, KernelMatrix::Bt709, &mut sink_simd).unwrap();
+  yuv410p_to(&src, true, sink_simd.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   let mut sink_scalar = MixedSinker::<Yuv410p>::new(w as usize, h as usize)
     .with_rgb(&mut rgb_scalar)
     .unwrap();
   sink_scalar.set_simd(false);
-  yuv410p_to(&src, true, KernelMatrix::Bt709, &mut sink_scalar).unwrap();
+  yuv410p_to(
+    &src,
+    true,
+    sink_scalar.set_kernel_matrix(KernelMatrix::Bt709),
+  )
+  .unwrap();
 
   assert_eq!(
     rgb_simd, rgb_scalar,
@@ -367,13 +372,18 @@ fn non_4_aligned_height_reuses_trailing_chroma_row() {
   let mut sink_simd = MixedSinker::<Yuv410p>::new(w as usize, h as usize)
     .with_rgb(&mut rgb_simd)
     .unwrap();
-  yuv410p_to(&src, true, KernelMatrix::Bt709, &mut sink_simd).unwrap();
+  yuv410p_to(&src, true, sink_simd.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   let mut sink_scalar = MixedSinker::<Yuv410p>::new(w as usize, h as usize)
     .with_rgb(&mut rgb_scalar)
     .unwrap();
   sink_scalar.set_simd(false);
-  yuv410p_to(&src, true, KernelMatrix::Bt709, &mut sink_scalar).unwrap();
+  yuv410p_to(
+    &src,
+    true,
+    sink_scalar.set_kernel_matrix(KernelMatrix::Bt709),
+  )
+  .unwrap();
 
   assert_eq!(
     rgb_simd, rgb_scalar,
@@ -449,7 +459,7 @@ fn yuv410p_rgb_scratch_alloc_failure_leaves_outputs_untouched() {
     .unwrap();
 
   super::super::arm_rgb_scratch_alloc_failure();
-  let err = yuv410p_to(&src, false, KernelMatrix::Bt601, &mut sink).unwrap_err();
+  let err = yuv410p_to(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap_err();
   drop(sink);
 
   assert!(

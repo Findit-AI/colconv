@@ -168,6 +168,10 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Y212<BE>, R> {
   type Input<'r> = Y212Row<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     check_dimensions_match(self.width, self.height, width, height)?;
     if !self.width.is_multiple_of(2) {

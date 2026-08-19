@@ -274,7 +274,7 @@ macro_rules! y2xx_native_suite {
           .unwrap()
           .with_luma(&mut luma)
           .unwrap();
-          $walker(&frame(&p), FR, M, &mut sink).unwrap();
+          $walker(&frame(&p), FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgb_u16, luma)
       }
@@ -300,7 +300,7 @@ macro_rules! y2xx_native_suite {
           .unwrap()
           .with_luma(&mut luma)
           .unwrap();
-          $walker_be::<_, true>(&frame_be(&p), FR, M, &mut sink).unwrap();
+          $walker_be::<_, true>(&frame_be(&p), FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgb_u16, luma)
       }
@@ -326,7 +326,7 @@ macro_rules! y2xx_native_suite {
           .unwrap()
           .with_luma(&mut luma)
           .unwrap();
-          $walker_be::<_, true>(&frame_be(&p), FR, M, &mut sink).unwrap();
+          $walker_be::<_, true>(&frame_be(&p), FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgb_u16, luma)
       }
@@ -356,7 +356,7 @@ macro_rules! y2xx_native_suite {
             &ye, &ue, &ve, OUT as u32, OUT as u32, OUT as u32, OUT as u32, OUT as u32,
           )
           .unwrap();
-          $oracle_walker(&f, FR, M, &mut sink).unwrap();
+          $oracle_walker(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         let luma: Vec<u8> = yb
           .iter()
@@ -393,7 +393,7 @@ macro_rules! y2xx_native_suite {
             &ye, &ue, &ve, SRC as u32, SRC as u32, SRC as u32, CW as u32, CW as u32,
           )
           .unwrap();
-          $twin_walker(&f, FR, M, &mut sink).unwrap();
+          $twin_walker(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgb_u16, luma)
       }
@@ -607,7 +607,7 @@ macro_rules! y2xx_native_suite {
             .unwrap()
             .with_rgb_u16(&mut ref_rgb16)
             .unwrap();
-          $walker(&frame(&p), FR, M, &mut sink).unwrap();
+          $walker(&frame(&p), FR, sink.set_kernel_matrix(M)).unwrap();
         }
         for px in n_rgb.chunks_exact(3) {
           assert_eq!(px, &ref_rgb[..3], "uniform-gray u8 colour drifted");
@@ -669,7 +669,7 @@ macro_rules! y2xx_native_suite {
             .with_native(true)
             .with_luma_u16(&mut luma_u16)
             .unwrap();
-            $walker(&frame(&p), FR, M, &mut sink).unwrap();
+            $walker(&frame(&p), FR, sink.set_kernel_matrix(M)).unwrap();
           }
           assert_eq!(
             luma_u16, luma_u16_oracle,
@@ -692,7 +692,7 @@ macro_rules! y2xx_native_suite {
             .with_native(true)
             .with_luma_u16(&mut luma_u16)
             .unwrap();
-            $walker_be::<_, true>(&frame_be(&p), FR, M, &mut sink).unwrap();
+            $walker_be::<_, true>(&frame_be(&p), FR, sink.set_kernel_matrix(M)).unwrap();
           }
           assert_eq!(
             luma_u16, luma_u16_oracle,
@@ -719,7 +719,7 @@ macro_rules! y2xx_native_suite {
             .unwrap()
             .with_luma_u16(&mut luma_u16)
             .unwrap();
-            $walker(&frame(&p), FR, M, &mut sink).unwrap();
+            $walker(&frame(&p), FR, sink.set_kernel_matrix(M)).unwrap();
           }
           let (o_rgb, _, _) = oracle(&packed);
           assert_eq!(
@@ -745,7 +745,7 @@ macro_rules! y2xx_native_suite {
         )
         .unwrap()
         .with_native(true);
-        $walker(&frame(&p), FR, M, &mut sink).unwrap();
+        $walker(&frame(&p), FR, sink.set_kernel_matrix(M)).unwrap();
       }
 
       #[test]
@@ -777,8 +777,8 @@ macro_rules! y2xx_native_suite {
           .unwrap()
           .with_luma(&mut luma)
           .unwrap();
-          $walker(&frame(&p1), FR, M, &mut sink).unwrap();
-          $walker(&frame(&p2), FR, M, &mut sink).unwrap();
+          $walker(&frame(&p1), FR, sink.set_kernel_matrix(M)).unwrap();
+          $walker(&frame(&p2), FR, sink.set_kernel_matrix(M)).unwrap();
         }
         let y_ref = bin_to_out(&logical_y(&packed2), SRC, SRC);
         let luma_ref: Vec<u8> = y_ref.iter().map(|&c| (c >> ($bits - 8)) as u8).collect();
@@ -808,7 +808,7 @@ macro_rules! y2xx_native_suite {
         sink.begin_frame(SRC as u32, SRC as u32).unwrap();
         // The Y2xx row is `width x 2` u16 (one packed plane).
         let row3 = &p[3 * 2 * SRC..4 * 2 * SRC];
-        let err = sink.process($row::new(row3, 3, M, FR)).unwrap_err();
+        let err = sink.process($row::for_tests(row3, 3, M, FR)).unwrap_err();
         assert!(
           matches!(
             err,
@@ -819,7 +819,7 @@ macro_rules! y2xx_native_suite {
         let mut rgb = vec![0u8; OUT * OUT * 3];
         sink.set_rgb(&mut rgb).unwrap();
         sink
-          .process($row::new(&p[..2 * SRC], 0, M, FR))
+          .process($row::for_tests(&p[..2 * SRC], 0, M, FR))
           .expect("row 0 must succeed after a rejected out-of-sequence first row");
       }
 
@@ -849,7 +849,7 @@ macro_rules! y2xx_native_suite {
         // Luma-only rows 0 and 1 freeze a luma-only output set.
         for r in 0..2 {
           sink
-            .process($row::new(&p[r * 2 * SRC..(r + 1) * 2 * SRC], r, M, FR))
+            .process($row::for_tests(&p[r * 2 * SRC..(r + 1) * 2 * SRC], r, M, FR))
             .expect("luma-only rows freeze a luma-only output set");
         }
         // Attach u16 colour mid-frame, changing the output set, and arm the
@@ -857,7 +857,7 @@ macro_rules! y2xx_native_suite {
         sink.set_rgb_u16(&mut rgb_u16).unwrap();
         crate::sinker::mixed::arm_y2xx_alloc_failure();
         let err = sink
-          .process($row::new(&p[2 * 2 * SRC..3 * 2 * SRC], 2, M, FR))
+          .process($row::for_tests(&p[2 * 2 * SRC..3 * 2 * SRC], 2, M, FR))
           .unwrap_err();
         assert!(
           matches!(err, MixedSinkerError::ResampleOutputsChanged(_)),
@@ -880,7 +880,7 @@ macro_rules! y2xx_native_suite {
         .with_native(true)
         .with_rgb_u16(&mut rgb_u16b)
         .unwrap();
-        let err2 = sink2.process($row::new(&p[..2 * SRC], 0, M, FR)).unwrap_err();
+        let err2 = sink2.process($row::for_tests(&p[..2 * SRC], 0, M, FR)).unwrap_err();
         assert!(
           matches!(
             err2,
@@ -916,7 +916,7 @@ macro_rules! y2xx_native_suite {
         .with_rgb_u16(&mut rgb_u16)
         .unwrap();
         crate::sinker::mixed::arm_y2xx_alloc_failure();
-        let err0 = sink.process($row::new(&p[..2 * SRC], 0, M, FR)).unwrap_err();
+        let err0 = sink.process($row::for_tests(&p[..2 * SRC], 0, M, FR)).unwrap_err();
         assert!(
           matches!(
             err0,
@@ -926,7 +926,7 @@ macro_rules! y2xx_native_suite {
         );
         crate::sinker::mixed::arm_y2xx_alloc_failure();
         let err2 = sink
-          .process($row::new(&p[2 * 2 * SRC..3 * 2 * SRC], 2, M, FR))
+          .process($row::for_tests(&p[2 * 2 * SRC..3 * 2 * SRC], 2, M, FR))
           .unwrap_err();
         assert!(
           matches!(
@@ -950,7 +950,7 @@ macro_rules! y2xx_native_suite {
         .with_native(true)
         .with_rgb_u16(&mut rgb_u16b)
         .unwrap();
-        let err3 = sink2.process($row::new(&p[..2 * SRC], 0, M, FR)).unwrap_err();
+        let err3 = sink2.process($row::for_tests(&p[..2 * SRC], 0, M, FR)).unwrap_err();
         assert!(
           matches!(
             err3,
@@ -985,11 +985,11 @@ macro_rules! y2xx_native_suite {
         .unwrap();
         sink.begin_frame(SRC as u32, SRC as u32).unwrap();
         sink
-          .process($row::new(&p[..2 * SRC], 0, M, FR))
+          .process($row::for_tests(&p[..2 * SRC], 0, M, FR))
           .expect("native row 0 freezes the route and succeeds");
         sink.set_native(false);
         let err = sink
-          .process($row::new(&p[2 * SRC..2 * 2 * SRC], 1, M, FR))
+          .process($row::for_tests(&p[2 * SRC..2 * 2 * SRC], 1, M, FR))
           .unwrap_err();
         assert!(
           matches!(err, MixedSinkerError::NativeRouteChanged(_)),
@@ -1019,11 +1019,11 @@ macro_rules! y2xx_native_suite {
         .unwrap();
         sink.begin_frame(SRC as u32, SRC as u32).unwrap();
         sink
-          .process($row::new(&p[..2 * SRC], 0, M, FR))
+          .process($row::for_tests(&p[..2 * SRC], 0, M, FR))
           .expect("row-stage row 0 freezes the route and succeeds");
         sink.set_native(true);
         let err = sink
-          .process($row::new(&p[2 * SRC..2 * 2 * SRC], 1, M, FR))
+          .process($row::for_tests(&p[2 * SRC..2 * 2 * SRC], 1, M, FR))
           .unwrap_err();
         assert!(
           matches!(err, MixedSinkerError::NativeRouteChanged(_)),
@@ -1062,13 +1062,13 @@ macro_rules! y2xx_native_suite {
         sink.begin_frame(SRC as u32, SRC as u32).unwrap();
         // Native u8-luma row 0 freezes a {luma} output set on the native route.
         sink
-          .process($row::new(&p[..2 * SRC], 0, M, FR))
+          .process($row::for_tests(&p[..2 * SRC], 0, M, FR))
           .expect("native luma row 0 freezes the output set and the route");
         // Attach native-depth luma_u16 mid-frame: the route stays native
         // (`take_native = *native`), so the frozen-output check owns the verdict.
         sink.set_luma_u16(&mut luma_u16).unwrap();
         let err = sink
-          .process($row::new(&p[2 * SRC..2 * 2 * SRC], 1, M, FR))
+          .process($row::for_tests(&p[2 * SRC..2 * 2 * SRC], 1, M, FR))
           .unwrap_err();
         assert!(
           matches!(err, MixedSinkerError::ResampleOutputsChanged(_)),
@@ -1162,7 +1162,7 @@ fn luma_only_native_skips_chroma_planning() {
         .with_native(true)
         .with_luma(&mut luma)
         .unwrap();
-    y210_to(&frame, FR, M, &mut sink).expect("luma-only native must not plan chroma");
+    y210_to(&frame, FR, sink.set_kernel_matrix(M)).expect("luma-only native must not plan chroma");
   }
 
   // Colour: the still-armed failpoint fires at chroma planning -> Err. This both
@@ -1175,7 +1175,7 @@ fn luma_only_native_skips_chroma_planning() {
       .with_rgb(&mut rgb)
       .unwrap();
   assert!(
-    y210_to(&frame, FR, M, &mut sink).is_err(),
+    y210_to(&frame, FR, sink.set_kernel_matrix(M)).is_err(),
     "colour native must reach chroma planning (the armed failpoint fires)"
   );
 }
@@ -1206,7 +1206,7 @@ fn native_delegate_grow_failure_through_packed_wrapper_is_transactional() {
     }
   }
   let p = as_le(&packed);
-  let row = |r: usize| Y210Row::new(&p[r * 2 * SRC..(r + 1) * 2 * SRC], r, M, FR);
+  let row = |r: usize| Y210Row::for_tests(&p[r * 2 * SRC..(r + 1) * 2 * SRC], r, M, FR);
 
   let mut luma = vec![0u8; OUT * OUT];
   let mut rgb_u16 = vec![0u16; OUT * OUT * 3];

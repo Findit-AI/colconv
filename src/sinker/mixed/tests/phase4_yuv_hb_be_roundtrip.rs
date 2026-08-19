@@ -175,7 +175,12 @@ macro_rules! planar3_be_roundtrip_test {
         .unwrap()
         .with_luma(&mut luma_le)
         .unwrap();
-      $walker(&frame_le, true, KernelMatrix::Bt709, &mut sink_le).unwrap();
+      $walker(
+        &frame_le,
+        true,
+        sink_le.set_kernel_matrix(KernelMatrix::Bt709),
+      )
+      .unwrap();
 
       let frame_be =
         $frame_be::try_new(&y_be, &u_be, &v_be, w, h, w, cw as u32, cw as u32).unwrap();
@@ -187,7 +192,12 @@ macro_rules! planar3_be_roundtrip_test {
         .unwrap()
         .with_luma(&mut luma_be)
         .unwrap();
-      $walker_endian(&frame_be, true, KernelMatrix::Bt709, &mut sink_be).unwrap();
+      $walker_endian(
+        &frame_be,
+        true,
+        sink_be.set_kernel_matrix(KernelMatrix::Bt709),
+      )
+      .unwrap();
 
       assert_eq!(
         out_le,
@@ -364,7 +374,12 @@ macro_rules! planar4_be_roundtrip_test {
         .unwrap()
         .with_luma(&mut luma_le)
         .unwrap();
-      $walker(&frame_le, true, KernelMatrix::Bt709, &mut sink_le).unwrap();
+      $walker(
+        &frame_le,
+        true,
+        sink_le.set_kernel_matrix(KernelMatrix::Bt709),
+      )
+      .unwrap();
 
       let frame_be =
         $frame_be::try_new(&y_be, &u_be, &v_be, &a_be, w, h, w, cw as u32, cw as u32, w).unwrap();
@@ -376,7 +391,12 @@ macro_rules! planar4_be_roundtrip_test {
         .unwrap()
         .with_luma(&mut luma_be)
         .unwrap();
-      $walker_endian(&frame_be, true, KernelMatrix::Bt709, &mut sink_be).unwrap();
+      $walker_endian(
+        &frame_be,
+        true,
+        sink_be.set_kernel_matrix(KernelMatrix::Bt709),
+      )
+      .unwrap();
 
       assert_eq!(
         out_le,
@@ -519,7 +539,12 @@ macro_rules! pn_be_roundtrip_test {
         .unwrap()
         .with_luma(&mut luma_le)
         .unwrap();
-      $walker(&frame_le, true, KernelMatrix::Bt709, &mut sink_le).unwrap();
+      $walker(
+        &frame_le,
+        true,
+        sink_le.set_kernel_matrix(KernelMatrix::Bt709),
+      )
+      .unwrap();
 
       let frame_be = $frame_be::try_new(&y_be, &uv_be, w, h, w, uv_row_elems as u32).unwrap();
       let mut out_be = vec![0u8; (w * h * 4) as usize];
@@ -530,7 +555,12 @@ macro_rules! pn_be_roundtrip_test {
         .unwrap()
         .with_luma(&mut luma_be)
         .unwrap();
-      $walker_endian(&frame_be, true, KernelMatrix::Bt709, &mut sink_be).unwrap();
+      $walker_endian(
+        &frame_be,
+        true,
+        sink_be.set_kernel_matrix(KernelMatrix::Bt709),
+      )
+      .unwrap();
 
       assert_eq!(
         out_le,

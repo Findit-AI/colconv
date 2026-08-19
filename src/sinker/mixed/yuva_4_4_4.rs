@@ -92,6 +92,10 @@ impl<R> PixelSink for MixedSinker<'_, Yuva444p, R> {
   type Input<'r> = Yuva444pRow<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     check_dimensions_match(self.width, self.height, width, height)?;
     // New frame: restart the 4-channel u8 RGBA colour stream and the
@@ -554,6 +558,10 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuva444p9<BE>, R> {
   type Input<'r> = Yuva444p9Row<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     check_dimensions_match(self.width, self.height, width, height)?;
     reset_high_bit_yuva_streams(self);
@@ -698,6 +706,10 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuva444p10<BE>, R> {
   type Input<'r> = Yuva444p10Row<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     check_dimensions_match(self.width, self.height, width, height)?;
     reset_high_bit_yuva_streams(self);
@@ -842,6 +854,10 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuva444p12<BE>, R> {
   type Input<'r> = Yuva444p12Row<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     check_dimensions_match(self.width, self.height, width, height)?;
     reset_high_bit_yuva_streams(self);
@@ -986,6 +1002,10 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuva444p14<BE>, R> {
   type Input<'r> = Yuva444p14Row<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     check_dimensions_match(self.width, self.height, width, height)?;
     reset_high_bit_yuva_streams(self);
@@ -1130,6 +1150,10 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuva444p16<BE>, R> {
   type Input<'r> = Yuva444p16Row<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     check_dimensions_match(self.width, self.height, width, height)?;
     reset_high_bit_yuva_streams(self);

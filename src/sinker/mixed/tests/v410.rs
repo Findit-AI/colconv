@@ -43,7 +43,7 @@ fn v410_luma_only_extracts_y_bytes_downshifted() {
   let src = V410Frame::new(&buf, 6, 8, 6);
   let mut luma = std::vec![0u8; 6 * 8];
   let mut sink = MixedSinker::<V410>::new(6, 8).with_luma(&mut luma).unwrap();
-  v410_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
+  v410_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   // 10-bit Y=256 → 8-bit (256 >> 2) = 64.
   assert!(luma.iter().all(|&y| y == 64), "luma {luma:?}");
 }
@@ -65,7 +65,7 @@ fn v410_with_luma_u16_extracts_y_native_depth() {
   let mut sink = MixedSinker::<V410>::new(6, 8)
     .with_luma_u16(&mut luma)
     .unwrap();
-  v410_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
+  v410_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   assert!(
     luma.iter().all(|&y| y == 0x3FC),
     "luma_u16 expected 0x3FC, got {:?}",
@@ -86,7 +86,7 @@ fn v410_rgb_only_converts_gray_to_gray() {
   let src = V410Frame::new(&buf, 12, 4, 12);
   let mut rgb = std::vec![0u8; 12 * 4 * 3];
   let mut sink = MixedSinker::<V410>::new(12, 4).with_rgb(&mut rgb).unwrap();
-  v410_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
+  v410_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   for px in rgb.chunks(3) {
     assert!(px[0].abs_diff(128) <= 4);
     assert_eq!(px[0], px[1]);
@@ -107,7 +107,7 @@ fn v410_rgba_only_converts_gray_to_gray_with_opaque_alpha() {
   let mut sink = MixedSinker::<V410>::new(12, 4)
     .with_rgba(&mut rgba)
     .unwrap();
-  v410_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
+  v410_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   for px in rgba.chunks(4) {
     assert_eq!(px[3], 0xFF);
   }
@@ -128,7 +128,7 @@ fn v410_rgb_u16_only_converts_gray_to_gray_native_depth() {
   let mut sink = MixedSinker::<V410>::new(12, 4)
     .with_rgb_u16(&mut rgb)
     .unwrap();
-  v410_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
+  v410_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   for px in rgb.chunks(3) {
     assert!(px[0].abs_diff(512) <= 16, "expected ~512, got {}", px[0]);
   }
@@ -148,7 +148,7 @@ fn v410_rgba_u16_alpha_is_max() {
   let mut sink = MixedSinker::<V410>::new(12, 4)
     .with_rgba_u16(&mut rgba)
     .unwrap();
-  v410_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
+  v410_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   for px in rgba.chunks(4) {
     assert_eq!(px[3], 0x3FF);
   }
@@ -171,7 +171,7 @@ fn v410_hsv_only_produces_valid_hue_range() {
   let mut sink = MixedSinker::<V410>::new(12, 4)
     .with_hsv(&mut h, &mut s, &mut v_plane)
     .unwrap();
-  v410_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
+  v410_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   // Gray pixels: hue and saturation must be 0.
   assert!(h.iter().all(|&x| x == 0), "H {h:?}");
   assert!(s.iter().all(|&x| x == 0), "S {s:?}");
@@ -200,7 +200,7 @@ fn v410_with_rgb_and_with_rgba_byte_identical_u8() {
     .unwrap()
     .with_rgba(&mut rgba)
     .unwrap();
-  v410_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
+  v410_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   for i in 0..(w * h) as usize {
     assert_eq!(rgba[i * 4], rgb[i * 3]);
     assert_eq!(rgba[i * 4 + 1], rgb[i * 3 + 1]);
@@ -229,7 +229,7 @@ fn v410_with_rgb_u16_and_with_rgba_u16_byte_identical() {
     .unwrap()
     .with_rgba_u16(&mut rgba)
     .unwrap();
-  v410_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
+  v410_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   for i in 0..(w * h) as usize {
     assert_eq!(rgba[i * 4], rgb[i * 3]);
     assert_eq!(rgba[i * 4 + 1], rgb[i * 3 + 1]);
@@ -276,8 +276,18 @@ fn v410_with_simd_false_matches_with_simd_true() {
       .with_rgb(&mut rgb_scalar)
       .unwrap()
       .with_simd(false);
-    v410_to(&src, false, KernelMatrix::Bt709, &mut sink_simd).unwrap();
-    v410_to(&src, false, KernelMatrix::Bt709, &mut sink_scalar).unwrap();
+    v410_to(
+      &src,
+      false,
+      sink_simd.set_kernel_matrix(KernelMatrix::Bt709),
+    )
+    .unwrap();
+    v410_to(
+      &src,
+      false,
+      sink_scalar.set_kernel_matrix(KernelMatrix::Bt709),
+    )
+    .unwrap();
     assert_eq!(rgb_simd, rgb_scalar, "V410 SIMD≠scalar at width {w}");
   }
 }
@@ -353,8 +363,13 @@ fn v410_planar_parity_with_yuv444p10() {
   let mut v_sink = MixedSinker::<V410>::new(width, height)
     .with_rgb(&mut v_rgb)
     .unwrap();
-  yuv444p10_to(&planar, false, KernelMatrix::Bt709, &mut p_sink).unwrap();
-  v410_to(&v410, false, KernelMatrix::Bt709, &mut v_sink).unwrap();
+  yuv444p10_to(
+    &planar,
+    false,
+    p_sink.set_kernel_matrix(KernelMatrix::Bt709),
+  )
+  .unwrap();
+  v410_to(&v410, false, v_sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   assert_eq!(p_rgb, v_rgb, "V410 ↔ Yuv444p10 u8 RGB diverges");
 
   // u16 RGB parity (validates the low-bit-packed 10-bit path)
@@ -366,8 +381,13 @@ fn v410_planar_parity_with_yuv444p10() {
   let mut v_sink2 = MixedSinker::<V410>::new(width, height)
     .with_rgb_u16(&mut v_rgb_u16)
     .unwrap();
-  yuv444p10_to(&planar, false, KernelMatrix::Bt709, &mut p_sink2).unwrap();
-  v410_to(&v410, false, KernelMatrix::Bt709, &mut v_sink2).unwrap();
+  yuv444p10_to(
+    &planar,
+    false,
+    p_sink2.set_kernel_matrix(KernelMatrix::Bt709),
+  )
+  .unwrap();
+  v410_to(&v410, false, v_sink2.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   assert_eq!(p_rgb_u16, v_rgb_u16, "V410 ↔ Yuv444p10 u16 RGB diverges");
 }
 
@@ -421,7 +441,12 @@ fn v410_le_be_roundtrip_byte_identical() {
     .with_simd(false)
     .with_rgba(&mut out_le)
     .unwrap();
-  v410_to(&frame_le, true, KernelMatrix::Bt709, &mut sink_le).unwrap();
+  v410_to(
+    &frame_le,
+    true,
+    sink_le.set_kernel_matrix(KernelMatrix::Bt709),
+  )
+  .unwrap();
 
   let frame_be = V410BeFrame::try_new(&pix_be, 8, 4, 8).unwrap();
   let mut out_be = std::vec![0u8; 8 * 4 * 4];
@@ -429,7 +454,12 @@ fn v410_le_be_roundtrip_byte_identical() {
     .with_simd(false)
     .with_rgba(&mut out_be)
     .unwrap();
-  v410_to_endian(&frame_be, true, KernelMatrix::Bt709, &mut sink_be).unwrap();
+  v410_to_endian(
+    &frame_be,
+    true,
+    sink_be.set_kernel_matrix(KernelMatrix::Bt709),
+  )
+  .unwrap();
 
   assert_eq!(
     out_le, out_be,
@@ -527,7 +557,7 @@ fn v410_hsv_only_is_rgb_free_and_matches_reference() {
     let mut sink = MixedSinker::<V410>::new(w, h)
       .with_hsv(&mut hh, &mut ss, &mut vv)
       .unwrap();
-    v410_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+    v410_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
     sink.rgb_scratch.len()
   };
   assert_eq!(
@@ -595,7 +625,7 @@ fn v410_rgb_scratch_alloc_failure_leaves_outputs_untouched() {
     .unwrap();
 
   super::super::arm_rgb_scratch_alloc_failure();
-  let err = v410_to(&src, false, KernelMatrix::Bt601, &mut sink).unwrap_err();
+  let err = v410_to(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap_err();
   drop(sink);
 
   assert!(

@@ -173,7 +173,7 @@ fn rgba_filter_oracle<K: FilterKernel + Copy>(
     .unwrap()
     .with_rgba(&mut rgba)
     .unwrap();
-    rgba_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+    rgba_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   rgba
 }
@@ -527,7 +527,7 @@ fn filter_out_of_sequence_first_row_is_rejected() {
   .unwrap();
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   let err = sink
-    .process(Pal8Row::new(&indices[SRC..2 * SRC], &palette, 1))
+    .process(Pal8Row::for_tests(&indices[SRC..2 * SRC], &palette, 1))
     .unwrap_err();
   assert!(
     matches!(
@@ -579,7 +579,7 @@ fn filter_first_row_scratch_oom_leaves_stream_and_freeze_uncommitted_for_retry()
     // uncommitted (the commit-together atomic shape).
     crate::sinker::mixed::arm_source_rgb_scratch_failure();
     let err = sink
-      .process(Pal8Row::new(&indices[..SRC], &palette, 0))
+      .process(Pal8Row::for_tests(&indices[..SRC], &palette, 0))
       .unwrap_err();
     assert!(
       matches!(
@@ -609,7 +609,11 @@ fn filter_first_row_scratch_oom_leaves_stream_and_freeze_uncommitted_for_retry()
     sink.set_luma(&mut luma).unwrap();
     for r in 0..SRC {
       sink
-        .process(Pal8Row::new(&indices[r * SRC..(r + 1) * SRC], &palette, r))
+        .process(Pal8Row::for_tests(
+          &indices[r * SRC..(r + 1) * SRC],
+          &palette,
+          r,
+        ))
         .expect("frame replay after a first-row scratch OOM must succeed");
     }
   }

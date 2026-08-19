@@ -70,7 +70,7 @@ fn full_res_rgb_420(y: &[u8], u: &[u8], v: &[u8], matrix: KernelMatrix) -> Vec<u
     let mut sink = MixedSinker::<Yuv420p>::new(SRC, SRC)
       .with_rgb(&mut rgb)
       .unwrap();
-    yuv420p_to(&src, true, matrix, &mut sink).unwrap();
+    yuv420p_to(&src, true, sink.set_kernel_matrix(matrix)).unwrap();
   }
   rgb
 }
@@ -85,7 +85,7 @@ fn full_res_rgb_422(y: &[u8], u: &[u8], v: &[u8], matrix: KernelMatrix) -> Vec<u
     let mut sink = MixedSinker::<Yuv422p>::new(SRC, SRC)
       .with_rgb(&mut rgb)
       .unwrap();
-    yuv422p_to(&src, true, matrix, &mut sink).unwrap();
+    yuv422p_to(&src, true, sink.set_kernel_matrix(matrix)).unwrap();
   }
   rgb
 }
@@ -99,7 +99,7 @@ fn full_res_rgb_444(y: &[u8], u: &[u8], v: &[u8], matrix: KernelMatrix) -> Vec<u
     let mut sink = MixedSinker::<Yuv444p>::new(SRC, SRC)
       .with_rgb(&mut rgb)
       .unwrap();
-    yuv444p_to(&src, true, matrix, &mut sink).unwrap();
+    yuv444p_to(&src, true, sink.set_kernel_matrix(matrix)).unwrap();
   }
   rgb
 }
@@ -113,7 +113,7 @@ fn full_res_rgb_440(y: &[u8], u: &[u8], v: &[u8], matrix: KernelMatrix) -> Vec<u
     let mut sink = MixedSinker::<Yuv440p>::new(SRC, SRC)
       .with_rgb(&mut rgb)
       .unwrap();
-    yuv440p_to(&src, true, matrix, &mut sink).unwrap();
+    yuv440p_to(&src, true, sink.set_kernel_matrix(matrix)).unwrap();
   }
   rgb
 }
@@ -191,7 +191,7 @@ fn yuv420p_linear_domain_equals_independent_linear_light_oracle() {
         .with_averaging_domain(AveragingDomain::Linear)
         .with_rgb(&mut rgb)
         .unwrap();
-    yuv420p_to(&src, true, matrix, &mut sink).unwrap();
+    yuv420p_to(&src, true, sink.set_kernel_matrix(matrix)).unwrap();
   }
   assert!(
     max_abs_diff(&rgb, &oracle) <= 1,
@@ -226,7 +226,7 @@ fn yuv422p_linear_domain_equals_independent_linear_light_oracle() {
         .with_averaging_domain(AveragingDomain::Linear)
         .with_rgb(&mut rgb)
         .unwrap();
-    yuv422p_to(&src, true, matrix, &mut sink).unwrap();
+    yuv422p_to(&src, true, sink.set_kernel_matrix(matrix)).unwrap();
   }
   assert!(
     max_abs_diff(&rgb, &oracle) <= 1,
@@ -260,7 +260,7 @@ fn yuv444p_linear_domain_equals_independent_linear_light_oracle() {
         .with_averaging_domain(AveragingDomain::Linear)
         .with_rgb(&mut rgb)
         .unwrap();
-    yuv444p_to(&src, true, matrix, &mut sink).unwrap();
+    yuv444p_to(&src, true, sink.set_kernel_matrix(matrix)).unwrap();
   }
   assert!(
     max_abs_diff(&rgb, &oracle) <= 1,
@@ -295,7 +295,7 @@ fn yuv440p_linear_domain_equals_independent_linear_light_oracle() {
         .with_averaging_domain(AveragingDomain::Linear)
         .with_rgb(&mut rgb)
         .unwrap();
-    yuv440p_to(&src, true, matrix, &mut sink).unwrap();
+    yuv440p_to(&src, true, sink.set_kernel_matrix(matrix)).unwrap();
   }
   assert!(
     max_abs_diff(&rgb, &oracle) <= 1,
@@ -323,7 +323,7 @@ fn run_420(y: &[u8], u: &[u8], v: &[u8], matrix: KernelMatrix, domain: Averaging
         .with_native(false)
         .with_rgb(&mut rgb)
         .unwrap();
-    yuv420p_to(&src, true, matrix, &mut sink).unwrap();
+    yuv420p_to(&src, true, sink.set_kernel_matrix(matrix)).unwrap();
   }
   rgb
 }
@@ -399,7 +399,7 @@ fn transfer_function_caller_override_changes_output() {
       .with_transfer_function(tf)
       .with_rgb(&mut rgb)
       .unwrap();
-      yuv420p_to(&src, true, matrix, &mut sink).unwrap();
+      yuv420p_to(&src, true, sink.set_kernel_matrix(matrix)).unwrap();
     }
     rgb
   };
@@ -455,7 +455,7 @@ fn per_color_matrix_default_transfer_resolves() {
         .with_native(false)
         .with_rgb(&mut overridden)
         .unwrap();
-    yuv420p_to(&src, true, matrix, &mut sink).unwrap();
+    yuv420p_to(&src, true, sink.set_kernel_matrix(matrix)).unwrap();
   }
   assert_eq!(
     default, overridden,
@@ -501,7 +501,7 @@ fn encoded_default_is_byte_identical_to_unset() {
           base
         };
         let mut sink = base.with_rgba(&mut rgba).unwrap();
-        yuv420p_to(&src, true, matrix, &mut sink).unwrap();
+        yuv420p_to(&src, true, sink.set_kernel_matrix(matrix)).unwrap();
       }
       rgba
     };
@@ -550,7 +550,7 @@ fn linear_domain_rejects_filter_plan() {
     .with_averaging_domain(AveragingDomain::Linear)
     .with_rgb(&mut rgb)
     .unwrap();
-    let err = yuv420p_to(&src, true, matrix, &mut sink).unwrap_err();
+    let err = yuv420p_to(&src, true, sink.set_kernel_matrix(matrix)).unwrap_err();
     assert!(
       matches!(
         err,
@@ -594,7 +594,14 @@ fn linear_domain_out_of_sequence_row_is_atomic() {
     // Row 3 before rows 0..3: rejected before the frame buffer is allocated
     // and before any output is written.
     let err = sink
-      .process(Yuv420pRow::new(&y, &u, &v, 3, KernelMatrix::Bt709, true))
+      .process(Yuv420pRow::for_tests(
+        &y,
+        &u,
+        &v,
+        3,
+        KernelMatrix::Bt709,
+        true,
+      ))
       .unwrap_err();
     assert!(
       matches!(
@@ -647,7 +654,14 @@ fn linear_domain_final_row_output_change_is_atomic() {
       let ur = &u[cr * cw..(cr + 1) * cw];
       let vr = &v[cr * cw..(cr + 1) * cw];
       sink
-        .process(Yuv420pRow::new(yr, ur, vr, r, KernelMatrix::Bt709, true))
+        .process(Yuv420pRow::for_tests(
+          yr,
+          ur,
+          vr,
+          r,
+          KernelMatrix::Bt709,
+          true,
+        ))
         .unwrap();
     }
     // Final row: attach a new output (changing the frozen set) — must reject
@@ -659,7 +673,14 @@ fn linear_domain_final_row_output_change_is_atomic() {
     let ur = &u[cr * cw..(cr + 1) * cw];
     let vr = &v[cr * cw..(cr + 1) * cw];
     let err = sink
-      .process(Yuv420pRow::new(yr, ur, vr, r, KernelMatrix::Bt709, true))
+      .process(Yuv420pRow::for_tests(
+        yr,
+        ur,
+        vr,
+        r,
+        KernelMatrix::Bt709,
+        true,
+      ))
       .unwrap_err();
     assert!(
       matches!(err, MixedSinkerError::ResampleOutputsChanged(_)),
@@ -716,7 +737,14 @@ fn linear_domain_final_row_alloc_failure_leaves_frame_retryable() {
       let cr = r / 2;
       let ur = &u[cr * cw..(cr + 1) * cw];
       let vr = &v[cr * cw..(cr + 1) * cw];
-      sink.process(Yuv420pRow::new(yr, ur, vr, r, KernelMatrix::Bt709, true))
+      sink.process(Yuv420pRow::for_tests(
+        yr,
+        ur,
+        vr,
+        r,
+        KernelMatrix::Bt709,
+        true,
+      ))
     };
 
     // Rows 0..SRC-1 buffer cleanly.
@@ -822,7 +850,7 @@ fn linear_domain_premultiplied_on_non_alpha_rejects() {
       .with_averaging_domain(AveragingDomain::Premultiplied)
       .with_rgb(rgb)
       .unwrap();
-      yuv420p_to(&src, true, matrix, &mut sink)
+      yuv420p_to(&src, true, sink.set_kernel_matrix(matrix))
     });
   }
 
@@ -839,7 +867,7 @@ fn linear_domain_premultiplied_on_non_alpha_rejects() {
         .with_averaging_domain(AveragingDomain::Premultiplied)
         .with_rgb(rgb)
         .unwrap();
-    yuv422p_to(&src, true, matrix, &mut sink)
+    yuv422p_to(&src, true, sink.set_kernel_matrix(matrix))
   });
 
   // Yuv444p — chroma w x h.
@@ -855,7 +883,7 @@ fn linear_domain_premultiplied_on_non_alpha_rejects() {
         .with_averaging_domain(AveragingDomain::Premultiplied)
         .with_rgb(rgb)
         .unwrap();
-    yuv444p_to(&src, true, matrix, &mut sink)
+    yuv444p_to(&src, true, sink.set_kernel_matrix(matrix))
   });
 
   // Yuv440p — chroma w x h/2.
@@ -872,7 +900,7 @@ fn linear_domain_premultiplied_on_non_alpha_rejects() {
         .with_averaging_domain(AveragingDomain::Premultiplied)
         .with_rgb(rgb)
         .unwrap();
-    yuv440p_to(&src, true, matrix, &mut sink)
+    yuv440p_to(&src, true, sink.set_kernel_matrix(matrix))
   });
 }
 
@@ -909,7 +937,14 @@ fn linear_domain_mid_frame_transfer_change_is_rejected_and_retryable() {
     // Row 0 freezes the resolved transfer (Srgb) on the lazily-created frame.
     let (yr, ur, vr) = row(0);
     sink
-      .process(Yuv420pRow::new(yr, ur, vr, 0, KernelMatrix::Bt709, true))
+      .process(Yuv420pRow::for_tests(
+        yr,
+        ur,
+        vr,
+        0,
+        KernelMatrix::Bt709,
+        true,
+      ))
       .unwrap();
 
     // Flip the transfer mid-frame, then feed row 1 — must reject before the
@@ -917,7 +952,14 @@ fn linear_domain_mid_frame_transfer_change_is_rejected_and_retryable() {
     sink.set_transfer_function(TransferFunction::Bt1886);
     let (yr, ur, vr) = row(1);
     let err = sink
-      .process(Yuv420pRow::new(yr, ur, vr, 1, KernelMatrix::Bt709, true))
+      .process(Yuv420pRow::for_tests(
+        yr,
+        ur,
+        vr,
+        1,
+        KernelMatrix::Bt709,
+        true,
+      ))
       .unwrap_err();
     assert!(
       matches!(err, MixedSinkerError::TransferFunctionChanged(_)),
@@ -931,7 +973,14 @@ fn linear_domain_mid_frame_transfer_change_is_rejected_and_retryable() {
     for r in 1..SRC {
       let (yr, ur, vr) = row(r);
       sink
-        .process(Yuv420pRow::new(yr, ur, vr, r, KernelMatrix::Bt709, true))
+        .process(Yuv420pRow::for_tests(
+          yr,
+          ur,
+          vr,
+          r,
+          KernelMatrix::Bt709,
+          true,
+        ))
         .unwrap();
     }
   }
@@ -975,7 +1024,14 @@ fn linear_domain_mid_frame_domain_change_is_rejected() {
     // Row 0 freezes the domain (Linear) on its first output-bearing row.
     let (yr, ur, vr) = row(0);
     sink
-      .process(Yuv420pRow::new(yr, ur, vr, 0, KernelMatrix::Bt709, true))
+      .process(Yuv420pRow::for_tests(
+        yr,
+        ur,
+        vr,
+        0,
+        KernelMatrix::Bt709,
+        true,
+      ))
       .unwrap();
 
     // Flip the domain mid-frame, then feed row 1 — the freeze guards the domain
@@ -987,7 +1043,14 @@ fn linear_domain_mid_frame_domain_change_is_rejected() {
     sink.set_averaging_domain(AveragingDomain::Encoded);
     let (yr, ur, vr) = row(1);
     let err = sink
-      .process(Yuv420pRow::new(yr, ur, vr, 1, KernelMatrix::Bt709, true))
+      .process(Yuv420pRow::for_tests(
+        yr,
+        ur,
+        vr,
+        1,
+        KernelMatrix::Bt709,
+        true,
+      ))
       .unwrap_err();
     assert!(
       matches!(err, MixedSinkerError::AveragingDomainChanged(_)),
@@ -1012,7 +1075,14 @@ fn linear_domain_mid_frame_domain_change_is_rejected() {
     for r in 1..SRC {
       let (yr, ur, vr) = row(r);
       sink
-        .process(Yuv420pRow::new(yr, ur, vr, r, KernelMatrix::Bt709, true))
+        .process(Yuv420pRow::for_tests(
+          yr,
+          ur,
+          vr,
+          r,
+          KernelMatrix::Bt709,
+          true,
+        ))
         .unwrap();
     }
   }
@@ -1048,7 +1118,7 @@ fn linear_domain_filter_reject_does_not_poison_domain_freeze() {
   let row = |r: usize| {
     let yr = &y[r * SRC..(r + 1) * SRC];
     let cr = r / 2;
-    Yuv420pRow::new(
+    Yuv420pRow::for_tests(
       yr,
       &u[cr * cw..(cr + 1) * cw],
       &v[cr * cw..(cr + 1) * cw],
@@ -1160,7 +1230,14 @@ fn linear_domain_first_row_scratch_failure_leaves_frame_unset() {
       let cr = r / 2;
       let ur = &u[cr * cw..(cr + 1) * cw];
       let vr = &v[cr * cw..(cr + 1) * cw];
-      sink.process(Yuv420pRow::new(yr, ur, vr, r, KernelMatrix::Bt709, true))
+      sink.process(Yuv420pRow::for_tests(
+        yr,
+        ur,
+        vr,
+        r,
+        KernelMatrix::Bt709,
+        true,
+      ))
     };
 
     // Row 0 with the scratch reserve armed to fail: the frame was built into a
@@ -1253,7 +1330,7 @@ fn linear_domain_first_row_failure_allows_output_set_retry() {
       let cr = r / 2;
       let ur = &u[cr * cw..(cr + 1) * cw];
       let vr = &v[cr * cw..(cr + 1) * cw];
-      Yuv420pRow::new(yr, ur, vr, r, KernelMatrix::Bt709, true)
+      Yuv420pRow::for_tests(yr, ur, vr, r, KernelMatrix::Bt709, true)
     };
 
     // Row 0 (rgb-only) with the scratch reserve armed to fail: the output-set
@@ -1340,7 +1417,14 @@ fn linear_domain_single_row_frame_tail_failure_leaves_frame_unset() {
     // `*frame` still `None`.
     crate::sinker::mixed::linear_light::arm_linear_tail_alloc_failure();
     let err = sink
-      .process(Yuv444pRow::new(&y, &u, &v, 0, KernelMatrix::Bt709, true))
+      .process(Yuv444pRow::for_tests(
+        &y,
+        &u,
+        &v,
+        0,
+        KernelMatrix::Bt709,
+        true,
+      ))
       .unwrap_err();
     assert!(
       matches!(
@@ -1355,7 +1439,14 @@ fn linear_domain_single_row_frame_tail_failure_leaves_frame_unset() {
     // (the one-shot failpoint is already taken, so the tail now allocates).
     sink.set_transfer_function(TransferFunction::Bt1886);
     sink
-      .process(Yuv444pRow::new(&y, &u, &v, 0, KernelMatrix::Bt709, true))
+      .process(Yuv444pRow::for_tests(
+        &y,
+        &u,
+        &v,
+        0,
+        KernelMatrix::Bt709,
+        true,
+      ))
       .expect(
         "after a single-row tail failure the corrected-transfer retry of row 0 \
          must succeed — the failed row must not have committed the frame",

@@ -146,7 +146,7 @@ fn run(
         .unwrap()
         .with_luma_u16(&mut lu16)
         .unwrap();
-    yuva420p_to(&frame(y, u, v, a), FR, M, &mut sink).unwrap();
+    yuva420p_to(&frame(y, u, v, a), FR, sink.set_kernel_matrix(M)).unwrap();
   }
   (rgb, rgba, luma, lu16)
 }
@@ -182,7 +182,7 @@ fn oracle(y: &[u8], u: &[u8], v: &[u8], a: &[u8]) -> (Vec<u8>, Vec<u8>, Vec<u8>,
       &yb, &ub, &vb, &ab, OUT as u32, OUT as u32, OUT as u32, OUT as u32, OUT as u32, OUT as u32,
     )
     .unwrap();
-    crate::source::yuva444p_to(&f, FR, M, &mut sink).unwrap();
+    crate::source::yuva444p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   (rgb, rgba, luma, lu16)
 }
@@ -291,7 +291,7 @@ fn straight_native_default_matches_explicit_true() {
         .unwrap()
         .with_rgba(&mut rgba)
         .unwrap();
-    yuva420p_to(&frame(&y, &u, &v, &a), FR, M, &mut sink).unwrap();
+    yuva420p_to(&frame(&y, &u, &v, &a), FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(
     rgba, explicit.1,
@@ -323,7 +323,7 @@ fn premultiplied_byte_identical_to_current() {
     let mut sink = MixedSinker::<Yuva420p>::new(SRC, SRC)
       .with_rgba(&mut full)
       .unwrap();
-    yuva420p_to(&frame(&y, &u, &v, &a), FR, M, &mut sink).unwrap();
+    yuva420p_to(&frame(&y, &u, &v, &a), FR, sink.set_kernel_matrix(M)).unwrap();
     full
   };
   for px in pm.chunks_exact_mut(4) {
@@ -382,7 +382,7 @@ fn straight_native_simd_matches_scalar() {
         .unwrap()
         .with_luma(&mut luma)
         .unwrap();
-    yuva420p_to(&frame(&y, &u, &v, &a), FR, M, &mut sink).unwrap();
+    yuva420p_to(&frame(&y, &u, &v, &a), FR, sink.set_kernel_matrix(M)).unwrap();
     (rgba, luma)
   };
   assert_eq!(
@@ -409,8 +409,8 @@ fn straight_native_cross_frame_reset_reuses_streams() {
         .unwrap()
         .with_rgba(&mut rgba)
         .unwrap();
-    yuva420p_to(&frame(&y, &u, &v, &a), FR, M, &mut sink).unwrap();
-    yuva420p_to(&frame(&y, &u, &v, &a), FR, M, &mut sink).unwrap();
+    yuva420p_to(&frame(&y, &u, &v, &a), FR, sink.set_kernel_matrix(M)).unwrap();
+    yuva420p_to(&frame(&y, &u, &v, &a), FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(rgba, oracle(&y, &u, &v, &a).1, "second frame != oracle");
 }
@@ -433,7 +433,7 @@ fn straight_native_mid_frame_alpha_mode_flip_is_rejected() {
       .unwrap();
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   sink
-    .process(Yuva420pRow::new(
+    .process(Yuva420pRow::for_tests(
       &y[..SRC],
       &u[..CW],
       &v[..CW],
@@ -445,7 +445,7 @@ fn straight_native_mid_frame_alpha_mode_flip_is_rejected() {
     .unwrap();
   sink.set_alpha_mode(AlphaMode::Premultiplied);
   let err = sink
-    .process(Yuva420pRow::new(
+    .process(Yuva420pRow::for_tests(
       &y[SRC..2 * SRC],
       &u[..CW],
       &v[..CW],
@@ -474,7 +474,7 @@ fn straight_native_out_of_sequence_first_row_is_rejected() {
       .unwrap();
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   let err = sink
-    .process(Yuva420pRow::new(
+    .process(Yuva420pRow::for_tests(
       &y[2 * SRC..3 * SRC],
       &u[CW..2 * CW],
       &v[CW..2 * CW],
@@ -518,7 +518,7 @@ fn straight_native_first_build_scratch_oom_leaves_freeze_unfrozen_for_retry() {
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   crate::sinker::mixed::arm_native_rgb_scratch_failure();
   let err = sink
-    .process(Yuva420pRow::new(
+    .process(Yuva420pRow::for_tests(
       &y[0..SRC],
       &u[0..CW],
       &v[0..CW],
@@ -539,7 +539,7 @@ fn straight_native_first_build_scratch_oom_leaves_freeze_unfrozen_for_retry() {
   // luma added (changed output set) is ACCEPTED, not ResampleOutputsChanged.
   sink.set_luma(&mut luma).unwrap();
   sink
-    .process(Yuva420pRow::new(
+    .process(Yuva420pRow::for_tests(
       &y[0..SRC],
       &u[0..CW],
       &v[0..CW],
@@ -582,7 +582,7 @@ fn straight_native_colour_capability_rebuild_scratch_oom_leaves_freeze_unfrozen_
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   for r in 0..SRC {
     sink
-      .process(Yuva420pRow::new(
+      .process(Yuva420pRow::for_tests(
         &y[r * SRC..(r + 1) * SRC],
         &u[(r / 2) * CW..(r / 2) * CW + CW],
         &v[(r / 2) * CW..(r / 2) * CW + CW],
@@ -599,7 +599,7 @@ fn straight_native_colour_capability_rebuild_scratch_oom_leaves_freeze_unfrozen_
   sink.set_rgb(&mut rgb).unwrap();
   crate::sinker::mixed::arm_native_rgb_scratch_failure();
   let err = sink
-    .process(Yuva420pRow::new(
+    .process(Yuva420pRow::for_tests(
       &y[0..SRC],
       &u[0..CW],
       &v[0..CW],
@@ -622,7 +622,7 @@ fn straight_native_colour_capability_rebuild_scratch_oom_leaves_freeze_unfrozen_
   // would have frozen {luma, rgb} and rejected this as ResampleOutputsChanged).
   sink.set_hsv(&mut hh, &mut ss, &mut vv).unwrap();
   sink
-    .process(Yuva420pRow::new(
+    .process(Yuva420pRow::for_tests(
       &y[0..SRC],
       &u[0..CW],
       &v[0..CW],
@@ -667,7 +667,7 @@ fn straight_native_alpha_drop_paths_match_no_alpha_native() {
         .unwrap()
         .with_luma_u16(&mut lu16)
         .unwrap();
-    yuv420p_to(&f, FR, M, &mut sink).unwrap();
+    yuv420p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(
     n_rgb, rgb,
@@ -708,7 +708,7 @@ fn native_to_rowstage_route_flip_mid_frame_rejected() {
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   // Row 0 freezes the route = native.
   sink
-    .process(Yuva420pRow::new(
+    .process(Yuva420pRow::for_tests(
       &y[..SRC],
       &u[..CW],
       &v[..CW],
@@ -721,7 +721,7 @@ fn native_to_rowstage_route_flip_mid_frame_rejected() {
   // Flip to the row-stage tier and feed the next in-sequence row.
   sink.set_native(false);
   let err = sink
-    .process(Yuva420pRow::new(
+    .process(Yuva420pRow::for_tests(
       &y[SRC..2 * SRC],
       &u[..CW],
       &v[..CW],
@@ -757,7 +757,7 @@ fn rowstage_to_native_route_flip_mid_frame_rejected() {
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   // Row 0 freezes the route = row-stage.
   sink
-    .process(Yuva420pRow::new(
+    .process(Yuva420pRow::for_tests(
       &y[..SRC],
       &u[..CW],
       &v[..CW],
@@ -769,7 +769,7 @@ fn rowstage_to_native_route_flip_mid_frame_rejected() {
     .expect("row-stage row 0 freezes the route and succeeds");
   sink.set_native(true);
   let err = sink
-    .process(Yuva420pRow::new(
+    .process(Yuva420pRow::for_tests(
       &y[SRC..2 * SRC],
       &u[..CW],
       &v[..CW],
@@ -804,11 +804,11 @@ fn route_constant_succeeds_and_resets_across_frames() {
       .with_rgba(&mut rgba)
       .unwrap();
   // Frame 1: native, route constant across every row.
-  yuva420p_to(&frame(&y, &u, &v, &a), FR, M, &mut sink).unwrap();
+  yuva420p_to(&frame(&y, &u, &v, &a), FR, sink.set_kernel_matrix(M)).unwrap();
   // Frame 2: flip to row-stage for the WHOLE frame after begin_frame — a new
   // frame may pick the other tier because the route resets per frame.
   sink.set_native(false);
-  yuva420p_to(&frame(&y, &u, &v, &a), FR, M, &mut sink)
+  yuva420p_to(&frame(&y, &u, &v, &a), FR, sink.set_kernel_matrix(M))
     .expect("a new frame may pick the other tier; the route resets per frame");
 }
 
@@ -837,7 +837,7 @@ fn straight_native_box_alloc_failure_recoverable() {
     sink.begin_frame(SRC as u32, SRC as u32).unwrap();
     crate::resample::arm_box_failure();
     let err = sink
-      .process(Yuva420pRow::new(
+      .process(Yuva420pRow::for_tests(
         &y[..SRC],
         &u[..CW],
         &v[..CW],
@@ -872,7 +872,7 @@ fn straight_native_box_alloc_failure_recoverable() {
         .unwrap()
         .with_rgba(&mut rgba2)
         .unwrap();
-    yuva420p_to(&frame(&y, &u, &v, &a), FR, M, &mut sink)
+    yuva420p_to(&frame(&y, &u, &v, &a), FR, sink.set_kernel_matrix(M))
       .expect("a fresh frame after the consumed failpoint resamples cleanly");
   }
   assert_eq!(

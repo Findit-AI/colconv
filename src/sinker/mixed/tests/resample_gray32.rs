@@ -95,7 +95,7 @@ fn gray32_downscale_luma_u16_is_exact_area_mean() {
         .unwrap()
         .with_luma_u16(&mut luma_u16)
         .unwrap();
-    gray32_to(&src, FR, M, &mut sink).unwrap();
+    gray32_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(
     luma_u16,
@@ -144,7 +144,7 @@ fn gray32_all_outputs_match_direct_over_binned_luma() {
         .unwrap()
         .with_hsv(&mut h, &mut s_, &mut v_)
         .unwrap();
-    gray32_to(&src, FR, M, &mut sink).unwrap();
+    gray32_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
   }
 
   let binned = block_mean_2x2_u32(&plane);
@@ -175,7 +175,7 @@ fn gray32_all_outputs_match_direct_over_binned_luma() {
       .unwrap()
       .with_hsv(&mut ref_h, &mut ref_s, &mut ref_v)
       .unwrap();
-    gray32_to(&binned_frame, FR, M, &mut sink).unwrap();
+    gray32_to(&binned_frame, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(luma, ref_luma, "luma");
   assert_eq!(luma_u16, ref_luma_u16, "luma_u16");
@@ -215,7 +215,7 @@ fn gray32_le_be_resample_outputs_identical() {
         .unwrap()
         .with_rgba(&mut le_rgba)
         .unwrap();
-    gray32_to(&frame, FR, M, &mut sink).unwrap();
+    gray32_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   }
 
   let mut be_luma_u16 = vec![0u16; OUT * OUT];
@@ -235,7 +235,7 @@ fn gray32_le_be_resample_outputs_identical() {
     .unwrap()
     .with_rgba(&mut be_rgba)
     .unwrap();
-    gray32_to_endian::<_, true>(&frame, FR, M, &mut sink).unwrap();
+    gray32_to_endian::<_, true>(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   }
 
   assert_eq!(le_luma_u16, be_luma_u16, "luma_u16 LE/BE diverge");
@@ -265,7 +265,7 @@ fn gray32_out_of_sequence_first_row_rejected_before_allocation() {
       .unwrap();
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   let g = &pix[SRC..2 * SRC];
-  let err = sink.process(Gray32Row::new(g, 1, M, FR)).unwrap_err();
+  let err = sink.process(Gray32Row::for_tests(g, 1, M, FR)).unwrap_err();
   assert!(
     matches!(
       err,
@@ -371,7 +371,7 @@ fn gray32_filter_luma_u16<K: FilterKernel + Copy>(ow: usize, oh: usize, kernel: 
     .unwrap()
     .with_rgb(&mut rgb)
     .unwrap();
-    gray32_to(&src, FR, M, &mut sink).unwrap();
+    gray32_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   // Derived outputs follow from the resampled luma exactly as the gray32
   // derive kernels do: luma = luma_u16 >> 8, rgb broadcasts that byte.
@@ -469,7 +469,7 @@ fn pin_limited_exact_over_u32_binned<R: Resampler, const BE: bool>(
       .with_hsv(&mut h, &mut s, &mut v)
       .unwrap();
     // full_range = false — the limited-range path under test.
-    gray32_to_endian::<_, BE>(&frame, false, M, &mut sink).unwrap();
+    gray32_to_endian::<_, BE>(&frame, false, sink.set_kernel_matrix(M)).unwrap();
   }
 
   // Reference: the direct (identity-plan) Gray32 limited sink over the
@@ -506,7 +506,7 @@ fn pin_limited_exact_over_u32_binned<R: Resampler, const BE: bool>(
       .unwrap()
       .with_hsv(&mut ref_h, &mut ref_s, &mut ref_v)
       .unwrap();
-    gray32_to_endian::<_, BE>(&ref_frame, false, M, &mut ref_sink).unwrap();
+    gray32_to_endian::<_, BE>(&ref_frame, false, ref_sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(rgb, ref_rgb, "{label} rgb");
   assert_eq!(rgb_u16, ref_rgb_u16, "{label} rgb_u16");

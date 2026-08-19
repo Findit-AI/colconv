@@ -718,6 +718,10 @@ impl<R> PixelSink for MixedSinker<'_, Nv12, R> {
   type Input<'r> = Nv12Row<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     // Reject odd-width sinkers up front — the underlying row
     // primitives assume `width & 1 == 0` and would panic on the
@@ -2326,6 +2330,10 @@ impl<R> PixelSink for MixedSinker<'_, Nv16, R> {
   type Input<'r> = Nv16Row<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     if self.width & 1 != 0 {
       return Err(MixedSinkerError::WidthAlignment(WidthAlignment::odd(
@@ -3175,6 +3183,10 @@ impl<R> PixelSink for MixedSinker<'_, Nv21, R> {
   type Input<'r> = Nv21Row<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     if self.width & 1 != 0 {
       return Err(MixedSinkerError::WidthAlignment(WidthAlignment::odd(
@@ -4721,6 +4733,10 @@ impl<R> PixelSink for MixedSinker<'_, Nv24, R> {
   type Input<'r> = Nv24Row<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     check_dimensions_match(self.width, self.height, width, height)?;
     if let Some(stream) = self.rgb_stream.as_mut() {
@@ -5124,6 +5140,10 @@ impl<R> PixelSink for MixedSinker<'_, Nv42, R> {
   type Input<'r> = Nv42Row<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     check_dimensions_match(self.width, self.height, width, height)?;
     if let Some(stream) = self.rgb_stream.as_mut() {

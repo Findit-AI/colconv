@@ -161,7 +161,7 @@ macro_rules! packed_siting_suite {
           .unwrap()
           .with_chroma_location(loc.clone())
           .with_simd(simd);
-        $walker(&src, false, KernelMatrix::Bt601, &mut sink).unwrap();
+        $walker(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
         rgb
       }
 
@@ -203,7 +203,7 @@ macro_rules! packed_siting_suite {
           .with_rgb(&mut rgb)
           .unwrap()
           .with_chroma_location(ChromaLocation::Left);
-        $walker(&src, false, KernelMatrix::Bt601, &mut sink).unwrap();
+        $walker(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
         let chroma_len = sink.chroma_full.len();
         let half_len = sink.packed_yuv_u_half.len();
         let y_len = sink.packed_yuv_y_full.len();
@@ -237,7 +237,7 @@ macro_rules! packed_siting_suite {
         let mut ref_sink = MixedSinker::<Yuv444p>::new(W as usize, H as usize)
           .with_rgb(&mut rgb_ref)
           .unwrap();
-        yuv444p_to(&ref_src, false, KernelMatrix::Bt601, &mut ref_sink).unwrap();
+        yuv444p_to(&ref_src, false, ref_sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
         assert_eq!(
           convert_rgb(ChromaLocation::Center, true),
           rgb_ref,
@@ -259,7 +259,7 @@ macro_rules! packed_siting_suite {
           .with_rgb(&mut rgb)
           .unwrap()
           .with_chroma_location(ChromaLocation::Center);
-        $walker(&src, false, KernelMatrix::Bt601, &mut sink).unwrap();
+        $walker(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
         let chroma_len = sink.chroma_full.len();
         let half_len = sink.packed_yuv_u_half.len();
         let y_len = sink.packed_yuv_y_full.len();
@@ -340,7 +340,7 @@ macro_rules! packed_siting_suite {
           .with_rgb(&mut rgb422)
           .unwrap()
           .with_chroma_location(ChromaLocation::Center);
-        yuv422p_to(&src422, false, KernelMatrix::Bt601, &mut sink422).unwrap();
+        yuv422p_to(&src422, false, sink422.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
         assert_eq!(
           convert_rgb(ChromaLocation::Center, true),
           rgb422,
@@ -383,8 +383,8 @@ macro_rules! packed_siting_suite {
           let mut sink = MixedSinker::<$Marker>::new(W as usize, H as usize)
             .with_rgb(&mut rgb)
             .unwrap()
-            .with_color_spec(&spec(loc));
-          $walker(&src, false, KernelMatrix::ChromaDerivedNcl, &mut sink).unwrap();
+            .with_color_spec(&spec(loc)).unwrap();
+          $walker(&src, false, sink.set_kernel_matrix(KernelMatrix::ChromaDerivedNcl)).unwrap();
           rgb
         };
         let decode_bt709 = |loc: ChromaLocation| -> Vec<u8> {
@@ -394,7 +394,7 @@ macro_rules! packed_siting_suite {
             .with_rgb(&mut rgb)
             .unwrap()
             .with_chroma_location(loc.clone());
-          $walker(&src, false, KernelMatrix::Bt709, &mut sink).unwrap();
+          $walker(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
           rgb
         };
 
@@ -435,14 +435,14 @@ macro_rules! packed_siting_suite {
             .with_rgba(&mut rgba)
             .unwrap()
             .with_chroma_location(ChromaLocation::Center);
-          $walker(&src, false, KernelMatrix::Bt601, &mut sink).unwrap();
+          $walker(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
 
           let ref_src = Yuv444pFrame::new(&yp, &u444, &v444, W, H, W, W, W);
           let mut rgba_ref = std::vec![0u8; (W * H * 4) as usize];
           let mut ref_sink = MixedSinker::<Yuv444p>::new(W as usize, H as usize)
             .with_rgba(&mut rgba_ref)
             .unwrap();
-          yuv444p_to(&ref_src, false, KernelMatrix::Bt601, &mut ref_sink).unwrap();
+          yuv444p_to(&ref_src, false, ref_sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
           assert_eq!(rgba, rgba_ref, "centered RGBA must equal upsample-then-4:4:4");
         }
 
@@ -458,7 +458,7 @@ macro_rules! packed_siting_suite {
             .with_hsv(&mut h, &mut s, &mut v)
             .unwrap()
             .with_chroma_location(ChromaLocation::Center);
-          $walker(&src, false, KernelMatrix::Bt601, &mut sink).unwrap();
+          $walker(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
 
           let ref_src = Yuv444pFrame::new(&yp, &u444, &v444, W, H, W, W, W);
           let (mut hr, mut sr, mut vr) = (
@@ -469,7 +469,7 @@ macro_rules! packed_siting_suite {
           let mut ref_sink = MixedSinker::<Yuv444p>::new(W as usize, H as usize)
             .with_hsv(&mut hr, &mut sr, &mut vr)
             .unwrap();
-          yuv444p_to(&ref_src, false, KernelMatrix::Bt601, &mut ref_sink).unwrap();
+          yuv444p_to(&ref_src, false, ref_sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
           assert_eq!(
             (h, s, v),
             (hr, sr, vr),
@@ -502,13 +502,13 @@ macro_rules! packed_siting_suite {
           ChromaLocation::Center,
         );
         let spec = ColorSpec::from_info(PixelFormat::Yuv422p, info);
-        let opts = YuvOptions::from_color_spec(&spec).unwrap();
+        let opts = YuvOptions::from_color_spec(&spec);
         let mut rgb = std::vec![0u8; (W * H * 3) as usize];
         let mut sink = MixedSinker::<$Marker>::new(W as usize, H as usize)
           .with_rgb(&mut rgb)
           .unwrap()
-          .with_color_spec(&spec);
-        $walker(&src, opts.full_range(), opts.matrix(), &mut sink).unwrap();
+          .with_color_spec(&spec).unwrap();
+        $walker(&src, opts.full_range(), &mut sink).unwrap();
         drop(sink);
 
         assert_ne!(
@@ -548,7 +548,7 @@ macro_rules! packed_siting_suite {
             .with_rgb(&mut rgb_ok)
             .unwrap()
             .with_chroma_location(ChromaLocation::Center);
-          $walker(&src, false, KernelMatrix::Bt601, &mut sink_ok).unwrap();
+          $walker(&src, false, sink_ok.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
           drop(sink_ok);
           assert!(
             luma_ok.iter().any(|&b| b != 0xAB),
@@ -570,7 +570,7 @@ macro_rules! packed_siting_suite {
           .with_chroma_location(ChromaLocation::Center);
 
         crate::sinker::mixed::arm_chroma_full_alloc_failure();
-        let err = $walker(&src, false, KernelMatrix::Bt601, &mut sink).unwrap_err();
+        let err = $walker(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap_err();
         drop(sink);
 
         assert!(
@@ -605,7 +605,7 @@ macro_rules! packed_siting_suite {
         let src = $Frame::new(&packed, W, H, W * 2);
         let mut sink = MixedSinker::<$Marker>::new(W as usize, H as usize)
           .with_chroma_location(ChromaLocation::Center);
-        $walker(&src, false, KernelMatrix::Bt601, &mut sink).unwrap();
+        $walker(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
         let chroma_len = sink.chroma_full.len();
         let half_len = sink.packed_yuv_u_half.len();
         drop(sink);
@@ -644,7 +644,7 @@ macro_rules! packed_siting_suite {
         let packed = std::vec![128u8; 2 * w]; // one packed row: 2 * w bytes
         let mut sink =
           MixedSinker::<$Marker>::new(w, h).with_chroma_location(ChromaLocation::Center);
-        let row = crate::source::$Row::new(&packed, idx, KernelMatrix::Bt601, false);
+        let row = crate::source::$Row::for_tests(&packed, idx, KernelMatrix::Bt601, false);
         crate::PixelSink::process(&mut sink, row).unwrap();
         let chroma_len = sink.chroma_full.len();
         drop(sink);
@@ -684,12 +684,12 @@ macro_rules! packed_siting_suite {
             .with_chroma_location(loc1.clone())
             .with_simd(true);
           crate::PixelSink::begin_frame(&mut sink, W, H).unwrap();
-          let row0 = crate::source::$Row::new(&packed[0..2 * w], 0, KernelMatrix::Bt601, false);
+          let row0 = crate::source::$Row::for_tests(&packed[0..2 * w], 0, KernelMatrix::Bt601, false);
           crate::PixelSink::process(&mut sink, row0).unwrap();
           let scratch_len = sink.chroma_full.len();
 
           sink.set_chroma_location(loc2.clone());
-          let row1 = crate::source::$Row::new(&packed[2 * w..4 * w], 1, KernelMatrix::Bt601, false);
+          let row1 = crate::source::$Row::for_tests(&packed[2 * w..4 * w], 1, KernelMatrix::Bt601, false);
           let err = crate::PixelSink::process(&mut sink, row1).unwrap_err();
           assert!(
             matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
@@ -703,7 +703,7 @@ macro_rules! packed_siting_suite {
 
           sink.set_chroma_location(loc1.clone());
           for r in 1..h {
-            let row = crate::source::$Row::new(
+            let row = crate::source::$Row::for_tests(
               &packed[r * 2 * w..(r + 1) * 2 * w],
               r,
               KernelMatrix::Bt601,

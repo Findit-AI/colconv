@@ -290,7 +290,7 @@ fn run(
         .unwrap()
         .with_rgb_u16(&mut rgb16)
         .unwrap();
-    v210_to(&frame(&packed), FR, M, &mut sink).unwrap();
+    v210_to(&frame(&packed), FR, sink.set_kernel_matrix(M)).unwrap();
   }
   (rgb, rgb16)
 }
@@ -320,7 +320,7 @@ fn run_be(
     .unwrap()
     .with_rgb_u16(&mut rgb16)
     .unwrap();
-    v210_to_endian::<_, true>(&be_frame, FR, M, &mut sink).unwrap();
+    v210_to_endian::<_, true>(&be_frame, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   (rgb, rgb16)
 }
@@ -355,7 +355,7 @@ fn run_yuv422p(
     let f = Yuv422p10Frame::new(
       y, u, v, SRC as u32, SRC as u32, SRC as u32, CW as u32, CW as u32,
     );
-    yuv422p10_to(&f, FR, M, &mut sink).unwrap();
+    yuv422p10_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   (rgb, rgb16)
 }
@@ -379,7 +379,7 @@ fn native_oracle(y: &[u16], u: &[u16], v: &[u16], simd: bool) -> (Vec<u8>, Vec<u
     let f = Yuv444p10Frame::new(
       &yb, &ub, &vb, OUT as u32, OUT as u32, OUT as u32, OUT as u32, OUT as u32,
     );
-    yuv444p10_to(&f, FR, M, &mut sink).unwrap();
+    yuv444p10_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   (rgb, rgb16)
 }
@@ -412,7 +412,7 @@ fn rgb_domain_oracle(y: &[u16], u: &[u16], v: &[u16], simd: bool) -> (Vec<u8>, V
     .unwrap()
     .with_rgb_u16(&mut rgb16)
     .unwrap();
-    yuv444p10_to(&f, FR, M, &mut sink).unwrap();
+    yuv444p10_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   (rgb, rgb16)
 }
@@ -581,10 +581,10 @@ fn flip_row1<R>(
   let packed = pack_v210(y, u, v);
   sink.set_chroma_location(loc1.clone());
   PixelSink::begin_frame(&mut sink, SRC as u32, SRC as u32).unwrap();
-  let row0 = V210Row::new(row_slice(&packed, 0), 0, M, FR);
+  let row0 = V210Row::for_tests(row_slice(&packed, 0), 0, M, FR);
   PixelSink::process(&mut sink, row0).unwrap();
   sink.set_chroma_location(loc2.clone());
-  let row1 = V210Row::new(row_slice(&packed, 1), 1, M, FR);
+  let row1 = V210Row::for_tests(row_slice(&packed, 1), 1, M, FR);
   PixelSink::process(&mut sink, row1)
 }
 

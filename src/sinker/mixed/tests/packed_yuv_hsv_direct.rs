@@ -227,7 +227,7 @@ fn yuyv422_hsv_only_grows_no_rgb_scratch() {
     let mut sink = MixedSinker::<Yuyv422>::new(w, h)
       .with_hsv(&mut hh, &mut ss, &mut vv)
       .unwrap();
-    yuyv422_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
+    yuyv422_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
     sink.rgb_scratch.len()
   };
   assert_eq!(
@@ -266,7 +266,7 @@ fn yuyv422_luma_plus_hsv_only_is_correct_and_rgb_free() {
       .unwrap()
       .with_hsv(&mut hh, &mut ss, &mut vv)
       .unwrap();
-    yuyv422_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+    yuyv422_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
     sink.rgb_scratch.len()
   };
   assert_eq!(
@@ -301,7 +301,7 @@ fn packed_yuv_hsv_only_grows_no_rgb_scratch_all_formats() {
       let mut sink = MixedSinker::<Uyvy422>::new(w, h)
         .with_hsv(&mut hh, &mut ss, &mut vv)
         .unwrap();
-      uyvy422_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
+      uyvy422_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
       sink.rgb_scratch.len()
     };
     assert_eq!(scratch_len, 0, "Uyvy422 HSV-only RGB-free");
@@ -324,7 +324,7 @@ fn packed_yuv_hsv_only_grows_no_rgb_scratch_all_formats() {
       let mut sink = MixedSinker::<Yvyu422>::new(w, h)
         .with_hsv(&mut hh, &mut ss, &mut vv)
         .unwrap();
-      yvyu422_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
+      yvyu422_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
       sink.rgb_scratch.len()
     };
     assert_eq!(scratch_len, 0, "Yvyu422 HSV-only RGB-free");
@@ -348,7 +348,7 @@ fn packed_yuv_hsv_only_grows_no_rgb_scratch_all_formats() {
       let mut sink = MixedSinker::<Uyyvyy411>::new(w, h)
         .with_hsv(&mut hh, &mut ss, &mut vv)
         .unwrap();
-      uyyvyy411_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
+      uyyvyy411_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
       sink.rgb_scratch.len()
     };
     assert_eq!(scratch_len, 0, "Uyyvyy411 HSV-only RGB-free");

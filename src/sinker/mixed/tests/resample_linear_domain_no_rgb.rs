@@ -45,7 +45,14 @@ fn linear_domain_without_rgb_rejects_and_does_not_silently_encode() {
     let u = [128u8; SRC / 2];
     let v = [128u8; SRC / 2];
     let err = sink
-      .process(Yuv420pRow::new(&y, &u, &v, 0, KernelMatrix::Bt709, true))
+      .process(Yuv420pRow::for_tests(
+        &y,
+        &u,
+        &v,
+        0,
+        KernelMatrix::Bt709,
+        true,
+      ))
       .unwrap_err();
     assert!(
       matches!(

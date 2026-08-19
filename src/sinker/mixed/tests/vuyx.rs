@@ -53,7 +53,7 @@ fn vuyx_with_rgb_smoke() {
   let src = VuyxFrame::try_new(&buf, 4, 1, 16).unwrap();
   let mut rgb = std::vec![0u8; 4 * 3];
   let mut sink = MixedSinker::<Vuyx>::new(4, 1).with_rgb(&mut rgb).unwrap();
-  vuyx_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+  vuyx_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   for px in rgb.chunks(3) {
     assert!(
       px[0].abs_diff(128) <= 4,
@@ -82,7 +82,7 @@ fn vuyx_with_rgba_forces_alpha_max_with_zero_source() {
   let src = VuyxFrame::try_new(&buf, 8, 1, 32).unwrap();
   let mut rgba = std::vec![0u8; 8 * 4];
   let mut sink = MixedSinker::<Vuyx>::new(8, 1).with_rgba(&mut rgba).unwrap();
-  vuyx_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+  vuyx_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   for (i, px) in rgba.chunks(4).enumerate() {
     assert_eq!(
       px[3], 0xFF,
@@ -107,7 +107,7 @@ fn vuyx_with_rgba_forces_alpha_max_with_random_source() {
   let n = 6 * 2;
   let mut rgba = std::vec![0u8; n * 4];
   let mut sink = MixedSinker::<Vuyx>::new(6, 2).with_rgba(&mut rgba).unwrap();
-  vuyx_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+  vuyx_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   for (i, px) in rgba.chunks(4).enumerate() {
     assert_eq!(
       px[3], 0xFF,
@@ -131,7 +131,7 @@ fn vuyx_with_luma_extracts_y_byte() {
   let src = VuyxFrame::try_new(&buf, 8, 2, 32).unwrap();
   let mut luma = std::vec![0u8; 8 * 2];
   let mut sink = MixedSinker::<Vuyx>::new(8, 2).with_luma(&mut luma).unwrap();
-  vuyx_to(&src, false, KernelMatrix::Bt709, &mut sink).unwrap();
+  vuyx_to(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   assert!(
     luma.iter().all(|&y| y == 0xC0),
     "luma expected 0xC0, got {:?}",
@@ -158,7 +158,7 @@ fn vuyx_with_hsv_smoke() {
   let mut sink = MixedSinker::<Vuyx>::new(6, 2)
     .with_hsv(&mut h, &mut s, &mut v)
     .unwrap();
-  vuyx_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+  vuyx_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   for &sat in &s {
     assert_eq!(sat, 0, "gray must have S=0 in HSV");
   }
@@ -196,7 +196,7 @@ fn vuyx_with_rgb_and_rgba_strategy_a_byte_identical() {
     .unwrap()
     .with_rgba(&mut rgba)
     .unwrap();
-  vuyx_to(&frame, true, KernelMatrix::Bt709, &mut sinker).unwrap();
+  vuyx_to(&frame, true, sinker.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   for n in 0..width {
     // RGB and RGBA RGB-channels must be byte-identical (Strategy A).
@@ -238,13 +238,23 @@ fn vuyx_simd_vs_scalar_parity_at_1922() {
   let mut sink_simd = MixedSinker::<Vuyx>::new(w, h)
     .with_rgb(&mut rgb_simd)
     .unwrap();
-  vuyx_to(&src, false, KernelMatrix::Bt709, &mut sink_simd).unwrap();
+  vuyx_to(
+    &src,
+    false,
+    sink_simd.set_kernel_matrix(KernelMatrix::Bt709),
+  )
+  .unwrap();
 
   let mut sink_scalar = MixedSinker::<Vuyx>::new(w, h)
     .with_rgb(&mut rgb_scalar)
     .unwrap()
     .with_simd(false);
-  vuyx_to(&src, false, KernelMatrix::Bt709, &mut sink_scalar).unwrap();
+  vuyx_to(
+    &src,
+    false,
+    sink_scalar.set_kernel_matrix(KernelMatrix::Bt709),
+  )
+  .unwrap();
 
   assert_eq!(rgb_simd, rgb_scalar, "VUYX SIMD ≠ scalar at width {w}");
 }
@@ -342,7 +352,7 @@ fn vuyx_with_luma_u16_extracts_y_zero_extended() {
   let mut sink = MixedSinker::<Vuyx>::new(width, height)
     .with_luma_u16(&mut luma)
     .unwrap();
-  vuyx_to(&frame, false, KernelMatrix::Bt709, &mut sink).unwrap();
+  vuyx_to(&frame, false, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   // Reference: Y bytes at offset 2 of each 4-byte pixel quadruple.
   // The X byte at offset 3 must be completely ignored.
@@ -397,7 +407,7 @@ fn vuyx_force_alpha_max_independent_of_source() {
   let mut sink = MixedSinker::<Vuyx>::new(width, height)
     .with_rgba(&mut rgba)
     .unwrap();
-  vuyx_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+  vuyx_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   for i in 0..n {
     let src_x = x_pattern[i % x_pattern.len()];
@@ -449,7 +459,7 @@ fn vuyx_rgb_scratch_alloc_failure_leaves_outputs_untouched() {
     .unwrap();
 
   super::super::arm_rgb_scratch_alloc_failure();
-  let err = vuyx_to(&src, false, KernelMatrix::Bt601, &mut sink).unwrap_err();
+  let err = vuyx_to(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap_err();
   drop(sink);
 
   assert!(

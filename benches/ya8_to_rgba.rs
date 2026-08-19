@@ -52,7 +52,14 @@ fn bench(c: &mut Criterion) {
             .with_simd(use_simd)
             .with_rgba(&mut rgba)
             .unwrap();
-          ya8_to(&frame, FULL_RANGE, MATRIX, &mut sinker).unwrap();
+          ya8_to(
+            &frame,
+            FULL_RANGE,
+            sinker
+              .set_color_spec(&pixon::ColorSpec::of_matrix(MATRIX))
+              .unwrap(),
+          )
+          .unwrap();
           black_box(&rgba);
         });
       });

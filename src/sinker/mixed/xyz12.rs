@@ -234,7 +234,16 @@ impl<'a, R, const BE: bool> MixedSinker<'a, Xyz12<BE>, R> {
 // plan, the separable filter engine for a `Filter` plan
 // (`xyz12_resample_*`).
 
-impl<R, const BE: bool> Xyz12Sink<BE> for MixedSinker<'_, Xyz12<BE>, R> {}
+impl<R, const BE: bool> Xyz12Sink<BE> for MixedSinker<'_, Xyz12<BE>, R> {
+  /// The gamut is an output axis and this sinker is the output, so
+  /// [`xyz12_to`](crate::source::xyz12_to) asks here instead of taking it
+  /// beside the sink. Set through
+  /// [`MixedSinker::with_target_gamut`](crate::sinker::MixedSinker::with_target_gamut).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn target_gamut(&self) -> crate::KernelGamut {
+    self.target_gamut
+  }
+}
 
 impl<R, const BE: bool> MixedSinker<'_, Xyz12<BE>, R> {
   /// Runs the identity (no-resample) output derivation for one source
@@ -417,6 +426,10 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Xyz12<BE>, R> {
   type Input<'r> = Xyz12Row<'r, BE>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     check_dimensions_match(self.width, self.height, width, height)?;
     if let Some(stream) = self.xyz_stream_f32.as_mut() {

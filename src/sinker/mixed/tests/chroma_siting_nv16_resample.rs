@@ -237,7 +237,7 @@ fn run(
         .with_luma_u16(&mut luma_u16)
         .unwrap();
     let f = Nv16Frame::new(y, &uv, sw as u32, sh as u32, sw as u32, sw as u32);
-    nv16_to(&f, FR, M, &mut sink).unwrap();
+    nv16_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   (rgb, rgba, (hh, ss, vv), luma, luma_u16)
 }
@@ -283,7 +283,7 @@ fn run_yuv422p(
     let f = Yuv422pFrame::new(
       y, u, v, sw as u32, sh as u32, sw as u32, cw as u32, cw as u32,
     );
-    yuv422p_to(&f, FR, M, &mut sink).unwrap();
+    yuv422p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   (rgb, rgba, (hh, ss, vv), luma, luma_u16)
 }
@@ -327,7 +327,7 @@ fn native_oracle(
     let f = Yuv444pFrame::new(
       &yb, &ub, &vb, ow as u32, oh as u32, ow as u32, ow as u32, ow as u32,
     );
-    yuv444p_to(&f, FR, M, &mut sink).unwrap();
+    yuv444p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   (rgb, rgba, (hh, ss, vv), luma, luma_u16)
 }
@@ -365,7 +365,7 @@ fn encoded_oracle_rgb(
     let f = Yuv444pFrame::new(
       y, &uf, &vf, sw as u32, sh as u32, sw as u32, sw as u32, sw as u32,
     );
-    yuv444p_to(&f, FR, M, &mut sink).unwrap();
+    yuv444p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   rgb
 }
@@ -534,7 +534,7 @@ fn filter_rgb_nv16(
     .with_rgb(&mut rgb)
     .unwrap();
     let f = Nv16Frame::new(y, &uv, sw as u32, sh as u32, sw as u32, sw as u32);
-    nv16_to(&f, FR, M, &mut sink).unwrap();
+    nv16_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   rgb
 }
@@ -565,7 +565,7 @@ fn filter_rgb_yuv422p(
     let f = Yuv422pFrame::new(
       y, u, v, sw as u32, sh as u32, sw as u32, cw as u32, cw as u32,
     );
-    yuv422p_to(&f, FR, M, &mut sink).unwrap();
+    yuv422p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   rgb
 }
@@ -719,9 +719,9 @@ fn run_reuse_native(
         .unwrap();
     let f = Nv16Frame::new(y, &uv, sw as u32, sh as u32, sw as u32, sw as u32);
     sink.set_chroma_location(loc1.clone());
-    nv16_to(&f, FR, M, &mut sink).unwrap();
+    nv16_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
     sink.set_chroma_location(loc2.clone());
-    nv16_to(&f, FR, M, &mut sink).unwrap();
+    nv16_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   (rgb, rgba, (hh, ss, vv), luma, luma_u16)
 }
@@ -780,7 +780,7 @@ fn native_out_of_sequence_first_row_does_not_drop_the_cached_join() {
   // Frame 1 at Left builds the native join.
   PixelSink::begin_frame(&mut sink, 8, 8).unwrap();
   for r in 0..8 {
-    let row = Nv16Row::new(&y[r * 8..r * 8 + 8], &uv[r * 8..r * 8 + 8], r, M, FR);
+    let row = Nv16Row::for_tests(&y[r * 8..r * 8 + 8], &uv[r * 8..r * 8 + 8], r, M, FR);
     PixelSink::process(&mut sink, row).unwrap();
   }
   assert!(
@@ -790,7 +790,7 @@ fn native_out_of_sequence_first_row_does_not_drop_the_cached_join() {
   // Frame 2: change siting to Center, then feed an OUT-OF-SEQUENCE first row.
   PixelSink::begin_frame(&mut sink, 8, 8).unwrap();
   sink.set_chroma_location(ChromaLocation::Center);
-  let bad = Nv16Row::new(&y[3 * 8..4 * 8], &uv[3 * 8..4 * 8], 3, M, FR);
+  let bad = Nv16Row::for_tests(&y[3 * 8..4 * 8], &uv[3 * 8..4 * 8], 3, M, FR);
   let err = PixelSink::process(&mut sink, bad).unwrap_err();
   assert!(
     matches!(
@@ -805,7 +805,7 @@ fn native_out_of_sequence_first_row_does_not_drop_the_cached_join() {
   );
   // The corrected retry (row 0, now rebuilding for Center) succeeds.
   for r in 0..8 {
-    let row = Nv16Row::new(&y[r * 8..r * 8 + 8], &uv[r * 8..r * 8 + 8], r, M, FR);
+    let row = Nv16Row::for_tests(&y[r * 8..r * 8 + 8], &uv[r * 8..r * 8 + 8], r, M, FR);
     PixelSink::process(&mut sink, row).unwrap();
   }
 }
@@ -831,10 +831,10 @@ fn in_sequence_flip_row1<R>(
 ) -> Result<(), super::super::MixedSinkerError> {
   sink.set_chroma_location(loc1.clone());
   PixelSink::begin_frame(&mut sink, 8, 8).unwrap();
-  let row0 = Nv16Row::new(&y[0..8], &uv[0..8], 0, M, FR);
+  let row0 = Nv16Row::for_tests(&y[0..8], &uv[0..8], 0, M, FR);
   PixelSink::process(&mut sink, row0).unwrap();
   sink.set_chroma_location(loc2.clone());
-  let row1 = Nv16Row::new(&y[8..16], &uv[8..16], 1, M, FR);
+  let row1 = Nv16Row::for_tests(&y[8..16], &uv[8..16], 1, M, FR);
   PixelSink::process(&mut sink, row1)
 }
 
@@ -932,11 +932,11 @@ fn native_mid_frame_phase_change_rejection_keeps_the_stream_retryable() {
     .unwrap();
   PixelSink::begin_frame(&mut sink, 8, 8).unwrap();
   for r in 0..2 {
-    let row = Nv16Row::new(&y[r * 8..r * 8 + 8], &uv[r * 8..r * 8 + 8], r, M, FR);
+    let row = Nv16Row::for_tests(&y[r * 8..r * 8 + 8], &uv[r * 8..r * 8 + 8], r, M, FR);
     PixelSink::process(&mut sink, row).unwrap();
   }
   sink.set_chroma_location(ChromaLocation::Left);
-  let bad = Nv16Row::new(&y[5 * 8..6 * 8], &uv[5 * 8..6 * 8], 5, M, FR);
+  let bad = Nv16Row::for_tests(&y[5 * 8..6 * 8], &uv[5 * 8..6 * 8], 5, M, FR);
   let err = PixelSink::process(&mut sink, bad).unwrap_err();
   assert!(
     matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
@@ -946,7 +946,7 @@ fn native_mid_frame_phase_change_rejection_keeps_the_stream_retryable() {
   // fresh frame at the new siting processes without error.
   PixelSink::begin_frame(&mut sink, 8, 8).unwrap();
   for r in 0..8 {
-    let row = Nv16Row::new(&y[r * 8..r * 8 + 8], &uv[r * 8..r * 8 + 8], r, M, FR);
+    let row = Nv16Row::for_tests(&y[r * 8..r * 8 + 8], &uv[r * 8..r * 8 + 8], r, M, FR);
     PixelSink::process(&mut sink, row).unwrap();
   }
 }

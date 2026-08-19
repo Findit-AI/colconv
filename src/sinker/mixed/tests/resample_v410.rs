@@ -119,7 +119,7 @@ fn direct_full(packed: &[u32]) -> (Vec<u8>, Vec<u16>, Vec<u16>) {
       .unwrap()
       .with_luma_u16(&mut y_u16)
       .unwrap();
-    v410_to(&src, FR, M, &mut sink).unwrap();
+    v410_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   (rgb_u8, rgb_u16, y_u16)
 }
@@ -157,7 +157,7 @@ fn v410_uniform_gray_downscale_leaves_colour_outputs_unchanged() {
     .unwrap()
     .with_hsv(&mut hh, &mut ss, &mut vv)
     .unwrap();
-    v410_to(&v410_frame(&packed), FR, M, &mut sink).unwrap();
+    v410_to(&v410_frame(&packed), FR, sink.set_kernel_matrix(M)).unwrap();
   }
 
   let gray_px = &full_rgb[..3];
@@ -217,7 +217,7 @@ fn v410_downscale_rgb_u16_is_native_depth_block_mean() {
     )
     .with_rgb_u16(&mut rgb_u16)
     .unwrap();
-    v410_to(&v410_frame(&packed), FR, M, &mut sink).unwrap();
+    v410_to(&v410_frame(&packed), FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(
     rgb_u16,
@@ -247,7 +247,7 @@ fn v410_downscale_luma_is_native_depth_block_mean_of_y() {
     .unwrap()
     .with_luma_u16(&mut luma_u16)
     .unwrap();
-    v410_to(&v410_frame(&packed), FR, M, &mut sink).unwrap();
+    v410_to(&v410_frame(&packed), FR, sink.set_kernel_matrix(M)).unwrap();
   }
   let y_binned = block_mean_u16(&full_y);
   assert_eq!(
@@ -301,7 +301,7 @@ fn v410_all_outputs_match_their_own_native_depth_block_mean() {
     .unwrap()
     .with_hsv(&mut hh, &mut ss, &mut vv)
     .unwrap();
-    v410_to(&v410_frame(&packed), FR, M, &mut sink).unwrap();
+    v410_to(&v410_frame(&packed), FR, sink.set_kernel_matrix(M)).unwrap();
   }
 
   let rgb_ref = block_mean_rgb_u8(&full_rgb);
@@ -357,7 +357,7 @@ fn v410_luma_taken_from_native_y_under_saturated_chroma() {
     )
     .with_luma_u16(&mut luma_u16)
     .unwrap();
-    v410_to(&v410_frame(&packed), FR, M, &mut sink).unwrap();
+    v410_to(&v410_frame(&packed), FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert!(
     luma_u16.iter().all(|&p| p == yc),
@@ -395,7 +395,7 @@ fn v410_resample_le_be_parity() {
       .unwrap()
       .with_luma_u16(&mut le_luma_u16)
       .unwrap();
-      v410_to(&frame, FR, M, &mut sink).unwrap();
+      v410_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
     }
 
     let mut be_rgb = vec![0u8; OUT * OUT * 3];
@@ -418,7 +418,7 @@ fn v410_resample_le_be_parity() {
       .unwrap()
       .with_luma_u16(&mut be_luma_u16)
       .unwrap();
-      v410_to_endian(&frame, FR, M, &mut sink).unwrap();
+      v410_to_endian(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
     }
 
     assert_eq!(
@@ -451,7 +451,7 @@ fn v410_identity_plan_matches_new_sink() {
     let mut sink = MixedSinker::<V410>::new(SRC, SRC)
       .with_rgb_u16(&mut direct)
       .unwrap();
-    v410_to(&v410_frame(&packed), FR, M, &mut sink).unwrap();
+    v410_to(&v410_frame(&packed), FR, sink.set_kernel_matrix(M)).unwrap();
   }
   let mut via_area = vec![0u16; SRC * SRC * 3];
   {
@@ -461,7 +461,7 @@ fn v410_identity_plan_matches_new_sink() {
     )
     .with_rgb_u16(&mut via_area)
     .unwrap();
-    v410_to(&v410_frame(&packed), FR, M, &mut sink).unwrap();
+    v410_to(&v410_frame(&packed), FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(direct, via_area, "identity plan must match the direct sink");
 }
@@ -473,7 +473,7 @@ fn v410_no_outputs_is_a_no_op() {
   let mut sink =
     MixedSinker::<V410, AreaResampler>::with_resampler(SRC, SRC, AreaResampler::to(OUT, OUT))
       .unwrap();
-  v410_to(&v410_frame(&packed), FR, M, &mut sink).unwrap();
+  v410_to(&v410_frame(&packed), FR, sink.set_kernel_matrix(M)).unwrap();
   assert!(!sink.rgb_stream_allocated());
   assert!(!sink.rgb_stream_u16_allocated());
   assert!(!sink.luma_stream_u16_allocated());
@@ -503,8 +503,8 @@ fn v410_resets_streams_across_frames() {
     .unwrap()
     .with_rgb_u16(&mut rgb_u16)
     .unwrap();
-    v410_to(&v410_frame(&p1), FR, M, &mut sink).unwrap();
-    v410_to(&v410_frame(&p2), FR, M, &mut sink).unwrap();
+    v410_to(&v410_frame(&p1), FR, sink.set_kernel_matrix(M)).unwrap();
+    v410_to(&v410_frame(&p2), FR, sink.set_kernel_matrix(M)).unwrap();
   }
   let (_r, _r16, full_y2) = direct_full(&p2);
   assert_eq!(
@@ -535,7 +535,9 @@ fn v410_out_of_sequence_first_row_rejected_before_allocation() {
   .with_rgb_u16(&mut rgb_u16)
   .unwrap();
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
-  let err = sink.process(V410Row::new(row3, 3, M, FR)).unwrap_err();
+  let err = sink
+    .process(V410Row::for_tests(row3, 3, M, FR))
+    .unwrap_err();
   assert!(
     matches!(
       err,
@@ -586,11 +588,11 @@ fn v410_rejects_mid_frame_output_change() {
   .unwrap();
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   sink
-    .process(V410Row::new(&packed[..SRC], 0, M, FR))
+    .process(V410Row::for_tests(&packed[..SRC], 0, M, FR))
     .unwrap();
   sink.set_luma_u16(&mut luma_u16).unwrap();
   let err = sink
-    .process(V410Row::new(&packed[SRC..2 * SRC], 1, M, FR))
+    .process(V410Row::for_tests(&packed[SRC..2 * SRC], 1, M, FR))
     .unwrap_err();
   assert!(
     matches!(err, MixedSinkerError::ResampleOutputsChanged(_)),

@@ -1490,6 +1490,10 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P010<BE>, R> {
   type Input<'r> = P010Row<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     if self.width & 1 != 0 {
       return Err(MixedSinkerError::WidthAlignment(WidthAlignment::odd(
@@ -2836,6 +2840,10 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P012<BE>, R> {
   type Input<'r> = P012Row<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     if self.width & 1 != 0 {
       return Err(MixedSinkerError::WidthAlignment(WidthAlignment::odd(
@@ -4162,6 +4170,10 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P016<BE>, R> {
   type Input<'r> = P016Row<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     if self.width & 1 != 0 {
       return Err(MixedSinkerError::WidthAlignment(WidthAlignment::odd(

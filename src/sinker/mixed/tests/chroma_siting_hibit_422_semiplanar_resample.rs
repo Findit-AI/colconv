@@ -270,7 +270,7 @@ macro_rules! hibit_422_semiplanar_resample_siting {
           let f = $F::new(
             &y_wire, &uv_wire, SRC as u32, SRC as u32, SRC as u32, SRC as u32,
           );
-          $w(&f, FR, M, &mut sink).unwrap();
+          $w(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgb16)
       }
@@ -302,7 +302,7 @@ macro_rules! hibit_422_semiplanar_resample_siting {
           let f = $F::new(
             &y_wire, &uv_wire, SRC as u32, SRC as u32, SRC as u32, SRC as u32,
           );
-          $w(&f, FR, M, &mut sink).unwrap();
+          $w(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgb16)
       }
@@ -335,7 +335,7 @@ macro_rules! hibit_422_semiplanar_resample_siting {
             &y_wire, &uv_wire, SRC as u32, SRC as u32, SRC as u32, SRC as u32,
           )
           .unwrap();
-          $wbe(&f, FR, M, &mut sink).unwrap();
+          $wbe(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgb16)
       }
@@ -370,7 +370,7 @@ macro_rules! hibit_422_semiplanar_resample_siting {
           let f = $F422::new(
             y, u, v, SRC as u32, SRC as u32, SRC as u32, CW as u32, CW as u32,
           );
-          $w422(&f, FR, M, &mut sink).unwrap();
+          $w422(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgb16)
       }
@@ -394,7 +394,7 @@ macro_rules! hibit_422_semiplanar_resample_siting {
           let f = $F444::new(
             &yb, &ub, &vb, OUT as u32, OUT as u32, OUT as u32, OUT as u32, OUT as u32,
           );
-          $w444(&f, FR, M, &mut sink).unwrap();
+          $w444(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgb16)
       }
@@ -435,7 +435,7 @@ macro_rules! hibit_422_semiplanar_resample_siting {
           .unwrap()
           .with_rgb_u16(&mut rgb16)
           .unwrap();
-          $w444(&f, FR, M, &mut sink).unwrap();
+          $w444(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         } else {
           let mut sink = MixedSinker::<$M444, AreaResampler>::with_resampler(
             SRC,
@@ -449,7 +449,7 @@ macro_rules! hibit_422_semiplanar_resample_siting {
           .unwrap()
           .with_rgb_u16(&mut rgb16)
           .unwrap();
-          $w444(&f, FR, M, &mut sink).unwrap();
+          $w444(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgb16)
       }
@@ -632,10 +632,10 @@ macro_rules! hibit_422_semiplanar_resample_siting {
         let (y_wire, uv_wire) = (pack_y(y), interleave_pack(u, v));
         sink.set_chroma_location(loc1.clone());
         PixelSink::begin_frame(&mut sink, SRC as u32, SRC as u32).unwrap();
-        let row0 = $Row::new(&y_wire[0..SRC], &uv_wire[0..SRC], 0, M, FR);
+        let row0 = $Row::for_tests(&y_wire[0..SRC], &uv_wire[0..SRC], 0, M, FR);
         PixelSink::process(&mut sink, row0).unwrap();
         sink.set_chroma_location(loc2.clone());
-        let row1 = $Row::new(&y_wire[SRC..2 * SRC], &uv_wire[SRC..2 * SRC], 1, M, FR);
+        let row1 = $Row::for_tests(&y_wire[SRC..2 * SRC], &uv_wire[SRC..2 * SRC], 1, M, FR);
         PixelSink::process(&mut sink, row1)
       }
 

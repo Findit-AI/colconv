@@ -21,7 +21,7 @@ fn rgb24_with_rgb_passes_through_identity() {
 
   let mut out = std::vec![0u8; 16 * 4 * 3];
   let mut sink = MixedSinker::<Rgb24>::new(16, 4).with_rgb(&mut out).unwrap();
-  rgb24_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+  rgb24_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   assert_eq!(out, pix);
 }
@@ -35,7 +35,7 @@ fn rgb24_with_rgba_appends_opaque_alpha() {
   let mut sink = MixedSinker::<Rgb24>::new(16, 4)
     .with_rgba(&mut rgba)
     .unwrap();
-  rgb24_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+  rgb24_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   for px in rgba.chunks(4) {
     assert_eq!(px, [200, 100, 50, 0xFF]);
@@ -57,7 +57,7 @@ fn rgb24_with_luma_derives_bt709_full_range() {
   let mut sink = MixedSinker::<Rgb24>::new(16, 4)
     .with_luma(&mut luma)
     .unwrap();
-  rgb24_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+  rgb24_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   // 0.2126 x 255 = 54.213 → 54 after rounding.
   for &y in &luma {
@@ -79,7 +79,7 @@ fn rgb24_with_luma_derives_bt601_full_range() {
   let mut sink = MixedSinker::<Rgb24>::new(16, 4)
     .with_luma(&mut luma)
     .unwrap();
-  rgb24_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
+  rgb24_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
 
   for &y in &luma {
     assert!(y.abs_diff(150) <= 1, "got Y={y}");
@@ -100,7 +100,7 @@ fn rgb24_with_luma_limited_range_falls_in_studio_band() {
   let mut sink = MixedSinker::<Rgb24>::new(16, 4)
     .with_luma(&mut luma)
     .unwrap();
-  rgb24_to(&src, false, KernelMatrix::Bt709, &mut sink).unwrap();
+  rgb24_to(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   for &y in &luma {
     assert!((234..=236).contains(&y), "got Y={y}");
@@ -113,7 +113,7 @@ fn rgb24_with_luma_limited_range_falls_in_studio_band() {
   let mut sink = MixedSinker::<Rgb24>::new(16, 4)
     .with_luma(&mut luma)
     .unwrap();
-  rgb24_to(&src, false, KernelMatrix::Bt709, &mut sink).unwrap();
+  rgb24_to(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   for &y in &luma {
     assert_eq!(y, 16);
@@ -136,7 +136,7 @@ fn rgb24_with_hsv_matches_existing_kernel() {
   let mut sink = MixedSinker::<Rgb24>::new(16, 4)
     .with_hsv(&mut h, &mut s, &mut v)
     .unwrap();
-  rgb24_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+  rgb24_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   for i in 0..16 * 4 {
     assert_eq!(h[i], 0, "px {i}");
@@ -174,7 +174,7 @@ fn rgb24_random_input_produces_stable_output() {
     .unwrap()
     .with_hsv(&mut hh, &mut ss, &mut vv)
     .unwrap();
-  rgb24_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+  rgb24_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   // RGB is identity-copied.
   assert_eq!(rgb, pix);
@@ -217,7 +217,7 @@ fn bgr24_with_rgb_swaps_channel_order() {
   let mut sink = MixedSinker::<Bgr24>::new(16, 4)
     .with_rgb(&mut rgb_out)
     .unwrap();
-  bgr24_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+  bgr24_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   for px in rgb_out.chunks(3) {
     assert_eq!(px, [200, 100, 50]);
@@ -237,7 +237,7 @@ fn bgr24_with_rgba_swaps_then_appends_opaque_alpha() {
   let mut sink = MixedSinker::<Bgr24>::new(16, 4)
     .with_rgba(&mut rgba)
     .unwrap();
-  bgr24_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+  bgr24_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   for px in rgba.chunks(4) {
     assert_eq!(px, [200, 100, 50, 0xFF]);
@@ -261,13 +261,13 @@ fn bgr24_luma_matches_rgb24_after_swap() {
   let mut s_bgr = MixedSinker::<Bgr24>::new(16, 4)
     .with_luma(&mut bgr_luma)
     .unwrap();
-  bgr24_to(&bgr_src, true, KernelMatrix::Bt709, &mut s_bgr).unwrap();
+  bgr24_to(&bgr_src, true, s_bgr.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   let mut rgb_luma = std::vec![0u8; 16 * 4];
   let mut s_rgb = MixedSinker::<Rgb24>::new(16, 4)
     .with_luma(&mut rgb_luma)
     .unwrap();
-  rgb24_to(&rgb_src, true, KernelMatrix::Bt709, &mut s_rgb).unwrap();
+  rgb24_to(&rgb_src, true, s_rgb.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   assert_eq!(bgr_luma, rgb_luma);
 }
@@ -302,7 +302,7 @@ fn rgba_with_rgb_drops_alpha() {
   let mut sink = MixedSinker::<Rgba>::new(16, 4)
     .with_rgb(&mut rgb_out)
     .unwrap();
-  rgba_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+  rgba_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   for px in rgb_out.chunks(3) {
     assert_eq!(px, [200, 100, 50]);
@@ -324,7 +324,7 @@ fn rgba_with_rgba_passes_through_alpha() {
   let mut sink = MixedSinker::<Rgba>::new(16, 4)
     .with_rgba(&mut rgba_out)
     .unwrap();
-  rgba_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+  rgba_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   for px in rgba_out.chunks(4) {
     assert_eq!(px, [200, 100, 50, 0x80]);
@@ -348,13 +348,18 @@ fn rgba_luma_matches_rgb24_after_alpha_drop() {
   let mut s_rgba = MixedSinker::<Rgba>::new(16, 4)
     .with_luma(&mut rgba_luma)
     .unwrap();
-  rgba_to(&rgba_src, true, KernelMatrix::Bt709, &mut s_rgba).unwrap();
+  rgba_to(
+    &rgba_src,
+    true,
+    s_rgba.set_kernel_matrix(KernelMatrix::Bt709),
+  )
+  .unwrap();
 
   let mut rgb_luma = std::vec![0u8; 16 * 4];
   let mut s_rgb = MixedSinker::<Rgb24>::new(16, 4)
     .with_luma(&mut rgb_luma)
     .unwrap();
-  rgb24_to(&rgb_src, true, KernelMatrix::Bt709, &mut s_rgb).unwrap();
+  rgb24_to(&rgb_src, true, s_rgb.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   assert_eq!(rgba_luma, rgb_luma);
 }
@@ -379,7 +384,12 @@ fn rgba_with_hsv_matches_rgb24_kernel() {
   let mut sink_rgba = MixedSinker::<Rgba>::new(16, 4)
     .with_hsv(&mut h1, &mut s1, &mut v1)
     .unwrap();
-  rgba_to(&rgba_src, true, KernelMatrix::Bt709, &mut sink_rgba).unwrap();
+  rgba_to(
+    &rgba_src,
+    true,
+    sink_rgba.set_kernel_matrix(KernelMatrix::Bt709),
+  )
+  .unwrap();
 
   let (mut h2, mut s2, mut v2) = (
     std::vec![0u8; 16 * 4],
@@ -389,7 +399,12 @@ fn rgba_with_hsv_matches_rgb24_kernel() {
   let mut sink_rgb = MixedSinker::<Rgb24>::new(16, 4)
     .with_hsv(&mut h2, &mut s2, &mut v2)
     .unwrap();
-  rgb24_to(&rgb_src, true, KernelMatrix::Bt709, &mut sink_rgb).unwrap();
+  rgb24_to(
+    &rgb_src,
+    true,
+    sink_rgb.set_kernel_matrix(KernelMatrix::Bt709),
+  )
+  .unwrap();
 
   assert_eq!(h1, h2);
   assert_eq!(s1, s2);
@@ -423,7 +438,7 @@ fn rgba_random_input_produces_stable_output() {
     .unwrap()
     .with_hsv(&mut hh, &mut ss, &mut vv)
     .unwrap();
-  rgba_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+  rgba_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   // RGB drops alpha (per-pixel R, G, B copied verbatim).
   for (i, px) in rgb.chunks(3).enumerate() {
@@ -465,7 +480,7 @@ fn bgra_with_rgb_swaps_and_drops_alpha() {
   let mut sink = MixedSinker::<Bgra>::new(16, 4)
     .with_rgb(&mut rgb_out)
     .unwrap();
-  bgra_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+  bgra_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   for px in rgb_out.chunks(3) {
     assert_eq!(px, [200, 100, 50]);
@@ -485,7 +500,7 @@ fn bgra_with_rgba_swaps_with_alpha_passthrough() {
   let mut sink = MixedSinker::<Bgra>::new(16, 4)
     .with_rgba(&mut rgba_out)
     .unwrap();
-  bgra_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+  bgra_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   for px in rgba_out.chunks(4) {
     assert_eq!(px, [200, 100, 50, 0x80]);
@@ -508,13 +523,23 @@ fn bgra_luma_matches_rgba_after_swap() {
   let mut s_bgra = MixedSinker::<Bgra>::new(16, 4)
     .with_luma(&mut bgra_luma)
     .unwrap();
-  bgra_to(&bgra_src, true, KernelMatrix::Bt709, &mut s_bgra).unwrap();
+  bgra_to(
+    &bgra_src,
+    true,
+    s_bgra.set_kernel_matrix(KernelMatrix::Bt709),
+  )
+  .unwrap();
 
   let mut rgba_luma = std::vec![0u8; 16 * 4];
   let mut s_rgba = MixedSinker::<Rgba>::new(16, 4)
     .with_luma(&mut rgba_luma)
     .unwrap();
-  rgba_to(&rgba_src, true, KernelMatrix::Bt709, &mut s_rgba).unwrap();
+  rgba_to(
+    &rgba_src,
+    true,
+    s_rgba.set_kernel_matrix(KernelMatrix::Bt709),
+  )
+  .unwrap();
 
   assert_eq!(bgra_luma, rgba_luma);
 }
@@ -546,7 +571,7 @@ fn bgra_random_input_produces_stable_output() {
     .unwrap()
     .with_hsv(&mut hh, &mut ss, &mut vv)
     .unwrap();
-  bgra_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+  bgra_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   // RGB output: R/G/B come from BGRA byte-2 / byte-1 / byte-0
   // (R↔B swap); alpha dropped.
@@ -600,7 +625,7 @@ fn rgba_simd_matches_scalar_with_random_input() {
     .unwrap()
     .with_luma(&mut luma_simd)
     .unwrap();
-  rgba_to(&src, true, KernelMatrix::Bt709, &mut s_simd).unwrap();
+  rgba_to(&src, true, s_simd.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   let mut s_scalar = MixedSinker::<Rgba>::new(w, h)
     .with_rgb(&mut rgb_scalar)
@@ -610,7 +635,7 @@ fn rgba_simd_matches_scalar_with_random_input() {
     .with_luma(&mut luma_scalar)
     .unwrap();
   s_scalar.set_simd(false);
-  rgba_to(&src, true, KernelMatrix::Bt709, &mut s_scalar).unwrap();
+  rgba_to(&src, true, s_scalar.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   assert_eq!(
     rgb_simd, rgb_scalar,
@@ -653,7 +678,7 @@ fn bgra_simd_matches_scalar_with_random_input() {
     .unwrap()
     .with_luma(&mut luma_simd)
     .unwrap();
-  bgra_to(&src, true, KernelMatrix::Bt709, &mut s_simd).unwrap();
+  bgra_to(&src, true, s_simd.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   let mut s_scalar = MixedSinker::<Bgra>::new(w, h)
     .with_rgb(&mut rgb_scalar)
@@ -663,7 +688,7 @@ fn bgra_simd_matches_scalar_with_random_input() {
     .with_luma(&mut luma_scalar)
     .unwrap();
   s_scalar.set_simd(false);
-  bgra_to(&src, true, KernelMatrix::Bt709, &mut s_scalar).unwrap();
+  bgra_to(&src, true, s_scalar.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   assert_eq!(
     rgb_simd, rgb_scalar,
@@ -720,7 +745,7 @@ fn argb_with_rgb_drops_leading_alpha() {
   let mut sink = MixedSinker::<Argb>::new(16, 4)
     .with_rgb(&mut rgb_out)
     .unwrap();
-  argb_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+  argb_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   for px in rgb_out.chunks(3) {
     assert_eq!(px, [200, 100, 50]);
@@ -740,7 +765,7 @@ fn argb_with_rgba_rotates_alpha_to_trailing() {
   let mut sink = MixedSinker::<Argb>::new(16, 4)
     .with_rgba(&mut rgba_out)
     .unwrap();
-  argb_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+  argb_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   for px in rgba_out.chunks(4) {
     assert_eq!(px, [200, 100, 50, 0x80]);
@@ -762,13 +787,23 @@ fn argb_luma_matches_rgba_after_alpha_drop() {
   let mut s_argb = MixedSinker::<Argb>::new(16, 4)
     .with_luma(&mut argb_luma)
     .unwrap();
-  argb_to(&argb_src, true, KernelMatrix::Bt709, &mut s_argb).unwrap();
+  argb_to(
+    &argb_src,
+    true,
+    s_argb.set_kernel_matrix(KernelMatrix::Bt709),
+  )
+  .unwrap();
 
   let mut rgba_luma = std::vec![0u8; 16 * 4];
   let mut s_rgba = MixedSinker::<Rgba>::new(16, 4)
     .with_luma(&mut rgba_luma)
     .unwrap();
-  rgba_to(&rgba_src, true, KernelMatrix::Bt709, &mut s_rgba).unwrap();
+  rgba_to(
+    &rgba_src,
+    true,
+    s_rgba.set_kernel_matrix(KernelMatrix::Bt709),
+  )
+  .unwrap();
 
   assert_eq!(argb_luma, rgba_luma);
 }
@@ -786,7 +821,7 @@ fn abgr_with_rgb_swaps_and_drops_leading_alpha() {
   let mut sink = MixedSinker::<Abgr>::new(16, 4)
     .with_rgb(&mut rgb_out)
     .unwrap();
-  abgr_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+  abgr_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   for px in rgb_out.chunks(3) {
     assert_eq!(px, [200, 100, 50]);
@@ -806,7 +841,7 @@ fn abgr_with_rgba_full_byte_reverse() {
   let mut sink = MixedSinker::<Abgr>::new(16, 4)
     .with_rgba(&mut rgba_out)
     .unwrap();
-  abgr_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+  abgr_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   for px in rgba_out.chunks(4) {
     assert_eq!(px, [200, 100, 50, 0x80]);
@@ -828,13 +863,23 @@ fn abgr_luma_matches_rgba_after_swap() {
   let mut s_abgr = MixedSinker::<Abgr>::new(16, 4)
     .with_luma(&mut abgr_luma)
     .unwrap();
-  abgr_to(&abgr_src, true, KernelMatrix::Bt709, &mut s_abgr).unwrap();
+  abgr_to(
+    &abgr_src,
+    true,
+    s_abgr.set_kernel_matrix(KernelMatrix::Bt709),
+  )
+  .unwrap();
 
   let mut rgba_luma = std::vec![0u8; 16 * 4];
   let mut s_rgba = MixedSinker::<Rgba>::new(16, 4)
     .with_luma(&mut rgba_luma)
     .unwrap();
-  rgba_to(&rgba_src, true, KernelMatrix::Bt709, &mut s_rgba).unwrap();
+  rgba_to(
+    &rgba_src,
+    true,
+    s_rgba.set_kernel_matrix(KernelMatrix::Bt709),
+  )
+  .unwrap();
 
   assert_eq!(abgr_luma, rgba_luma);
 }
@@ -868,7 +913,7 @@ fn argb_simd_matches_scalar_with_random_input() {
     .unwrap()
     .with_luma(&mut luma_simd)
     .unwrap();
-  argb_to(&src, true, KernelMatrix::Bt709, &mut s_simd).unwrap();
+  argb_to(&src, true, s_simd.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   let mut s_scalar = MixedSinker::<Argb>::new(w, h)
     .with_rgb(&mut rgb_scalar)
@@ -878,7 +923,7 @@ fn argb_simd_matches_scalar_with_random_input() {
     .with_luma(&mut luma_scalar)
     .unwrap();
   s_scalar.set_simd(false);
-  argb_to(&src, true, KernelMatrix::Bt709, &mut s_scalar).unwrap();
+  argb_to(&src, true, s_scalar.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   assert_eq!(rgb_simd, rgb_scalar, "RGB output diverges (SIMD vs scalar)");
   assert_eq!(rgba_simd, rgba_scalar, "RGBA output diverges");
@@ -911,7 +956,7 @@ fn abgr_simd_matches_scalar_with_random_input() {
     .unwrap()
     .with_luma(&mut luma_simd)
     .unwrap();
-  abgr_to(&src, true, KernelMatrix::Bt709, &mut s_simd).unwrap();
+  abgr_to(&src, true, s_simd.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   let mut s_scalar = MixedSinker::<Abgr>::new(w, h)
     .with_rgb(&mut rgb_scalar)
@@ -921,7 +966,7 @@ fn abgr_simd_matches_scalar_with_random_input() {
     .with_luma(&mut luma_scalar)
     .unwrap();
   s_scalar.set_simd(false);
-  abgr_to(&src, true, KernelMatrix::Bt709, &mut s_scalar).unwrap();
+  abgr_to(&src, true, s_scalar.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   assert_eq!(rgb_simd, rgb_scalar, "RGB output diverges (SIMD vs scalar)");
   assert_eq!(rgba_simd, rgba_scalar, "RGBA output diverges");
@@ -957,7 +1002,7 @@ fn xrgb_with_rgba_forces_alpha_to_ff() {
   let mut sink = MixedSinker::<Xrgb>::new(16, 4)
     .with_rgba(&mut rgba_out)
     .unwrap();
-  xrgb_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+  xrgb_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   for px in rgba_out.chunks(4) {
     assert_eq!(px, [200, 100, 50, 0xFF]);
@@ -977,7 +1022,7 @@ fn rgbx_with_rgba_forces_alpha_to_ff() {
   let mut sink = MixedSinker::<Rgbx>::new(16, 4)
     .with_rgba(&mut rgba_out)
     .unwrap();
-  rgbx_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+  rgbx_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   for px in rgba_out.chunks(4) {
     assert_eq!(px, [200, 100, 50, 0xFF]);
@@ -997,7 +1042,7 @@ fn xbgr_with_rgba_swaps_and_forces_alpha() {
   let mut sink = MixedSinker::<Xbgr>::new(16, 4)
     .with_rgba(&mut rgba_out)
     .unwrap();
-  xbgr_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+  xbgr_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   for px in rgba_out.chunks(4) {
     assert_eq!(px, [200, 100, 50, 0xFF]);
@@ -1017,7 +1062,7 @@ fn bgrx_with_rgba_swaps_and_forces_alpha() {
   let mut sink = MixedSinker::<Bgrx>::new(16, 4)
     .with_rgba(&mut rgba_out)
     .unwrap();
-  bgrx_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+  bgrx_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   for px in rgba_out.chunks(4) {
     assert_eq!(px, [200, 100, 50, 0xFF]);
@@ -1041,13 +1086,23 @@ fn xrgb_luma_matches_argb_after_alpha_drop() {
   let mut s_xrgb = MixedSinker::<Xrgb>::new(16, 4)
     .with_luma(&mut xrgb_luma)
     .unwrap();
-  xrgb_to(&xrgb_src, true, KernelMatrix::Bt709, &mut s_xrgb).unwrap();
+  xrgb_to(
+    &xrgb_src,
+    true,
+    s_xrgb.set_kernel_matrix(KernelMatrix::Bt709),
+  )
+  .unwrap();
 
   let mut argb_luma = std::vec![0u8; 16 * 4];
   let mut s_argb = MixedSinker::<Argb>::new(16, 4)
     .with_luma(&mut argb_luma)
     .unwrap();
-  argb_to(&argb_src, true, KernelMatrix::Bt709, &mut s_argb).unwrap();
+  argb_to(
+    &argb_src,
+    true,
+    s_argb.set_kernel_matrix(KernelMatrix::Bt709),
+  )
+  .unwrap();
 
   assert_eq!(xrgb_luma, argb_luma);
 }
@@ -1081,7 +1136,7 @@ fn xrgb_simd_matches_scalar_with_random_input() {
     .unwrap()
     .with_luma(&mut luma_simd)
     .unwrap();
-  xrgb_to(&src, true, KernelMatrix::Bt709, &mut s_simd).unwrap();
+  xrgb_to(&src, true, s_simd.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   let mut s_scalar = MixedSinker::<Xrgb>::new(w, h)
     .with_rgb(&mut rgb_scalar)
@@ -1091,7 +1146,7 @@ fn xrgb_simd_matches_scalar_with_random_input() {
     .with_luma(&mut luma_scalar)
     .unwrap();
   s_scalar.set_simd(false);
-  xrgb_to(&src, true, KernelMatrix::Bt709, &mut s_scalar).unwrap();
+  xrgb_to(&src, true, s_scalar.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   assert_eq!(rgb_simd, rgb_scalar, "RGB output diverges");
   assert_eq!(rgba_simd, rgba_scalar, "RGBA output diverges");
@@ -1124,7 +1179,7 @@ fn rgbx_simd_matches_scalar_with_random_input() {
     .unwrap()
     .with_luma(&mut luma_simd)
     .unwrap();
-  rgbx_to(&src, true, KernelMatrix::Bt709, &mut s_simd).unwrap();
+  rgbx_to(&src, true, s_simd.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   let mut s_scalar = MixedSinker::<Rgbx>::new(w, h)
     .with_rgb(&mut rgb_scalar)
@@ -1134,7 +1189,7 @@ fn rgbx_simd_matches_scalar_with_random_input() {
     .with_luma(&mut luma_scalar)
     .unwrap();
   s_scalar.set_simd(false);
-  rgbx_to(&src, true, KernelMatrix::Bt709, &mut s_scalar).unwrap();
+  rgbx_to(&src, true, s_scalar.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   assert_eq!(rgb_simd, rgb_scalar, "RGB output diverges");
   assert_eq!(rgba_simd, rgba_scalar, "RGBA output diverges");
@@ -1167,7 +1222,7 @@ fn xbgr_simd_matches_scalar_with_random_input() {
     .unwrap()
     .with_luma(&mut luma_simd)
     .unwrap();
-  xbgr_to(&src, true, KernelMatrix::Bt709, &mut s_simd).unwrap();
+  xbgr_to(&src, true, s_simd.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   let mut s_scalar = MixedSinker::<Xbgr>::new(w, h)
     .with_rgb(&mut rgb_scalar)
@@ -1177,7 +1232,7 @@ fn xbgr_simd_matches_scalar_with_random_input() {
     .with_luma(&mut luma_scalar)
     .unwrap();
   s_scalar.set_simd(false);
-  xbgr_to(&src, true, KernelMatrix::Bt709, &mut s_scalar).unwrap();
+  xbgr_to(&src, true, s_scalar.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   assert_eq!(rgb_simd, rgb_scalar, "RGB output diverges");
   assert_eq!(rgba_simd, rgba_scalar, "RGBA output diverges");
@@ -1210,7 +1265,7 @@ fn bgrx_simd_matches_scalar_with_random_input() {
     .unwrap()
     .with_luma(&mut luma_simd)
     .unwrap();
-  bgrx_to(&src, true, KernelMatrix::Bt709, &mut s_simd).unwrap();
+  bgrx_to(&src, true, s_simd.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   let mut s_scalar = MixedSinker::<Bgrx>::new(w, h)
     .with_rgb(&mut rgb_scalar)
@@ -1220,7 +1275,7 @@ fn bgrx_simd_matches_scalar_with_random_input() {
     .with_luma(&mut luma_scalar)
     .unwrap();
   s_scalar.set_simd(false);
-  bgrx_to(&src, true, KernelMatrix::Bt709, &mut s_scalar).unwrap();
+  bgrx_to(&src, true, s_scalar.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   assert_eq!(rgb_simd, rgb_scalar, "RGB output diverges");
   assert_eq!(rgba_simd, rgba_scalar, "RGBA output diverges");

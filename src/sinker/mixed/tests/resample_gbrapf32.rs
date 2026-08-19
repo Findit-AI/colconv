@@ -17,7 +17,8 @@
 //! (α the raw plane value, `R' = R * A`), bins, then un-premultiplies
 //! (`R = mean(R*A) / mean(A)`, `A == 0 -> RGB = 0`).
 //!
-//! `Gbrapf32Row::new` is `pub(crate)` in `mediaframe`, so a row can only
+//! `Gbrapf32Row::new` is `pub(crate)` in `mediaframe` and the float-GBR rows
+//! carry no `for_tests` door, so a row can only
 //! reach `process` through the in-order walker; the mid-frame
 //! alpha-mode-freeze / out-of-sequence rejections are covered by the
 //! shared-tail `resample_packed_rgba_8bit` / `resample_packed_rgba_16bit`

@@ -68,7 +68,7 @@ fn gray8_downscale_luma_is_exact_area_mean() {
         .unwrap()
         .with_luma(&mut luma)
         .unwrap();
-    gray8_to(&src, FR, M, &mut sink).unwrap();
+    gray8_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(
     luma,
@@ -111,7 +111,7 @@ fn gray8_all_outputs_match_direct_over_binned_y() {
         .unwrap()
         .with_hsv(&mut h, &mut s_, &mut v_)
         .unwrap();
-    gray8_to(&src, FR, M, &mut sink).unwrap();
+    gray8_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
   }
 
   // Reference: the direct sink over the exact binned Y plane.
@@ -136,7 +136,7 @@ fn gray8_all_outputs_match_direct_over_binned_y() {
       .unwrap()
       .with_hsv(&mut ref_h, &mut ref_s, &mut ref_v)
       .unwrap();
-    gray8_to(&binned, FR, M, &mut sink).unwrap();
+    gray8_to(&binned, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(luma, ref_luma, "luma");
   assert_eq!(luma_u16, ref_luma_u16, "luma_u16");
@@ -164,7 +164,7 @@ fn gray8_standalone_rgba_matches_direct_over_binned_y() {
         .unwrap()
         .with_rgba(&mut rgba)
         .unwrap();
-    gray8_to(&src, FR, M, &mut sink).unwrap();
+    gray8_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   let binned_y = block_mean_2x2(&plane);
   let mut ref_rgba = vec![0u8; OUT * OUT * 4];
@@ -173,7 +173,7 @@ fn gray8_standalone_rgba_matches_direct_over_binned_y() {
     let mut sink = MixedSinker::<Gray8>::new(OUT, OUT)
       .with_rgba(&mut ref_rgba)
       .unwrap();
-    gray8_to(&binned, FR, M, &mut sink).unwrap();
+    gray8_to(&binned, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(rgba, ref_rgba, "standalone rgba");
 }
@@ -201,7 +201,7 @@ fn gray8_hsv_plus_rgba_matches_direct_over_binned_y() {
         .unwrap()
         .with_hsv(&mut h, &mut s_, &mut v_)
         .unwrap();
-    gray8_to(&src, FR, M, &mut sink).unwrap();
+    gray8_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   let binned_y = block_mean_2x2(&plane);
   let mut ref_rgba = vec![0u8; OUT * OUT * 4];
@@ -215,7 +215,7 @@ fn gray8_hsv_plus_rgba_matches_direct_over_binned_y() {
       .unwrap()
       .with_hsv(&mut ref_h, &mut ref_s, &mut ref_v)
       .unwrap();
-    gray8_to(&binned, FR, M, &mut sink).unwrap();
+    gray8_to(&binned, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(rgba, ref_rgba, "hsv+rgba: rgba");
   assert_eq!(h, ref_h, "hsv+rgba: h");
@@ -237,7 +237,7 @@ fn gray8_identity_plan_matches_new_sink() {
     let mut sink = MixedSinker::<Gray8>::new(SRC, SRC)
       .with_rgb(&mut direct)
       .unwrap();
-    gray8_to(&src, FR, M, &mut sink).unwrap();
+    gray8_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   let mut via_area = vec![0u8; SRC * SRC * 3];
   {
@@ -246,7 +246,7 @@ fn gray8_identity_plan_matches_new_sink() {
         .unwrap()
         .with_rgb(&mut via_area)
         .unwrap();
-    gray8_to(&src, FR, M, &mut sink).unwrap();
+    gray8_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(direct, via_area, "identity plan must match the direct sink");
 }
@@ -271,8 +271,8 @@ fn gray8_resample_reuses_luma_stream_across_frames() {
         .unwrap()
         .with_luma(&mut luma)
         .unwrap();
-    gray8_to(&gray8_frame(&y1), FR, M, &mut sink).unwrap();
-    gray8_to(&gray8_frame(&y2), FR, M, &mut sink).unwrap();
+    gray8_to(&gray8_frame(&y1), FR, sink.set_kernel_matrix(M)).unwrap();
+    gray8_to(&gray8_frame(&y2), FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(
     luma,
@@ -289,7 +289,7 @@ fn gray8_resample_no_outputs_is_a_no_op() {
     MixedSinker::<Gray8, AreaResampler>::with_resampler(SRC, SRC, AreaResampler::to(OUT, OUT))
       .unwrap();
   // No outputs attached: a legal no-op, accepted without error.
-  gray8_to(&src, FR, M, &mut sink).unwrap();
+  gray8_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
   // A no-output call has no stream to sequence and never allocates.
   assert!(
     !sink.luma_stream_allocated(),
@@ -310,7 +310,9 @@ fn gray8_out_of_sequence_first_row_rejected_before_allocation() {
       .unwrap();
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   // Feed row 3 first — the stream expects strict sequencing from 0.
-  let err = sink.process(Gray8Row::new(row3, 3, M, FR)).unwrap_err();
+  let err = sink
+    .process(Gray8Row::for_tests(row3, 3, M, FR))
+    .unwrap_err();
   assert!(
     matches!(
       err,
@@ -342,7 +344,9 @@ fn gray8_rejected_first_row_does_not_poison_output_retry() {
       .unwrap();
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   let row3 = &plane[3 * SRC..4 * SRC];
-  let err = sink.process(Gray8Row::new(row3, 3, M, FR)).unwrap_err();
+  let err = sink
+    .process(Gray8Row::for_tests(row3, 3, M, FR))
+    .unwrap_err();
   assert!(
     matches!(
       err,
@@ -353,7 +357,7 @@ fn gray8_rejected_first_row_does_not_poison_output_retry() {
   let mut rgb = vec![0u8; OUT * OUT * 3];
   sink.set_rgb(&mut rgb).unwrap();
   sink
-    .process(Gray8Row::new(&plane[..SRC], 0, M, FR))
+    .process(Gray8Row::for_tests(&plane[..SRC], 0, M, FR))
     .expect("row 0 must succeed after a rejected out-of-sequence first row");
 }
 
@@ -368,11 +372,11 @@ fn gray8_resample_rejects_mid_frame_out_of_sequence() {
       .unwrap();
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   sink
-    .process(Gray8Row::new(&plane[..SRC], 0, M, FR))
+    .process(Gray8Row::for_tests(&plane[..SRC], 0, M, FR))
     .unwrap();
   // Skip row 1 — feeding row 2 next is out of sequence.
   let err = sink
-    .process(Gray8Row::new(&plane[2 * SRC..3 * SRC], 2, M, FR))
+    .process(Gray8Row::for_tests(&plane[2 * SRC..3 * SRC], 2, M, FR))
     .unwrap_err();
   assert!(
     matches!(
@@ -395,12 +399,12 @@ fn gray8_resample_rejects_mid_frame_output_change() {
       .unwrap();
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   sink
-    .process(Gray8Row::new(&plane[..SRC], 0, M, FR))
+    .process(Gray8Row::for_tests(&plane[..SRC], 0, M, FR))
     .unwrap();
   // Attaching a new output mid-frame trips the frozen-output check.
   sink.set_luma(&mut luma).unwrap();
   let err = sink
-    .process(Gray8Row::new(&plane[SRC..2 * SRC], 1, M, FR))
+    .process(Gray8Row::for_tests(&plane[SRC..2 * SRC], 1, M, FR))
     .unwrap_err();
   assert!(
     matches!(err, MixedSinkerError::ResampleOutputsChanged(_)),
@@ -446,7 +450,7 @@ fn gray8_first_row_emit_scratch_oom_leaves_stream_and_freeze_uncommitted_for_ret
     // shape would have left the stream committed).
     crate::sinker::mixed::arm_rgb_scratch_alloc_failure();
     let err = sink
-      .process(Gray8Row::new(&plane[..SRC], 0, M, FR))
+      .process(Gray8Row::for_tests(&plane[..SRC], 0, M, FR))
       .unwrap_err();
     assert!(
       matches!(
@@ -469,7 +473,12 @@ fn gray8_first_row_emit_scratch_oom_leaves_stream_and_freeze_uncommitted_for_ret
     sink.set_luma(&mut luma).unwrap();
     for r in 0..SRC {
       sink
-        .process(Gray8Row::new(&plane[r * SRC..(r + 1) * SRC], r, M, FR))
+        .process(Gray8Row::for_tests(
+          &plane[r * SRC..(r + 1) * SRC],
+          r,
+          M,
+          FR,
+        ))
         .expect("frame replay after a first-row emit-scratch OOM must succeed");
     }
   }
@@ -606,7 +615,7 @@ fn gray8_filter_outputs<K: FilterKernel + Copy>(
     .unwrap()
     .with_hsv(&mut o.hp, &mut o.sp, &mut o.vp)
     .unwrap();
-    gray8_to(&src, FR, M, &mut sink).unwrap();
+    gray8_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   o
 }
@@ -652,7 +661,7 @@ fn assert_gray8_filter_matches_oracle<K: FilterKernel + Copy>(
       .unwrap()
       .with_hsv(&mut ref_h, &mut ref_s, &mut ref_v)
       .unwrap();
-    gray8_to(&binned, FR, M, &mut sink).unwrap();
+    gray8_to(&binned, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(got.luma_u16, ref_luma_u16, "{ctx} luma_u16");
   assert_eq!(got.rgb, ref_rgb, "{ctx} rgb");
@@ -710,7 +719,7 @@ fn gray8_filter_plan_is_accepted() {
     .unwrap()
     .with_luma(&mut luma)
     .unwrap();
-    gray8_to(&src, FR, M, &mut sink).expect("filter plan must be accepted");
+    gray8_to(&src, FR, sink.set_kernel_matrix(M)).expect("filter plan must be accepted");
   }
   let y_ref = native_luma_filter(Triangle, &plane, FW, FH, FOUT_DOWN, FOUT_DOWN);
   assert_eq!(luma, y_ref, "accepted filter luma = single-channel oracle");

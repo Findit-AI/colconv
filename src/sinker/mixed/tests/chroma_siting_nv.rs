@@ -124,7 +124,7 @@ macro_rules! nv_chroma_siting_tests {
           .unwrap()
           .with_chroma_location(loc.clone())
           .with_simd(simd);
-        $walker(&src, false, KernelMatrix::Bt601, &mut sink).unwrap();
+        $walker(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
         rgb
       }
 
@@ -172,7 +172,7 @@ macro_rules! nv_chroma_siting_tests {
           .with_rgb(&mut rgb)
           .unwrap()
           .with_chroma_location(ChromaLocation::Left);
-        $walker(&src, false, KernelMatrix::Bt601, &mut sink).unwrap();
+        $walker(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
         let chroma_len = sink.chroma_full.len();
         let half_len = sink.semi_planar_u_half.len();
         drop(sink);
@@ -197,7 +197,7 @@ macro_rules! nv_chroma_siting_tests {
         let mut ref_sink = MixedSinker::<Yuv444p>::new(W as usize, H as usize)
           .with_rgb(&mut rgb_ref)
           .unwrap();
-        yuv444p_to(&ref_src, false, KernelMatrix::Bt601, &mut ref_sink).unwrap();
+        yuv444p_to(&ref_src, false, ref_sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
 
         assert_eq!(
           convert_rgb(ChromaLocation::Center, true),
@@ -220,7 +220,7 @@ macro_rules! nv_chroma_siting_tests {
           .with_rgb(&mut rgb)
           .unwrap()
           .with_chroma_location(ChromaLocation::Center);
-        $walker(&src, false, KernelMatrix::Bt601, &mut sink).unwrap();
+        $walker(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
         let chroma_len = sink.chroma_full.len();
         let half_len = sink.semi_planar_u_half.len();
         drop(sink);
@@ -299,7 +299,7 @@ macro_rules! nv_chroma_siting_tests {
           .with_rgb(&mut rgb420)
           .unwrap()
           .with_chroma_location(ChromaLocation::BottomLeft);
-        yuv420p_to(&src420, false, KernelMatrix::Bt601, &mut sink420).unwrap();
+        yuv420p_to(&src420, false, sink420.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
         assert_eq!(
           bl, rgb420,
           "BottomLeft semi-planar must equal BottomLeft Yuv420p of the same planes"
@@ -354,7 +354,7 @@ macro_rules! nv_chroma_siting_tests {
           .with_rgb(&mut rgb420)
           .unwrap()
           .with_chroma_location(ChromaLocation::Center);
-        yuv420p_to(&src420, false, KernelMatrix::Bt601, &mut sink420).unwrap();
+        yuv420p_to(&src420, false, sink420.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
 
         assert_eq!(
           convert_rgb(ChromaLocation::Center, true),
@@ -409,8 +409,8 @@ macro_rules! nv_chroma_siting_tests {
           let mut sink = MixedSinker::<$Marker>::new(W as usize, H as usize)
             .with_rgb(&mut rgb)
             .unwrap()
-            .with_color_spec(&spec(loc));
-          $walker(&src, false, KernelMatrix::ChromaDerivedNcl, &mut sink).unwrap();
+            .with_color_spec(&spec(loc)).unwrap();
+          $walker(&src, false, sink.set_kernel_matrix(KernelMatrix::ChromaDerivedNcl)).unwrap();
           rgb
         };
         // The BT.709 reference the matrix-tag fallback must equal.
@@ -421,7 +421,7 @@ macro_rules! nv_chroma_siting_tests {
             .with_rgb(&mut rgb)
             .unwrap()
             .with_chroma_location(loc.clone());
-          $walker(&src, false, KernelMatrix::Bt709, &mut sink).unwrap();
+          $walker(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
           rgb
         };
 
@@ -461,14 +461,14 @@ macro_rules! nv_chroma_siting_tests {
             .with_rgba(&mut rgba)
             .unwrap()
             .with_chroma_location(ChromaLocation::Center);
-          $walker(&src, false, KernelMatrix::Bt601, &mut sink).unwrap();
+          $walker(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
 
           let ref_src = Yuv444pFrame::new(&yp, &u444, &v444, W, H, W, W, W);
           let mut rgba_ref = std::vec![0u8; (W * H * 4) as usize];
           let mut ref_sink = MixedSinker::<Yuv444p>::new(W as usize, H as usize)
             .with_rgba(&mut rgba_ref)
             .unwrap();
-          yuv444p_to(&ref_src, false, KernelMatrix::Bt601, &mut ref_sink).unwrap();
+          yuv444p_to(&ref_src, false, ref_sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
           assert_eq!(rgba, rgba_ref, "centered RGBA must equal upsample-then-4:4:4");
         }
 
@@ -484,7 +484,7 @@ macro_rules! nv_chroma_siting_tests {
             .with_hsv(&mut h, &mut s, &mut v)
             .unwrap()
             .with_chroma_location(ChromaLocation::Center);
-          $walker(&src, false, KernelMatrix::Bt601, &mut sink).unwrap();
+          $walker(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
 
           let ref_src = Yuv444pFrame::new(&yp, &u444, &v444, W, H, W, W, W);
           let (mut hr, mut sr, mut vr) = (
@@ -495,7 +495,7 @@ macro_rules! nv_chroma_siting_tests {
           let mut ref_sink = MixedSinker::<Yuv444p>::new(W as usize, H as usize)
             .with_hsv(&mut hr, &mut sr, &mut vr)
             .unwrap();
-          yuv444p_to(&ref_src, false, KernelMatrix::Bt601, &mut ref_sink).unwrap();
+          yuv444p_to(&ref_src, false, ref_sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
           assert_eq!((h, s, v), (hr, sr, vr), "centered HSV must equal upsample-then-4:4:4");
         }
       }
@@ -527,13 +527,13 @@ macro_rules! nv_chroma_siting_tests {
           ChromaLocation::Center,
         );
         let spec = ColorSpec::from_info(PixelFormat::Yuv420p, info);
-        let opts = YuvOptions::from_color_spec(&spec).unwrap();
+        let opts = YuvOptions::from_color_spec(&spec);
         let mut rgb = std::vec![0u8; (W * H * 3) as usize];
         let mut sink = MixedSinker::<$Marker>::new(W as usize, H as usize)
           .with_rgb(&mut rgb)
           .unwrap()
-          .with_color_spec(&spec);
-        $walker(&src, opts.full_range(), opts.matrix(), &mut sink).unwrap();
+          .with_color_spec(&spec).unwrap();
+        $walker(&src, opts.full_range(), &mut sink).unwrap();
         drop(sink);
 
         assert_ne!(
@@ -573,7 +573,7 @@ macro_rules! nv_chroma_siting_tests {
             .with_rgb(&mut rgb_ok)
             .unwrap()
             .with_chroma_location(ChromaLocation::Center);
-          $walker(&src, false, KernelMatrix::Bt601, &mut sink_ok).unwrap();
+          $walker(&src, false, sink_ok.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
           drop(sink_ok);
           assert!(
             luma_ok.iter().any(|&b| b != 0xAB),
@@ -594,7 +594,7 @@ macro_rules! nv_chroma_siting_tests {
           .with_chroma_location(ChromaLocation::Center);
 
         super::super::super::arm_chroma_full_alloc_failure();
-        let err = $walker(&src, false, KernelMatrix::Bt601, &mut sink).unwrap_err();
+        let err = $walker(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap_err();
         drop(sink);
 
         assert!(
@@ -656,7 +656,7 @@ fn nv12_direct_path_mid_frame_siting_flip_is_rejected() {
         .unwrap()
         .with_chroma_location(loc1.clone())
         .with_simd(true);
-      nv12_to(&src, false, KernelMatrix::Bt601, &mut ref_sink).unwrap();
+      nv12_to(&src, false, ref_sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
     }
 
     let mut rgb = std::vec![0u8; w * h * 3];
@@ -668,7 +668,7 @@ fn nv12_direct_path_mid_frame_siting_flip_is_rejected() {
     crate::PixelSink::begin_frame(&mut sink, W, H).unwrap();
     for r in 0..2 {
       let cr = r / 2;
-      let row = Nv12Row::new(
+      let row = Nv12Row::for_tests(
         &y[r * w..(r + 1) * w],
         &uv[cr * w..(cr + 1) * w],
         r,
@@ -682,7 +682,7 @@ fn nv12_direct_path_mid_frame_siting_flip_is_rejected() {
     let prev_tag = sink.chroma_prev_row;
 
     sink.set_chroma_location(loc2.clone());
-    let row2 = Nv12Row::new(
+    let row2 = Nv12Row::for_tests(
       &y[2 * w..3 * w],
       &uv[w..2 * w],
       2,
@@ -712,7 +712,7 @@ fn nv12_direct_path_mid_frame_siting_flip_is_rejected() {
     sink.set_chroma_location(loc1.clone());
     for r in 2..h {
       let cr = r / 2;
-      let row = Nv12Row::new(
+      let row = Nv12Row::for_tests(
         &y[r * w..(r + 1) * w],
         &uv[cr * w..(cr + 1) * w],
         r,
@@ -752,7 +752,7 @@ fn nv21_begin_frame_drops_held_top_row() {
     let cr = r / 2;
     crate::PixelSink::process(
       &mut sink,
-      Nv21Row::new(
+      Nv21Row::for_tests(
         &y[r * w..(r + 1) * w],
         &vu[cr * w..(cr + 1) * w],
         r,
@@ -826,7 +826,7 @@ fn nv_direct_top_matches_yuv420p_top() {
           .with_rgb(&mut want)
           .unwrap()
           .with_chroma_location(loc.clone());
-        yuv420p_to(&src, false, KernelMatrix::Bt601, &mut sink).unwrap();
+        yuv420p_to(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
       }
       for simd in [true, false] {
         let mut nv12 = std::vec![0u8; w * h * 3];
@@ -837,7 +837,7 @@ fn nv_direct_top_matches_yuv420p_top() {
             .unwrap()
             .with_chroma_location(loc.clone())
             .with_simd(simd);
-          nv12_to(&src, false, KernelMatrix::Bt601, &mut sink).unwrap();
+          nv12_to(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
         }
         assert_eq!(
           nv12, want,
@@ -851,7 +851,7 @@ fn nv_direct_top_matches_yuv420p_top() {
             .unwrap()
             .with_chroma_location(loc.clone())
             .with_simd(simd);
-          nv21_to(&src, false, KernelMatrix::Bt601, &mut sink).unwrap();
+          nv21_to(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
         }
         assert_eq!(
           nv21, want,

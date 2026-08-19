@@ -295,7 +295,7 @@ fn packed_yuv444_hsv_only_grows_no_rgb_scratch_all_formats() {
       let mut sink = MixedSinker::<Ayuv64>::new(w, h)
         .with_hsv(&mut hh, &mut ss, &mut vv)
         .unwrap();
-      ayuv64_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+      ayuv64_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
       sink.rgb_scratch.len()
     };
     assert_eq!(
@@ -337,7 +337,7 @@ fn packed_yuv444_hsv_only_grows_no_rgb_scratch_all_formats() {
       let mut sink = MixedSinker::<Xv36>::new(w, h)
         .with_hsv(&mut hh, &mut ss, &mut vv)
         .unwrap();
-      xv36_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
+      xv36_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
       sink.rgb_scratch.len()
     };
     assert_eq!(
@@ -357,7 +357,7 @@ fn packed_yuv444_hsv_only_grows_no_rgb_scratch_all_formats() {
       let mut sink = MixedSinker::<Vuya>::new(w, h)
         .with_hsv(&mut hh, &mut ss, &mut vv)
         .unwrap();
-      vuya_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+      vuya_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
       sink.rgb_scratch.len()
     };
     assert_eq!(
@@ -377,7 +377,7 @@ fn packed_yuv444_hsv_only_grows_no_rgb_scratch_all_formats() {
       let mut sink = MixedSinker::<Vuyx>::new(w, h)
         .with_hsv(&mut hh, &mut ss, &mut vv)
         .unwrap();
-      vuyx_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
+      vuyx_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
       sink.rgb_scratch.len()
     };
     assert_eq!(
@@ -409,7 +409,7 @@ fn vuya_luma_plus_hsv_only_is_correct_and_rgb_free() {
       .unwrap()
       .with_hsv(&mut hh, &mut ss, &mut vv)
       .unwrap();
-    vuya_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+    vuya_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
     sink.rgb_scratch.len()
   };
 

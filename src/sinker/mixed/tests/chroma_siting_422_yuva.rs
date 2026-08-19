@@ -135,8 +135,7 @@ mod p8 {
     yuva422p_to(
       &frame(&y, &u, &v, &a),
       false,
-      KernelMatrix::Bt601,
-      &mut sink,
+      sink.set_kernel_matrix(KernelMatrix::Bt601),
     )
     .unwrap();
     rgb
@@ -153,8 +152,7 @@ mod p8 {
     yuva422p_to(
       &frame(&y, &u, &v, &a),
       false,
-      KernelMatrix::Bt601,
-      &mut sink,
+      sink.set_kernel_matrix(KernelMatrix::Bt601),
     )
     .unwrap();
     rgba
@@ -199,8 +197,7 @@ mod p8 {
     yuva422p_to(
       &frame(&y, &u, &v, &a),
       false,
-      KernelMatrix::Bt601,
-      &mut sink,
+      sink.set_kernel_matrix(KernelMatrix::Bt601),
     )
     .unwrap();
     let chroma_len = sink.chroma_full.len();
@@ -226,8 +223,7 @@ mod p8 {
     yuva422p_to(
       &frame(&y, &u, &v, &a),
       false,
-      KernelMatrix::Bt601,
-      &mut sink,
+      sink.set_kernel_matrix(KernelMatrix::Bt601),
     )
     .unwrap();
     let chroma_len = sink.chroma_full.len();
@@ -256,8 +252,7 @@ mod p8 {
     yuva422p_to(
       &frame(&y, &u, &v, &a),
       false,
-      KernelMatrix::Bt601,
-      &mut sink,
+      sink.set_kernel_matrix(KernelMatrix::Bt601),
     )
     .unwrap();
     let chroma_len = sink.chroma_full.len();
@@ -296,7 +291,7 @@ mod p8 {
     let mut sink = MixedSinker::<Yuva422p>::new(w, h).with_chroma_location(ChromaLocation::Center);
     // No outputs attached: the guard returns before `idx * w` (no overflow panic)
     // and before the centered preflight (no allocation).
-    let row = Yuva422pRow::new(&y, &c, &c, &a, idx, KernelMatrix::Bt601, false);
+    let row = Yuva422pRow::for_tests(&y, &c, &c, &a, idx, KernelMatrix::Bt601, false);
     crate::PixelSink::process(&mut sink, row).unwrap();
     let chroma_len = sink.chroma_full.len();
     drop(sink);
@@ -323,7 +318,12 @@ mod p8 {
     let mut ref_sink = MixedSinker::<Yuva444p>::new(W as usize, H as usize)
       .with_rgba(&mut rgba_ref)
       .unwrap();
-    yuva444p_to(&ref_src, false, KernelMatrix::Bt601, &mut ref_sink).unwrap();
+    yuva444p_to(
+      &ref_src,
+      false,
+      ref_sink.set_kernel_matrix(KernelMatrix::Bt601),
+    )
+    .unwrap();
     assert_eq!(
       convert_rgba(ChromaLocation::Center, true),
       rgba_ref,
@@ -344,7 +344,12 @@ mod p8 {
     let mut ref_sink = MixedSinker::<Yuva444p>::new(W as usize, H as usize)
       .with_rgb(&mut rgb_ref)
       .unwrap();
-    yuva444p_to(&ref_src, false, KernelMatrix::Bt601, &mut ref_sink).unwrap();
+    yuva444p_to(
+      &ref_src,
+      false,
+      ref_sink.set_kernel_matrix(KernelMatrix::Bt601),
+    )
+    .unwrap();
     assert_eq!(
       convert_rgb(ChromaLocation::Center, true),
       rgb_ref,
@@ -370,7 +375,7 @@ mod p8 {
       .with_hsv(&mut h, &mut s, &mut vv)
       .unwrap()
       .with_chroma_location(ChromaLocation::Center);
-    yuva422p_to(&src, false, KernelMatrix::Bt601, &mut sink).unwrap();
+    yuva422p_to(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
 
     let ref_src = Yuva444pFrame::try_new(&y, &u444, &v444, &a, W, H, W, W, W, W).unwrap();
     let (mut hr, mut sr, mut vr) = (
@@ -381,7 +386,12 @@ mod p8 {
     let mut ref_sink = MixedSinker::<Yuva444p>::new(W as usize, H as usize)
       .with_hsv(&mut hr, &mut sr, &mut vr)
       .unwrap();
-    yuva444p_to(&ref_src, false, KernelMatrix::Bt601, &mut ref_sink).unwrap();
+    yuva444p_to(
+      &ref_src,
+      false,
+      ref_sink.set_kernel_matrix(KernelMatrix::Bt601),
+    )
+    .unwrap();
     assert_eq!(
       (h, s, vv),
       (hr, sr, vr),
@@ -443,8 +453,7 @@ mod p8 {
       yuva422p_to(
         &frame(&y, &u, &v, &a),
         false,
-        KernelMatrix::Bt601,
-        &mut sink,
+        sink.set_kernel_matrix(KernelMatrix::Bt601),
       )
       .unwrap();
       rgba
@@ -530,7 +539,7 @@ mod p8 {
       .with_chroma_location(ChromaLocation::Center);
 
     super::super::super::arm_chroma_full_alloc_failure();
-    let err = yuva422p_to(&src, false, KernelMatrix::Bt601, &mut sink).unwrap_err();
+    let err = yuva422p_to(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap_err();
     drop(sink);
 
     assert!(
@@ -583,12 +592,12 @@ mod p8 {
       let mut sink = MixedSinker::<Yuva422p>::new(W as usize, H as usize)
         .with_rgb(&mut rgb)
         .unwrap()
-        .with_color_spec(&spec(loc));
+        .with_color_spec(&spec(loc))
+        .unwrap();
       yuva422p_to(
         &frame(&y, &u, &v, &a),
         false,
-        KernelMatrix::ChromaDerivedNcl,
-        &mut sink,
+        sink.set_kernel_matrix(KernelMatrix::ChromaDerivedNcl),
       )
       .unwrap();
       rgb
@@ -602,8 +611,7 @@ mod p8 {
       yuva422p_to(
         &frame(&y, &u, &v, &a),
         false,
-        KernelMatrix::Bt709,
-        &mut sink,
+        sink.set_kernel_matrix(KernelMatrix::Bt709),
       )
       .unwrap();
       rgb
@@ -639,7 +647,7 @@ mod p8 {
     let h = H as usize;
     let cw = w / 2;
     let row_at = |r: usize| {
-      Yuva422pRow::new(
+      Yuva422pRow::for_tests(
         &y[r * w..(r + 1) * w],
         &u[r * cw..(r + 1) * cw],
         &v[r * cw..(r + 1) * cw],
@@ -789,7 +797,7 @@ macro_rules! hibit_yuva422_chroma_tests {
           .unwrap()
           .with_chroma_location(loc.clone())
           .with_simd(simd);
-        $walker(&frame(&y, &u, &v, &a), false, KernelMatrix::Bt601, &mut sink).unwrap();
+        $walker(&frame(&y, &u, &v, &a), false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
         rgb
       }
 
@@ -801,7 +809,7 @@ macro_rules! hibit_yuva422_chroma_tests {
           .unwrap()
           .with_chroma_location(loc.clone())
           .with_simd(simd);
-        $walker(&frame(&y, &u, &v, &a), false, KernelMatrix::Bt601, &mut sink).unwrap();
+        $walker(&frame(&y, &u, &v, &a), false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
         rgba
       }
 
@@ -841,7 +849,7 @@ macro_rules! hibit_yuva422_chroma_tests {
           .with_rgba(&mut rgba)
           .unwrap()
           .with_chroma_location(ChromaLocation::Left);
-        $walker(&frame(&y, &u, &v, &a), false, KernelMatrix::Bt601, &mut sink).unwrap();
+        $walker(&frame(&y, &u, &v, &a), false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
         let chroma_len = sink.chroma_full_u16.len();
         drop(sink);
         assert_eq!(chroma_len, 0, "co-sited path must not grow the u16 chroma scratch");
@@ -859,7 +867,7 @@ macro_rules! hibit_yuva422_chroma_tests {
           .with_rgba(&mut rgba)
           .unwrap()
           .with_chroma_location(ChromaLocation::Center);
-        $walker(&frame(&y, &u, &v, &a), false, KernelMatrix::Bt601, &mut sink).unwrap();
+        $walker(&frame(&y, &u, &v, &a), false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
         let chroma_len = sink.chroma_full_u16.len();
         drop(sink);
         assert_eq!(chroma_len, 2 * W as usize, "centered path stages U+V at full width");
@@ -896,7 +904,7 @@ macro_rules! hibit_yuva422_chroma_tests {
           MixedSinker::<$Marker>::new(w, h).with_chroma_location(ChromaLocation::Center);
         // No outputs attached: the guard returns before `idx * w` (no overflow
         // panic) and before the centered preflight (no allocation).
-        let row = $Row::new(&y, &c, &c, &a, idx, KernelMatrix::Bt601, false);
+        let row = $Row::for_tests(&y, &c, &c, &a, idx, KernelMatrix::Bt601, false);
         crate::PixelSink::process(&mut sink, row).unwrap();
         let chroma_len = sink.chroma_full_u16.len();
         drop(sink);
@@ -921,7 +929,7 @@ macro_rules! hibit_yuva422_chroma_tests {
         let mut ref_sink = MixedSinker::<$Ref>::new(W as usize, H as usize)
           .with_rgba(&mut rgba_ref)
           .unwrap();
-        $ref_walker(&ref_src, false, KernelMatrix::Bt601, &mut ref_sink).unwrap();
+        $ref_walker(&ref_src, false, ref_sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
         assert_eq!(
           convert_rgba(ChromaLocation::Center, true),
           rgba_ref,
@@ -944,14 +952,14 @@ macro_rules! hibit_yuva422_chroma_tests {
           .with_rgba_u16(&mut rgba16)
           .unwrap()
           .with_chroma_location(ChromaLocation::Center);
-        $walker(&src, false, KernelMatrix::Bt601, &mut sink).unwrap();
+        $walker(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
 
         let ref_src = $RefFrame::try_new(&y, &u444, &v444, &a, W, H, W, W, W, W).unwrap();
         let mut rgba16_ref = std::vec![0u16; (W * H * 4) as usize];
         let mut ref_sink = MixedSinker::<$Ref>::new(W as usize, H as usize)
           .with_rgba_u16(&mut rgba16_ref)
           .unwrap();
-        $ref_walker(&ref_src, false, KernelMatrix::Bt601, &mut ref_sink).unwrap();
+        $ref_walker(&ref_src, false, ref_sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
         assert_eq!(
           rgba16, rgba16_ref,
           "centered high-bit YUVA 4:2:2 RGBA(u16) must equal upsample-then-4:4:4 (real alpha)"
@@ -974,7 +982,7 @@ macro_rules! hibit_yuva422_chroma_tests {
           let mut ref_sink = MixedSinker::<$Ref>::new(W as usize, H as usize)
             .with_rgb(&mut rgb_ref)
             .unwrap();
-          $ref_walker(&ref_src, false, KernelMatrix::Bt601, &mut ref_sink).unwrap();
+          $ref_walker(&ref_src, false, ref_sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
           assert_eq!(convert_rgb(ChromaLocation::Center, true), rgb_ref, "centered RGB");
         }
 
@@ -986,14 +994,14 @@ macro_rules! hibit_yuva422_chroma_tests {
             .with_rgb_u16(&mut rgb16)
             .unwrap()
             .with_chroma_location(ChromaLocation::Center);
-          $walker(&src, false, KernelMatrix::Bt601, &mut sink).unwrap();
+          $walker(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
 
           let ref_src = $RefFrame::try_new(&y, &u444, &v444, &a, W, H, W, W, W, W).unwrap();
           let mut rgb16_ref = std::vec![0u16; (W * H * 3) as usize];
           let mut ref_sink = MixedSinker::<$Ref>::new(W as usize, H as usize)
             .with_rgb_u16(&mut rgb16_ref)
             .unwrap();
-          $ref_walker(&ref_src, false, KernelMatrix::Bt601, &mut ref_sink).unwrap();
+          $ref_walker(&ref_src, false, ref_sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
           assert_eq!(rgb16, rgb16_ref, "centered RGB(u16)");
         }
 
@@ -1009,7 +1017,7 @@ macro_rules! hibit_yuva422_chroma_tests {
             .with_hsv(&mut h, &mut s, &mut vv)
             .unwrap()
             .with_chroma_location(ChromaLocation::Center);
-          $walker(&src, false, KernelMatrix::Bt601, &mut sink).unwrap();
+          $walker(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
 
           let ref_src = $RefFrame::try_new(&y, &u444, &v444, &a, W, H, W, W, W, W).unwrap();
           let (mut hr, mut sr, mut vr) = (
@@ -1020,7 +1028,7 @@ macro_rules! hibit_yuva422_chroma_tests {
           let mut ref_sink = MixedSinker::<$Ref>::new(W as usize, H as usize)
             .with_hsv(&mut hr, &mut sr, &mut vr)
             .unwrap();
-          $ref_walker(&ref_src, false, KernelMatrix::Bt601, &mut ref_sink).unwrap();
+          $ref_walker(&ref_src, false, ref_sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
           assert_eq!((h, s, vv), (hr, sr, vr), "centered HSV");
         }
       }
@@ -1040,7 +1048,7 @@ macro_rules! hibit_yuva422_chroma_tests {
             .with_rgba_u16(&mut rgba)
             .unwrap()
             .with_chroma_location(loc.clone());
-          $walker(&frame(&y, &u, &v, &a), false, KernelMatrix::Bt601, &mut sink).unwrap();
+          $walker(&frame(&y, &u, &v, &a), false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
           rgba
         };
         let center = decode(ChromaLocation::Center);
@@ -1071,7 +1079,7 @@ macro_rules! hibit_yuva422_chroma_tests {
             .unwrap()
             .with_alpha_mode(mode)
             .with_chroma_location(ChromaLocation::Center);
-          $walker(&frame(&y, &u, &v, &a), false, KernelMatrix::Bt601, &mut sink).unwrap();
+          $walker(&frame(&y, &u, &v, &a), false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
           rgba
         };
         let premult = decode(AlphaMode::Premultiplied);
@@ -1149,7 +1157,7 @@ macro_rules! hibit_yuva422_chroma_tests {
             .with_rgb(&mut rgb)
             .unwrap()
             .with_chroma_location(ChromaLocation::Center);
-          $walker(&frame(&y, u, v, &a), false, KernelMatrix::Bt601, &mut sink).unwrap();
+          $walker(&frame(&y, u, v, &a), false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
           rgb
         };
         let u_dirty: Vec<u16> = u.iter().map(|&x| x | upper).collect();
@@ -1184,7 +1192,7 @@ macro_rules! hibit_yuva422_chroma_tests {
             .with_rgb(&mut rgb)
             .unwrap()
             .with_chroma_location(ChromaLocation::Center);
-          $walker_be(&src, false, KernelMatrix::Bt601, &mut sink).unwrap();
+          $walker_be(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
           rgb
         };
         let u_dirty: Vec<u16> = u.iter().map(|&x| x | upper).collect();
@@ -1226,7 +1234,7 @@ macro_rules! hibit_yuva422_chroma_tests {
             .with_luma_u16(&mut luma16)
             .unwrap()
             .with_chroma_location(ChromaLocation::Center);
-          $walker(&frame(yp, &u, &v, &a), false, KernelMatrix::Bt601, &mut sink).unwrap();
+          $walker(&frame(yp, &u, &v, &a), false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
           (luma, luma16)
         };
         let y_dirty: Vec<u16> = y.iter().map(|&x| x | upper).collect();
@@ -1265,7 +1273,7 @@ macro_rules! hibit_yuva422_chroma_tests {
             .with_luma_u16(&mut luma16)
             .unwrap()
             .with_chroma_location(ChromaLocation::Center);
-          $walker_be(&src, false, KernelMatrix::Bt601, &mut sink).unwrap();
+          $walker_be(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
           (luma, luma16)
         };
         let y_dirty: Vec<u16> = y.iter().map(|&x| x | upper).collect();
@@ -1315,7 +1323,7 @@ macro_rules! hibit_yuva422_chroma_tests {
             .unwrap()
             .with_luma_u16(&mut luma16)
             .unwrap();
-            $walker(&frame(yp, &u, &v, &a), false, KernelMatrix::Bt601, &mut sink).unwrap();
+            $walker(&frame(yp, &u, &v, &a), false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
           }
           (luma, luma16)
         };
@@ -1361,7 +1369,7 @@ macro_rules! hibit_yuva422_chroma_tests {
             .unwrap()
             .with_luma_u16(&mut luma16)
             .unwrap();
-            $walker_be(&src, false, KernelMatrix::Bt601, &mut sink).unwrap();
+            $walker_be(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
           }
           (luma, luma16)
         };
@@ -1402,7 +1410,7 @@ macro_rules! hibit_yuva422_chroma_tests {
               .unwrap()
               .with_luma_u16(&mut luma16)
               .unwrap();
-            $walker(&frame(yp, &u, &v, &a), false, KernelMatrix::Bt601, &mut sink).unwrap();
+            $walker(&frame(yp, &u, &v, &a), false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
           }
           (luma, luma16)
         };
@@ -1451,7 +1459,7 @@ macro_rules! hibit_yuva422_chroma_tests {
               .unwrap()
               .with_luma_u16(&mut luma16)
               .unwrap();
-            $walker_be(&src, false, KernelMatrix::Bt601, &mut sink).unwrap();
+            $walker_be(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
           }
           (luma, luma16)
         };
@@ -1488,7 +1496,7 @@ macro_rules! hibit_yuva422_chroma_tests {
           .with_chroma_location(ChromaLocation::Center);
 
         super::super::super::arm_chroma_full_alloc_failure();
-        let err = $walker(&src, false, KernelMatrix::Bt601, &mut sink).unwrap_err();
+        let err = $walker(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap_err();
         drop(sink);
 
         assert!(
@@ -1527,8 +1535,8 @@ macro_rules! hibit_yuva422_chroma_tests {
           let mut sink = MixedSinker::<$Marker>::new(W as usize, H as usize)
             .with_rgb(&mut rgb)
             .unwrap()
-            .with_color_spec(&spec(loc));
-          $walker(&frame(&y, &u, &v, &a), false, KernelMatrix::ChromaDerivedNcl, &mut sink)
+            .with_color_spec(&spec(loc)).unwrap();
+          $walker(&frame(&y, &u, &v, &a), false, sink.set_kernel_matrix(KernelMatrix::ChromaDerivedNcl))
             .unwrap();
           rgb
         };
@@ -1538,7 +1546,7 @@ macro_rules! hibit_yuva422_chroma_tests {
             .with_rgb(&mut rgb)
             .unwrap()
             .with_chroma_location(loc.clone());
-          $walker(&frame(&y, &u, &v, &a), false, KernelMatrix::Bt709, &mut sink).unwrap();
+          $walker(&frame(&y, &u, &v, &a), false, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
           rgb
         };
         assert_eq!(

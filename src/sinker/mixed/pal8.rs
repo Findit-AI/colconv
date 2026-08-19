@@ -168,6 +168,10 @@ impl<R> PixelSink for MixedSinker<'_, Pal8, R> {
   type Input<'r> = Pal8Row<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     check_dimensions_match(self.width, self.height, width, height)?;
     // New frame: restart the 4-channel RGBA color streams (the area

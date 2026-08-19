@@ -187,7 +187,7 @@ macro_rules! p4xx_high_bit_native_suite {
           .unwrap()
           .with_luma(&mut luma)
           .unwrap();
-          $walker(&frame(&yl, &uvl), FR, M, &mut sink).unwrap();
+          $walker(&frame(&yl, &uvl), FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgb_u16, luma)
       }
@@ -211,7 +211,7 @@ macro_rules! p4xx_high_bit_native_suite {
           .unwrap()
           .with_luma(&mut luma)
           .unwrap();
-          $walker_be::<_, true>(&frame_be(&yb, &uvb), FR, M, &mut sink).unwrap();
+          $walker_be::<_, true>(&frame_be(&yb, &uvb), FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgb_u16, luma)
       }
@@ -235,7 +235,7 @@ macro_rules! p4xx_high_bit_native_suite {
           .unwrap()
           .with_luma(&mut luma)
           .unwrap();
-          $walker_be::<_, true>(&frame_be(&yb, &uvb), FR, M, &mut sink).unwrap();
+          $walker_be::<_, true>(&frame_be(&yb, &uvb), FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgb_u16, luma)
       }
@@ -263,7 +263,7 @@ macro_rules! p4xx_high_bit_native_suite {
             &ye, &ue, &ve, OUT as u32, OUT as u32, OUT as u32, OUT as u32, OUT as u32,
           )
           .unwrap();
-          $planar_walker(&f, FR, M, &mut sink).unwrap();
+          $planar_walker(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         let luma: Vec<u8> = yb
           .iter()
@@ -298,7 +298,7 @@ macro_rules! p4xx_high_bit_native_suite {
             &ye, &ue, &ve, SRC as u32, SRC as u32, SRC as u32, SRC as u32, SRC as u32,
           )
           .unwrap();
-          $planar_walker(&f, FR, M, &mut sink).unwrap();
+          $planar_walker(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgb_u16, luma)
       }
@@ -495,7 +495,7 @@ macro_rules! p4xx_high_bit_native_suite {
             .unwrap()
             .with_rgb_u16(&mut ref_rgb16)
             .unwrap();
-          $walker(&frame(&yl, &uvl), FR, M, &mut sink).unwrap();
+          $walker(&frame(&yl, &uvl), FR, sink.set_kernel_matrix(M)).unwrap();
         }
         for px in n_rgb.chunks_exact(3) {
           assert_eq!(px, &ref_rgb[..3], "uniform-gray u8 colour drifted");
@@ -531,7 +531,7 @@ macro_rules! p4xx_high_bit_native_suite {
         )
         .unwrap()
         .with_native(true);
-        $walker(&frame(&yl, &uvl), FR, M, &mut sink).unwrap();
+        $walker(&frame(&yl, &uvl), FR, sink.set_kernel_matrix(M)).unwrap();
       }
 
       #[test]
@@ -563,8 +563,8 @@ macro_rules! p4xx_high_bit_native_suite {
           .unwrap()
           .with_luma(&mut luma)
           .unwrap();
-          $walker(&frame(&y1l, &uv1l), FR, M, &mut sink).unwrap();
-          $walker(&frame(&y2l, &uv2l), FR, M, &mut sink).unwrap();
+          $walker(&frame(&y1l, &uv1l), FR, sink.set_kernel_matrix(M)).unwrap();
+          $walker(&frame(&y2l, &uv2l), FR, sink.set_kernel_matrix(M)).unwrap();
         }
         let y_ref = bin_to_out(&logical_y(&y2), SRC, SRC);
         let luma_ref: Vec<u8> = y_ref.iter().map(|&c| (c >> ($bits - 8)) as u8).collect();
@@ -595,7 +595,7 @@ macro_rules! p4xx_high_bit_native_suite {
         // `2 * SRC` u16 wide.
         let (yr, cr) = (3 * SRC, 3 * 2 * SRC);
         let err = sink
-          .process($row::new(&y[yr..yr + SRC], &uv[cr..cr + 2 * SRC], 3, M, FR))
+          .process($row::for_tests(&y[yr..yr + SRC], &uv[cr..cr + 2 * SRC], 3, M, FR))
           .unwrap_err();
         assert!(
           matches!(
@@ -607,7 +607,7 @@ macro_rules! p4xx_high_bit_native_suite {
         let mut rgb = vec![0u8; OUT * OUT * 3];
         sink.set_rgb(&mut rgb).unwrap();
         sink
-          .process($row::new(&y[..SRC], &uv[..2 * SRC], 0, M, FR))
+          .process($row::for_tests(&y[..SRC], &uv[..2 * SRC], 0, M, FR))
           .expect("row 0 must succeed after a rejected out-of-sequence first row");
       }
 
@@ -633,7 +633,7 @@ macro_rules! p4xx_high_bit_native_suite {
         for r in 0..2 {
           let cr = r * 2 * SRC;
           sink
-            .process($row::new(
+            .process($row::for_tests(
               &y[r * SRC..(r + 1) * SRC],
               &uv[cr..cr + 2 * SRC],
               r,
@@ -645,7 +645,7 @@ macro_rules! p4xx_high_bit_native_suite {
         sink.set_rgb_u16(&mut rgb_u16).unwrap();
         crate::sinker::mixed::subsampled_4_4_4_high_bit::arm_p4xx_alloc_failure();
         let err = sink
-          .process($row::new(
+          .process($row::for_tests(
             &y[2 * SRC..3 * SRC],
             &uv[2 * 2 * SRC..3 * 2 * SRC],
             2,
@@ -673,7 +673,7 @@ macro_rules! p4xx_high_bit_native_suite {
         .with_rgb_u16(&mut rgb_u16b)
         .unwrap();
         let err2 = sink2
-          .process($row::new(&y[..SRC], &uv[..2 * SRC], 0, M, FR))
+          .process($row::for_tests(&y[..SRC], &uv[..2 * SRC], 0, M, FR))
           .unwrap_err();
         assert!(
           matches!(
@@ -704,7 +704,7 @@ macro_rules! p4xx_high_bit_native_suite {
         .unwrap();
         crate::sinker::mixed::subsampled_4_4_4_high_bit::arm_p4xx_alloc_failure();
         let err0 = sink
-          .process($row::new(&y[..SRC], &uv[..2 * SRC], 0, M, FR))
+          .process($row::for_tests(&y[..SRC], &uv[..2 * SRC], 0, M, FR))
           .unwrap_err();
         assert!(
           matches!(
@@ -715,7 +715,7 @@ macro_rules! p4xx_high_bit_native_suite {
         );
         crate::sinker::mixed::subsampled_4_4_4_high_bit::arm_p4xx_alloc_failure();
         let err2 = sink
-          .process($row::new(
+          .process($row::for_tests(
             &y[2 * SRC..3 * SRC],
             &uv[2 * 2 * SRC..3 * 2 * SRC],
             2,
@@ -746,7 +746,7 @@ macro_rules! p4xx_high_bit_native_suite {
         .with_rgb_u16(&mut rgb_u16b)
         .unwrap();
         let err3 = sink2
-          .process($row::new(&y[..SRC], &uv[..2 * SRC], 0, M, FR))
+          .process($row::for_tests(&y[..SRC], &uv[..2 * SRC], 0, M, FR))
           .unwrap_err();
         assert!(
           matches!(
@@ -779,11 +779,11 @@ macro_rules! p4xx_high_bit_native_suite {
         .unwrap();
         sink.begin_frame(SRC as u32, SRC as u32).unwrap();
         sink
-          .process($row::new(&y[..SRC], &uv[..2 * SRC], 0, M, FR))
+          .process($row::for_tests(&y[..SRC], &uv[..2 * SRC], 0, M, FR))
           .expect("native row 0 freezes the route and succeeds");
         sink.set_native(false);
         let err = sink
-          .process($row::new(&y[SRC..2 * SRC], &uv[2 * SRC..4 * SRC], 1, M, FR))
+          .process($row::for_tests(&y[SRC..2 * SRC], &uv[2 * SRC..4 * SRC], 1, M, FR))
           .unwrap_err();
         assert!(
           matches!(err, MixedSinkerError::NativeRouteChanged(_)),
@@ -810,11 +810,11 @@ macro_rules! p4xx_high_bit_native_suite {
         .unwrap();
         sink.begin_frame(SRC as u32, SRC as u32).unwrap();
         sink
-          .process($row::new(&y[..SRC], &uv[..2 * SRC], 0, M, FR))
+          .process($row::for_tests(&y[..SRC], &uv[..2 * SRC], 0, M, FR))
           .expect("row-stage row 0 freezes the route and succeeds");
         sink.set_native(true);
         let err = sink
-          .process($row::new(&y[SRC..2 * SRC], &uv[2 * SRC..4 * SRC], 1, M, FR))
+          .process($row::for_tests(&y[SRC..2 * SRC], &uv[2 * SRC..4 * SRC], 1, M, FR))
           .unwrap_err();
         assert!(
           matches!(err, MixedSinkerError::NativeRouteChanged(_)),
@@ -898,7 +898,7 @@ fn luma_only_native_skips_chroma_planning() {
         .with_native(true)
         .with_luma(&mut luma)
         .unwrap();
-    p410_to(&frame, FR, M, &mut sink).expect("luma-only native must not plan chroma");
+    p410_to(&frame, FR, sink.set_kernel_matrix(M)).expect("luma-only native must not plan chroma");
   }
 
   let mut rgb = vec![0u8; OUT * OUT * 3];
@@ -909,7 +909,7 @@ fn luma_only_native_skips_chroma_planning() {
       .with_rgb(&mut rgb)
       .unwrap();
   assert!(
-    p410_to(&frame, FR, M, &mut sink).is_err(),
+    p410_to(&frame, FR, sink.set_kernel_matrix(M)).is_err(),
     "colour native must reach chroma planning (the armed failpoint fires)"
   );
 }

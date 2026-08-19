@@ -324,7 +324,7 @@ fn run(packed: &[u8], native: bool) -> (Vec<u8>, Vec<u16>, Vec<u8>) {
         .unwrap()
         .with_luma(&mut luma)
         .unwrap();
-    v210_to(&frame(packed), FR, M, &mut sink).unwrap();
+    v210_to(&frame(packed), FR, sink.set_kernel_matrix(M)).unwrap();
   }
   (rgb, rgb_u16, luma)
 }
@@ -350,7 +350,7 @@ fn be_run(packed_le: &[u8], native: bool) -> (Vec<u8>, Vec<u16>, Vec<u8>) {
     .unwrap()
     .with_luma(&mut luma)
     .unwrap();
-    v210_to_endian::<_, true>(&be_frame, FR, M, &mut sink).unwrap();
+    v210_to_endian::<_, true>(&be_frame, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   (rgb, rgb_u16, luma)
 }
@@ -377,7 +377,7 @@ fn oracle(packed: &[u8]) -> (Vec<u8>, Vec<u16>, Vec<u8>) {
     let f = Yuv444p10Frame::new(
       &yb, &ub, &vb, OUT as u32, OUT as u32, OUT as u32, OUT as u32, OUT as u32,
     );
-    yuv444p10_to(&f, FR, M, &mut sink).unwrap();
+    yuv444p10_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   let luma: Vec<u8> = yb.iter().map(|&by| (by.min(MASK) >> 2) as u8).collect();
   (rgb, rgb_u16, luma)
@@ -409,7 +409,7 @@ fn planar_twin_native(packed: &[u8], w: usize, h: usize) -> (Vec<u8>, Vec<u16>, 
     let f = Yuv422p10Frame::new(
       &yl, &u, &v, w as u32, h as u32, w as u32, cw as u32, cw as u32,
     );
-    yuv422p10_to(&f, FR, M, &mut sink).unwrap();
+    yuv422p10_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   (rgb, rgb_u16, luma)
 }
@@ -512,8 +512,7 @@ fn native_equals_planar_twin_partial_word() {
     v210_to(
       &V210Frame::new(&packed, W as u32, H as u32, stride),
       FR,
-      M,
-      &mut sink,
+      sink.set_kernel_matrix(M),
     )
     .unwrap();
   }
@@ -689,7 +688,7 @@ fn uniform_gray_leaves_color_unchanged() {
       .unwrap()
       .with_rgb_u16(&mut ref_rgb16)
       .unwrap();
-    v210_to(&frame(&packed), FR, M, &mut sink).unwrap();
+    v210_to(&frame(&packed), FR, sink.set_kernel_matrix(M)).unwrap();
   }
   for px in n_rgb.chunks_exact(3) {
     assert_eq!(px, &ref_rgb[..3], "uniform-gray u8 colour drifted");
@@ -744,7 +743,7 @@ fn native_luma_u16_equals_clamped_binned_y() {
           .with_native(true)
           .with_luma_u16(&mut luma_u16)
           .unwrap();
-      v210_to(&frame(&packed), FR, M, &mut sink).unwrap();
+      v210_to(&frame(&packed), FR, sink.set_kernel_matrix(M)).unwrap();
     }
     assert_eq!(
       luma_u16, luma_u16_oracle,
@@ -768,7 +767,7 @@ fn native_luma_u16_equals_clamped_binned_y() {
       .with_native(true)
       .with_luma_u16(&mut luma_u16)
       .unwrap();
-      v210_to_endian::<_, true>(&be_frame, FR, M, &mut sink).unwrap();
+      v210_to_endian::<_, true>(&be_frame, FR, sink.set_kernel_matrix(M)).unwrap();
     }
     assert_eq!(
       luma_u16, luma_u16_oracle,
@@ -789,7 +788,7 @@ fn native_luma_u16_equals_clamped_binned_y() {
           .unwrap()
           .with_luma_u16(&mut luma_u16)
           .unwrap();
-      v210_to(&frame(&packed), FR, M, &mut sink).unwrap();
+      v210_to(&frame(&packed), FR, sink.set_kernel_matrix(M)).unwrap();
     }
     let (o_rgb, _, _) = oracle(&packed);
     assert_eq!(
@@ -811,7 +810,7 @@ fn no_outputs_is_a_no_op() {
     MixedSinker::<V210, AreaResampler>::with_resampler(SRC, SRC, AreaResampler::to(OUT, OUT))
       .unwrap()
       .with_native(true);
-  v210_to(&frame(&packed), FR, M, &mut sink).unwrap();
+  v210_to(&frame(&packed), FR, sink.set_kernel_matrix(M)).unwrap();
 }
 
 #[test]
@@ -835,8 +834,8 @@ fn resets_join_across_frames() {
         .unwrap()
         .with_luma(&mut luma)
         .unwrap();
-    v210_to(&frame(&p1), FR, M, &mut sink).unwrap();
-    v210_to(&frame(&p2), FR, M, &mut sink).unwrap();
+    v210_to(&frame(&p1), FR, sink.set_kernel_matrix(M)).unwrap();
+    v210_to(&frame(&p2), FR, sink.set_kernel_matrix(M)).unwrap();
   }
   let y_ref = bin_to(&logical_y(&p2, SRC, SRC), SRC, SRC, OUT, OUT);
   let luma_ref: Vec<u8> = y_ref.iter().map(|&c| (c >> 2) as u8).collect();
@@ -867,7 +866,7 @@ fn out_of_sequence_first_row_rejected_and_does_not_poison_retry() {
       .unwrap();
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   let err = sink
-    .process(V210Row::new(row_slice(&packed, 3), 3, M, FR))
+    .process(V210Row::for_tests(row_slice(&packed, 3), 3, M, FR))
     .unwrap_err();
   assert!(
     matches!(
@@ -879,7 +878,7 @@ fn out_of_sequence_first_row_rejected_and_does_not_poison_retry() {
   let mut rgb = std::vec![0u8; OUT * OUT * 3];
   sink.set_rgb(&mut rgb).unwrap();
   sink
-    .process(V210Row::new(row_slice(&packed, 0), 0, M, FR))
+    .process(V210Row::for_tests(row_slice(&packed, 0), 0, M, FR))
     .expect("row 0 must succeed after a rejected out-of-sequence first row");
 }
 
@@ -905,7 +904,7 @@ fn frozen_mid_frame_change_rejected_before_scratch_alloc() {
   // Luma-only rows 0 and 1 freeze a luma-only output set.
   for r in 0..2 {
     sink
-      .process(V210Row::new(row_slice(&packed, r), r, M, FR))
+      .process(V210Row::for_tests(row_slice(&packed, r), r, M, FR))
       .expect("luma-only rows freeze a luma-only output set");
   }
   // Attach u16 colour mid-frame, changing the output set, and arm the wrapper
@@ -913,7 +912,7 @@ fn frozen_mid_frame_change_rejected_before_scratch_alloc() {
   sink.set_rgb_u16(&mut rgb_u16).unwrap();
   crate::sinker::mixed::arm_v210_alloc_failure();
   let err = sink
-    .process(V210Row::new(row_slice(&packed, 2), 2, M, FR))
+    .process(V210Row::for_tests(row_slice(&packed, 2), 2, M, FR))
     .unwrap_err();
   assert!(
     matches!(err, MixedSinkerError::ResampleOutputsChanged(_)),
@@ -934,7 +933,7 @@ fn frozen_mid_frame_change_rejected_before_scratch_alloc() {
       .with_rgb_u16(&mut rgb_u16b)
       .unwrap();
   let err2 = sink2
-    .process(V210Row::new(row_slice(&packed, 0), 0, M, FR))
+    .process(V210Row::for_tests(row_slice(&packed, 0), 0, M, FR))
     .unwrap_err();
   assert!(
     matches!(
@@ -968,7 +967,7 @@ fn oos_after_recoverable_alloc_failure_rejected_before_scratch_alloc() {
       .unwrap();
   crate::sinker::mixed::arm_v210_alloc_failure();
   let err0 = sink
-    .process(V210Row::new(row_slice(&packed, 0), 0, M, FR))
+    .process(V210Row::for_tests(row_slice(&packed, 0), 0, M, FR))
     .unwrap_err();
   assert!(
     matches!(
@@ -979,7 +978,7 @@ fn oos_after_recoverable_alloc_failure_rejected_before_scratch_alloc() {
   );
   crate::sinker::mixed::arm_v210_alloc_failure();
   let err2 = sink
-    .process(V210Row::new(row_slice(&packed, 2), 2, M, FR))
+    .process(V210Row::for_tests(row_slice(&packed, 2), 2, M, FR))
     .unwrap_err();
   assert!(
     matches!(
@@ -1010,7 +1009,7 @@ fn oos_after_recoverable_alloc_failure_rejected_before_scratch_alloc() {
       .with_rgb_u16(&mut rgb_u16b)
       .unwrap();
   let err3 = sink2
-    .process(V210Row::new(row_slice(&packed, 0), 0, M, FR))
+    .process(V210Row::for_tests(row_slice(&packed, 0), 0, M, FR))
     .unwrap_err();
   assert!(
     matches!(
@@ -1042,11 +1041,11 @@ fn native_to_rowstage_route_flip_mid_frame_rejected() {
       .unwrap();
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   sink
-    .process(V210Row::new(row_slice(&packed, 0), 0, M, FR))
+    .process(V210Row::for_tests(row_slice(&packed, 0), 0, M, FR))
     .expect("native row 0 freezes the route and succeeds");
   sink.set_native(false);
   let err = sink
-    .process(V210Row::new(row_slice(&packed, 1), 1, M, FR))
+    .process(V210Row::for_tests(row_slice(&packed, 1), 1, M, FR))
     .unwrap_err();
   assert!(
     matches!(err, MixedSinkerError::NativeRouteChanged(_)),
@@ -1072,11 +1071,11 @@ fn rowstage_to_native_route_flip_mid_frame_rejected() {
       .unwrap();
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   sink
-    .process(V210Row::new(row_slice(&packed, 0), 0, M, FR))
+    .process(V210Row::for_tests(row_slice(&packed, 0), 0, M, FR))
     .expect("row-stage row 0 freezes the route and succeeds");
   sink.set_native(true);
   let err = sink
-    .process(V210Row::new(row_slice(&packed, 1), 1, M, FR))
+    .process(V210Row::for_tests(row_slice(&packed, 1), 1, M, FR))
     .unwrap_err();
   assert!(
     matches!(err, MixedSinkerError::NativeRouteChanged(_)),
@@ -1106,11 +1105,11 @@ fn luma_u16_attach_mid_frame_rejected_as_outputs_changed() {
       .unwrap();
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   sink
-    .process(V210Row::new(row_slice(&packed, 0), 0, M, FR))
+    .process(V210Row::for_tests(row_slice(&packed, 0), 0, M, FR))
     .expect("native luma row 0 freezes the output set and the route");
   sink.set_luma_u16(&mut luma_u16).unwrap();
   let err = sink
-    .process(V210Row::new(row_slice(&packed, 1), 1, M, FR))
+    .process(V210Row::for_tests(row_slice(&packed, 1), 1, M, FR))
     .unwrap_err();
   assert!(
     matches!(err, MixedSinkerError::ResampleOutputsChanged(_)),
@@ -1145,7 +1144,8 @@ fn luma_only_native_skips_chroma_planning() {
         .with_native(true)
         .with_luma(&mut luma)
         .unwrap();
-    v210_to(&frame(&packed), FR, M, &mut sink).expect("luma-only native must not plan chroma");
+    v210_to(&frame(&packed), FR, sink.set_kernel_matrix(M))
+      .expect("luma-only native must not plan chroma");
   }
 
   // Colour: the still-armed failpoint fires at chroma planning -> Err.
@@ -1157,7 +1157,7 @@ fn luma_only_native_skips_chroma_planning() {
       .with_rgb(&mut rgb)
       .unwrap();
   assert!(
-    v210_to(&frame(&packed), FR, M, &mut sink).is_err(),
+    v210_to(&frame(&packed), FR, sink.set_kernel_matrix(M)).is_err(),
     "colour native must reach chroma planning (the armed failpoint fires)"
   );
 }

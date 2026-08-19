@@ -7,66 +7,72 @@
 use super::*;
 use crate::ColorMatrix;
 
-/// Walk options naming `matrix` at `full_range`.
+/// Walk options at `full_range`.
 ///
-/// A `KernelMatrix` reaches a walk only out of `ColorSpec::kernel_matrix`, so
-/// the affine sweeps below source theirs the way every caller does — through
-/// the casual-path `ColorSpec::of_matrix`, whose round trip across the closed
-/// vocabulary cannot fail.
-fn yuv_opts(full_range: bool, matrix: KernelMatrix) -> YuvOptions {
-  YuvOptions::from_color_spec(&ColorSpec::of_matrix(matrix))
-    .unwrap()
-    .maybe_full_range(full_range)
+/// The matrix is deliberately absent: since mediaframe 0.4 a walk reads its
+/// selector off the sink, so the affine sweeps below pin theirs there
+/// (`MixedSinker::set_kernel_matrix`) rather than passing one here that
+/// nothing would read.
+fn yuv_opts(full_range: bool) -> YuvOptions {
+  YuvOptions::default().maybe_full_range(full_range)
 }
 
 // ---- Structural round-trip: Options builders / getters ----------------
 
+#[cfg(feature = "xyz")]
 #[test]
-fn xyz12_options_default_is_dcip3() {
-  assert_eq!(Xyz12Options::default(), Xyz12Options::new());
-  assert_eq!(Xyz12Options::new().target_gamut(), KernelGamut::DciP3);
+fn sinker_default_target_gamut_is_dcip3() {
   // The honest default delegates to mediaframe's own gamut default.
-  assert_eq!(Xyz12Options::default().target_gamut(), KernelGamut::DciP3);
+  assert_eq!(
+    crate::sinker::MixedSinker::<crate::source::Xyz12Le>::new(2, 2).target_gamut(),
+    crate::KernelGamut::DciP3
+  );
 }
 
-/// The gamut door: `KernelGamut` enters `Xyz12Options` only by exchanging the
-/// open descriptor, and a descriptor with no tabulated matrix is refused
-/// rather than converted as one of the three that are.
+/// The gamut door: `KernelGamut` reaches a walk only by exchanging the open
+/// descriptor at the sink, and a descriptor with no tabulated matrix is
+/// refused rather than converted as one of the three that are.
+#[cfg(feature = "xyz")]
 #[test]
-fn xyz12_options_target_gamut_comes_only_from_the_descriptor() {
+fn sinker_target_gamut_comes_only_from_the_descriptor() {
+  use crate::{DcpTargetGamut, KernelGamut, sinker::MixedSinker, source::Xyz12Le};
+
   for (descriptor, kernel) in [
     (DcpTargetGamut::DciP3, KernelGamut::DciP3),
     (DcpTargetGamut::Rec709, KernelGamut::Rec709),
     (DcpTargetGamut::Rec2020, KernelGamut::Rec2020),
   ] {
     assert_eq!(
-      Xyz12Options::for_target_gamut(&descriptor)
+      MixedSinker::<Xyz12Le>::new(2, 2)
+        .with_target_gamut(&descriptor)
         .unwrap()
         .target_gamut(),
       kernel
     );
   }
 
-  assert!(Xyz12Options::for_target_gamut(&DcpTargetGamut::other("acescg")).is_err());
+  assert!(
+    MixedSinker::<Xyz12Le>::new(2, 2)
+      .with_target_gamut(&DcpTargetGamut::other("acescg"))
+      .is_err()
+  );
 }
 
+/// The row selector's default posture, now that it is the sink's to answer:
+/// limited-range BT.709, the same unnamed-colorimetry decode the walkers'
+/// matrix parameter defaulted to before mediaframe 0.4 removed it.
 #[test]
-fn yuv_options_default_is_limited_bt709() {
+fn defaults_are_limited_bt709() {
   assert_eq!(YuvOptions::default(), YuvOptions::new());
   assert!(!YuvOptions::new().full_range());
-  assert_eq!(YuvOptions::new().matrix(), KernelMatrix::Bt709);
+  assert_eq!(
+    crate::sinker::MixedSinker::<crate::source::Yuv420p>::new(2, 2).kernel_matrix(),
+    KernelMatrix::Bt709
+  );
 }
 
 #[test]
 fn yuv_options_builders_and_mutators_round_trip() {
-  // The matrix has exactly one source: a `ColorSpec`.
-  assert_eq!(
-    YuvOptions::from_color_spec(&ColorSpec::of_matrix(KernelMatrix::Bt601))
-      .unwrap()
-      .matrix(),
-    KernelMatrix::Bt601
-  );
-
   // bool consuming builders
   assert!(YuvOptions::new().with_full_range().full_range());
   assert!(YuvOptions::new().maybe_full_range(true).full_range());
@@ -171,12 +177,13 @@ fn yuv_options_from_color_spec_bridges_range_and_matrix() {
     DynamicRange::Limited,
     ColorMatrix::Bt601,
   );
-  let opts = YuvOptions::from_color_spec(&spec).unwrap();
+  let opts = YuvOptions::from_color_spec(&spec);
   assert!(opts.full_range());
-  assert_eq!(opts.matrix(), KernelMatrix::Bt601);
+  // The matrix half of the bridge is the sink's now.
+  assert_eq!(spec.kernel_matrix().unwrap(), KernelMatrix::Bt601);
 
   // The bridge equals a direct raw construction of the resolved values.
-  assert_eq!(opts, yuv_opts(true, KernelMatrix::Bt601));
+  assert_eq!(opts, yuv_opts(true));
 }
 
 /// The casual-path constructor is a shortcut into the one carrier, not a
@@ -207,10 +214,15 @@ fn color_spec_of_matrix_round_trips_and_leaves_the_rest_unspecified() {
     assert_eq!(spec.transfer(), Transfer::Unspecified);
     assert_eq!(spec.chroma_location(), ChromaLocation::Unspecified);
 
-    // And it is exactly what the walk options consume.
-    let opts = YuvOptions::from_color_spec(&spec).unwrap();
-    assert_eq!(opts.matrix(), k);
-    assert!(!opts.full_range());
+    // And it is exactly what the sink consumes.
+    assert_eq!(
+      crate::sinker::MixedSinker::<crate::source::Yuv420p>::new(2, 2)
+        .with_color_spec(&spec)
+        .unwrap()
+        .kernel_matrix(),
+      k
+    );
+    assert!(!YuvOptions::from_color_spec(&spec).full_range());
   }
 }
 
@@ -392,6 +404,7 @@ mod bayer_options {
 mod xyz12_parity {
   use super::*;
   use crate::{
+    KernelGamut,
     frame::{Xyz12BeFrame, Xyz12LeFrame},
     sinker::MixedSinker,
     source::{Xyz12Be, Xyz12Le, xyz12_to},
@@ -433,7 +446,7 @@ mod xyz12_parity {
   fn assert_parity_rgb_u8_le(gamut: KernelGamut) {
     let pix = ramp_frame(W, H, pack12_le);
     let src = Xyz12LeFrame::try_new(&pix, W, H, W * 3).unwrap();
-    let opts = Xyz12Options::for_target_gamut(&DcpTargetGamut::from(gamut)).unwrap();
+    let opts = ();
 
     let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
     let mut via_direct = std::vec![0u8; (W * H * 3) as usize];
@@ -441,12 +454,12 @@ mod xyz12_parity {
     let mut sink_w = MixedSinker::<Xyz12Le>::new(W as usize, H as usize)
       .with_rgb(&mut via_walker)
       .unwrap();
-    <Xyz12<false> as Walker<_>>::walk(&src, &opts, &mut sink_w).unwrap();
+    <Xyz12<false> as Walker<_>>::walk(&src, &opts, sink_w.set_kernel_gamut(gamut)).unwrap();
 
     let mut sink_d = MixedSinker::<Xyz12Le>::new(W as usize, H as usize)
       .with_rgb(&mut via_direct)
       .unwrap();
-    xyz12_to(&src, gamut, &mut sink_d).unwrap();
+    xyz12_to(&src, sink_d.set_kernel_gamut(gamut)).unwrap();
 
     assert_eq!(via_walker, via_direct, "rgb u8 LE parity (gamut {gamut:?})");
   }
@@ -455,7 +468,7 @@ mod xyz12_parity {
   fn assert_parity_rgb_u16_be(gamut: KernelGamut) {
     let pix = ramp_frame(W, H, pack12_be);
     let src = Xyz12BeFrame::try_new(&pix, W, H, W * 3).unwrap();
-    let opts = Xyz12Options::for_target_gamut(&DcpTargetGamut::from(gamut)).unwrap();
+    let opts = ();
 
     let mut via_walker = std::vec![0u16; (W * H * 3) as usize];
     let mut via_direct = std::vec![0u16; (W * H * 3) as usize];
@@ -463,12 +476,12 @@ mod xyz12_parity {
     let mut sink_w = MixedSinker::<Xyz12Be>::new(W as usize, H as usize)
       .with_rgb_u16(&mut via_walker)
       .unwrap();
-    <Xyz12<true> as Walker<_>>::walk(&src, &opts, &mut sink_w).unwrap();
+    <Xyz12<true> as Walker<_>>::walk(&src, &opts, sink_w.set_kernel_gamut(gamut)).unwrap();
 
     let mut sink_d = MixedSinker::<Xyz12Be>::new(W as usize, H as usize)
       .with_rgb_u16(&mut via_direct)
       .unwrap();
-    xyz12_to(&src, gamut, &mut sink_d).unwrap();
+    xyz12_to(&src, sink_d.set_kernel_gamut(gamut)).unwrap();
 
     assert_eq!(
       via_walker, via_direct,
@@ -513,17 +526,17 @@ mod xyz12_parity {
       {
         let pix = ramp_frame(W, H, pack12_le);
         let src = Xyz12LeFrame::try_new(&pix, W, H, W * 3).unwrap();
-        let opts = Xyz12Options::for_target_gamut(&DcpTargetGamut::from(gamut)).unwrap();
+        let opts = ();
         let mut via_walker = std::vec![0u16; (W * H * 3) as usize];
         let mut via_direct = std::vec![0u16; (W * H * 3) as usize];
         let mut sw = MixedSinker::<Xyz12Le>::new(W as usize, H as usize)
           .with_rgb_u16(&mut via_walker)
           .unwrap();
-        <Xyz12<false> as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
+        <Xyz12<false> as Walker<_>>::walk(&src, &opts, sw.set_kernel_gamut(gamut)).unwrap();
         let mut sd = MixedSinker::<Xyz12Le>::new(W as usize, H as usize)
           .with_rgb_u16(&mut via_direct)
           .unwrap();
-        xyz12_to(&src, gamut, &mut sd).unwrap();
+        xyz12_to(&src, sd.set_kernel_gamut(gamut)).unwrap();
         assert_eq!(
           via_walker, via_direct,
           "rgb u16 LE parity (gamut {gamut:?})"
@@ -533,17 +546,17 @@ mod xyz12_parity {
       {
         let pix = ramp_frame(W, H, pack12_be);
         let src = Xyz12BeFrame::try_new(&pix, W, H, W * 3).unwrap();
-        let opts = Xyz12Options::for_target_gamut(&DcpTargetGamut::from(gamut)).unwrap();
+        let opts = ();
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
         let mut via_direct = std::vec![0u8; (W * H * 3) as usize];
         let mut sw = MixedSinker::<Xyz12Be>::new(W as usize, H as usize)
           .with_rgb(&mut via_walker)
           .unwrap();
-        <Xyz12<true> as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
+        <Xyz12<true> as Walker<_>>::walk(&src, &opts, sw.set_kernel_gamut(gamut)).unwrap();
         let mut sd = MixedSinker::<Xyz12Be>::new(W as usize, H as usize)
           .with_rgb(&mut via_direct)
           .unwrap();
-        xyz12_to(&src, gamut, &mut sd).unwrap();
+        xyz12_to(&src, sd.set_kernel_gamut(gamut)).unwrap();
         assert_eq!(via_walker, via_direct, "rgb u8 BE parity (gamut {gamut:?})");
       }
     }
@@ -784,15 +797,18 @@ mod mono_parity {
   // byte-parity test cannot see a dropped forward — this can.
   macro_rules! metadata_probe {
     ($probe:ident, $row:ident, $sink:ident) => {
-      #[derive(Default)]
       struct $probe {
         seen: std::vec::Vec<(bool, KernelMatrix)>,
+        matrix: KernelMatrix,
       }
       impl PixelSink for $probe {
         type Input<'r> = $row<'r>;
         type Error = core::convert::Infallible;
         fn begin_frame(&mut self, _w: u32, _h: u32) -> Result<(), Self::Error> {
           Ok(())
+        }
+        fn kernel_matrix(&self) -> KernelMatrix {
+          self.matrix
         }
         fn process(&mut self, row: $row<'_>) -> Result<(), Self::Error> {
           self.seen.push((row.full_range(), row.matrix()));
@@ -807,7 +823,8 @@ mod mono_parity {
 
   /// The luma path discards `full_range`/`matrix`, so byte parity can't prove
   /// the Walker forwards them; instrument the sink and assert every emitted row
-  /// carries exactly the supplied `YuvOptions` values.
+  /// carries the range the walk was given and the matrix the sink answered
+  /// with (mediaframe 0.4 reads the selector off the sink, once per walk).
   #[test]
   #[cfg_attr(
     miri,
@@ -817,9 +834,12 @@ mod mono_parity {
     let (data, stride) = packed_1bpp();
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = yuv_opts(full_range, matrix);
+        let opts = yuv_opts(full_range);
 
-        let mut bp = MonoblackProbe::default();
+        let mut bp = MonoblackProbe {
+          seen: std::vec::Vec::new(),
+          matrix,
+        };
         let src = MonoblackFrame::try_new(&data, W, H, stride).unwrap();
         <Monoblack as Walker<_>>::walk(&src, &opts, &mut bp).unwrap();
         assert!(!bp.seen.is_empty(), "monoblack walked at least one row");
@@ -827,11 +847,14 @@ mod mono_parity {
           assert_eq!(
             (fr, m),
             (full_range, matrix),
-            "monoblack forwards full_range/matrix into the row"
+            "monoblack stamps the sink's matrix and the walk's range on the row"
           );
         }
 
-        let mut wp = MonowhiteProbe::default();
+        let mut wp = MonowhiteProbe {
+          seen: std::vec::Vec::new(),
+          matrix,
+        };
         let src = MonowhiteFrame::try_new(&data, W, H, stride).unwrap();
         <Monowhite as Walker<_>>::walk(&src, &opts, &mut wp).unwrap();
         assert!(!wp.seen.is_empty(), "monowhite walked at least one row");
@@ -839,7 +862,7 @@ mod mono_parity {
           assert_eq!(
             (fr, m),
             (full_range, matrix),
-            "monowhite forwards full_range/matrix into the row"
+            "monowhite stamps the sink's matrix and the walk's range on the row"
           );
         }
       }
@@ -855,7 +878,7 @@ mod mono_parity {
     let (data, stride) = packed_1bpp();
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = yuv_opts(full_range, matrix);
+        let opts = yuv_opts(full_range);
         let src = MonoblackFrame::try_new(&data, W, H, stride).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H) as usize];
@@ -864,12 +887,12 @@ mod mono_parity {
         let mut sw = MixedSinker::<Monoblack>::new(W as usize, H as usize)
           .with_luma(&mut via_walker)
           .unwrap();
-        <Monoblack as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
+        <Monoblack as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
 
         let mut sd = MixedSinker::<Monoblack>::new(W as usize, H as usize)
           .with_luma(&mut via_direct)
           .unwrap();
-        monoblack_to(&src, opts.full_range(), opts.matrix(), &mut sd).unwrap();
+        monoblack_to(&src, opts.full_range(), sd.set_kernel_matrix(matrix)).unwrap();
 
         assert_eq!(
           via_walker, via_direct,
@@ -888,7 +911,7 @@ mod mono_parity {
     let (data, stride) = packed_1bpp();
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = yuv_opts(full_range, matrix);
+        let opts = yuv_opts(full_range);
         let src = MonowhiteFrame::try_new(&data, W, H, stride).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H) as usize];
@@ -897,12 +920,12 @@ mod mono_parity {
         let mut sw = MixedSinker::<Monowhite>::new(W as usize, H as usize)
           .with_luma(&mut via_walker)
           .unwrap();
-        <Monowhite as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
+        <Monowhite as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
 
         let mut sd = MixedSinker::<Monowhite>::new(W as usize, H as usize)
           .with_luma(&mut via_direct)
           .unwrap();
-        monowhite_to(&src, opts.full_range(), opts.matrix(), &mut sd).unwrap();
+        monowhite_to(&src, opts.full_range(), sd.set_kernel_matrix(matrix)).unwrap();
 
         assert_eq!(
           via_walker, via_direct,
@@ -989,10 +1012,10 @@ mod yuv_planar_parity {
       for matrix in MATRICES {
         let spec = ColorSpec::resolve(fmt.clone(), stream_range.clone(), ColorMatrix::from(matrix));
         assert_eq!(spec.full_range(), expected_fr);
-        let spec_opts = YuvOptions::from_color_spec(&spec).unwrap();
+        let spec_opts = YuvOptions::from_color_spec(&spec);
 
         // The equivalent raw path sets the resolved range directly.
-        let raw_opts = yuv_opts(expected_fr, matrix);
+        let raw_opts = yuv_opts(expected_fr);
         assert_eq!(spec_opts, raw_opts);
 
         let src =
@@ -1004,12 +1027,19 @@ mod yuv_planar_parity {
         let mut ss = MixedSinker::<crate::source::Yuv420p>::new(W as usize, H as usize)
           .with_rgb(&mut via_spec)
           .unwrap();
-        <crate::source::Yuv420p as Walker<_>>::walk(&src, &spec_opts, &mut ss).unwrap();
+        <crate::source::Yuv420p as Walker<_>>::walk(
+          &src,
+          &spec_opts,
+          // The spec half sources its selector the way a caller does.
+          ss.set_kernel_matrix(spec.kernel_matrix().unwrap()),
+        )
+        .unwrap();
 
         let mut sr = MixedSinker::<crate::source::Yuv420p>::new(W as usize, H as usize)
           .with_rgb(&mut via_raw)
           .unwrap();
-        <crate::source::Yuv420p as Walker<_>>::walk(&src, &raw_opts, &mut sr).unwrap();
+        <crate::source::Yuv420p as Walker<_>>::walk(&src, &raw_opts, sr.set_kernel_matrix(matrix))
+          .unwrap();
 
         assert_eq!(
           via_spec, via_raw,
@@ -1044,7 +1074,7 @@ mod yuv_planar_parity {
 
         for full_range in [false, true] {
           for matrix in MATRICES {
-            let opts = yuv_opts(full_range, matrix);
+            let opts = yuv_opts(full_range);
             let src = $try_new(&y, &u, &v, W, H, W, cw as u32, cw as u32).unwrap();
 
             let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -1053,12 +1083,11 @@ mod yuv_planar_parity {
             let mut sw = MixedSinker::<$marker>::new(W as usize, H as usize)
               .with_rgb(&mut via_walker)
               .unwrap();
-            <$marker as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
-
+            <$marker as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
             let mut sd = MixedSinker::<$marker>::new(W as usize, H as usize)
               .with_rgb(&mut via_direct)
               .unwrap();
-            $walker(&src, full_range, matrix, &mut sd).unwrap();
+            $walker(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
 
             assert_eq!(
               via_walker, via_direct,
@@ -1128,7 +1157,7 @@ mod yuv_planar_parity {
 
         for full_range in [false, true] {
           for matrix in MATRICES {
-            let opts = yuv_opts(full_range, matrix);
+            let opts = yuv_opts(full_range);
             let src = $try_new(&y, &u, &v, W, H, W, cw as u32, cw as u32).unwrap();
 
             let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -1137,12 +1166,11 @@ mod yuv_planar_parity {
             let mut sw = MixedSinker::<$marker>::new(W as usize, H as usize)
               .with_rgb(&mut via_walker)
               .unwrap();
-            <$marker as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
-
+            <$marker as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
             let mut sd = MixedSinker::<$marker>::new(W as usize, H as usize)
               .with_rgb(&mut via_direct)
               .unwrap();
-            $walker_endian(&src, full_range, matrix, &mut sd).unwrap();
+            $walker_endian(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
 
             assert_eq!(
               via_walker, via_direct,
@@ -1209,7 +1237,7 @@ mod yuv_semi_planar_parity {
 
         for full_range in [false, true] {
           for matrix in MATRICES {
-            let opts = yuv_opts(full_range, matrix);
+            let opts = yuv_opts(full_range);
             let src = $try_new(&y, &uv, W, H, W, uv_row as u32).unwrap();
 
             let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -1218,12 +1246,11 @@ mod yuv_semi_planar_parity {
             let mut sw = MixedSinker::<$marker>::new(W as usize, H as usize)
               .with_rgb(&mut via_walker)
               .unwrap();
-            <$marker as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
-
+            <$marker as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
             let mut sd = MixedSinker::<$marker>::new(W as usize, H as usize)
               .with_rgb(&mut via_direct)
               .unwrap();
-            $walker(&src, full_range, matrix, &mut sd).unwrap();
+            $walker(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
 
             assert_eq!(
               via_walker, via_direct,
@@ -1281,7 +1308,7 @@ mod yuv_semi_planar_parity {
 
         for full_range in [false, true] {
           for matrix in MATRICES {
-            let opts = yuv_opts(full_range, matrix);
+            let opts = yuv_opts(full_range);
             let src = $try_new(&y, &uv, W, H, W, uv_row as u32).unwrap();
 
             let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -1290,12 +1317,11 @@ mod yuv_semi_planar_parity {
             let mut sw = MixedSinker::<$marker>::new(W as usize, H as usize)
               .with_rgb(&mut via_walker)
               .unwrap();
-            <$marker as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
-
+            <$marker as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
             let mut sd = MixedSinker::<$marker>::new(W as usize, H as usize)
               .with_rgb(&mut via_direct)
               .unwrap();
-            $walker_endian(&src, full_range, matrix, &mut sd).unwrap();
+            $walker_endian(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
 
             assert_eq!(
               via_walker, via_direct,
@@ -1346,7 +1372,7 @@ mod yuv_packed_parity {
 
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = yuv_opts(full_range, matrix);
+        let opts = yuv_opts(full_range);
         let src = Yuyv422Frame::try_new(&buf, W, H, W * 2).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -1355,12 +1381,11 @@ mod yuv_packed_parity {
         let mut sw = MixedSinker::<Yuyv422>::new(W as usize, H as usize)
           .with_rgb(&mut via_walker)
           .unwrap();
-        <Yuyv422 as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
-
+        <Yuyv422 as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
         let mut sd = MixedSinker::<Yuyv422>::new(W as usize, H as usize)
           .with_rgb(&mut via_direct)
           .unwrap();
-        yuyv422_to(&src, full_range, matrix, &mut sd).unwrap();
+        yuyv422_to(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
 
         assert_eq!(
           via_walker, via_direct,
@@ -1406,7 +1431,7 @@ mod y2xx_parity {
 
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = yuv_opts(full_range, matrix);
+        let opts = yuv_opts(full_range);
         let src = Y210LeFrame::try_new(&buf, W, H, W * 2).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -1415,12 +1440,11 @@ mod y2xx_parity {
         let mut sw = MixedSinker::<Y210>::new(W as usize, H as usize)
           .with_rgb(&mut via_walker)
           .unwrap();
-        <Y210 as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
-
+        <Y210 as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
         let mut sd = MixedSinker::<Y210>::new(W as usize, H as usize)
           .with_rgb(&mut via_direct)
           .unwrap();
-        y210_to(&src, full_range, matrix, &mut sd).unwrap();
+        y210_to(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
 
         assert_eq!(
           via_walker, via_direct,
@@ -1444,7 +1468,7 @@ mod y2xx_parity {
 
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = yuv_opts(full_range, matrix);
+        let opts = yuv_opts(full_range);
         let src = Y210BeFrame::try_new(&buf, W, H, W * 2).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -1453,12 +1477,11 @@ mod y2xx_parity {
         let mut sw = MixedSinker::<Y210<true>>::new(W as usize, H as usize)
           .with_rgb(&mut via_walker)
           .unwrap();
-        <Y210<true> as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
-
+        <Y210<true> as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
         let mut sd = MixedSinker::<Y210<true>>::new(W as usize, H as usize)
           .with_rgb(&mut via_direct)
           .unwrap();
-        y210_to_endian::<_, true>(&src, full_range, matrix, &mut sd).unwrap();
+        y210_to_endian::<_, true>(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
 
         assert_eq!(
           via_walker, via_direct,
@@ -1524,7 +1547,7 @@ mod yuv_444_packed_parity {
         let buf = ($ramp)(row_elems * H as usize);
         for full_range in [false, true] {
           for matrix in MATRICES {
-            let opts = yuv_opts(full_range, matrix);
+            let opts = yuv_opts(full_range);
             let src = $try_new(&buf, W, H, row_elems as u32).unwrap();
 
             let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -1533,12 +1556,11 @@ mod yuv_444_packed_parity {
             let mut sw = MixedSinker::<$marker>::new(W as usize, H as usize)
               .with_rgb(&mut via_walker)
               .unwrap();
-            <$marker as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
-
+            <$marker as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
             let mut sd = MixedSinker::<$marker>::new(W as usize, H as usize)
               .with_rgb(&mut via_direct)
               .unwrap();
-            $walker(&src, full_range, matrix, &mut sd).unwrap();
+            $walker(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
 
             assert_eq!(
               via_walker, via_direct,
@@ -1598,7 +1620,7 @@ mod yuv_444_packed_parity {
         let buf = ($ramp)(row_elems * H as usize);
         for full_range in [false, true] {
           for matrix in MATRICES {
-            let opts = yuv_opts(full_range, matrix);
+            let opts = yuv_opts(full_range);
             let src = $try_new(&buf, W, H, row_elems as u32).unwrap();
 
             let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -1607,12 +1629,11 @@ mod yuv_444_packed_parity {
             let mut sw = MixedSinker::<$marker>::new(W as usize, H as usize)
               .with_rgb(&mut via_walker)
               .unwrap();
-            <$marker as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
-
+            <$marker as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
             let mut sd = MixedSinker::<$marker>::new(W as usize, H as usize)
               .with_rgb(&mut via_direct)
               .unwrap();
-            $walker(&src, full_range, matrix, &mut sd).unwrap();
+            $walker(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
 
             assert_eq!(
               via_walker, via_direct,
@@ -1721,7 +1742,7 @@ mod v210_parity {
     let buf = ramp((STRIDE * H) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = yuv_opts(full_range, matrix);
+        let opts = yuv_opts(full_range);
         let src = V210LeFrame::try_new(&buf, W, H, STRIDE).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -1730,12 +1751,11 @@ mod v210_parity {
         let mut sw = MixedSinker::<V210>::new(W as usize, H as usize)
           .with_rgb(&mut via_walker)
           .unwrap();
-        <V210 as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
-
+        <V210 as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
         let mut sd = MixedSinker::<V210>::new(W as usize, H as usize)
           .with_rgb(&mut via_direct)
           .unwrap();
-        v210_to(&src, full_range, matrix, &mut sd).unwrap();
+        v210_to(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
 
         assert_eq!(
           via_walker, via_direct,
@@ -1756,7 +1776,7 @@ mod v210_parity {
     let buf = ramp((STRIDE * H) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = yuv_opts(full_range, matrix);
+        let opts = yuv_opts(full_range);
         let src = V210BeFrame::try_new(&buf, W, H, STRIDE).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -1765,12 +1785,11 @@ mod v210_parity {
         let mut sw = MixedSinker::<V210<true>>::new(W as usize, H as usize)
           .with_rgb(&mut via_walker)
           .unwrap();
-        <V210<true> as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
-
+        <V210<true> as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
         let mut sd = MixedSinker::<V210<true>>::new(W as usize, H as usize)
           .with_rgb(&mut via_direct)
           .unwrap();
-        v210_to_endian::<_, true>(&src, full_range, matrix, &mut sd).unwrap();
+        v210_to_endian::<_, true>(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
 
         assert_eq!(
           via_walker, via_direct,
@@ -1826,7 +1845,7 @@ mod yuva_parity {
 
         for full_range in [false, true] {
           for matrix in MATRICES {
-            let opts = yuv_opts(full_range, matrix);
+            let opts = yuv_opts(full_range);
             let src = $try_new(&y, &u, &v, &a, W, H, W, cw as u32, cw as u32, W).unwrap();
 
             let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -1835,12 +1854,11 @@ mod yuva_parity {
             let mut sw = MixedSinker::<$marker>::new(W as usize, H as usize)
               .with_rgb(&mut via_walker)
               .unwrap();
-            <$marker as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
-
+            <$marker as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
             let mut sd = MixedSinker::<$marker>::new(W as usize, H as usize)
               .with_rgb(&mut via_direct)
               .unwrap();
-            $walker(&src, full_range, matrix, &mut sd).unwrap();
+            $walker(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
 
             assert_eq!(
               via_walker, via_direct,
@@ -1900,7 +1918,7 @@ mod yuva_parity {
 
         for full_range in [false, true] {
           for matrix in MATRICES {
-            let opts = yuv_opts(full_range, matrix);
+            let opts = yuv_opts(full_range);
             let src = $try_new(&y, &u, &v, &a, W, H, W, cw as u32, cw as u32, W).unwrap();
 
             let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -1909,12 +1927,11 @@ mod yuva_parity {
             let mut sw = MixedSinker::<$marker>::new(W as usize, H as usize)
               .with_rgb(&mut via_walker)
               .unwrap();
-            <$marker as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
-
+            <$marker as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
             let mut sd = MixedSinker::<$marker>::new(W as usize, H as usize)
               .with_rgb(&mut via_direct)
               .unwrap();
-            $walker_endian(&src, full_range, matrix, &mut sd).unwrap();
+            $walker_endian(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
 
             assert_eq!(
               via_walker, via_direct,
@@ -1994,7 +2011,7 @@ mod rgb_parity {
     let buf = ramp8((W * H * 3) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = yuv_opts(full_range, matrix);
+        let opts = yuv_opts(full_range);
         let src = Rgb24Frame::try_new(&buf, W, H, W * 3).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -2003,12 +2020,11 @@ mod rgb_parity {
         let mut sw = MixedSinker::<Rgb24>::new(W as usize, H as usize)
           .with_rgb(&mut via_walker)
           .unwrap();
-        <Rgb24 as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
-
+        <Rgb24 as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
         let mut sd = MixedSinker::<Rgb24>::new(W as usize, H as usize)
           .with_rgb(&mut via_direct)
           .unwrap();
-        rgb24_to(&src, full_range, matrix, &mut sd).unwrap();
+        rgb24_to(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
 
         assert_eq!(
           via_walker, via_direct,
@@ -2030,7 +2046,7 @@ mod rgb_parity {
     let buf = ramp16((W * H * 3) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = yuv_opts(full_range, matrix);
+        let opts = yuv_opts(full_range);
         let src = Rgb48Frame::try_new(&buf, W, H, W * 3).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -2039,12 +2055,11 @@ mod rgb_parity {
         let mut sw = MixedSinker::<Rgb48>::new(W as usize, H as usize)
           .with_rgb(&mut via_walker)
           .unwrap();
-        <Rgb48 as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
-
+        <Rgb48 as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
         let mut sd = MixedSinker::<Rgb48>::new(W as usize, H as usize)
           .with_rgb(&mut via_direct)
           .unwrap();
-        rgb48_to(&src, full_range, matrix, &mut sd).unwrap();
+        rgb48_to(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
 
         assert_eq!(
           via_walker, via_direct,
@@ -2067,7 +2082,7 @@ mod rgb_parity {
     let buf = ramp16((W * H * 3) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = yuv_opts(full_range, matrix);
+        let opts = yuv_opts(full_range);
         let src = Rgb48BeFrame::try_new(&buf, W, H, W * 3).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -2076,12 +2091,11 @@ mod rgb_parity {
         let mut sw = MixedSinker::<Rgb48<true>>::new(W as usize, H as usize)
           .with_rgb(&mut via_walker)
           .unwrap();
-        <Rgb48<true> as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
-
+        <Rgb48<true> as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
         let mut sd = MixedSinker::<Rgb48<true>>::new(W as usize, H as usize)
           .with_rgb(&mut via_direct)
           .unwrap();
-        rgb48_to_endian::<_, true>(&src, full_range, matrix, &mut sd).unwrap();
+        rgb48_to_endian::<_, true>(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
 
         assert_eq!(
           via_walker, via_direct,
@@ -2104,7 +2118,7 @@ mod rgb_parity {
     let buf = ramp32((W * H * 3) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = yuv_opts(full_range, matrix);
+        let opts = yuv_opts(full_range);
         let src = Rgb96Frame::try_new(&buf, W, H, W * 3).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H) as usize];
@@ -2113,12 +2127,11 @@ mod rgb_parity {
         let mut sw = MixedSinker::<Rgb96>::new(W as usize, H as usize)
           .with_luma(&mut via_walker)
           .unwrap();
-        <Rgb96 as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
-
+        <Rgb96 as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
         let mut sd = MixedSinker::<Rgb96>::new(W as usize, H as usize)
           .with_luma(&mut via_direct)
           .unwrap();
-        rgb96_to(&src, full_range, matrix, &mut sd).unwrap();
+        rgb96_to(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
 
         assert_eq!(
           via_walker, via_direct,
@@ -2140,7 +2153,7 @@ mod rgb_parity {
     let buf = ramp32((W * H * 3) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = yuv_opts(full_range, matrix);
+        let opts = yuv_opts(full_range);
         let src = Rgb96BeFrame::try_new(&buf, W, H, W * 3).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H) as usize];
@@ -2149,12 +2162,11 @@ mod rgb_parity {
         let mut sw = MixedSinker::<Rgb96<true>>::new(W as usize, H as usize)
           .with_luma(&mut via_walker)
           .unwrap();
-        <Rgb96<true> as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
-
+        <Rgb96<true> as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
         let mut sd = MixedSinker::<Rgb96<true>>::new(W as usize, H as usize)
           .with_luma(&mut via_direct)
           .unwrap();
-        rgb96_to_endian::<_, true>(&src, full_range, matrix, &mut sd).unwrap();
+        rgb96_to_endian::<_, true>(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
 
         assert_eq!(
           via_walker, via_direct,
@@ -2209,7 +2221,7 @@ mod x2_packed_rgb_parity {
         let buf = ramp((W * 4 * H) as usize);
         for full_range in [false, true] {
           for matrix in MATRICES {
-            let opts = yuv_opts(full_range, matrix);
+            let opts = yuv_opts(full_range);
             let src = $try_new(&buf, W, H, W * 4).unwrap();
 
             let mut via_walker = std::vec![0u8; (W * H) as usize];
@@ -2218,12 +2230,11 @@ mod x2_packed_rgb_parity {
             let mut sw = MixedSinker::<$marker>::new(W as usize, H as usize)
               .with_luma(&mut via_walker)
               .unwrap();
-            <$marker as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
-
+            <$marker as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
             let mut sd = MixedSinker::<$marker>::new(W as usize, H as usize)
               .with_luma(&mut via_direct)
               .unwrap();
-            $walker(&src, full_range, matrix, &mut sd).unwrap();
+            $walker(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
 
             assert_eq!(
               via_walker, via_direct,
@@ -2297,7 +2308,7 @@ mod rgb_legacy_parity {
       .collect();
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = yuv_opts(full_range, matrix);
+        let opts = yuv_opts(full_range);
         let src = Rgb565Frame::try_new(&buf, W, H, W * 2).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -2306,12 +2317,11 @@ mod rgb_legacy_parity {
         let mut sw = MixedSinker::<Rgb565>::new(W as usize, H as usize)
           .with_rgb(&mut via_walker)
           .unwrap();
-        <Rgb565 as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
-
+        <Rgb565 as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
         let mut sd = MixedSinker::<Rgb565>::new(W as usize, H as usize)
           .with_rgb(&mut via_direct)
           .unwrap();
-        rgb565_to(&src, full_range, matrix, &mut sd).unwrap();
+        rgb565_to(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
 
         assert_eq!(
           via_walker, via_direct,
@@ -2334,7 +2344,7 @@ mod rgb_legacy_parity {
           (0..rb * H as usize).map(|i| ((i * 19 + 7) % 251) as u8).collect();
         for full_range in [false, true] {
           for matrix in MATRICES {
-            let opts = yuv_opts(full_range, matrix);
+            let opts = yuv_opts(full_range);
             let src = $Frame::try_new(&buf, W, H, rb as u32).unwrap();
 
             let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -2343,12 +2353,11 @@ mod rgb_legacy_parity {
             let mut sw = MixedSinker::<$Marker>::new(W as usize, H as usize)
               .with_rgb(&mut via_walker)
               .unwrap();
-            <$Marker as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
-
+            <$Marker as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
             let mut sd = MixedSinker::<$Marker>::new(W as usize, H as usize)
               .with_rgb(&mut via_direct)
               .unwrap();
-            $free(&src, full_range, matrix, &mut sd).unwrap();
+            $free(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
 
             assert_eq!(
               via_walker,
@@ -2431,7 +2440,7 @@ mod gray_parity {
     let y = ramp8((W * H) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = yuv_opts(full_range, matrix);
+        let opts = yuv_opts(full_range);
         let src = Gray8Frame::try_new(&y, W, H, W).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -2440,12 +2449,11 @@ mod gray_parity {
         let mut sw = MixedSinker::<Gray8>::new(W as usize, H as usize)
           .with_rgb(&mut via_walker)
           .unwrap();
-        <Gray8 as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
-
+        <Gray8 as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
         let mut sd = MixedSinker::<Gray8>::new(W as usize, H as usize)
           .with_rgb(&mut via_direct)
           .unwrap();
-        gray8_to(&src, full_range, matrix, &mut sd).unwrap();
+        gray8_to(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
 
         assert_eq!(
           via_walker, via_direct,
@@ -2469,7 +2477,7 @@ mod gray_parity {
     let packed = ramp8((W * H * 2) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = yuv_opts(full_range, matrix);
+        let opts = yuv_opts(full_range);
         let src = Ya8Frame::try_new(&packed, W, H, W * 2).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -2478,12 +2486,11 @@ mod gray_parity {
         let mut sw = MixedSinker::<Ya8>::new(W as usize, H as usize)
           .with_rgb(&mut via_walker)
           .unwrap();
-        <Ya8 as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
-
+        <Ya8 as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
         let mut sd = MixedSinker::<Ya8>::new(W as usize, H as usize)
           .with_rgb(&mut via_direct)
           .unwrap();
-        ya8_to(&src, full_range, matrix, &mut sd).unwrap();
+        ya8_to(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
 
         assert_eq!(
           via_walker, via_direct,
@@ -2509,7 +2516,7 @@ mod gray_parity {
     let y = ramp16((W * H) as usize, 10);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = yuv_opts(full_range, matrix);
+        let opts = yuv_opts(full_range);
         let src = Gray10LeFrame::try_new(&y, W, H, W).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -2518,12 +2525,11 @@ mod gray_parity {
         let mut sw = MixedSinker::<Gray10>::new(W as usize, H as usize)
           .with_rgb(&mut via_walker)
           .unwrap();
-        <Gray10 as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
-
+        <Gray10 as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
         let mut sd = MixedSinker::<Gray10>::new(W as usize, H as usize)
           .with_rgb(&mut via_direct)
           .unwrap();
-        gray10_to(&src, full_range, matrix, &mut sd).unwrap();
+        gray10_to(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
 
         assert_eq!(
           via_walker, via_direct,
@@ -2549,7 +2555,7 @@ mod gray_parity {
     let y = ramp16((W * H) as usize, 10);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = yuv_opts(full_range, matrix);
+        let opts = yuv_opts(full_range);
         let src = Gray10BeFrame::try_new(&y, W, H, W).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -2558,12 +2564,11 @@ mod gray_parity {
         let mut sw = MixedSinker::<Gray10<true>>::new(W as usize, H as usize)
           .with_rgb(&mut via_walker)
           .unwrap();
-        <Gray10<true> as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
-
+        <Gray10<true> as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
         let mut sd = MixedSinker::<Gray10<true>>::new(W as usize, H as usize)
           .with_rgb(&mut via_direct)
           .unwrap();
-        gray10_to_endian::<_, true>(&src, full_range, matrix, &mut sd).unwrap();
+        gray10_to_endian::<_, true>(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
 
         assert_eq!(
           via_walker, via_direct,
@@ -2588,7 +2593,7 @@ mod gray_parity {
     let y = ramp16((W * H) as usize, 16);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = yuv_opts(full_range, matrix);
+        let opts = yuv_opts(full_range);
         let src = Gray16LeFrame::try_new(&y, W, H, W).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -2597,12 +2602,11 @@ mod gray_parity {
         let mut sw = MixedSinker::<Gray16>::new(W as usize, H as usize)
           .with_rgb(&mut via_walker)
           .unwrap();
-        <Gray16 as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
-
+        <Gray16 as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
         let mut sd = MixedSinker::<Gray16>::new(W as usize, H as usize)
           .with_rgb(&mut via_direct)
           .unwrap();
-        gray16_to(&src, full_range, matrix, &mut sd).unwrap();
+        gray16_to(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
 
         assert_eq!(
           via_walker, via_direct,
@@ -2627,7 +2631,7 @@ mod gray_parity {
     let y = ramp16((W * H) as usize, 16);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = yuv_opts(full_range, matrix);
+        let opts = yuv_opts(full_range);
         let src = Gray16BeFrame::try_new(&y, W, H, W).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -2636,12 +2640,11 @@ mod gray_parity {
         let mut sw = MixedSinker::<Gray16<true>>::new(W as usize, H as usize)
           .with_rgb(&mut via_walker)
           .unwrap();
-        <Gray16<true> as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
-
+        <Gray16<true> as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
         let mut sd = MixedSinker::<Gray16<true>>::new(W as usize, H as usize)
           .with_rgb(&mut via_direct)
           .unwrap();
-        gray16_to_endian::<_, true>(&src, full_range, matrix, &mut sd).unwrap();
+        gray16_to_endian::<_, true>(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
 
         assert_eq!(
           via_walker, via_direct,
@@ -2666,7 +2669,7 @@ mod gray_parity {
     let y = ramp32((W * H) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = yuv_opts(full_range, matrix);
+        let opts = yuv_opts(full_range);
         let src = Gray32LeFrame::try_new(&y, W, H, W).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -2675,12 +2678,11 @@ mod gray_parity {
         let mut sw = MixedSinker::<Gray32>::new(W as usize, H as usize)
           .with_rgb(&mut via_walker)
           .unwrap();
-        <Gray32 as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
-
+        <Gray32 as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
         let mut sd = MixedSinker::<Gray32>::new(W as usize, H as usize)
           .with_rgb(&mut via_direct)
           .unwrap();
-        gray32_to(&src, full_range, matrix, &mut sd).unwrap();
+        gray32_to(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
 
         assert_eq!(
           via_walker, via_direct,
@@ -2705,7 +2707,7 @@ mod gray_parity {
     let y = ramp32((W * H) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = yuv_opts(full_range, matrix);
+        let opts = yuv_opts(full_range);
         let src = Gray32BeFrame::try_new(&y, W, H, W).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -2714,12 +2716,11 @@ mod gray_parity {
         let mut sw = MixedSinker::<Gray32<true>>::new(W as usize, H as usize)
           .with_rgb(&mut via_walker)
           .unwrap();
-        <Gray32<true> as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
-
+        <Gray32<true> as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
         let mut sd = MixedSinker::<Gray32<true>>::new(W as usize, H as usize)
           .with_rgb(&mut via_direct)
           .unwrap();
-        gray32_to_endian::<_, true>(&src, full_range, matrix, &mut sd).unwrap();
+        gray32_to_endian::<_, true>(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
 
         assert_eq!(
           via_walker, via_direct,
@@ -2790,7 +2791,7 @@ mod gbr_parity {
     let (g, b, r) = planes8();
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = yuv_opts(full_range, matrix);
+        let opts = yuv_opts(full_range);
         let src = GbrpFrame::try_new(&g, &b, &r, W, H, W, W, W).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -2799,12 +2800,11 @@ mod gbr_parity {
         let mut sw = MixedSinker::<Gbrp>::new(W as usize, H as usize)
           .with_rgb(&mut via_walker)
           .unwrap();
-        <Gbrp as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
-
+        <Gbrp as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
         let mut sd = MixedSinker::<Gbrp>::new(W as usize, H as usize)
           .with_rgb(&mut via_direct)
           .unwrap();
-        gbrp_to(&src, full_range, matrix, &mut sd).unwrap();
+        gbrp_to(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
 
         assert_eq!(
           via_walker, via_direct,
@@ -2830,7 +2830,7 @@ mod gbr_parity {
     let (g, b, r) = planes16(10);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = yuv_opts(full_range, matrix);
+        let opts = yuv_opts(full_range);
         let src = Gbrp10LeFrame::try_new(&g, &b, &r, W, H, W, W, W).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -2839,12 +2839,11 @@ mod gbr_parity {
         let mut sw = MixedSinker::<Gbrp10>::new(W as usize, H as usize)
           .with_rgb(&mut via_walker)
           .unwrap();
-        <Gbrp10 as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
-
+        <Gbrp10 as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
         let mut sd = MixedSinker::<Gbrp10>::new(W as usize, H as usize)
           .with_rgb(&mut via_direct)
           .unwrap();
-        gbrp10_to(&src, full_range, matrix, &mut sd).unwrap();
+        gbrp10_to(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
 
         assert_eq!(
           via_walker, via_direct,
@@ -2870,7 +2869,7 @@ mod gbr_parity {
     let (g, b, r) = planes16(10);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = yuv_opts(full_range, matrix);
+        let opts = yuv_opts(full_range);
         let src = Gbrp10BeFrame::try_new(&g, &b, &r, W, H, W, W, W).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -2879,12 +2878,11 @@ mod gbr_parity {
         let mut sw = MixedSinker::<Gbrp10<true>>::new(W as usize, H as usize)
           .with_rgb(&mut via_walker)
           .unwrap();
-        <Gbrp10<true> as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
-
+        <Gbrp10<true> as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
         let mut sd = MixedSinker::<Gbrp10<true>>::new(W as usize, H as usize)
           .with_rgb(&mut via_direct)
           .unwrap();
-        gbrp10_to_endian::<_, true>(&src, full_range, matrix, &mut sd).unwrap();
+        gbrp10_to_endian::<_, true>(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
 
         assert_eq!(
           via_walker, via_direct,
@@ -2935,7 +2933,7 @@ mod gbr_parity {
     let (g, b, r, a) = planes32();
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = yuv_opts(full_range, matrix);
+        let opts = yuv_opts(full_range);
         let src = Gbrap32LeFrame::try_new(&g, &b, &r, &a, W, H, W, W, W, W).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 4) as usize];
@@ -2944,12 +2942,11 @@ mod gbr_parity {
         let mut sw = MixedSinker::<Gbrap32>::new(W as usize, H as usize)
           .with_rgba(&mut via_walker)
           .unwrap();
-        <Gbrap32 as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
-
+        <Gbrap32 as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
         let mut sd = MixedSinker::<Gbrap32>::new(W as usize, H as usize)
           .with_rgba(&mut via_direct)
           .unwrap();
-        gbrap32_to(&src, full_range, matrix, &mut sd).unwrap();
+        gbrap32_to(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
 
         assert_eq!(
           via_walker, via_direct,
@@ -2974,7 +2971,7 @@ mod gbr_parity {
     let (g, b, r, a) = planes32();
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = yuv_opts(full_range, matrix);
+        let opts = yuv_opts(full_range);
         let src = Gbrap32BeFrame::try_new(&g, &b, &r, &a, W, H, W, W, W, W).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 4) as usize];
@@ -2983,12 +2980,11 @@ mod gbr_parity {
         let mut sw = MixedSinker::<Gbrap32<true>>::new(W as usize, H as usize)
           .with_rgba(&mut via_walker)
           .unwrap();
-        <Gbrap32<true> as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
-
+        <Gbrap32<true> as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
         let mut sd = MixedSinker::<Gbrap32<true>>::new(W as usize, H as usize)
           .with_rgba(&mut via_direct)
           .unwrap();
-        gbrap32_to_endian::<_, true>(&src, full_range, matrix, &mut sd).unwrap();
+        gbrap32_to_endian::<_, true>(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
 
         assert_eq!(
           via_walker, via_direct,
@@ -3018,7 +3014,7 @@ mod gbr_parity {
     let (g16, b16, r16) = planes16(10);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = yuv_opts(full_range, matrix);
+        let opts = yuv_opts(full_range);
 
         let src = GbrpFrame::try_new(&g8, &b8, &r8, W, H, W, W, W).unwrap();
         let mut vw = std::vec![0u8; (W * H) as usize];
@@ -3026,11 +3022,11 @@ mod gbr_parity {
         let mut sw = MixedSinker::<Gbrp>::new(W as usize, H as usize)
           .with_luma(&mut vw)
           .unwrap();
-        <Gbrp as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
+        <Gbrp as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
         let mut sd = MixedSinker::<Gbrp>::new(W as usize, H as usize)
           .with_luma(&mut vd)
           .unwrap();
-        gbrp_to(&src, full_range, matrix, &mut sd).unwrap();
+        gbrp_to(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
         assert_eq!(
           vw, vd,
           "gbrp luma parity (full_range={full_range}, matrix={matrix:?})"
@@ -3042,11 +3038,11 @@ mod gbr_parity {
         let mut sw = MixedSinker::<Gbrp10>::new(W as usize, H as usize)
           .with_luma(&mut vw)
           .unwrap();
-        <Gbrp10 as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
+        <Gbrp10 as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
         let mut sd = MixedSinker::<Gbrp10>::new(W as usize, H as usize)
           .with_luma(&mut vd)
           .unwrap();
-        gbrp10_to(&src, full_range, matrix, &mut sd).unwrap();
+        gbrp10_to(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
         assert_eq!(
           vw, vd,
           "gbrp10 LE luma parity (full_range={full_range}, matrix={matrix:?})"
@@ -3058,11 +3054,11 @@ mod gbr_parity {
         let mut sw = MixedSinker::<Gbrp10<true>>::new(W as usize, H as usize)
           .with_luma(&mut vw)
           .unwrap();
-        <Gbrp10<true> as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
+        <Gbrp10<true> as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
         let mut sd = MixedSinker::<Gbrp10<true>>::new(W as usize, H as usize)
           .with_luma(&mut vd)
           .unwrap();
-        gbrp10_to_endian::<_, true>(&src, full_range, matrix, &mut sd).unwrap();
+        gbrp10_to_endian::<_, true>(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
         assert_eq!(
           vw, vd,
           "gbrp10 BE luma parity (full_range={full_range}, matrix={matrix:?})"
@@ -3093,7 +3089,7 @@ mod gbr_parity {
     let (g, b, r) = (msb_align(&g, 10), msb_align(&b, 10), msb_align(&r, 10));
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = yuv_opts(full_range, matrix);
+        let opts = yuv_opts(full_range);
         let src = Gbrp10MsbLeFrame::new(&g, &b, &r, W, H, W, W, W);
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -3102,12 +3098,11 @@ mod gbr_parity {
         let mut sw = MixedSinker::<Gbrp10Msb>::new(W as usize, H as usize)
           .with_rgb(&mut via_walker)
           .unwrap();
-        <Gbrp10Msb as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
-
+        <Gbrp10Msb as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
         let mut sd = MixedSinker::<Gbrp10Msb>::new(W as usize, H as usize)
           .with_rgb(&mut via_direct)
           .unwrap();
-        gbrp10_msb_to(&src, full_range, matrix, &mut sd).unwrap();
+        gbrp10_msb_to(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
 
         assert_eq!(
           via_walker, via_direct,
@@ -3134,7 +3129,7 @@ mod gbr_parity {
     let (g, b, r) = (msb_align(&g, 12), msb_align(&b, 12), msb_align(&r, 12));
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = yuv_opts(full_range, matrix);
+        let opts = yuv_opts(full_range);
         let src = Gbrp12MsbBeFrame::new(&g, &b, &r, W, H, W, W, W);
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -3143,12 +3138,11 @@ mod gbr_parity {
         let mut sw = MixedSinker::<Gbrp12Msb<true>>::new(W as usize, H as usize)
           .with_rgb(&mut via_walker)
           .unwrap();
-        <Gbrp12Msb<true> as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
-
+        <Gbrp12Msb<true> as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
         let mut sd = MixedSinker::<Gbrp12Msb<true>>::new(W as usize, H as usize)
           .with_rgb(&mut via_direct)
           .unwrap();
-        gbrp12_msb_to_endian::<_, true>(&src, full_range, matrix, &mut sd).unwrap();
+        gbrp12_msb_to_endian::<_, true>(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
 
         assert_eq!(
           via_walker, via_direct,
@@ -3176,7 +3170,7 @@ mod gbr_parity {
     let (y, u, v) = (msb_align(&y, 10), msb_align(&u, 10), msb_align(&v, 10));
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = yuv_opts(full_range, matrix);
+        let opts = yuv_opts(full_range);
         let src = Yuv444p10MsbLeFrame::new(&y, &u, &v, W, H, W, W, W);
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -3185,12 +3179,11 @@ mod gbr_parity {
         let mut sw = MixedSinker::<Yuv444p10Msb>::new(W as usize, H as usize)
           .with_rgb(&mut via_walker)
           .unwrap();
-        <Yuv444p10Msb as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
-
+        <Yuv444p10Msb as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
         let mut sd = MixedSinker::<Yuv444p10Msb>::new(W as usize, H as usize)
           .with_rgb(&mut via_direct)
           .unwrap();
-        yuv444p10_msb_to(&src, full_range, matrix, &mut sd).unwrap();
+        yuv444p10_msb_to(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
 
         assert_eq!(
           via_walker, via_direct,
@@ -3218,7 +3211,7 @@ mod gbr_parity {
     let (y, u, v) = (msb_align(&y, 12), msb_align(&u, 12), msb_align(&v, 12));
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = yuv_opts(full_range, matrix);
+        let opts = yuv_opts(full_range);
         let src = Yuv444p12MsbBeFrame::new(&y, &u, &v, W, H, W, W, W);
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -3227,12 +3220,11 @@ mod gbr_parity {
         let mut sw = MixedSinker::<Yuv444p12Msb<true>>::new(W as usize, H as usize)
           .with_rgb(&mut via_walker)
           .unwrap();
-        <Yuv444p12Msb<true> as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
-
+        <Yuv444p12Msb<true> as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
         let mut sd = MixedSinker::<Yuv444p12Msb<true>>::new(W as usize, H as usize)
           .with_rgb(&mut via_direct)
           .unwrap();
-        yuv444p12_msb_to_endian::<_, true>(&src, full_range, matrix, &mut sd).unwrap();
+        yuv444p12_msb_to_endian::<_, true>(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
 
         assert_eq!(
           via_walker, via_direct,
@@ -3270,7 +3262,7 @@ mod gbr_parity {
     );
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = yuv_opts(full_range, matrix);
+        let opts = yuv_opts(full_range);
 
         let src = Gbrp10MsbLeFrame::new(&g10, &b10, &r10, W, H, W, W, W);
         let mut vw = std::vec![0u16; (W * H) as usize];
@@ -3278,11 +3270,11 @@ mod gbr_parity {
         let mut sw = MixedSinker::<Gbrp10Msb>::new(W as usize, H as usize)
           .with_luma_u16(&mut vw)
           .unwrap();
-        <Gbrp10Msb as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
+        <Gbrp10Msb as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
         let mut sd = MixedSinker::<Gbrp10Msb>::new(W as usize, H as usize)
           .with_luma_u16(&mut vd)
           .unwrap();
-        gbrp10_msb_to(&src, full_range, matrix, &mut sd).unwrap();
+        gbrp10_msb_to(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
         assert_eq!(
           vw, vd,
           "gbrp10msb LE luma parity (full_range={full_range}, matrix={matrix:?})"
@@ -3294,11 +3286,11 @@ mod gbr_parity {
         let mut sw = MixedSinker::<Gbrp12Msb<true>>::new(W as usize, H as usize)
           .with_luma_u16(&mut vw)
           .unwrap();
-        <Gbrp12Msb<true> as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
+        <Gbrp12Msb<true> as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
         let mut sd = MixedSinker::<Gbrp12Msb<true>>::new(W as usize, H as usize)
           .with_luma_u16(&mut vd)
           .unwrap();
-        gbrp12_msb_to_endian::<_, true>(&src, full_range, matrix, &mut sd).unwrap();
+        gbrp12_msb_to_endian::<_, true>(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
         assert_eq!(
           vw, vd,
           "gbrp12msb BE luma parity (full_range={full_range}, matrix={matrix:?})"
@@ -3363,7 +3355,7 @@ mod rgbf_parity {
     let buf = ramp_f16((W * H * 3) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = yuv_opts(full_range, matrix);
+        let opts = yuv_opts(full_range);
         let src = Rgbf16Frame::try_new(&buf, W, H, W * 3).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H) as usize];
@@ -3372,12 +3364,11 @@ mod rgbf_parity {
         let mut sw = MixedSinker::<Rgbf16>::new(W as usize, H as usize)
           .with_luma(&mut via_walker)
           .unwrap();
-        <Rgbf16 as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
-
+        <Rgbf16 as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
         let mut sd = MixedSinker::<Rgbf16>::new(W as usize, H as usize)
           .with_luma(&mut via_direct)
           .unwrap();
-        rgbf16_to(&src, full_range, matrix, &mut sd).unwrap();
+        rgbf16_to(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
 
         assert_eq!(
           via_walker, via_direct,
@@ -3399,7 +3390,7 @@ mod rgbf_parity {
     let buf = ramp_f16((W * H * 3) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = yuv_opts(full_range, matrix);
+        let opts = yuv_opts(full_range);
         let src = Rgbf16BeFrame::try_new(&buf, W, H, W * 3).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H) as usize];
@@ -3408,12 +3399,11 @@ mod rgbf_parity {
         let mut sw = MixedSinker::<Rgbf16<true>>::new(W as usize, H as usize)
           .with_luma(&mut via_walker)
           .unwrap();
-        <Rgbf16<true> as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
-
+        <Rgbf16<true> as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
         let mut sd = MixedSinker::<Rgbf16<true>>::new(W as usize, H as usize)
           .with_luma(&mut via_direct)
           .unwrap();
-        rgbf16_to_endian::<_, true>(&src, full_range, matrix, &mut sd).unwrap();
+        rgbf16_to_endian::<_, true>(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
 
         assert_eq!(
           via_walker, via_direct,
@@ -3434,7 +3424,7 @@ mod rgbf_parity {
     let buf = ramp_f32((W * H * 3) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = yuv_opts(full_range, matrix);
+        let opts = yuv_opts(full_range);
         let src = Rgbf32Frame::try_new(&buf, W, H, W * 3).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H) as usize];
@@ -3443,12 +3433,11 @@ mod rgbf_parity {
         let mut sw = MixedSinker::<Rgbf32>::new(W as usize, H as usize)
           .with_luma(&mut via_walker)
           .unwrap();
-        <Rgbf32 as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
-
+        <Rgbf32 as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
         let mut sd = MixedSinker::<Rgbf32>::new(W as usize, H as usize)
           .with_luma(&mut via_direct)
           .unwrap();
-        rgbf32_to(&src, full_range, matrix, &mut sd).unwrap();
+        rgbf32_to(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
 
         assert_eq!(
           via_walker, via_direct,
@@ -3470,7 +3459,7 @@ mod rgbf_parity {
     let buf = ramp_f32((W * H * 3) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = yuv_opts(full_range, matrix);
+        let opts = yuv_opts(full_range);
         let src = Rgbf32BeFrame::try_new(&buf, W, H, W * 3).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H) as usize];
@@ -3479,12 +3468,11 @@ mod rgbf_parity {
         let mut sw = MixedSinker::<Rgbf32<true>>::new(W as usize, H as usize)
           .with_luma(&mut via_walker)
           .unwrap();
-        <Rgbf32<true> as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
-
+        <Rgbf32<true> as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
         let mut sd = MixedSinker::<Rgbf32<true>>::new(W as usize, H as usize)
           .with_luma(&mut via_direct)
           .unwrap();
-        rgbf32_to_endian::<_, true>(&src, full_range, matrix, &mut sd).unwrap();
+        rgbf32_to_endian::<_, true>(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
 
         assert_eq!(
           via_walker, via_direct,
@@ -3506,7 +3494,7 @@ mod rgbf_parity {
     let buf = ramp_f32((W * H * 3) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = yuv_opts(full_range, matrix);
+        let opts = yuv_opts(full_range);
         let src = Rgbf32Frame::try_new(&buf, W, H, W * 3).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -3515,12 +3503,11 @@ mod rgbf_parity {
         let mut sw = MixedSinker::<Rgbf32>::new(W as usize, H as usize)
           .with_rgb(&mut via_walker)
           .unwrap();
-        <Rgbf32 as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
-
+        <Rgbf32 as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
         let mut sd = MixedSinker::<Rgbf32>::new(W as usize, H as usize)
           .with_rgb(&mut via_direct)
           .unwrap();
-        rgbf32_to(&src, full_range, matrix, &mut sd).unwrap();
+        rgbf32_to(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
 
         assert_eq!(
           via_walker, via_direct,
@@ -3570,18 +3557,18 @@ mod rgbaf_parity {
     let buf = ramp_f16((W * H * 4) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = yuv_opts(full_range, matrix);
+        let opts = yuv_opts(full_range);
         let src = Rgbaf16Frame::try_new(&buf, W, H, W * 4).unwrap();
         let mut via_walker = std::vec![0u8; (W * H) as usize];
         let mut via_direct = std::vec![0u8; (W * H) as usize];
         let mut sw = MixedSinker::<Rgbaf16>::new(W as usize, H as usize)
           .with_luma(&mut via_walker)
           .unwrap();
-        <Rgbaf16 as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
+        <Rgbaf16 as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
         let mut sd = MixedSinker::<Rgbaf16>::new(W as usize, H as usize)
           .with_luma(&mut via_direct)
           .unwrap();
-        rgbaf16_to(&src, full_range, matrix, &mut sd).unwrap();
+        rgbaf16_to(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
         assert_eq!(via_walker, via_direct, "rgbaf16 LE luma parity");
       }
     }
@@ -3596,18 +3583,18 @@ mod rgbaf_parity {
     let buf = ramp_f16((W * H * 4) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = yuv_opts(full_range, matrix);
+        let opts = yuv_opts(full_range);
         let src = Rgbaf16BeFrame::try_new(&buf, W, H, W * 4).unwrap();
         let mut via_walker = std::vec![0u8; (W * H) as usize];
         let mut via_direct = std::vec![0u8; (W * H) as usize];
         let mut sw = MixedSinker::<Rgbaf16<true>>::new(W as usize, H as usize)
           .with_luma(&mut via_walker)
           .unwrap();
-        <Rgbaf16<true> as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
+        <Rgbaf16<true> as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
         let mut sd = MixedSinker::<Rgbaf16<true>>::new(W as usize, H as usize)
           .with_luma(&mut via_direct)
           .unwrap();
-        rgbaf16_to_endian::<_, true>(&src, full_range, matrix, &mut sd).unwrap();
+        rgbaf16_to_endian::<_, true>(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
         assert_eq!(via_walker, via_direct, "rgbaf16 BE luma parity");
       }
     }
@@ -3622,18 +3609,18 @@ mod rgbaf_parity {
     let buf = ramp_f32((W * H * 4) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = yuv_opts(full_range, matrix);
+        let opts = yuv_opts(full_range);
         let src = Rgbaf32Frame::try_new(&buf, W, H, W * 4).unwrap();
         let mut via_walker = std::vec![0u8; (W * H) as usize];
         let mut via_direct = std::vec![0u8; (W * H) as usize];
         let mut sw = MixedSinker::<Rgbaf32>::new(W as usize, H as usize)
           .with_luma(&mut via_walker)
           .unwrap();
-        <Rgbaf32 as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
+        <Rgbaf32 as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
         let mut sd = MixedSinker::<Rgbaf32>::new(W as usize, H as usize)
           .with_luma(&mut via_direct)
           .unwrap();
-        rgbaf32_to(&src, full_range, matrix, &mut sd).unwrap();
+        rgbaf32_to(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
         assert_eq!(via_walker, via_direct, "rgbaf32 LE luma parity");
       }
     }
@@ -3648,18 +3635,18 @@ mod rgbaf_parity {
     let buf = ramp_f32((W * H * 4) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = yuv_opts(full_range, matrix);
+        let opts = yuv_opts(full_range);
         let src = Rgbaf32BeFrame::try_new(&buf, W, H, W * 4).unwrap();
         let mut via_walker = std::vec![0u8; (W * H) as usize];
         let mut via_direct = std::vec![0u8; (W * H) as usize];
         let mut sw = MixedSinker::<Rgbaf32<true>>::new(W as usize, H as usize)
           .with_luma(&mut via_walker)
           .unwrap();
-        <Rgbaf32<true> as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
+        <Rgbaf32<true> as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
         let mut sd = MixedSinker::<Rgbaf32<true>>::new(W as usize, H as usize)
           .with_luma(&mut via_direct)
           .unwrap();
-        rgbaf32_to_endian::<_, true>(&src, full_range, matrix, &mut sd).unwrap();
+        rgbaf32_to_endian::<_, true>(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
         assert_eq!(via_walker, via_direct, "rgbaf32 BE luma parity");
       }
     }
@@ -3685,7 +3672,7 @@ mod rgbaf_parity {
     let mut sd = MixedSinker::<Rgbaf32>::new(W as usize, H as usize)
       .with_rgba(&mut via_direct)
       .unwrap();
-    rgbaf32_to(&src, opts.full_range(), opts.matrix(), &mut sd).unwrap();
+    rgbaf32_to(&src, opts.full_range(), &mut sd).unwrap();
     assert_eq!(via_walker, via_direct, "rgbaf32 rgba parity");
   }
 }
@@ -3730,15 +3717,18 @@ mod grayf32_parity {
   /// consumes those fields, so byte parity can't see a dropped forward — this
   /// can. `Grayf32Sink<BE>` is endian-parameterised, so the probe blanket-impls
   /// it for every `BE`.
-  #[derive(Default)]
   struct Grayf32Probe {
     seen: std::vec::Vec<(bool, KernelMatrix)>,
+    matrix: KernelMatrix,
   }
   impl PixelSink for Grayf32Probe {
     type Input<'r> = Grayf32Row<'r>;
     type Error = core::convert::Infallible;
     fn begin_frame(&mut self, _w: u32, _h: u32) -> Result<(), Self::Error> {
       Ok(())
+    }
+    fn kernel_matrix(&self) -> KernelMatrix {
+      self.matrix
     }
     fn process(&mut self, row: Grayf32Row<'_>) -> Result<(), Self::Error> {
       self.seen.push((row.full_range(), row.matrix()));
@@ -3750,8 +3740,8 @@ mod grayf32_parity {
   /// Grayf32 → RGB clamps the f32 luma directly and discards `full_range` /
   /// `matrix` (carried on the row for sinks that observe them), so the RGB
   /// parity below can't prove the Walker forwards them. Instrument the sink and
-  /// assert every emitted row carries exactly the supplied `YuvOptions`, for
-  /// both the LE default and the BE marker.
+  /// assert every emitted row carries the walk's range and the sink's own
+  /// matrix, for both the LE default and the BE marker.
   #[test]
   #[cfg_attr(
     miri,
@@ -3761,29 +3751,35 @@ mod grayf32_parity {
     let y = ramp_f32((W * H) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = yuv_opts(full_range, matrix);
+        let opts = yuv_opts(full_range);
 
         let src = Grayf32Frame::try_new(&y, W, H, W).unwrap();
-        let mut le = Grayf32Probe::default();
+        let mut le = Grayf32Probe {
+          seen: std::vec::Vec::new(),
+          matrix,
+        };
         <Grayf32 as Walker<_>>::walk(&src, &opts, &mut le).unwrap();
         assert!(!le.seen.is_empty(), "grayf32 LE walked at least one row");
         for &(fr, m) in &le.seen {
           assert_eq!(
             (fr, m),
             (full_range, matrix),
-            "grayf32 LE forwards full_range/matrix into the row"
+            "grayf32 LE stamps the sink's matrix and the walk's range on the row"
           );
         }
 
         let src = Grayf32BeFrame::try_new(&y, W, H, W).unwrap();
-        let mut be = Grayf32Probe::default();
+        let mut be = Grayf32Probe {
+          seen: std::vec::Vec::new(),
+          matrix,
+        };
         <Grayf32<true> as Walker<_>>::walk(&src, &opts, &mut be).unwrap();
         assert!(!be.seen.is_empty(), "grayf32 BE walked at least one row");
         for &(fr, m) in &be.seen {
           assert_eq!(
             (fr, m),
             (full_range, matrix),
-            "grayf32 BE forwards full_range/matrix into the row"
+            "grayf32 BE stamps the sink's matrix and the walk's range on the row"
           );
         }
       }
@@ -3801,7 +3797,7 @@ mod grayf32_parity {
     let y = ramp_f32((W * H) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = yuv_opts(full_range, matrix);
+        let opts = yuv_opts(full_range);
         let src = Grayf32Frame::try_new(&y, W, H, W).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -3810,12 +3806,11 @@ mod grayf32_parity {
         let mut sw = MixedSinker::<Grayf32>::new(W as usize, H as usize)
           .with_rgb(&mut via_walker)
           .unwrap();
-        <Grayf32 as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
-
+        <Grayf32 as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
         let mut sd = MixedSinker::<Grayf32>::new(W as usize, H as usize)
           .with_rgb(&mut via_direct)
           .unwrap();
-        grayf32_to(&src, full_range, matrix, &mut sd).unwrap();
+        grayf32_to(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
 
         assert_eq!(
           via_walker, via_direct,
@@ -3837,7 +3832,7 @@ mod grayf32_parity {
     let y = ramp_f32((W * H) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = yuv_opts(full_range, matrix);
+        let opts = yuv_opts(full_range);
         let src = Grayf32BeFrame::try_new(&y, W, H, W).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -3846,12 +3841,11 @@ mod grayf32_parity {
         let mut sw = MixedSinker::<Grayf32<true>>::new(W as usize, H as usize)
           .with_rgb(&mut via_walker)
           .unwrap();
-        <Grayf32<true> as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
-
+        <Grayf32<true> as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
         let mut sd = MixedSinker::<Grayf32<true>>::new(W as usize, H as usize)
           .with_rgb(&mut via_direct)
           .unwrap();
-        grayf32_to_endian::<_, true>(&src, full_range, matrix, &mut sd).unwrap();
+        grayf32_to_endian::<_, true>(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
 
         assert_eq!(
           via_walker, via_direct,
@@ -3897,15 +3891,18 @@ mod grayf16_parity {
   /// An instrumented sink recording each row's forwarded `(full_range,
   /// matrix)`. `Grayf16Sink<BE>` is endian-parameterised, so the probe
   /// blanket-impls it for every `BE`.
-  #[derive(Default)]
   struct Grayf16Probe {
     seen: std::vec::Vec<(bool, KernelMatrix)>,
+    matrix: KernelMatrix,
   }
   impl PixelSink for Grayf16Probe {
     type Input<'r> = Grayf16Row<'r>;
     type Error = core::convert::Infallible;
     fn begin_frame(&mut self, _w: u32, _h: u32) -> Result<(), Self::Error> {
       Ok(())
+    }
+    fn kernel_matrix(&self) -> KernelMatrix {
+      self.matrix
     }
     fn process(&mut self, row: Grayf16Row<'_>) -> Result<(), Self::Error> {
       self.seen.push((row.full_range(), row.matrix()));
@@ -3923,29 +3920,35 @@ mod grayf16_parity {
     let y = ramp_f16((W * H) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = yuv_opts(full_range, matrix);
+        let opts = yuv_opts(full_range);
 
         let src = Grayf16Frame::try_new(&y, W, H, W).unwrap();
-        let mut le = Grayf16Probe::default();
+        let mut le = Grayf16Probe {
+          seen: std::vec::Vec::new(),
+          matrix,
+        };
         <Grayf16 as Walker<_>>::walk(&src, &opts, &mut le).unwrap();
         assert!(!le.seen.is_empty(), "grayf16 LE walked at least one row");
         for &(fr, m) in &le.seen {
           assert_eq!(
             (fr, m),
             (full_range, matrix),
-            "grayf16 LE forwards full_range/matrix into the row"
+            "grayf16 LE stamps the sink's matrix and the walk's range on the row"
           );
         }
 
         let src = Grayf16BeFrame::try_new(&y, W, H, W).unwrap();
-        let mut be = Grayf16Probe::default();
+        let mut be = Grayf16Probe {
+          seen: std::vec::Vec::new(),
+          matrix,
+        };
         <Grayf16<true> as Walker<_>>::walk(&src, &opts, &mut be).unwrap();
         assert!(!be.seen.is_empty(), "grayf16 BE walked at least one row");
         for &(fr, m) in &be.seen {
           assert_eq!(
             (fr, m),
             (full_range, matrix),
-            "grayf16 BE forwards full_range/matrix into the row"
+            "grayf16 BE stamps the sink's matrix and the walk's range on the row"
           );
         }
       }
@@ -3963,7 +3966,7 @@ mod grayf16_parity {
     let y = ramp_f16((W * H) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = yuv_opts(full_range, matrix);
+        let opts = yuv_opts(full_range);
         let src = Grayf16Frame::try_new(&y, W, H, W).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -3972,12 +3975,11 @@ mod grayf16_parity {
         let mut sw = MixedSinker::<Grayf16>::new(W as usize, H as usize)
           .with_rgb(&mut via_walker)
           .unwrap();
-        <Grayf16 as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
-
+        <Grayf16 as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
         let mut sd = MixedSinker::<Grayf16>::new(W as usize, H as usize)
           .with_rgb(&mut via_direct)
           .unwrap();
-        grayf16_to(&src, full_range, matrix, &mut sd).unwrap();
+        grayf16_to(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
 
         assert_eq!(
           via_walker, via_direct,
@@ -3998,7 +4000,7 @@ mod grayf16_parity {
     let y = ramp_f16((W * H) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = yuv_opts(full_range, matrix);
+        let opts = yuv_opts(full_range);
         let src = Grayf16BeFrame::try_new(&y, W, H, W).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 3) as usize];
@@ -4007,12 +4009,11 @@ mod grayf16_parity {
         let mut sw = MixedSinker::<Grayf16<true>>::new(W as usize, H as usize)
           .with_rgb(&mut via_walker)
           .unwrap();
-        <Grayf16<true> as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
-
+        <Grayf16<true> as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
         let mut sd = MixedSinker::<Grayf16<true>>::new(W as usize, H as usize)
           .with_rgb(&mut via_direct)
           .unwrap();
-        grayf16_to_endian::<_, true>(&src, full_range, matrix, &mut sd).unwrap();
+        grayf16_to_endian::<_, true>(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
 
         assert_eq!(
           via_walker, via_direct,
@@ -4254,7 +4255,7 @@ mod yaf_parity {
     let packed = ramp_f32_packed((W * H * 2) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = yuv_opts(full_range, matrix);
+        let opts = yuv_opts(full_range);
         let src = Yaf32Frame::try_new(&packed, W, H, W * 2).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 4) as usize];
@@ -4263,12 +4264,11 @@ mod yaf_parity {
         let mut sw = MixedSinker::<Yaf32>::new(W as usize, H as usize)
           .with_rgba(&mut via_walker)
           .unwrap();
-        <Yaf32 as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
-
+        <Yaf32 as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
         let mut sd = MixedSinker::<Yaf32>::new(W as usize, H as usize)
           .with_rgba(&mut via_direct)
           .unwrap();
-        yaf32_to(&src, full_range, matrix, &mut sd).unwrap();
+        yaf32_to(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
 
         assert_eq!(via_walker, via_direct, "yaf32 LE parity");
       }
@@ -4296,7 +4296,7 @@ mod yaf_parity {
     let mut sd = MixedSinker::<Yaf32<true>>::new(W as usize, H as usize)
       .with_rgba(&mut via_direct)
       .unwrap();
-    yaf32_to_endian::<_, true>(&src, opts.full_range(), opts.matrix(), &mut sd).unwrap();
+    yaf32_to_endian::<_, true>(&src, opts.full_range(), &mut sd).unwrap();
 
     assert_eq!(via_walker, via_direct, "yaf32 BE parity");
   }
@@ -4310,7 +4310,7 @@ mod yaf_parity {
     let packed = ramp_f16_packed((W * H * 2) as usize);
     for full_range in [false, true] {
       for matrix in MATRICES {
-        let opts = yuv_opts(full_range, matrix);
+        let opts = yuv_opts(full_range);
         let src = Yaf16Frame::try_new(&packed, W, H, W * 2).unwrap();
 
         let mut via_walker = std::vec![0u8; (W * H * 4) as usize];
@@ -4319,12 +4319,11 @@ mod yaf_parity {
         let mut sw = MixedSinker::<Yaf16>::new(W as usize, H as usize)
           .with_rgba(&mut via_walker)
           .unwrap();
-        <Yaf16 as Walker<_>>::walk(&src, &opts, &mut sw).unwrap();
-
+        <Yaf16 as Walker<_>>::walk(&src, &opts, sw.set_kernel_matrix(matrix)).unwrap();
         let mut sd = MixedSinker::<Yaf16>::new(W as usize, H as usize)
           .with_rgba(&mut via_direct)
           .unwrap();
-        yaf16_to(&src, full_range, matrix, &mut sd).unwrap();
+        yaf16_to(&src, full_range, sd.set_kernel_matrix(matrix)).unwrap();
 
         assert_eq!(via_walker, via_direct, "yaf16 LE parity");
       }
@@ -4352,7 +4351,7 @@ mod yaf_parity {
     let mut sd = MixedSinker::<Yaf16<true>>::new(W as usize, H as usize)
       .with_rgba(&mut via_direct)
       .unwrap();
-    yaf16_to_endian::<_, true>(&src, opts.full_range(), opts.matrix(), &mut sd).unwrap();
+    yaf16_to_endian::<_, true>(&src, opts.full_range(), &mut sd).unwrap();
 
     assert_eq!(via_walker, via_direct, "yaf16 BE parity");
   }
@@ -4434,8 +4433,10 @@ mod kernel_matrix_exchange {
         "{m:?} must be refused, not decoded as BT.709",
       );
       assert!(
-        YuvOptions::from_color_spec(&spec_of(m.clone())).is_err(),
-        "{m:?} must be refused at the walker door too",
+        crate::sinker::MixedSinker::<crate::source::Yuv420p>::new(2, 2)
+          .with_color_spec(&spec_of(m.clone()))
+          .is_err(),
+        "{m:?} must be refused at the sink door too",
       );
     }
   }

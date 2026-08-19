@@ -269,7 +269,7 @@ fn bayer8_resample_no_outputs_is_a_no_op() {
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   let row2 = &plane[SRC * 2..SRC * 3];
   sink
-    .process(BayerRow::new(
+    .process(BayerRow::for_tests(
       row2,
       row2,
       row2,
@@ -297,7 +297,7 @@ fn bayer8_resample_rejects_out_of_sequence_before_staging() {
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   let row2 = &plane[SRC * 2..SRC * 3];
   let err = sink
-    .process(BayerRow::new(
+    .process(BayerRow::for_tests(
       row2,
       row2,
       row2,
@@ -335,7 +335,7 @@ fn bayer8_resample_rejects_out_of_sequence_rows() {
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   let row1 = &plane[SRC..SRC * 2];
   let err = sink
-    .process(BayerRow::new(
+    .process(BayerRow::for_tests(
       row1,
       row1,
       row1,
@@ -385,7 +385,7 @@ fn bayer8_first_row_scratch_oom_leaves_stream_and_freeze_uncommitted_for_retry()
     crate::sinker::mixed::arm_source_rgb_scratch_failure();
     let row0 = &plane[0..SRC];
     let err = sink
-      .process(BayerRow::new(
+      .process(BayerRow::for_tests(
         row0,
         row0,
         row0,
@@ -416,7 +416,7 @@ fn bayer8_first_row_scratch_oom_leaves_stream_and_freeze_uncommitted_for_retry()
       let above = r.saturating_sub(1);
       let below = (r + 1).min(SRC - 1);
       sink
-        .process(BayerRow::new(
+        .process(BayerRow::for_tests(
           &plane[above * SRC..above * SRC + SRC],
           &plane[r * SRC..r * SRC + SRC],
           &plane[below * SRC..below * SRC + SRC],

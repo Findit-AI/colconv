@@ -150,7 +150,7 @@ pub(crate) const fn xyz_to_rgb_matrix(g: KernelGamut) -> [[f32; 3]; 3] {
     // No `_` arm: `KernelGamut` is a closed vocabulary, so this match is
     // exhaustiveness-checked and a gamut added upstream becomes a compile
     // error here rather than a silent DCI-P3 picture. A gamut this build does
-    // not name is refused earlier, at `Xyz12Options::for_target_gamut`.
+    // not name is refused earlier, at `MixedSinker::set_target_gamut`.
   }
 }
 

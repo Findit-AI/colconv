@@ -90,7 +90,7 @@ fn yuv411p_resample_rgb_matches_rgb24_of_converted_frame() {
     .unwrap()
     .with_rgb(&mut rgb_a)
     .unwrap();
-    yuv411p_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
+    yuv411p_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   }
 
   let mut full_rgb = vec![0u8; SRC_W * SRC_H * 3];
@@ -98,7 +98,7 @@ fn yuv411p_resample_rgb_matches_rgb24_of_converted_frame() {
     let mut sink = MixedSinker::<Yuv411p>::new(SRC_W, SRC_H)
       .with_rgb(&mut full_rgb)
       .unwrap();
-    yuv411p_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
+    yuv411p_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   }
   let rgb_src = Rgb24Frame::new(&full_rgb, SRC_W as u32, SRC_H as u32, (SRC_W * 3) as u32);
   let mut rgb_b = vec![0u8; OUT_W * OUT_H * 3];
@@ -111,7 +111,7 @@ fn yuv411p_resample_rgb_matches_rgb24_of_converted_frame() {
     .unwrap()
     .with_rgb(&mut rgb_b)
     .unwrap();
-    rgb24_to(&rgb_src, true, KernelMatrix::Bt601, &mut sink).unwrap();
+    rgb24_to(&rgb_src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   }
   assert_eq!(rgb_a, rgb_b, "rgb: row-stage must equal convert-then-bin");
 }
@@ -137,7 +137,7 @@ fn yuv411p_resample_luma_is_area_downscaled_y_plane() {
     .unwrap()
     .with_luma_u16(&mut luma_u16)
     .unwrap();
-    yuv411p_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
+    yuv411p_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   }
   let y_ref = block_mean_2x2(&yp);
   assert_eq!(luma, y_ref, "luma must be the area-downscaled Y plane");
@@ -172,7 +172,7 @@ fn yuv411p_resample_luma_comes_from_y_not_rgb_under_saturated_chroma() {
     .unwrap()
     .with_luma(&mut luma)
     .unwrap();
-    yuv411p_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
+    yuv411p_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   }
   assert!(
     luma.iter().all(|&b| b == 16),
@@ -194,7 +194,7 @@ fn yuv411p_identity_plan_matches_new_sink() {
     let mut sink = MixedSinker::<Yuv411p>::new(SRC_W, SRC_H)
       .with_rgb(&mut direct)
       .unwrap();
-    yuv411p_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
+    yuv411p_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   }
   let mut via_area = vec![0u8; SRC_W * SRC_H * 3];
   {
@@ -206,7 +206,7 @@ fn yuv411p_identity_plan_matches_new_sink() {
     .unwrap()
     .with_rgb(&mut via_area)
     .unwrap();
-    yuv411p_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
+    yuv411p_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   }
   assert_eq!(direct, via_area);
 }
@@ -240,15 +240,13 @@ fn yuv411p_resample_reuses_luma_stream_across_frames() {
     yuv411p_to(
       &yuv411p_frame(&y1, &up, &vp),
       true,
-      KernelMatrix::Bt601,
-      &mut sink,
+      sink.set_kernel_matrix(KernelMatrix::Bt601),
     )
     .unwrap();
     yuv411p_to(
       &yuv411p_frame(&y2, &up, &vp),
       true,
-      KernelMatrix::Bt601,
-      &mut sink,
+      sink.set_kernel_matrix(KernelMatrix::Bt601),
     )
     .unwrap();
   }
@@ -272,7 +270,7 @@ fn yuv411p_resample_no_outputs_is_a_no_op() {
   )
   .unwrap();
   // No outputs attached: a legal no-op, accepted without error.
-  yuv411p_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
+  yuv411p_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
 }
 
 #[test]
@@ -289,7 +287,7 @@ fn yuv411p_resample_rejects_out_of_sequence_rows() {
   .unwrap();
   sink.begin_frame(SRC_W as u32, SRC_H as u32).unwrap();
   // Feed row 2 first — the stream expects strict sequencing from 0.
-  let row2 = Yuv411pRow::new(
+  let row2 = Yuv411pRow::for_tests(
     &yp[SRC_W * 2..SRC_W * 3],
     &up[CW * 2..CW * 3],
     &vp[CW * 2..CW * 3],

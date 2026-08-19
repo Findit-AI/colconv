@@ -108,7 +108,7 @@ macro_rules! hibit_422_chroma_tests {
           .unwrap()
           .with_chroma_location(loc.clone())
           .with_simd(simd);
-        $walker(&src, false, KernelMatrix::Bt601, &mut sink).unwrap();
+        $walker(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
         rgb
       }
 
@@ -149,7 +149,7 @@ macro_rules! hibit_422_chroma_tests {
           .with_rgb(&mut rgb)
           .unwrap()
           .with_chroma_location(ChromaLocation::Left);
-        $walker(&src, false, KernelMatrix::Bt601, &mut sink).unwrap();
+        $walker(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
         let chroma_len = sink.chroma_full_u16.len();
         drop(sink);
         assert_eq!(chroma_len, 0, "co-sited path must not grow the u16 chroma scratch");
@@ -170,7 +170,7 @@ macro_rules! hibit_422_chroma_tests {
           .with_rgb(&mut rgb)
           .unwrap()
           .with_chroma_location(ChromaLocation::Center);
-        $walker(&src, false, KernelMatrix::Bt601, &mut sink).unwrap();
+        $walker(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
         let chroma_len = sink.chroma_full_u16.len();
         drop(sink);
         assert_eq!(
@@ -193,7 +193,7 @@ macro_rules! hibit_422_chroma_tests {
         let mut ref_sink = MixedSinker::<$Ref>::new(W as usize, H as usize)
           .with_rgb(&mut rgb_ref)
           .unwrap();
-        $ref_walker(&ref_src, false, KernelMatrix::Bt601, &mut ref_sink).unwrap();
+        $ref_walker(&ref_src, false, ref_sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
         assert_eq!(
           convert_rgb(ChromaLocation::Center, true),
           rgb_ref,
@@ -216,14 +216,14 @@ macro_rules! hibit_422_chroma_tests {
           .with_rgb_u16(&mut rgb16)
           .unwrap()
           .with_chroma_location(ChromaLocation::Center);
-        $walker(&src, false, KernelMatrix::Bt601, &mut sink).unwrap();
+        $walker(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
 
         let ref_src = $RefFrame::new(&yp, &u444, &v444, W, H, W, W, W);
         let mut rgb16_ref = std::vec![0u16; (W * H * 3) as usize];
         let mut ref_sink = MixedSinker::<$Ref>::new(W as usize, H as usize)
           .with_rgb_u16(&mut rgb16_ref)
           .unwrap();
-        $ref_walker(&ref_src, false, KernelMatrix::Bt601, &mut ref_sink).unwrap();
+        $ref_walker(&ref_src, false, ref_sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
 
         assert_eq!(
           rgb16, rgb16_ref,
@@ -248,14 +248,14 @@ macro_rules! hibit_422_chroma_tests {
             .with_rgba(&mut rgba)
             .unwrap()
             .with_chroma_location(ChromaLocation::Center);
-          $walker(&src, false, KernelMatrix::Bt601, &mut sink).unwrap();
+          $walker(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
 
           let ref_src = $RefFrame::new(&yp, &u444, &v444, W, H, W, W, W);
           let mut rgba_ref = std::vec![0u8; (W * H * 4) as usize];
           let mut ref_sink = MixedSinker::<$Ref>::new(W as usize, H as usize)
             .with_rgba(&mut rgba_ref)
             .unwrap();
-          $ref_walker(&ref_src, false, KernelMatrix::Bt601, &mut ref_sink).unwrap();
+          $ref_walker(&ref_src, false, ref_sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
           assert_eq!(rgba, rgba_ref, "centered RGBA must equal upsample-then-4:4:4");
         }
 
@@ -267,14 +267,14 @@ macro_rules! hibit_422_chroma_tests {
             .with_rgba_u16(&mut rgba16)
             .unwrap()
             .with_chroma_location(ChromaLocation::Center);
-          $walker(&src, false, KernelMatrix::Bt601, &mut sink).unwrap();
+          $walker(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
 
           let ref_src = $RefFrame::new(&yp, &u444, &v444, W, H, W, W, W);
           let mut rgba16_ref = std::vec![0u16; (W * H * 4) as usize];
           let mut ref_sink = MixedSinker::<$Ref>::new(W as usize, H as usize)
             .with_rgba_u16(&mut rgba16_ref)
             .unwrap();
-          $ref_walker(&ref_src, false, KernelMatrix::Bt601, &mut ref_sink).unwrap();
+          $ref_walker(&ref_src, false, ref_sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
           assert_eq!(
             rgba16, rgba16_ref,
             "centered RGBA(u16) must equal upsample-then-4:4:4"
@@ -293,7 +293,7 @@ macro_rules! hibit_422_chroma_tests {
             .with_hsv(&mut h, &mut s, &mut v)
             .unwrap()
             .with_chroma_location(ChromaLocation::Center);
-          $walker(&src, false, KernelMatrix::Bt601, &mut sink).unwrap();
+          $walker(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
 
           let ref_src = $RefFrame::new(&yp, &u444, &v444, W, H, W, W, W);
           let (mut hr, mut sr, mut vr) = (
@@ -304,7 +304,7 @@ macro_rules! hibit_422_chroma_tests {
           let mut ref_sink = MixedSinker::<$Ref>::new(W as usize, H as usize)
             .with_hsv(&mut hr, &mut sr, &mut vr)
             .unwrap();
-          $ref_walker(&ref_src, false, KernelMatrix::Bt601, &mut ref_sink).unwrap();
+          $ref_walker(&ref_src, false, ref_sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
           assert_eq!(
             (h, s, v),
             (hr, sr, vr),
@@ -376,7 +376,7 @@ macro_rules! hibit_422_chroma_tests {
             .with_rgb(&mut rgb)
             .unwrap()
             .with_chroma_location(ChromaLocation::Center);
-          $walker(&src, false, KernelMatrix::Bt601, &mut sink).unwrap();
+          $walker(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
           rgb
         };
         let up_dirty: Vec<u16> = up.iter().map(|&x| x | upper).collect();
@@ -411,7 +411,7 @@ macro_rules! hibit_422_chroma_tests {
             .with_rgb(&mut rgb)
             .unwrap()
             .with_chroma_location(ChromaLocation::Center);
-          $walker_be(&src, false, KernelMatrix::Bt601, &mut sink).unwrap();
+          $walker_be(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
           rgb
         };
         let up_dirty: Vec<u16> = up.iter().map(|&x| x | upper).collect();
@@ -449,7 +449,7 @@ macro_rules! hibit_422_chroma_tests {
           .with_chroma_location(ChromaLocation::Center);
 
         super::super::super::arm_chroma_full_alloc_failure();
-        let err = $walker(&src, false, KernelMatrix::Bt601, &mut sink).unwrap_err();
+        let err = $walker(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap_err();
         drop(sink);
 
         assert!(
@@ -505,8 +505,8 @@ macro_rules! hibit_422_chroma_tests {
           let mut sink = MixedSinker::<$Marker>::new(W as usize, H as usize)
             .with_rgb(&mut rgb)
             .unwrap()
-            .with_color_spec(&spec(loc));
-          $walker(&src, false, KernelMatrix::ChromaDerivedNcl, &mut sink).unwrap();
+            .with_color_spec(&spec(loc)).unwrap();
+          $walker(&src, false, sink.set_kernel_matrix(KernelMatrix::ChromaDerivedNcl)).unwrap();
           rgb
         };
         let decode_bt709 = |loc: ChromaLocation| -> Vec<u8> {
@@ -516,7 +516,7 @@ macro_rules! hibit_422_chroma_tests {
             .with_rgb(&mut rgb)
             .unwrap()
             .with_chroma_location(loc.clone());
-          $walker(&src, false, KernelMatrix::Bt709, &mut sink).unwrap();
+          $walker(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
           rgb
         };
 
@@ -562,7 +562,7 @@ macro_rules! hibit_422_chroma_tests {
           MixedSinker::<$Marker>::new(w, h).with_chroma_location(ChromaLocation::Center);
         // No outputs attached: the guard returns before `idx * w` (no overflow
         // panic) and before the centered preflight (no allocation).
-        let row = $Row::new(&y, &c, &c, idx, KernelMatrix::Bt601, false);
+        let row = $Row::for_tests(&y, &c, &c, idx, KernelMatrix::Bt601, false);
         crate::PixelSink::process(&mut sink, row).unwrap();
         let chroma_len = sink.chroma_full_u16.len();
         drop(sink);
@@ -602,12 +602,12 @@ macro_rules! hibit_422_chroma_tests {
             .with_chroma_location(loc1.clone())
             .with_simd(true);
           crate::PixelSink::begin_frame(&mut sink, W, H).unwrap();
-          let row0 = $Row::new(&yp[0..w], &up[0..cw], &vp[0..cw], 0, KernelMatrix::Bt601, false);
+          let row0 = $Row::for_tests(&yp[0..w], &up[0..cw], &vp[0..cw], 0, KernelMatrix::Bt601, false);
           crate::PixelSink::process(&mut sink, row0).unwrap();
           let scratch_len = sink.chroma_full_u16.len();
 
           sink.set_chroma_location(loc2.clone());
-          let row1 = $Row::new(
+          let row1 = $Row::for_tests(
             &yp[w..2 * w],
             &up[cw..2 * cw],
             &vp[cw..2 * cw],
@@ -628,7 +628,7 @@ macro_rules! hibit_422_chroma_tests {
 
           sink.set_chroma_location(loc1.clone());
           for r in 1..h {
-            let row = $Row::new(
+            let row = $Row::for_tests(
               &yp[r * w..(r + 1) * w],
               &up[r * cw..(r + 1) * cw],
               &vp[r * cw..(r + 1) * cw],

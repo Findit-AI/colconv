@@ -149,7 +149,7 @@ fn gbrap32_downscale_rgba_u16_is_exact_u32_area_mean_incl_alpha() {
     .unwrap()
     .with_luma_u16(&mut luma_u16)
     .unwrap();
-    crate::source::gbrap32_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+    crate::source::gbrap32_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   let mut oracle_rgba = vec![0u16; OUT * OUT * 4];
   for oy in 0..OUT {
@@ -189,7 +189,7 @@ fn gbrap32_identity_plan_matches_new_sink() {
     let mut sink = MixedSinker::<crate::source::Gbrap32>::new(SRC, SRC)
       .with_rgba_u16(&mut direct)
       .unwrap();
-    crate::source::gbrap32_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+    crate::source::gbrap32_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   let mut via_area = vec![0u16; SRC * SRC * 4];
   {
@@ -201,7 +201,7 @@ fn gbrap32_identity_plan_matches_new_sink() {
     .unwrap()
     .with_rgba_u16(&mut via_area)
     .unwrap();
-    crate::source::gbrap32_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+    crate::source::gbrap32_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   assert_eq!(direct, via_area);
 }
@@ -257,7 +257,7 @@ fn gbrap32_fr_false_area_rgba_u16_is_u32_domain_mean() {
     .unwrap()
     .with_rgba_u16(&mut out_le)
     .unwrap();
-    crate::source::gbrap32_to(&src, false, KernelMatrix::Bt709, &mut sink).unwrap();
+    crate::source::gbrap32_to(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   // BE arm
   let (gb, bb, rb, ab) = (as_be_u32(&g), as_be_u32(&b), as_be_u32(&r), as_be_u32(&a));
@@ -275,8 +275,12 @@ fn gbrap32_fr_false_area_rgba_u16_is_u32_domain_mean() {
     .unwrap()
     .with_rgba_u16(&mut out_be)
     .unwrap();
-    crate::source::gbrap32_to_endian::<_, true>(&src, false, KernelMatrix::Bt709, &mut sink)
-      .unwrap();
+    crate::source::gbrap32_to_endian::<_, true>(
+      &src,
+      false,
+      sink.set_kernel_matrix(KernelMatrix::Bt709),
+    )
+    .unwrap();
   }
   assert_eq!(
     out_le, expected,
@@ -343,8 +347,12 @@ fn assert_gbrap32_4ch_filter(g: &[u32], b: &[u32], r: &[u32], a: &[u32], full_ra
         )
         .unwrap();
       let mut sink = attach!(sink);
-      crate::source::gbrap32_to_endian::<_, true>(&src, full_range, KernelMatrix::Bt709, &mut sink)
-        .unwrap();
+      crate::source::gbrap32_to_endian::<_, true>(
+        &src,
+        full_range,
+        sink.set_kernel_matrix(KernelMatrix::Bt709),
+      )
+      .unwrap();
     } else {
       let (gl, bl, rl, al) = (as_le_u32(g), as_le_u32(b), as_le_u32(r), as_le_u32(a));
       let src = crate::frame::Gbrap32LeFrame::try_new(
@@ -359,7 +367,12 @@ fn assert_gbrap32_4ch_filter(g: &[u32], b: &[u32], r: &[u32], a: &[u32], full_ra
         )
         .unwrap();
       let mut sink = attach!(sink);
-      crate::source::gbrap32_to(&src, full_range, KernelMatrix::Bt709, &mut sink).unwrap();
+      crate::source::gbrap32_to(
+        &src,
+        full_range,
+        sink.set_kernel_matrix(KernelMatrix::Bt709),
+      )
+      .unwrap();
     }
     let tag = if be { "BE" } else { "LE" };
     assert_eq!(
@@ -445,7 +458,7 @@ fn gbrap32_fr_true_area_rgba_u16_is_u32_domain_mean() {
     .unwrap()
     .with_rgba_u16(&mut out_le)
     .unwrap();
-    crate::source::gbrap32_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+    crate::source::gbrap32_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   let (gb, bb, rb, ab) = (as_be_u32(&g), as_be_u32(&b), as_be_u32(&r), as_be_u32(&a));
   let mut out_be = vec![0u16; FRO * FRO * 4];
@@ -462,8 +475,12 @@ fn gbrap32_fr_true_area_rgba_u16_is_u32_domain_mean() {
     .unwrap()
     .with_rgba_u16(&mut out_be)
     .unwrap();
-    crate::source::gbrap32_to_endian::<_, true>(&src, true, KernelMatrix::Bt709, &mut sink)
-      .unwrap();
+    crate::source::gbrap32_to_endian::<_, true>(
+      &src,
+      true,
+      sink.set_kernel_matrix(KernelMatrix::Bt709),
+    )
+    .unwrap();
   }
   assert_eq!(out_le, expected, "Gbrap32 FR=true area rgba_u16 LE (0-ULP)");
   assert_eq!(out_be, expected, "Gbrap32 FR=true area rgba_u16 BE (0-ULP)");
@@ -596,7 +613,7 @@ fn gbrap32_premult_area_matches_u32_premult_oracle() {
       .unwrap()
       .with_hsv(&mut ref_h, &mut ref_s, &mut ref_v)
       .unwrap();
-    rgb48_to(&binned, true, KernelMatrix::Bt709, &mut sink).unwrap();
+    rgb48_to(&binned, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
 
   for be in [false, true] {
@@ -633,8 +650,12 @@ fn gbrap32_premult_area_matches_u32_premult_oracle() {
       .unwrap()
       .with_hsv(&mut h, &mut s_, &mut v_)
       .unwrap();
-      crate::source::gbrap32_to_endian::<_, true>(&src, true, KernelMatrix::Bt709, &mut sink)
-        .unwrap();
+      crate::source::gbrap32_to_endian::<_, true>(
+        &src,
+        true,
+        sink.set_kernel_matrix(KernelMatrix::Bt709),
+      )
+      .unwrap();
     } else {
       let (gl, bl, rl, al) = (as_le_u32(&g), as_le_u32(&b), as_le_u32(&r), as_le_u32(&a));
       let src = crate::frame::Gbrap32LeFrame::try_new(
@@ -660,7 +681,7 @@ fn gbrap32_premult_area_matches_u32_premult_oracle() {
       .unwrap()
       .with_hsv(&mut h, &mut s_, &mut v_)
       .unwrap();
-      crate::source::gbrap32_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+      crate::source::gbrap32_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
     }
     let tag = if be { "BE" } else { "LE" };
     assert_eq!(rgba_u16, oracle, "Gbrap32 premult rgba_u16 {tag}");
@@ -737,7 +758,12 @@ fn rgb48_rgb_luma_hsv(rgb_u16: &[u16], n: usize, full_range: bool) -> RgbLumaHsv
       .unwrap()
       .with_hsv(&mut h, &mut s, &mut v)
       .unwrap();
-    rgb48_to(&src, full_range, KernelMatrix::Bt709, &mut sink).unwrap();
+    rgb48_to(
+      &src,
+      full_range,
+      sink.set_kernel_matrix(KernelMatrix::Bt709),
+    )
+    .unwrap();
   }
   (rgb, luma, h, s, v)
 }
@@ -767,7 +793,12 @@ fn gbrap32_native_luma_u16(rgb_u16: &[u16], n: usize, full_range: bool) -> Vec<u
     let mut sink = MixedSinker::<crate::source::Gbrap32>::new(n, n)
       .with_luma_u16(&mut luma_u16)
       .unwrap();
-    crate::source::gbrap32_to(&src, full_range, KernelMatrix::Bt709, &mut sink).unwrap();
+    crate::source::gbrap32_to(
+      &src,
+      full_range,
+      sink.set_kernel_matrix(KernelMatrix::Bt709),
+    )
+    .unwrap();
   }
   luma_u16
 }
@@ -868,8 +899,12 @@ fn run_gbrap32_drop_route(
           )
           .unwrap();
         let mut sink = attach!(sink);
-        crate::source::gbrap32_to_endian::<_, true>(&src, true, KernelMatrix::Bt709, &mut sink)
-          .unwrap();
+        crate::source::gbrap32_to_endian::<_, true>(
+          &src,
+          true,
+          sink.set_kernel_matrix(KernelMatrix::Bt709),
+        )
+        .unwrap();
       } else {
         let sink = MixedSinker::<crate::source::Gbrap32<true>, AreaResampler>::with_resampler(
           FRP,
@@ -878,8 +913,12 @@ fn run_gbrap32_drop_route(
         )
         .unwrap();
         let mut sink = attach!(sink);
-        crate::source::gbrap32_to_endian::<_, true>(&src, true, KernelMatrix::Bt709, &mut sink)
-          .unwrap();
+        crate::source::gbrap32_to_endian::<_, true>(
+          &src,
+          true,
+          sink.set_kernel_matrix(KernelMatrix::Bt709),
+        )
+        .unwrap();
       }
     } else {
       let (gl, bl, rl, al) = (as_le_u32(g), as_le_u32(b), as_le_u32(r), as_le_u32(a));
@@ -896,7 +935,7 @@ fn run_gbrap32_drop_route(
           )
           .unwrap();
         let mut sink = attach!(sink);
-        crate::source::gbrap32_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+        crate::source::gbrap32_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
       } else {
         let sink = MixedSinker::<crate::source::Gbrap32, AreaResampler>::with_resampler(
           FRP,
@@ -905,7 +944,7 @@ fn run_gbrap32_drop_route(
         )
         .unwrap();
         let mut sink = attach!(sink);
-        crate::source::gbrap32_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+        crate::source::gbrap32_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
       }
     }
     let tag = if be { "BE" } else { "LE" };
@@ -950,7 +989,8 @@ fn gbrap32_premult_filter_rejects() {
     .with_alpha_mode(AlphaMode::Premultiplied)
     .with_rgba_u16(&mut rgba_u16)
     .unwrap();
-  let err = crate::source::gbrap32_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap_err();
+  let err =
+    crate::source::gbrap32_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap_err();
   assert!(
     matches!(
       err,

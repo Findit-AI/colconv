@@ -264,7 +264,7 @@ fn yuv420p_scene_referred_equals_independent_unclamped_oracle() {
         .with_linear_mode(LinearMode::SceneReferred)
         .with_rgb(&mut rgb)
         .unwrap();
-    yuv420p_to(&src, true, matrix, &mut sink).unwrap();
+    yuv420p_to(&src, true, sink.set_kernel_matrix(matrix)).unwrap();
   }
   assert!(
     max_abs_diff(&rgb, &oracle) <= 1,
@@ -300,7 +300,7 @@ fn yuv422p_scene_referred_equals_independent_unclamped_oracle() {
         .with_linear_mode(LinearMode::SceneReferred)
         .with_rgb(&mut rgb)
         .unwrap();
-    yuv422p_to(&src, true, matrix, &mut sink).unwrap();
+    yuv422p_to(&src, true, sink.set_kernel_matrix(matrix)).unwrap();
   }
   assert!(
     max_abs_diff(&rgb, &oracle) <= 1,
@@ -335,7 +335,7 @@ fn yuv444p_scene_referred_equals_independent_unclamped_oracle() {
         .with_linear_mode(LinearMode::SceneReferred)
         .with_rgb(&mut rgb)
         .unwrap();
-    yuv444p_to(&src, true, matrix, &mut sink).unwrap();
+    yuv444p_to(&src, true, sink.set_kernel_matrix(matrix)).unwrap();
   }
   assert!(
     max_abs_diff(&rgb, &oracle) <= 1,
@@ -371,7 +371,7 @@ fn yuv440p_scene_referred_equals_independent_unclamped_oracle() {
         .with_linear_mode(LinearMode::SceneReferred)
         .with_rgb(&mut rgb)
         .unwrap();
-    yuv440p_to(&src, true, matrix, &mut sink).unwrap();
+    yuv440p_to(&src, true, sink.set_kernel_matrix(matrix)).unwrap();
   }
   assert!(
     max_abs_diff(&rgb, &oracle) <= 1,
@@ -400,7 +400,7 @@ fn run_420_mode(y: &[u8], u: &[u8], v: &[u8], matrix: KernelMatrix, mode: Linear
         .with_native(false)
         .with_rgb(&mut rgb)
         .unwrap();
-    yuv420p_to(&src, true, matrix, &mut sink).unwrap();
+    yuv420p_to(&src, true, sink.set_kernel_matrix(matrix)).unwrap();
   }
   rgb
 }
@@ -531,7 +531,7 @@ fn display_referred_default_is_byte_identical_to_explicit() {
           base
         };
         let mut sink = base.with_rgba(&mut rgba).unwrap();
-        yuv420p_to(&src, true, matrix, &mut sink).unwrap();
+        yuv420p_to(&src, true, sink.set_kernel_matrix(matrix)).unwrap();
       }
       rgba
     };
@@ -566,7 +566,7 @@ fn display_referred_default_is_byte_identical_to_explicit() {
           base
         };
         let mut sink = base.with_rgb(&mut rgb).unwrap();
-        yuv444p_to(&src, true, matrix, &mut sink).unwrap();
+        yuv444p_to(&src, true, sink.set_kernel_matrix(matrix)).unwrap();
       }
       rgb
     };
@@ -629,7 +629,14 @@ fn scene_mode_mid_frame_transfer_change_is_rejected() {
     let ur = &u[0..cw];
     let vr = &v[0..cw];
     sink
-      .process(Yuv420pRow::new(yr, ur, vr, 0, KernelMatrix::Bt709, true))
+      .process(Yuv420pRow::for_tests(
+        yr,
+        ur,
+        vr,
+        0,
+        KernelMatrix::Bt709,
+        true,
+      ))
       .unwrap();
     // Row 1 with a different transfer override → rejected.
     sink.set_transfer_function(TransferFunction::Bt1886);
@@ -637,7 +644,14 @@ fn scene_mode_mid_frame_transfer_change_is_rejected() {
     let ur = &u[cw..2 * cw];
     let vr = &v[cw..2 * cw];
     let err = sink
-      .process(Yuv420pRow::new(yr, ur, vr, 1, KernelMatrix::Bt709, true))
+      .process(Yuv420pRow::for_tests(
+        yr,
+        ur,
+        vr,
+        1,
+        KernelMatrix::Bt709,
+        true,
+      ))
       .unwrap_err();
     assert!(
       matches!(err, MixedSinkerError::TransferFunctionChanged(_)),
@@ -647,7 +661,14 @@ fn scene_mode_mid_frame_transfer_change_is_rejected() {
     // rejected row left the frame unpoisoned).
     sink.set_transfer_function(TransferFunction::Srgb);
     sink
-      .process(Yuv420pRow::new(yr, ur, vr, 1, KernelMatrix::Bt709, true))
+      .process(Yuv420pRow::for_tests(
+        yr,
+        ur,
+        vr,
+        1,
+        KernelMatrix::Bt709,
+        true,
+      ))
       .unwrap();
   }
 }
@@ -677,7 +698,14 @@ fn scene_mode_mid_frame_domain_change_is_rejected() {
     let ur = &u[0..cw];
     let vr = &v[0..cw];
     sink
-      .process(Yuv420pRow::new(yr, ur, vr, 0, KernelMatrix::Bt709, true))
+      .process(Yuv420pRow::for_tests(
+        yr,
+        ur,
+        vr,
+        0,
+        KernelMatrix::Bt709,
+        true,
+      ))
       .unwrap();
     // Flip the domain to Encoded mid-frame → rejected.
     sink.set_averaging_domain(AveragingDomain::Encoded);
@@ -685,7 +713,14 @@ fn scene_mode_mid_frame_domain_change_is_rejected() {
     let ur = &u[cw..2 * cw];
     let vr = &v[cw..2 * cw];
     let err = sink
-      .process(Yuv420pRow::new(yr, ur, vr, 1, KernelMatrix::Bt709, true))
+      .process(Yuv420pRow::for_tests(
+        yr,
+        ur,
+        vr,
+        1,
+        KernelMatrix::Bt709,
+        true,
+      ))
       .unwrap_err();
     assert!(
       matches!(err, MixedSinkerError::AveragingDomainChanged(_)),
@@ -746,7 +781,14 @@ fn scene_referred_mid_frame_mode_change_is_rejected() {
       // Row 0 freezes the linear mode (`frozen`) on the lazily-created frame.
       let (yr, ur, vr) = row(0);
       sink
-        .process(Yuv420pRow::new(yr, ur, vr, 0, KernelMatrix::Bt709, true))
+        .process(Yuv420pRow::for_tests(
+          yr,
+          ur,
+          vr,
+          0,
+          KernelMatrix::Bt709,
+          true,
+        ))
         .unwrap();
 
       // Flip the mode mid-frame, then feed row 1 — the freeze guards the mode
@@ -756,7 +798,14 @@ fn scene_referred_mid_frame_mode_change_is_rejected() {
       sink.set_linear_mode(flipped);
       let (yr, ur, vr) = row(1);
       let err = sink
-        .process(Yuv420pRow::new(yr, ur, vr, 1, KernelMatrix::Bt709, true))
+        .process(Yuv420pRow::for_tests(
+          yr,
+          ur,
+          vr,
+          1,
+          KernelMatrix::Bt709,
+          true,
+        ))
         .unwrap_err();
       assert!(
         matches!(err, MixedSinkerError::LinearModeChanged(_)),
@@ -771,7 +820,14 @@ fn scene_referred_mid_frame_mode_change_is_rejected() {
       for r in 1..SRC {
         let (yr, ur, vr) = row(r);
         sink
-          .process(Yuv420pRow::new(yr, ur, vr, r, KernelMatrix::Bt709, true))
+          .process(Yuv420pRow::for_tests(
+            yr,
+            ur,
+            vr,
+            r,
+            KernelMatrix::Bt709,
+            true,
+          ))
           .unwrap();
       }
     }
@@ -819,7 +875,14 @@ fn scene_mode_final_row_alloc_failure_leaves_frame_retryable() {
       let ur = &u[cr * cw..(cr + 1) * cw];
       let vr = &v[cr * cw..(cr + 1) * cw];
       sink
-        .process(Yuv420pRow::new(yr, ur, vr, r, KernelMatrix::Bt709, true))
+        .process(Yuv420pRow::for_tests(
+          yr,
+          ur,
+          vr,
+          r,
+          KernelMatrix::Bt709,
+          true,
+        ))
         .unwrap();
     }
     // Arm the final-row tail allocation failpoint.
@@ -830,7 +893,14 @@ fn scene_mode_final_row_alloc_failure_leaves_frame_retryable() {
     let ur = &u[cr * cw..(cr + 1) * cw];
     let vr = &v[cr * cw..(cr + 1) * cw];
     let err = sink
-      .process(Yuv420pRow::new(yr, ur, vr, r, KernelMatrix::Bt709, true))
+      .process(Yuv420pRow::for_tests(
+        yr,
+        ur,
+        vr,
+        r,
+        KernelMatrix::Bt709,
+        true,
+      ))
       .unwrap_err();
     assert!(
       matches!(
@@ -842,7 +912,14 @@ fn scene_mode_final_row_alloc_failure_leaves_frame_retryable() {
     // The failpoint is one-shot; retry the SAME final row → succeeds, frame
     // not poisoned.
     sink
-      .process(Yuv420pRow::new(yr, ur, vr, r, KernelMatrix::Bt709, true))
+      .process(Yuv420pRow::for_tests(
+        yr,
+        ur,
+        vr,
+        r,
+        KernelMatrix::Bt709,
+        true,
+      ))
       .unwrap();
   }
   assert!(
@@ -883,7 +960,7 @@ fn scene_mode_rejects_filter_plan() {
     .with_linear_mode(LinearMode::SceneReferred)
     .with_rgb(&mut rgb)
     .unwrap();
-    let err = yuv420p_to(&src, true, matrix, &mut sink).unwrap_err();
+    let err = yuv420p_to(&src, true, sink.set_kernel_matrix(matrix)).unwrap_err();
     assert!(
       matches!(
         err,

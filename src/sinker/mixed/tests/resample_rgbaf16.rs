@@ -68,7 +68,7 @@ macro_rules! assert_refeed {
         .unwrap()
         .with_hsv(&mut hh, &mut ss, &mut vv)
         .unwrap();
-      rgbaf16_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+      rgbaf16_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
     }
 
     let binned_wire = as_le(&rgba_f16);
@@ -96,7 +96,7 @@ macro_rules! assert_refeed {
         .unwrap()
         .with_hsv(&mut ref_h, &mut ref_s, &mut ref_v)
         .unwrap();
-      rgbaf16_to(&binned, true, KernelMatrix::Bt709, &mut sink).unwrap();
+      rgbaf16_to(&binned, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
     }
     assert_eq!(rgb, ref_rgb, "{} rgb", $ctx);
     assert_eq!(rgba, ref_rgba, "{} rgba", $ctx);
@@ -165,7 +165,7 @@ fn rgbaf16_identity_plan_matches_new_sink() {
     let mut sink = MixedSinker::<Rgbaf16>::new(8, 8)
       .with_rgba_f16(&mut direct)
       .unwrap();
-    rgbaf16_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+    rgbaf16_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   let mut via_area = vec![half::f16::ZERO; 8 * 8 * 4];
   {
@@ -174,7 +174,7 @@ fn rgbaf16_identity_plan_matches_new_sink() {
         .unwrap()
         .with_rgba_f16(&mut via_area)
         .unwrap();
-    rgbaf16_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+    rgbaf16_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   assert_eq!(direct, via_area);
 }

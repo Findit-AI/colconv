@@ -96,7 +96,14 @@ fn bench(c: &mut Criterion) {
         .unwrap()
         .with_hsv(&mut h, &mut s, &mut vv)
         .unwrap();
-        yuv420p_to(&src, false, KernelMatrix::Bt709, &mut sink).unwrap();
+        yuv420p_to(
+          &src,
+          false,
+          sink
+            .set_color_spec(&pixon::ColorSpec::of_matrix(KernelMatrix::Bt709))
+            .unwrap(),
+        )
+        .unwrap();
         black_box(&rgb);
       });
     });
@@ -130,7 +137,14 @@ fn bench(c: &mut Criterion) {
         .unwrap()
         .with_hsv(&mut h, &mut s, &mut vv)
         .unwrap();
-        nv12_to(&src, false, KernelMatrix::Bt709, &mut sink).unwrap();
+        nv12_to(
+          &src,
+          false,
+          sink
+            .set_color_spec(&pixon::ColorSpec::of_matrix(KernelMatrix::Bt709))
+            .unwrap(),
+        )
+        .unwrap();
         black_box(&rgb);
       });
     });
@@ -161,7 +175,14 @@ fn bench(c: &mut Criterion) {
         .unwrap()
         .with_hsv(&mut h, &mut s, &mut vv)
         .unwrap();
-        nv21_to(&src, false, KernelMatrix::Bt709, &mut sink).unwrap();
+        nv21_to(
+          &src,
+          false,
+          sink
+            .set_color_spec(&pixon::ColorSpec::of_matrix(KernelMatrix::Bt709))
+            .unwrap(),
+        )
+        .unwrap();
         black_box(&rgb);
       });
     });
@@ -213,7 +234,14 @@ fn bench(c: &mut Criterion) {
         .with_native(native)
         .with_rgb_u16(&mut rgb_u16)
         .unwrap();
-        yuv420p16_to(&src, false, KernelMatrix::Bt709, &mut sink).unwrap();
+        yuv420p16_to(
+          &src,
+          false,
+          sink
+            .set_color_spec(&pixon::ColorSpec::of_matrix(KernelMatrix::Bt709))
+            .unwrap(),
+        )
+        .unwrap();
         black_box(&rgb_u16);
       });
     });
@@ -247,7 +275,14 @@ fn bench(c: &mut Criterion) {
         .unwrap()
         .with_hsv(&mut h, &mut s, &mut vv)
         .unwrap();
-        yuv420p16_to(&src, false, KernelMatrix::Bt709, &mut sink).unwrap();
+        yuv420p16_to(
+          &src,
+          false,
+          sink
+            .set_color_spec(&pixon::ColorSpec::of_matrix(KernelMatrix::Bt709))
+            .unwrap(),
+        )
+        .unwrap();
         black_box(&rgb);
       });
     });
@@ -295,7 +330,14 @@ fn bench(c: &mut Criterion) {
         .with_native(native)
         .with_rgb_u16(&mut rgb_u16)
         .unwrap();
-        p010_to(&src, false, KernelMatrix::Bt709, &mut sink).unwrap();
+        p010_to(
+          &src,
+          false,
+          sink
+            .set_color_spec(&pixon::ColorSpec::of_matrix(KernelMatrix::Bt709))
+            .unwrap(),
+        )
+        .unwrap();
         black_box(&rgb_u16);
       });
     });
@@ -326,7 +368,14 @@ fn bench(c: &mut Criterion) {
         .with_native(native)
         .with_luma(&mut luma)
         .unwrap();
-        yuv420p_to(&src, false, KernelMatrix::Bt709, &mut sink).unwrap();
+        yuv420p_to(
+          &src,
+          false,
+          sink
+            .set_color_spec(&pixon::ColorSpec::of_matrix(KernelMatrix::Bt709))
+            .unwrap(),
+        )
+        .unwrap();
         black_box(&luma);
       });
     });
@@ -350,7 +399,14 @@ fn bench(c: &mut Criterion) {
       let mut sink = MixedSinker::<Yuv420p>::new(SRC_W, SRC_H)
         .with_rgb(&mut full_rgb)
         .unwrap();
-      yuv420p_to(&src, false, KernelMatrix::Bt709, &mut sink).unwrap();
+      yuv420p_to(
+        &src,
+        false,
+        sink
+          .set_color_spec(&pixon::ColorSpec::of_matrix(KernelMatrix::Bt709))
+          .unwrap(),
+      )
+      .unwrap();
       black_box(&full_rgb);
     });
   });
@@ -370,7 +426,14 @@ fn bench(c: &mut Criterion) {
       .unwrap()
       .with_hsv(&mut h, &mut s, &mut vv)
       .unwrap();
-      rgb24_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+      rgb24_to(
+        &src,
+        true,
+        sink
+          .set_color_spec(&pixon::ColorSpec::of_matrix(KernelMatrix::Bt709))
+          .unwrap(),
+      )
+      .unwrap();
       black_box(&rgb);
     });
   });

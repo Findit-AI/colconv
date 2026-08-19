@@ -12,10 +12,13 @@
 //!
 //! The out-of-sequence / mid-frame contract is exercised by the shared
 //! tail's `resample_rgb48` suite against the exact same stream/preflight
-//! functions; `GbrpNRow::new` is `pub(crate)` in `mediaframe`, so a high-bit
-//! GBR row can only reach `process` through the in-order walker and a direct
-//! out-of-order `process` call cannot be constructed here (mirrors the 8-bit
-//! `resample_gbrp` suite).
+//! functions; `Gbrp{N}Row::new` is `pub(crate)` in `mediaframe`, so a high-bit
+//! GBR row reaches `process` through the in-order walker. mediaframe 0.4 added a
+//! `#[doc(hidden)] for_tests` door to the macro-generated rows, so an
+//! out-of-order `process` call is now *constructible* here — this suite still
+//! drives the walker (mirroring the 8-bit `resample_gbrp` suite, whose rows have
+//! no such door); wiring the direct rejection is a follow-up, not an
+//! impossibility.
 
 use crate::{KernelMatrix, sinker::MixedSinker};
 
@@ -104,7 +107,7 @@ macro_rules! gbr_high_bit_resample_tests {
           .unwrap()
           .with_rgb_u16(&mut out)
           .unwrap();
-          crate::source::$walker(&src, true, MATRIX, &mut sink).unwrap();
+          crate::source::$walker(&src, true, sink.set_kernel_matrix(MATRIX)).unwrap();
         }
         for oy in 0..OUT {
           for ox in 0..OUT {
@@ -163,7 +166,7 @@ macro_rules! gbr_high_bit_resample_tests {
           .unwrap()
           .with_hsv(&mut h_o, &mut s_o, &mut v_o)
           .unwrap();
-          crate::source::$walker(&src, true, MATRIX, &mut sink).unwrap();
+          crate::source::$walker(&src, true, sink.set_kernel_matrix(MATRIX)).unwrap();
         }
 
         // The resampled rgb_u16 IS the exact native block mean; assert that
@@ -202,7 +205,7 @@ macro_rules! gbr_high_bit_resample_tests {
             .unwrap()
             .with_hsv(&mut h_ref, &mut s_ref, &mut v_ref)
             .unwrap();
-          crate::source::$walker(&binned_src, true, MATRIX, &mut sink).unwrap();
+          crate::source::$walker(&binned_src, true, sink.set_kernel_matrix(MATRIX)).unwrap();
         }
 
         assert_eq!(rgb_o, rgb_ref, "rgb (narrowed)");
@@ -232,7 +235,7 @@ macro_rules! gbr_high_bit_resample_tests {
           let mut sink = MixedSinker::<crate::source::$marker>::new(SRC, SRC)
             .with_rgb_u16(&mut direct)
             .unwrap();
-          crate::source::$walker(&src, true, MATRIX, &mut sink).unwrap();
+          crate::source::$walker(&src, true, sink.set_kernel_matrix(MATRIX)).unwrap();
         }
         let mut via_area = std::vec![0u16; SRC * SRC * 3];
         {
@@ -244,7 +247,7 @@ macro_rules! gbr_high_bit_resample_tests {
           .unwrap()
           .with_rgb_u16(&mut via_area)
           .unwrap();
-          crate::source::$walker(&src, true, MATRIX, &mut sink).unwrap();
+          crate::source::$walker(&src, true, sink.set_kernel_matrix(MATRIX)).unwrap();
         }
         assert_eq!(direct, via_area, "identity-plan resample == direct sink");
       }
@@ -268,7 +271,7 @@ macro_rules! gbr_high_bit_resample_tests {
           crate::resample::AreaResampler::to(OUT, OUT),
         )
         .unwrap();
-        crate::source::$walker(&src, true, MATRIX, &mut sink).unwrap();
+        crate::source::$walker(&src, true, sink.set_kernel_matrix(MATRIX)).unwrap();
       }
 
       #[test]
@@ -298,8 +301,8 @@ macro_rules! gbr_high_bit_resample_tests {
           .unwrap()
           .with_rgb_u16(&mut out)
           .unwrap();
-          crate::source::$walker(&frame(&g1, &b1, &r1, SRC, SRC), true, MATRIX, &mut sink).unwrap();
-          crate::source::$walker(&frame(&g2, &b2, &r2, SRC, SRC), true, MATRIX, &mut sink).unwrap();
+          crate::source::$walker(&frame(&g1, &b1, &r1, SRC, SRC), true, sink.set_kernel_matrix(MATRIX)).unwrap();
+          crate::source::$walker(&frame(&g2, &b2, &r2, SRC, SRC), true, sink.set_kernel_matrix(MATRIX)).unwrap();
         }
 
         let mut expected = std::vec![0u16; OUT * OUT * 3];
@@ -364,7 +367,7 @@ fn gbrp_filter_plan_is_accepted() {
       .with_rgb_u16(&mut out)
       .unwrap();
     // Accepted: a filter plan no longer raises `UnsupportedFilter`.
-    crate::source::gbrp10_to(&src, true, MATRIX, &mut sink).unwrap();
+    crate::source::gbrp10_to(&src, true, sink.set_kernel_matrix(MATRIX)).unwrap();
   }
   // The filter pass wrote every output element (the sentinel is gone).
   assert!(
@@ -442,7 +445,7 @@ mod filter_native_range {
       .unwrap()
       .with_rgb(&mut rgb_u8_o)
       .unwrap();
-      crate::source::gbrp10_to(&src, true, MATRIX, &mut sink).unwrap();
+      crate::source::gbrp10_to(&src, true, sink.set_kernel_matrix(MATRIX)).unwrap();
     }
     (rgb_u16_o, rgba_u16_o, rgb_u8_o)
   }
@@ -561,7 +564,7 @@ mod filter_parity {
       .unwrap()
       .with_rgb_u16(&mut out)
       .unwrap();
-      crate::source::rgb48_to(&src, true, MATRIX, &mut sink).unwrap();
+      crate::source::rgb48_to(&src, true, sink.set_kernel_matrix(MATRIX)).unwrap();
     }
     out
   }
@@ -599,7 +602,7 @@ mod filter_parity {
             .unwrap()
             .with_rgb_u16(&mut out)
             .unwrap();
-            crate::source::$walker(&src, true, MATRIX, &mut sink).unwrap();
+            crate::source::$walker(&src, true, sink.set_kernel_matrix(MATRIX)).unwrap();
           }
           out
         }

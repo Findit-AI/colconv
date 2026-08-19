@@ -57,7 +57,7 @@ fn rgb24_rgb_reference(converted: &[u8]) -> Vec<u8> {
         .unwrap()
         .with_rgb(&mut rgb)
         .unwrap();
-    rgb24_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
+    rgb24_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   }
   rgb
 }
@@ -116,7 +116,7 @@ fn nv12_resample_rgb_matches_rgb24_of_converted_frame() {
     let mut sink = MixedSinker::<Nv12>::new(SRC, SRC)
       .with_rgb(&mut full_rgb)
       .unwrap();
-    nv12_to(&frame, true, KernelMatrix::Bt601, &mut sink).unwrap();
+    nv12_to(&frame, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   }
   let mut rgb = vec![0u8; OUT * OUT * 3];
   {
@@ -128,7 +128,7 @@ fn nv12_resample_rgb_matches_rgb24_of_converted_frame() {
         .with_native(false)
         .with_rgb(&mut rgb)
         .unwrap();
-    nv12_to(&frame, true, KernelMatrix::Bt601, &mut sink).unwrap();
+    nv12_to(&frame, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   }
   assert_eq!(
     rgb,
@@ -156,7 +156,7 @@ fn nv12_resample_luma_is_area_downscaled_y_plane() {
         .unwrap()
         .with_luma_u16(&mut luma_u16)
         .unwrap();
-    nv12_to(&frame, true, KernelMatrix::Bt601, &mut sink).unwrap();
+    nv12_to(&frame, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   }
   let y_ref = block_mean_2x2(&y);
   assert_eq!(luma, y_ref, "nv12 luma must be the area-downscaled Y plane");
@@ -184,7 +184,7 @@ fn nv12_resample_luma_from_y_not_rgb_under_saturated_chroma() {
         .unwrap()
         .with_luma(&mut luma)
         .unwrap();
-    nv12_to(&frame, true, KernelMatrix::Bt601, &mut sink).unwrap();
+    nv12_to(&frame, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   }
   assert!(
     luma.iter().all(|&b| b == 16),
@@ -207,7 +207,7 @@ fn nv12_identity_plan_matches_new_sink() {
     let mut sink = MixedSinker::<Nv12>::new(SRC, SRC)
       .with_rgb(&mut direct)
       .unwrap();
-    nv12_to(&frame, true, KernelMatrix::Bt601, &mut sink).unwrap();
+    nv12_to(&frame, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   }
   let mut via_area = vec![0u8; SRC * SRC * 3];
   {
@@ -217,7 +217,7 @@ fn nv12_identity_plan_matches_new_sink() {
         .unwrap()
         .with_rgb(&mut via_area)
         .unwrap();
-    nv12_to(&frame, true, KernelMatrix::Bt601, &mut sink).unwrap();
+    nv12_to(&frame, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   }
   assert_eq!(direct, via_area, "nv12 identity plan == new sink");
 }
@@ -237,7 +237,7 @@ fn nv12_resample_no_output_is_noop() {
       .unwrap();
   // No attached outputs: every row is a legal no-op (no alloc, no
   // sequencing), even out of order.
-  nv12_to(&frame, true, KernelMatrix::Bt601, &mut sink).unwrap();
+  nv12_to(&frame, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
 }
 
 #[test]
@@ -262,8 +262,8 @@ fn nv12_resample_reuses_streams_across_frames() {
         .unwrap();
     let f1 = Nv12Frame::new(&y1, &uv, SRC as u32, SRC as u32, SRC as u32, SRC as u32);
     let f2 = Nv12Frame::new(&y2, &uv, SRC as u32, SRC as u32, SRC as u32, SRC as u32);
-    nv12_to(&f1, true, KernelMatrix::Bt601, &mut sink).unwrap();
-    nv12_to(&f2, true, KernelMatrix::Bt601, &mut sink).unwrap();
+    nv12_to(&f1, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
+    nv12_to(&f2, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   }
   assert_eq!(
     luma,
@@ -289,7 +289,7 @@ fn nv12_resample_out_of_order_row_rejected() {
       .unwrap();
   // Feed row 3 first: the luma stream expects row 0.
   let err = sink
-    .process(Nv12Row::new(
+    .process(Nv12Row::for_tests(
       &y[3 * SRC..4 * SRC],
       &uv[SRC..2 * SRC],
       3,
@@ -323,7 +323,7 @@ fn nv12_rejected_first_row_does_not_poison_output_retry() {
       .with_luma(&mut luma)
       .unwrap();
   let err = sink
-    .process(Nv12Row::new(
+    .process(Nv12Row::for_tests(
       &y[3 * SRC..4 * SRC],
       &uv[SRC..2 * SRC],
       3,
@@ -338,7 +338,7 @@ fn nv12_rejected_first_row_does_not_poison_output_retry() {
   let mut rgb = vec![0u8; OUT * OUT * 3];
   sink.set_rgb(&mut rgb).unwrap();
   sink
-    .process(Nv12Row::new(
+    .process(Nv12Row::for_tests(
       &y[0..SRC],
       &uv[0..SRC],
       0,
@@ -365,7 +365,7 @@ fn nv12_resample_mid_frame_output_change_rejected() {
       .with_luma(&mut luma)
       .unwrap();
   sink
-    .process(Nv12Row::new(
+    .process(Nv12Row::for_tests(
       &y[0..SRC],
       &uv[0..SRC],
       0,
@@ -376,7 +376,7 @@ fn nv12_resample_mid_frame_output_change_rejected() {
   // Swap the luma buffer mid-frame: the frozen-output check must reject.
   sink.set_luma(&mut luma2).unwrap();
   let err = sink
-    .process(Nv12Row::new(
+    .process(Nv12Row::for_tests(
       &y[SRC..2 * SRC],
       &uv[0..SRC],
       1,
@@ -406,7 +406,7 @@ fn nv21_resample_rgb_matches_rgb24_of_converted_frame() {
     let mut sink = MixedSinker::<Nv21>::new(SRC, SRC)
       .with_rgb(&mut full_rgb)
       .unwrap();
-    nv21_to(&frame, true, KernelMatrix::Bt601, &mut sink).unwrap();
+    nv21_to(&frame, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   }
   let mut rgb = vec![0u8; OUT * OUT * 3];
   {
@@ -418,7 +418,7 @@ fn nv21_resample_rgb_matches_rgb24_of_converted_frame() {
         .with_native(false)
         .with_rgb(&mut rgb)
         .unwrap();
-    nv21_to(&frame, true, KernelMatrix::Bt601, &mut sink).unwrap();
+    nv21_to(&frame, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   }
   assert_eq!(
     rgb,
@@ -446,7 +446,7 @@ fn nv16_resample_rgb_matches_rgb24_of_converted_frame() {
     let mut sink = MixedSinker::<Nv16>::new(SRC, SRC)
       .with_rgb(&mut full_rgb)
       .unwrap();
-    nv16_to(&frame, true, KernelMatrix::Bt601, &mut sink).unwrap();
+    nv16_to(&frame, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   }
   let mut rgb = vec![0u8; OUT * OUT * 3];
   {
@@ -458,7 +458,7 @@ fn nv16_resample_rgb_matches_rgb24_of_converted_frame() {
         .with_native(false)
         .with_rgb(&mut rgb)
         .unwrap();
-    nv16_to(&frame, true, KernelMatrix::Bt601, &mut sink).unwrap();
+    nv16_to(&frame, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   }
   assert_eq!(
     rgb,
@@ -484,7 +484,7 @@ fn nv16_resample_luma_is_area_downscaled_y_plane() {
         .unwrap()
         .with_luma(&mut luma)
         .unwrap();
-    nv16_to(&frame, true, KernelMatrix::Bt601, &mut sink).unwrap();
+    nv16_to(&frame, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   }
   assert_eq!(luma, block_mean_2x2(&y), "nv16 luma = area-downscaled Y");
 }
@@ -515,7 +515,7 @@ fn nv24_resample_rgb_matches_rgb24_of_converted_frame() {
     let mut sink = MixedSinker::<Nv24>::new(SRC, SRC)
       .with_rgb(&mut full_rgb)
       .unwrap();
-    nv24_to(&frame, true, KernelMatrix::Bt601, &mut sink).unwrap();
+    nv24_to(&frame, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   }
   let mut rgb = vec![0u8; OUT * OUT * 3];
   {
@@ -534,7 +534,7 @@ fn nv24_resample_rgb_matches_rgb24_of_converted_frame() {
         .with_native(false)
         .with_rgb(&mut rgb)
         .unwrap();
-    nv24_to(&frame, true, KernelMatrix::Bt601, &mut sink).unwrap();
+    nv24_to(&frame, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   }
   assert_eq!(
     rgb,
@@ -567,7 +567,7 @@ fn nv24_resample_luma_is_area_downscaled_y_plane() {
         .unwrap()
         .with_luma(&mut luma)
         .unwrap();
-    nv24_to(&frame, true, KernelMatrix::Bt601, &mut sink).unwrap();
+    nv24_to(&frame, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   }
   assert_eq!(luma, block_mean_2x2(&y), "nv24 luma = area-downscaled Y");
 }
@@ -594,7 +594,7 @@ fn nv42_resample_rgb_matches_rgb24_of_converted_frame() {
     let mut sink = MixedSinker::<Nv42>::new(SRC, SRC)
       .with_rgb(&mut full_rgb)
       .unwrap();
-    nv42_to(&frame, true, KernelMatrix::Bt601, &mut sink).unwrap();
+    nv42_to(&frame, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   }
   let mut rgb = vec![0u8; OUT * OUT * 3];
   {
@@ -613,7 +613,7 @@ fn nv42_resample_rgb_matches_rgb24_of_converted_frame() {
         .with_native(false)
         .with_rgb(&mut rgb)
         .unwrap();
-    nv42_to(&frame, true, KernelMatrix::Bt601, &mut sink).unwrap();
+    nv42_to(&frame, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   }
   assert_eq!(
     rgb,
@@ -660,7 +660,7 @@ fn nv12_resample_all_outputs_match_standalone() {
         .unwrap()
         .with_hsv(&mut hh, &mut ss, &mut vv)
         .unwrap();
-    nv12_to(&mk(), true, KernelMatrix::Bt601, &mut sink).unwrap();
+    nv12_to(&mk(), true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   }
 
   // Standalone references.
@@ -671,7 +671,7 @@ fn nv12_resample_all_outputs_match_standalone() {
         .unwrap()
         .with_rgb(&mut rgb_ref)
         .unwrap();
-    nv12_to(&mk(), true, KernelMatrix::Bt601, &mut s).unwrap();
+    nv12_to(&mk(), true, s.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   }
   let mut rgba_ref = vec![0u8; OUT * OUT * 4];
   {
@@ -680,7 +680,7 @@ fn nv12_resample_all_outputs_match_standalone() {
         .unwrap()
         .with_rgba(&mut rgba_ref)
         .unwrap();
-    nv12_to(&mk(), true, KernelMatrix::Bt601, &mut s).unwrap();
+    nv12_to(&mk(), true, s.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   }
   let (mut h_ref, mut s_ref, mut v_ref) = (
     vec![0u8; OUT * OUT],
@@ -693,7 +693,7 @@ fn nv12_resample_all_outputs_match_standalone() {
         .unwrap()
         .with_hsv(&mut h_ref, &mut s_ref, &mut v_ref)
         .unwrap();
-    nv12_to(&mk(), true, KernelMatrix::Bt601, &mut s).unwrap();
+    nv12_to(&mk(), true, s.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   }
 
   assert_eq!(rgb, rgb_ref, "combined rgb == standalone");
@@ -751,7 +751,7 @@ mod twin_parity {
           .unwrap()
           .with_luma(&mut nv_luma)
           .unwrap();
-      nv12_to(&frame, true, KernelMatrix::Bt601, &mut sink).unwrap();
+      nv12_to(&frame, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
     }
     let mut p_rgb = vec![0u8; OUT * OUT * 3];
     let mut p_luma = vec![0u8; OUT * OUT];
@@ -765,7 +765,7 @@ mod twin_parity {
           .unwrap()
           .with_luma(&mut p_luma)
           .unwrap();
-      yuv420p_to(&frame, true, KernelMatrix::Bt601, &mut sink).unwrap();
+      yuv420p_to(&frame, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
     }
     assert_eq!(nv_rgb, p_rgb, "nv12 rgb == yuv420p(row-stage) rgb");
     assert_eq!(nv_luma, p_luma, "nv12 luma == yuv420p luma");
@@ -803,7 +803,7 @@ mod twin_parity {
           .with_native(false)
           .with_rgb(&mut nv_rgb)
           .unwrap();
-      nv24_to(&frame, true, KernelMatrix::Bt601, &mut sink).unwrap();
+      nv24_to(&frame, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
     }
     let mut p_rgb = vec![0u8; OUT * OUT * 3];
     {
@@ -819,7 +819,7 @@ mod twin_parity {
       .with_native(false)
       .with_rgb(&mut p_rgb)
       .unwrap();
-      yuv444p_to(&frame, true, KernelMatrix::Bt601, &mut sink).unwrap();
+      yuv444p_to(&frame, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
     }
     assert_eq!(nv_rgb, p_rgb, "nv24 rgb == yuv444p rgb");
   }
@@ -906,7 +906,7 @@ mod native_tier {
           .unwrap()
           .with_hsv(&mut hh, &mut ss, &mut vv)
           .unwrap();
-      nv12_to(&frame, full_range, matrix, &mut sink).unwrap();
+      nv12_to(&frame, full_range, sink.set_kernel_matrix(matrix)).unwrap();
     }
     (rgb, rgba, luma, luma_u16, hh, ss, vv)
   }
@@ -972,7 +972,7 @@ mod native_tier {
             .unwrap()
             .with_luma(&mut p_luma)
             .unwrap();
-        yuv420p_to(&frame, true, KernelMatrix::Bt601, &mut sink).unwrap();
+        yuv420p_to(&frame, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
       }
       assert_eq!(
         nv.0, p_rgb,
@@ -1011,7 +1011,7 @@ mod native_tier {
           .with_native(true)
           .with_rgb(&mut nv_rgb)
           .unwrap();
-      nv21_to(&frame, true, KernelMatrix::Bt601, &mut sink).unwrap();
+      nv21_to(&frame, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
     }
     let mut p_rgb = vec![0u8; n * 3];
     {
@@ -1022,7 +1022,7 @@ mod native_tier {
           .with_native(true)
           .with_rgb(&mut p_rgb)
           .unwrap();
-      yuv420p_to(&frame, true, KernelMatrix::Bt601, &mut sink).unwrap();
+      yuv420p_to(&frame, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
     }
     assert_eq!(nv_rgb, p_rgb, "nv21 native rgb == yuv420p native rgb");
   }
@@ -1097,7 +1097,7 @@ mod native_tier {
       let mut sink = MixedSinker::<Nv12>::new(w, h)
         .with_rgb(&mut full_rgb)
         .unwrap();
-      nv12_to(&frame, false, KernelMatrix::Bt709, &mut sink).unwrap();
+      nv12_to(&frame, false, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
     }
     let out = run_nv12(&yp, &uv, w, h, 4, 4, false, KernelMatrix::Bt709, true);
     for px in out.0.chunks_exact(3) {
@@ -1131,7 +1131,7 @@ mod native_tier {
           .with_native(native)
           .with_luma(&mut luma)
           .unwrap();
-      nv12_to(&frame, false, KernelMatrix::Bt709, &mut sink).unwrap();
+      nv12_to(&frame, false, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
       luma
     };
     assert_eq!(run(true), run(false), "luma-only native == row-stage");
@@ -1159,7 +1159,7 @@ mod native_tier {
         .with_luma(&mut luma)
         .unwrap();
     let err = sink
-      .process(Nv12Row::new(
+      .process(Nv12Row::for_tests(
         &y[3 * w..4 * w],
         &uv[w..2 * w],
         3,
@@ -1174,7 +1174,7 @@ mod native_tier {
     let mut rgb = vec![0u8; 4 * 4 * 3];
     sink.set_rgb(&mut rgb).unwrap();
     sink
-      .process(Nv12Row::new(
+      .process(Nv12Row::for_tests(
         &y[0..w],
         &uv[0..w],
         0,
@@ -1207,7 +1207,7 @@ mod native_tier {
         .with_rgb(&mut rgb)
         .unwrap();
     let err = sink
-      .process(Nv12Row::new(
+      .process(Nv12Row::for_tests(
         &y[w..2 * w],
         &uv[w..2 * w],
         1,
@@ -1262,7 +1262,7 @@ mod native_tier {
     // reserve below WOULD run — but only if the preflight let it.
     crate::sinker::mixed::semi_planar_8bit::arm_deinterleave_alloc_failure();
     let err = sink
-      .process(Nv12Row::new(
+      .process(Nv12Row::for_tests(
         &y[2 * w..3 * w],
         &uv[w..2 * w],
         2,
@@ -1295,7 +1295,7 @@ mod native_tier {
         .with_rgb(&mut rgb2)
         .unwrap();
     let err2 = sink2
-      .process(Nv12Row::new(
+      .process(Nv12Row::for_tests(
         &y[0..w],
         &uv[0..w],
         0,
@@ -1349,7 +1349,7 @@ mod native_tier {
     // (no colour, so no de-interleave runs yet).
     for r in 0..2 {
       sink
-        .process(Nv12Row::new(
+        .process(Nv12Row::for_tests(
           &y[r * w..(r + 1) * w],
           &uv[r * w..(r + 1) * w],
           r,
@@ -1366,7 +1366,7 @@ mod native_tier {
     sink.set_rgb(&mut rgb).unwrap();
     crate::sinker::mixed::semi_planar_8bit::arm_deinterleave_alloc_failure();
     let err = sink
-      .process(Nv12Row::new(
+      .process(Nv12Row::for_tests(
         &y[2 * w..3 * w],
         &uv[2 * w..3 * w],
         2,
@@ -1397,7 +1397,7 @@ mod native_tier {
         .with_rgb(&mut rgb2)
         .unwrap();
     let err2 = sink2
-      .process(Nv12Row::new(
+      .process(Nv12Row::for_tests(
         &y[0..w],
         &uv[0..w],
         0,
@@ -1455,7 +1455,7 @@ mod native_tier {
     // exact recoverable state the sequence check must defend.
     crate::sinker::mixed::semi_planar_8bit::arm_deinterleave_alloc_failure();
     let err0 = sink
-      .process(Nv12Row::new(
+      .process(Nv12Row::for_tests(
         &y[0..w],
         &uv[0..w],
         0,
@@ -1482,7 +1482,7 @@ mod native_tier {
     // reaches the (re-armed) de-interleave reserve.
     crate::sinker::mixed::semi_planar_8bit::arm_deinterleave_alloc_failure();
     let err2 = sink
-      .process(Nv12Row::new(
+      .process(Nv12Row::for_tests(
         &y[2 * w..3 * w],
         &uv[2 * w..3 * w],
         2,
@@ -1519,7 +1519,7 @@ mod native_tier {
         .with_rgb(&mut rgb2)
         .unwrap();
     let err3 = sink2
-      .process(Nv12Row::new(
+      .process(Nv12Row::for_tests(
         &y[0..w],
         &uv[0..w],
         0,
@@ -1556,7 +1556,7 @@ mod native_tier {
         .unwrap()
         .with_native(true);
     sink
-      .process(Nv12Row::new(
+      .process(Nv12Row::for_tests(
         &y[0..w],
         &uv[0..w],
         0,
@@ -1567,7 +1567,7 @@ mod native_tier {
     let mut luma = vec![0u8; 4 * 4];
     sink.set_luma(&mut luma).unwrap();
     sink
-      .process(Nv12Row::new(
+      .process(Nv12Row::for_tests(
         &y[0..w],
         &uv[0..w],
         0,
@@ -1598,7 +1598,7 @@ mod native_tier {
         .with_luma(&mut luma)
         .unwrap();
     sink
-      .process(Nv12Row::new(
+      .process(Nv12Row::for_tests(
         &y[0..w],
         &uv[0..w],
         0,
@@ -1608,7 +1608,7 @@ mod native_tier {
       .unwrap();
     sink.set_luma(&mut luma2).unwrap();
     let err = sink
-      .process(Nv12Row::new(
+      .process(Nv12Row::for_tests(
         &y[w..2 * w],
         &uv[w..2 * w],
         1,
@@ -1646,8 +1646,8 @@ mod native_tier {
           .unwrap();
       let f1 = Nv12Frame::new(&y1, &uv, w as u32, h as u32, w as u32, w as u32);
       let f2 = Nv12Frame::new(&y2, &uv, w as u32, h as u32, w as u32, w as u32);
-      nv12_to(&f1, true, KernelMatrix::Bt601, &mut sink).unwrap();
-      nv12_to(&f2, true, KernelMatrix::Bt601, &mut sink).unwrap();
+      nv12_to(&f1, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
+      nv12_to(&f2, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
     }
     // Frame 2's luma must area-downscale frame 2's Y (2x2 block mean).
     let mut expect = vec![0u8; 4 * 4];
@@ -1702,7 +1702,7 @@ mod native_tier {
     sink.begin_frame(SRC as u32, SRC as u32).unwrap();
     // Row 0 freezes the route = native.
     sink
-      .process(Nv12Row::new(
+      .process(Nv12Row::for_tests(
         &y[0..SRC],
         &uv[0..SRC],
         0,
@@ -1713,7 +1713,7 @@ mod native_tier {
     // Flip to the row-stage tier and feed the next in-sequence row.
     sink.set_native(false);
     let err = sink
-      .process(Nv12Row::new(
+      .process(Nv12Row::for_tests(
         &y[SRC..2 * SRC],
         &uv[0..SRC],
         1,
@@ -1747,7 +1747,7 @@ mod native_tier {
     sink.begin_frame(SRC as u32, SRC as u32).unwrap();
     // Row 0 freezes the route = row-stage.
     sink
-      .process(Nv12Row::new(
+      .process(Nv12Row::for_tests(
         &y[0..SRC],
         &uv[0..SRC],
         0,
@@ -1758,7 +1758,7 @@ mod native_tier {
     // Flip to the native tier and feed the next in-sequence row.
     sink.set_native(true);
     let err = sink
-      .process(Nv12Row::new(
+      .process(Nv12Row::for_tests(
         &y[SRC..2 * SRC],
         &uv[0..SRC],
         1,
@@ -1792,7 +1792,7 @@ mod native_tier {
         .unwrap();
     sink.begin_frame(SRC as u32, SRC as u32).unwrap();
     sink
-      .process(Nv21Row::new(
+      .process(Nv21Row::for_tests(
         &y[0..SRC],
         &vu[0..SRC],
         0,
@@ -1802,7 +1802,7 @@ mod native_tier {
       .expect("native row 0 freezes the route and succeeds");
     sink.set_native(false);
     let err = sink
-      .process(Nv21Row::new(
+      .process(Nv21Row::for_tests(
         &y[SRC..2 * SRC],
         &vu[0..SRC],
         1,
@@ -1837,7 +1837,7 @@ mod native_tier {
     sink.begin_frame(SRC as u32, SRC as u32).unwrap();
     // Row 0 freezes the route = row-stage.
     sink
-      .process(Nv21Row::new(
+      .process(Nv21Row::for_tests(
         &y[0..SRC],
         &vu[0..SRC],
         0,
@@ -1848,7 +1848,7 @@ mod native_tier {
     // Flip to the native tier and feed the next in-sequence row.
     sink.set_native(true);
     let err = sink
-      .process(Nv21Row::new(
+      .process(Nv21Row::for_tests(
         &y[SRC..2 * SRC],
         &vu[0..SRC],
         1,
@@ -1884,11 +1884,11 @@ mod native_tier {
         .unwrap();
     let frame = Nv21Frame::new(&y, &vu, SRC as u32, SRC as u32, SRC as u32, SRC as u32);
     // Frame 1: native, route constant across every row — no false rejection.
-    nv21_to(&frame, true, KernelMatrix::Bt601, &mut sink).unwrap();
+    nv21_to(&frame, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
     // Frame 2: flip to row-stage for the WHOLE frame. The walker's
     // `begin_frame` cleared the frozen route, so this is allowed.
     sink.set_native(false);
-    nv21_to(&frame, true, KernelMatrix::Bt601, &mut sink)
+    nv21_to(&frame, true, sink.set_kernel_matrix(KernelMatrix::Bt601))
       .expect("a new frame may pick the other tier; the route reset per frame");
   }
 
@@ -1919,7 +1919,7 @@ mod native_tier {
     // row-stage. The CHECK is skipped, so this is a true no-op.
     sink.set_native(false);
     sink
-      .process(Nv21Row::new(
+      .process(Nv21Row::for_tests(
         &y[0..SRC],
         &vu[0..SRC],
         0,
@@ -1938,7 +1938,7 @@ mod native_tier {
     sink.set_native(true);
     sink.set_luma(&mut luma).unwrap();
     sink
-      .process(Nv21Row::new(
+      .process(Nv21Row::for_tests(
         &y[0..SRC],
         &vu[0..SRC],
         0,
@@ -1949,7 +1949,7 @@ mod native_tier {
     // ...while an output-bearing flip to the OTHER route now rejects.
     sink.set_native(false);
     let err = sink
-      .process(Nv21Row::new(
+      .process(Nv21Row::for_tests(
         &y[SRC..2 * SRC],
         &vu[0..SRC],
         1,
@@ -1984,11 +1984,11 @@ mod native_tier {
         .unwrap();
     let frame = Nv12Frame::new(&y, &uv, SRC as u32, SRC as u32, SRC as u32, SRC as u32);
     // Frame 1: native, route constant across every row — no false rejection.
-    nv12_to(&frame, true, KernelMatrix::Bt601, &mut sink).unwrap();
+    nv12_to(&frame, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
     // Frame 2: flip to row-stage for the WHOLE frame. The walker's
     // `begin_frame` cleared the frozen route, so this is allowed.
     sink.set_native(false);
-    nv12_to(&frame, true, KernelMatrix::Bt601, &mut sink)
+    nv12_to(&frame, true, sink.set_kernel_matrix(KernelMatrix::Bt601))
       .expect("a new frame may pick the other tier; the route reset per frame");
   }
 
@@ -2019,7 +2019,7 @@ mod native_tier {
     // row-stage. The CHECK is skipped, so this is a true no-op.
     sink.set_native(false);
     sink
-      .process(Nv12Row::new(
+      .process(Nv12Row::for_tests(
         &y[0..SRC],
         &uv[0..SRC],
         0,
@@ -2038,7 +2038,7 @@ mod native_tier {
     sink.set_native(true);
     sink.set_luma(&mut luma).unwrap();
     sink
-      .process(Nv12Row::new(
+      .process(Nv12Row::for_tests(
         &y[0..SRC],
         &uv[0..SRC],
         0,
@@ -2049,7 +2049,7 @@ mod native_tier {
     // ...while an output-bearing flip to the OTHER route now rejects.
     sink.set_native(false);
     let err = sink
-      .process(Nv12Row::new(
+      .process(Nv12Row::for_tests(
         &y[SRC..2 * SRC],
         &uv[0..SRC],
         1,
@@ -2120,7 +2120,7 @@ mod native_tier {
           .unwrap()
           .with_hsv(&mut hh, &mut ss, &mut vv)
           .unwrap();
-      nv16_to(&frame, full_range, matrix, &mut sink).unwrap();
+      nv16_to(&frame, full_range, sink.set_kernel_matrix(matrix)).unwrap();
     }
     (rgb, rgba, luma, luma_u16, hh, ss, vv)
   }
@@ -2160,7 +2160,7 @@ mod native_tier {
           .unwrap()
           .with_hsv(&mut hh, &mut ss, &mut vv)
           .unwrap();
-      nv24_to(&frame, full_range, matrix, &mut sink).unwrap();
+      nv24_to(&frame, full_range, sink.set_kernel_matrix(matrix)).unwrap();
     }
     (rgb, rgba, luma, luma_u16, hh, ss, vv)
   }
@@ -2203,7 +2203,7 @@ mod native_tier {
             .unwrap()
             .with_luma(&mut p_luma)
             .unwrap();
-        yuv422p_to(&frame, true, KernelMatrix::Bt601, &mut sink).unwrap();
+        yuv422p_to(&frame, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
       }
       assert_eq!(
         nv.0, p_rgb,
@@ -2250,7 +2250,7 @@ mod native_tier {
             .unwrap()
             .with_luma(&mut p_luma)
             .unwrap();
-        yuv444p_to(&frame, true, KernelMatrix::Bt601, &mut sink).unwrap();
+        yuv444p_to(&frame, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
       }
       assert_eq!(
         nv.0, p_rgb,
@@ -2290,7 +2290,7 @@ mod native_tier {
           .with_native(true)
           .with_rgb(&mut nv_rgb)
           .unwrap();
-      nv42_to(&frame, true, KernelMatrix::Bt601, &mut sink).unwrap();
+      nv42_to(&frame, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
     }
     let mut p_rgb = vec![0u8; n * 3];
     {
@@ -2301,7 +2301,7 @@ mod native_tier {
           .with_native(true)
           .with_rgb(&mut p_rgb)
           .unwrap();
-      yuv444p_to(&frame, true, KernelMatrix::Bt601, &mut sink).unwrap();
+      yuv444p_to(&frame, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
     }
     assert_eq!(
       nv_rgb, p_rgb,
@@ -2397,7 +2397,7 @@ mod native_tier {
       let mut sink = MixedSinker::<Nv24>::new(w, h)
         .with_rgb(&mut full_rgb)
         .unwrap();
-      nv24_to(&frame, false, KernelMatrix::Bt709, &mut sink).unwrap();
+      nv24_to(&frame, false, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
     }
     let want = (full_rgb[0], full_rgb[1], full_rgb[2]);
 
@@ -2474,7 +2474,7 @@ mod native_tier {
           .with_native(native)
           .with_luma(&mut luma)
           .unwrap();
-      nv24_to(&frame, false, KernelMatrix::Bt709, &mut sink).unwrap();
+      nv24_to(&frame, false, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
       luma
     };
     assert_eq!(run(true), run(false), "nv24 luma-only native == row-stage");
@@ -2504,7 +2504,7 @@ mod native_tier {
     sink.begin_frame(SRC as u32, SRC as u32).unwrap();
     // Row 0 freezes the route = native.
     sink
-      .process(crate::source::Nv16Row::new(
+      .process(crate::source::Nv16Row::for_tests(
         &y[0..SRC],
         &uv[0..SRC],
         0,
@@ -2514,7 +2514,7 @@ mod native_tier {
       .expect("native row 0 freezes the route and succeeds");
     sink.set_native(false);
     let err = sink
-      .process(crate::source::Nv16Row::new(
+      .process(crate::source::Nv16Row::for_tests(
         &y[SRC..2 * SRC],
         &uv[SRC..2 * SRC],
         1,
@@ -2551,11 +2551,11 @@ mod native_tier {
         .unwrap();
     let frame = Nv16Frame::new(&y, &uv, SRC as u32, SRC as u32, SRC as u32, SRC as u32);
     // Frame 1: native, route constant across every row — no false rejection.
-    nv16_to(&frame, true, KernelMatrix::Bt601, &mut sink).unwrap();
+    nv16_to(&frame, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
     // Frame 2: flip to row-stage for the WHOLE frame; the per-frame reset
     // (in `begin_frame`) cleared the frozen route, so this is allowed.
     sink.set_native(false);
-    nv16_to(&frame, true, KernelMatrix::Bt601, &mut sink)
+    nv16_to(&frame, true, sink.set_kernel_matrix(KernelMatrix::Bt601))
       .expect("a new frame may pick the other tier; the route reset per frame");
     assert_eq!(
       luma,
@@ -2593,7 +2593,7 @@ mod native_tier {
           .with_native(true)
           .with_luma(&mut luma)
           .unwrap();
-      nv16_to(&frame, true, KernelMatrix::Bt601, &mut sink)
+      nv16_to(&frame, true, sink.set_kernel_matrix(KernelMatrix::Bt601))
         .expect("luma-only native must not plan chroma");
     }
     assert_eq!(
@@ -2613,7 +2613,7 @@ mod native_tier {
         .with_rgb(&mut rgb)
         .unwrap();
     assert!(
-      nv16_to(&frame, true, KernelMatrix::Bt601, &mut sink).is_err(),
+      nv16_to(&frame, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).is_err(),
       "colour native must reach chroma planning (the armed failpoint fires)"
     );
   }

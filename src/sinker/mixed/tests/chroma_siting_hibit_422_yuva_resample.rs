@@ -202,7 +202,7 @@ macro_rules! hibit_422_yuva_resample_siting {
             y, u, v, a, sw as u32, sh as u32, sw as u32, cw as u32, cw as u32, sw as u32,
           )
           .unwrap();
-          $w422(&f, FR, M, &mut sink).unwrap();
+          $w422(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgba, rgb16, rgba16, (hh, ss, vv), luma, luma16)
       }
@@ -259,7 +259,7 @@ macro_rules! hibit_422_yuva_resample_siting {
             y, u, v, a, sw as u32, sh as u32, sw as u32, cw as u32, cw as u32, sw as u32,
           )
           .unwrap();
-          $w422(&f, FR, M, &mut sink).unwrap();
+          $w422(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgba, rgb16, rgba16, (hh, ss, vv), luma, luma16)
       }
@@ -315,7 +315,7 @@ macro_rules! hibit_422_yuva_resample_siting {
             &yb, &ub, &vb, &ab, sw as u32, sh as u32, sw as u32, cw as u32, cw as u32, sw as u32,
           )
           .unwrap();
-          $w422be(&f, FR, M, &mut sink).unwrap();
+          $w422be(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgba, rgb16, rgba16, (hh, ss, vv), luma, luma16)
       }
@@ -365,7 +365,7 @@ macro_rules! hibit_422_yuva_resample_siting {
           .unwrap()
           .with_rgba_u16(&mut rgba16)
           .unwrap();
-          $w444(&f, FR, M, &mut sink).unwrap();
+          $w444(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         } else {
           let mut sink =
             MixedSinker::<$M444, AreaResampler>::with_resampler(sw, sh, AreaResampler::to(ow, oh))
@@ -376,7 +376,7 @@ macro_rules! hibit_422_yuva_resample_siting {
               .unwrap()
               .with_rgba_u16(&mut rgba16)
               .unwrap();
-          $w444(&f, FR, M, &mut sink).unwrap();
+          $w444(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgba, rgba16)
       }
@@ -420,7 +420,7 @@ macro_rules! hibit_422_yuva_resample_siting {
           let f = $FYuv::new(
             y, u, v, sw as u32, sh as u32, sw as u32, cw as u32, cw as u32,
           );
-          $wYuv(&f, FR, M, &mut sink).unwrap();
+          $wYuv(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgb16, (hh, ss, vv), luma)
       }
@@ -661,10 +661,10 @@ macro_rules! hibit_422_yuva_resample_siting {
       ) -> Result<(), MixedSinkerError> {
         sink.set_chroma_location(loc1.clone());
         PixelSink::begin_frame(&mut sink, 8, 8).unwrap();
-        let row0 = $Row::new(&y[0..8], &u[0..4], &v[0..4], &a[0..8], 0, M, FR);
+        let row0 = $Row::for_tests(&y[0..8], &u[0..4], &v[0..4], &a[0..8], 0, M, FR);
         PixelSink::process(&mut sink, row0).unwrap();
         sink.set_chroma_location(loc2.clone());
-        let row1 = $Row::new(&y[8..16], &u[4..8], &v[4..8], &a[8..16], 1, M, FR);
+        let row1 = $Row::for_tests(&y[8..16], &u[4..8], &v[4..8], &a[8..16], 1, M, FR);
         PixelSink::process(&mut sink, row1)
       }
 

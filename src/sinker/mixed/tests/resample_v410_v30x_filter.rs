@@ -188,7 +188,7 @@ impl Yuv444Filter for V410F {
       .unwrap()
       .with_luma_u16(&mut luma_u16)
       .unwrap();
-      v410_to(&src, FR, M, &mut sink).unwrap();
+      v410_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     }
     FilterOutputs {
       rgb,
@@ -206,7 +206,7 @@ impl Yuv444Filter for V410F {
       let mut sink = MixedSinker::<V410>::new(w, h)
         .with_rgb_u16(&mut rgb_u16)
         .unwrap();
-      v410_to(&src, FR, M, &mut sink).unwrap();
+      v410_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     }
     rgb_u16
   }
@@ -216,7 +216,7 @@ impl Yuv444Filter for V410F {
     let mut rgb = vec![0u8; w * h * 3];
     {
       let mut sink = MixedSinker::<V410>::new(w, h).with_rgb(&mut rgb).unwrap();
-      v410_to(&src, FR, M, &mut sink).unwrap();
+      v410_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     }
     rgb
   }
@@ -228,7 +228,7 @@ impl Yuv444Filter for V410F {
       let mut sink = MixedSinker::<V410>::new(w, h)
         .with_luma_u16(&mut y)
         .unwrap();
-      v410_to(&src, FR, M, &mut sink).unwrap();
+      v410_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     }
     y
   }
@@ -270,7 +270,7 @@ impl Yuv444Filter for V30XF {
       .unwrap()
       .with_luma_u16(&mut luma_u16)
       .unwrap();
-      v30x_to(&src, FR, M, &mut sink).unwrap();
+      v30x_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     }
     FilterOutputs {
       rgb,
@@ -288,7 +288,7 @@ impl Yuv444Filter for V30XF {
       let mut sink = MixedSinker::<V30X>::new(w, h)
         .with_rgb_u16(&mut rgb_u16)
         .unwrap();
-      v30x_to(&src, FR, M, &mut sink).unwrap();
+      v30x_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     }
     rgb_u16
   }
@@ -298,7 +298,7 @@ impl Yuv444Filter for V30XF {
     let mut rgb = vec![0u8; w * h * 3];
     {
       let mut sink = MixedSinker::<V30X>::new(w, h).with_rgb(&mut rgb).unwrap();
-      v30x_to(&src, FR, M, &mut sink).unwrap();
+      v30x_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     }
     rgb
   }
@@ -310,7 +310,7 @@ impl Yuv444Filter for V30XF {
       let mut sink = MixedSinker::<V30X>::new(w, h)
         .with_luma_u16(&mut y)
         .unwrap();
-      v30x_to(&src, FR, M, &mut sink).unwrap();
+      v30x_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     }
     y
   }
@@ -706,7 +706,7 @@ mod packed_rgb_equivalence {
       .unwrap()
       .with_rgb_u16(&mut out)
       .unwrap();
-      rgb48_to(&src, FR, M, &mut sink).unwrap();
+      rgb48_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     }
     out
   }
@@ -732,7 +732,7 @@ mod packed_rgb_equivalence {
       .unwrap()
       .with_rgb(&mut out)
       .unwrap();
-      rgb24_to(&src, FR, M, &mut sink).unwrap();
+      rgb24_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     }
     out
   }

@@ -88,7 +88,7 @@ fn gray8_with_rgb_broadcasts_to_packed() {
   let mut sink = MixedSinker::<crate::source::Gray8>::new(4, 1)
     .with_rgb(&mut rgb)
     .unwrap();
-  gray8_to(&frame, FR, M, &mut sink).unwrap();
+  gray8_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   // Each pixel should be [Y, Y, Y]
   assert_eq!(rgb[0..3], [0, 0, 0]);
   assert_eq!(rgb[3..6], [64, 64, 64]);
@@ -104,7 +104,7 @@ fn gray8_with_rgba_alpha_is_0xff() {
   let mut sink = MixedSinker::<crate::source::Gray8>::new(4, 1)
     .with_rgba(&mut rgba)
     .unwrap();
-  gray8_to(&frame, FR, M, &mut sink).unwrap();
+  gray8_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   // Alpha byte (index 3, 7, 11, 15) should be 0xFF.
   for i in 0..4 {
     assert_eq!(rgba[i * 4 + 3], 0xFF, "pixel {i} alpha");
@@ -120,7 +120,7 @@ fn gray8_with_luma_copies_plane() {
   let mut sink = MixedSinker::<crate::source::Gray8>::new(4, 4)
     .with_luma(&mut luma)
     .unwrap();
-  gray8_to(&frame, FR, M, &mut sink).unwrap();
+  gray8_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   assert_eq!(luma, plane);
 }
 
@@ -132,7 +132,7 @@ fn gray8_with_luma_u16_zero_extends() {
   let mut sink = MixedSinker::<crate::source::Gray8>::new(4, 1)
     .with_luma_u16(&mut lu16)
     .unwrap();
-  gray8_to(&frame, FR, M, &mut sink).unwrap();
+  gray8_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   assert_eq!(lu16, [0, 64, 128, 255]);
 }
 
@@ -146,7 +146,7 @@ fn gray8_with_hsv_h_s_zero_v_equals_y() {
   let mut sink = MixedSinker::<crate::source::Gray8>::new(4, 1)
     .with_hsv(&mut h, &mut s, &mut v)
     .unwrap();
-  gray8_to(&frame, FR, M, &mut sink).unwrap();
+  gray8_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   assert_eq!(h, [0, 0, 0, 0], "H must be 0");
   assert_eq!(s, [0, 0, 0, 0], "S must be 0");
   assert_eq!(v, plane.as_slice(), "V must equal Y");
@@ -161,7 +161,7 @@ fn gray10_with_rgb_masks_and_shifts() {
   let mut sink = MixedSinker::<crate::source::Gray10>::new(4, 1)
     .with_rgb(&mut rgb)
     .unwrap();
-  gray10_to(&frame, FR, M, &mut sink).unwrap();
+  gray10_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   // 512 & 0x3FF = 512, >> 2 = 128. All channels should be 128.
   assert_eq!(rgb[0..3], [128, 128, 128]);
   assert_eq!(rgb[3..6], [128, 128, 128]);
@@ -176,7 +176,7 @@ fn gray10_with_luma_u16_masks_only() {
   let mut sink = MixedSinker::<crate::source::Gray10>::new(4, 1)
     .with_luma_u16(&mut lu16)
     .unwrap();
-  gray10_to(&frame, FR, M, &mut sink).unwrap();
+  gray10_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   assert_eq!(lu16, [0x0000, 0x03FF, 0x0200, 0x0001]);
 }
 
@@ -189,7 +189,7 @@ fn gray16_with_rgb_shifts_to_u8() {
   let mut sink = MixedSinker::<crate::source::Gray16>::new(4, 1)
     .with_rgb(&mut rgb)
     .unwrap();
-  gray16_to(&frame, FR, M, &mut sink).unwrap();
+  gray16_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   // Each pixel [Y>>8, Y>>8, Y>>8]
   assert_eq!(rgb[0..3], [0x80, 0x80, 0x80]);
   assert_eq!(rgb[3..6], [0xFF, 0xFF, 0xFF]);
@@ -209,7 +209,7 @@ fn gray16_with_luma_u16_copies_plane() {
   let mut sink = MixedSinker::<crate::source::Gray16>::new(4, 4)
     .with_luma_u16(&mut lu16)
     .unwrap();
-  gray16_to(&frame, FR, M, &mut sink).unwrap();
+  gray16_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   assert_eq!(lu16, intended);
 }
 
@@ -221,7 +221,7 @@ fn gray16_with_rgba_u16_alpha_is_0xffff() {
   let mut sink = MixedSinker::<crate::source::Gray16>::new(4, 1)
     .with_rgba_u16(&mut rgba_u16)
     .unwrap();
-  gray16_to(&frame, FR, M, &mut sink).unwrap();
+  gray16_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   for i in 0..4 {
     assert_eq!(rgba_u16[i * 4 + 3], 0xFFFF, "pixel {i} alpha");
     assert_eq!(rgba_u16[i * 4], 0x1234, "pixel {i} R");
@@ -237,7 +237,7 @@ fn gray9_walker_smoke_test() {
   let mut sink = MixedSinker::<crate::source::Gray9>::new(4, 1)
     .with_luma(&mut luma)
     .unwrap();
-  gray9_to(&frame, FR, M, &mut sink).unwrap();
+  gray9_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   // 100 & 0x1FF = 100, >> 1 = 50.
   assert_eq!(luma, [50, 50, 50, 50]);
 }
@@ -251,7 +251,7 @@ fn gray12_walker_smoke_test() {
   let mut sink = MixedSinker::<crate::source::Gray12>::new(4, 1)
     .with_luma(&mut luma)
     .unwrap();
-  gray12_to(&frame, FR, M, &mut sink).unwrap();
+  gray12_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   // 0x0FFF & 0x0FFF = 0x0FFF = 4095. >> 4 = 255.
   assert_eq!(luma, [255, 255, 255, 255]);
 }
@@ -265,7 +265,7 @@ fn gray14_walker_smoke_test() {
   let mut sink = MixedSinker::<crate::source::Gray14>::new(4, 1)
     .with_luma(&mut luma)
     .unwrap();
-  gray14_to(&frame, FR, M, &mut sink).unwrap();
+  gray14_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   // 0x3FFF & 0x3FFF = 0x3FFF = 16383. >> 6 = 255.
   assert_eq!(luma, [255, 255, 255, 255]);
 }
@@ -288,7 +288,7 @@ fn gray8_limited_range_black_maps_to_zero() {
   let mut sink = MixedSinker::<crate::source::Gray8>::new(4, 1)
     .with_rgb(&mut rgb)
     .unwrap();
-  gray8_to(&frame, false, M, &mut sink).unwrap();
+  gray8_to(&frame, false, sink.set_kernel_matrix(M)).unwrap();
   for i in 0..4 {
     assert_eq!(rgb[i * 3..i * 3 + 3], [0, 0, 0], "pixel {i}");
   }
@@ -303,7 +303,7 @@ fn gray8_limited_range_white_maps_to_255() {
   let mut sink = MixedSinker::<crate::source::Gray8>::new(4, 1)
     .with_rgb(&mut rgb)
     .unwrap();
-  gray8_to(&frame, false, M, &mut sink).unwrap();
+  gray8_to(&frame, false, sink.set_kernel_matrix(M)).unwrap();
   for i in 0..4 {
     assert_eq!(rgb[i * 3..i * 3 + 3], [255, 255, 255], "pixel {i}");
   }
@@ -318,7 +318,7 @@ fn gray8_limited_range_midpoint() {
   let mut sink = MixedSinker::<crate::source::Gray8>::new(4, 1)
     .with_rgb(&mut rgb)
     .unwrap();
-  gray8_to(&frame, false, M, &mut sink).unwrap();
+  gray8_to(&frame, false, sink.set_kernel_matrix(M)).unwrap();
   for i in 0..4 {
     assert_eq!(rgb[i * 3], 127, "pixel {i} R");
   }
@@ -333,7 +333,7 @@ fn gray8_limited_range_luma_passthrough_unchanged() {
   let mut sink = MixedSinker::<crate::source::Gray8>::new(4, 1)
     .with_luma(&mut luma)
     .unwrap();
-  gray8_to(&frame, false, M, &mut sink).unwrap();
+  gray8_to(&frame, false, sink.set_kernel_matrix(M)).unwrap();
   assert_eq!(luma, [16, 235, 125, 0]);
 }
 
@@ -346,7 +346,7 @@ fn gray8_limited_range_rgba_alpha_is_0xff() {
   let mut sink = MixedSinker::<crate::source::Gray8>::new(4, 1)
     .with_rgba(&mut rgba)
     .unwrap();
-  gray8_to(&frame, false, M, &mut sink).unwrap();
+  gray8_to(&frame, false, sink.set_kernel_matrix(M)).unwrap();
   for i in 0..4 {
     assert_eq!(rgba[i * 4], 255, "pixel {i} R");
     assert_eq!(rgba[i * 4 + 3], 0xFF, "pixel {i} alpha");
@@ -364,7 +364,7 @@ fn gray8_limited_range_hsv_v_is_rescaled() {
   let mut sink = MixedSinker::<crate::source::Gray8>::new(4, 1)
     .with_hsv(&mut h, &mut s, &mut v)
     .unwrap();
-  gray8_to(&frame, false, M, &mut sink).unwrap();
+  gray8_to(&frame, false, sink.set_kernel_matrix(M)).unwrap();
   assert_eq!(h, [0, 0, 0, 0], "H must be 0");
   assert_eq!(s, [0, 0, 0, 0], "S must be 0");
   assert_eq!(v, [255, 255, 255, 255], "V must be 255 for white");
@@ -380,7 +380,7 @@ fn gray10_limited_range_black_and_white() {
   let mut sink = MixedSinker::<crate::source::Gray10>::new(4, 1)
     .with_rgb(&mut rgb)
     .unwrap();
-  gray10_to(&frame, false, M, &mut sink).unwrap();
+  gray10_to(&frame, false, sink.set_kernel_matrix(M)).unwrap();
   assert_eq!(rgb[0..3], [0, 0, 0], "Y=64 → black");
   assert_eq!(rgb[3..6], [255, 255, 255], "Y=940 → white");
   assert_eq!(rgb[6..9], [0, 0, 0], "Y=64 → black");
@@ -397,7 +397,7 @@ fn gray12_limited_range_black_and_white() {
   let mut sink = MixedSinker::<crate::source::Gray12>::new(4, 1)
     .with_rgb(&mut rgb)
     .unwrap();
-  gray12_to(&frame, false, M, &mut sink).unwrap();
+  gray12_to(&frame, false, sink.set_kernel_matrix(M)).unwrap();
   assert_eq!(rgb[0..3], [0, 0, 0], "Y=256 → black");
   assert_eq!(rgb[3..6], [255, 255, 255], "Y=3760 → white");
   assert_eq!(rgb[6..9], [0, 0, 0], "Y=256 → black");
@@ -414,7 +414,7 @@ fn gray14_limited_range_black_and_white() {
   let mut sink = MixedSinker::<crate::source::Gray14>::new(4, 1)
     .with_rgb(&mut rgb)
     .unwrap();
-  gray14_to(&frame, false, M, &mut sink).unwrap();
+  gray14_to(&frame, false, sink.set_kernel_matrix(M)).unwrap();
   assert_eq!(rgb[0..3], [0, 0, 0], "Y=1024 → black");
   assert_eq!(rgb[3..6], [255, 255, 255], "Y=15040 → white");
   assert_eq!(rgb[6..9], [0, 0, 0], "Y=1024 → black");
@@ -430,7 +430,7 @@ fn gray16_limited_range_black_and_white() {
   let mut sink = MixedSinker::<crate::source::Gray16>::new(4, 1)
     .with_rgb(&mut rgb)
     .unwrap();
-  gray16_to(&frame, false, M, &mut sink).unwrap();
+  gray16_to(&frame, false, sink.set_kernel_matrix(M)).unwrap();
   assert_eq!(rgb[0..3], [0, 0, 0], "Y=4096 → black");
   assert_eq!(rgb[3..6], [255, 255, 255], "Y=60160 → white");
   assert_eq!(rgb[6..9], [0, 0, 0], "Y=4096 → black");
@@ -446,7 +446,7 @@ fn gray16_limited_range_luma_passthrough_unchanged() {
   let mut sink = MixedSinker::<crate::source::Gray16>::new(4, 1)
     .with_luma_u16(&mut lu16)
     .unwrap();
-  gray16_to(&frame, false, M, &mut sink).unwrap();
+  gray16_to(&frame, false, sink.set_kernel_matrix(M)).unwrap();
   assert_eq!(lu16, [4096, 60160, 32768, 0]);
 }
 
@@ -460,7 +460,7 @@ fn gray16_limited_range_rgba_u16_alpha_is_0xffff() {
   let mut sink = MixedSinker::<crate::source::Gray16>::new(4, 1)
     .with_rgba_u16(&mut rgba_u16)
     .unwrap();
-  gray16_to(&frame, false, M, &mut sink).unwrap();
+  gray16_to(&frame, false, sink.set_kernel_matrix(M)).unwrap();
   for i in 0..4 {
     assert_eq!(rgba_u16[i * 4 + 3], 0xFFFF, "pixel {i} alpha");
   }
@@ -478,7 +478,7 @@ fn gray16_limited_range_rgba_u16_channels_rescale_at_boundaries() {
   let mut sink = MixedSinker::<crate::source::Gray16>::new(4, 1)
     .with_rgba_u16(&mut rgba_u16)
     .unwrap();
-  gray16_to(&frame, false, M, &mut sink).unwrap();
+  gray16_to(&frame, false, sink.set_kernel_matrix(M)).unwrap();
   // pixel 0: limited black 4096 → 0
   assert_eq!(&rgba_u16[0..3], &[0, 0, 0]);
   // pixel 1: limited white 60160 → 65535 (over-i32 path)
@@ -502,7 +502,7 @@ fn gray16_limited_range_rgb_u16_channels_rescale_at_boundaries() {
   let mut sink = MixedSinker::<crate::source::Gray16>::new(2, 1)
     .with_rgb_u16(&mut rgb_u16)
     .unwrap();
-  gray16_to(&frame, false, M, &mut sink).unwrap();
+  gray16_to(&frame, false, sink.set_kernel_matrix(M)).unwrap();
   assert_eq!(&rgb_u16[0..3], &[0, 0, 0]);
   assert_eq!(&rgb_u16[3..6], &[65535, 65535, 65535]);
 }
@@ -518,7 +518,7 @@ fn gray16_limited_range_hsv_v_is_rescaled() {
   let mut sink = MixedSinker::<crate::source::Gray16>::new(4, 1)
     .with_hsv(&mut h, &mut s, &mut v)
     .unwrap();
-  gray16_to(&frame, false, M, &mut sink).unwrap();
+  gray16_to(&frame, false, sink.set_kernel_matrix(M)).unwrap();
   assert_eq!(h, [0, 0, 0, 0], "H must be 0");
   assert_eq!(s, [0, 0, 0, 0], "S must be 0");
   assert_eq!(v, [255, 255, 255, 255], "V must be 255 for white");
@@ -536,7 +536,7 @@ fn grayf32_with_luma_f32_passthrough() {
   let mut sink = MixedSinker::<crate::source::Grayf32>::new(8, 1)
     .with_luma_f32(&mut out)
     .unwrap();
-  grayf32_to(&frame, FR, M, &mut sink).unwrap();
+  grayf32_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   for (i, (&a, &b)) in intended.iter().zip(out.iter()).enumerate() {
     if a.is_nan() {
       assert!(b.is_nan(), "pixel {i}: expected NaN");
@@ -555,7 +555,7 @@ fn grayf32_with_rgb_f32_replicates_losslessly() {
   let mut sink = MixedSinker::<crate::source::Grayf32>::new(4, 1)
     .with_rgb_f32(&mut out)
     .unwrap();
-  grayf32_to(&frame, FR, M, &mut sink).unwrap();
+  grayf32_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   for (x, &y) in intended.iter().enumerate() {
     assert_eq!(out[x * 3], y, "pixel {x} R");
     assert_eq!(out[x * 3 + 1], y, "pixel {x} G");
@@ -573,7 +573,7 @@ fn grayf32_with_rgb_saturates() {
   let mut sink = MixedSinker::<crate::source::Grayf32>::new(5, 1)
     .with_rgb(&mut rgb)
     .unwrap();
-  grayf32_to(&frame, FR, M, &mut sink).unwrap();
+  grayf32_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   assert_eq!(&rgb[0..3], &[0, 0, 0]); // -0.5 clamps to 0
   assert_eq!(&rgb[3..6], &[0, 0, 0]); // 0.0
   assert_eq!(&rgb[6..9], &[128, 128, 128]); // 0.5 x 255 + 0.5 = 128
@@ -592,7 +592,7 @@ fn grayf32_with_hsv_h0_s0_v_saturated() {
   let mut sink = MixedSinker::<crate::source::Grayf32>::new(3, 1)
     .with_hsv(&mut h, &mut s, &mut v)
     .unwrap();
-  grayf32_to(&frame, FR, M, &mut sink).unwrap();
+  grayf32_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   assert_eq!(h, [0, 0, 0]);
   assert_eq!(s, [0, 0, 0]);
   assert_eq!(v, [0, 128, 255]);
@@ -611,7 +611,7 @@ fn grayf32_with_luma_u16_and_rgb_u16() {
     .unwrap()
     .with_rgb_u16(&mut rgb_u16)
     .unwrap();
-  grayf32_to(&frame, FR, M, &mut sink).unwrap();
+  grayf32_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   // (0.5 * 65535 + 0.5) as u16 = 32768
   assert_eq!(lu16[0], 32768);
   assert_eq!(rgb_u16, [32768, 32768, 32768]);
@@ -634,7 +634,7 @@ fn grayf32_width_128_and_130_smoke() {
       .unwrap()
       .with_luma_f32(&mut luma_f32)
       .unwrap();
-    grayf32_to(&frame, FR, M, &mut sink).unwrap();
+    grayf32_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
     // Verify first and last pixel.
     assert_eq!(rgb[0], 0, "w={w} first R");
     assert_eq!(luma_f32[0], 0.0, "w={w} first luma_f32");
@@ -715,7 +715,7 @@ fn grayf32_sinker_le_encoded_frame_decodes_correctly() {
     let mut sink = MixedSinker::<Grayf32>::new(w, h)
       .with_luma_f32(&mut luma_f32_out)
       .unwrap();
-    grayf32_to(&frame, FR, M, &mut sink).unwrap();
+    grayf32_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(
     luma_f32_out, intended,
@@ -728,7 +728,7 @@ fn grayf32_sinker_le_encoded_frame_decodes_correctly() {
     let mut sink = MixedSinker::<Grayf32>::new(w, h)
       .with_rgb_f32(&mut rgb_f32_out)
       .unwrap();
-    grayf32_to(&frame, FR, M, &mut sink).unwrap();
+    grayf32_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   for (x, &y) in intended.iter().enumerate() {
     assert_eq!(rgb_f32_out[x * 3], y, "pixel {x} R diverges");
@@ -762,7 +762,7 @@ fn grayf16_with_luma_f32_widens() {
   let mut sink = MixedSinker::<crate::source::Grayf16>::new(8, 1)
     .with_luma_f32(&mut out)
     .unwrap();
-  grayf16_to(&frame, FR, M, &mut sink).unwrap();
+  grayf16_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   for (i, (&a, &b)) in intended.iter().zip(out.iter()).enumerate() {
     if a.is_nan() {
       assert!(b.is_nan(), "pixel {i}: expected NaN");
@@ -790,7 +790,7 @@ fn grayf16_with_rgb_f32_replicates_losslessly() {
   let mut sink = MixedSinker::<crate::source::Grayf16>::new(4, 1)
     .with_rgb_f32(&mut out)
     .unwrap();
-  grayf16_to(&frame, FR, M, &mut sink).unwrap();
+  grayf16_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   for (x, &y) in intended.iter().enumerate() {
     let yf = y.to_f32();
     assert_eq!(out[x * 3], yf, "pixel {x} R");
@@ -819,7 +819,7 @@ fn grayf16_with_rgb_saturates() {
   let mut sink = MixedSinker::<crate::source::Grayf16>::new(5, 1)
     .with_rgb(&mut rgb)
     .unwrap();
-  grayf16_to(&frame, FR, M, &mut sink).unwrap();
+  grayf16_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   assert_eq!(&rgb[0..3], &[0, 0, 0]); // -0.5 clamps to 0
   assert_eq!(&rgb[3..6], &[0, 0, 0]); // 0.0
   assert_eq!(&rgb[6..9], &[128, 128, 128]); // 0.5 x 255 + 0.5 = 128
@@ -843,7 +843,7 @@ fn grayf16_with_hsv_h0_s0_v_saturated() {
   let mut sink = MixedSinker::<crate::source::Grayf16>::new(3, 1)
     .with_hsv(&mut h, &mut s, &mut v)
     .unwrap();
-  grayf16_to(&frame, FR, M, &mut sink).unwrap();
+  grayf16_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   assert_eq!(h, [0, 0, 0]);
   assert_eq!(s, [0, 0, 0]);
   assert_eq!(v, [0, 128, 255]);
@@ -866,7 +866,7 @@ fn grayf16_with_luma_u16_and_rgb_u16() {
     .unwrap()
     .with_rgb_u16(&mut rgb_u16)
     .unwrap();
-  grayf16_to(&frame, FR, M, &mut sink).unwrap();
+  grayf16_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   // (0.5 * 65535 + 0.5) as u16 = 32768
   assert_eq!(lu16[0], 32768);
   assert_eq!(rgb_u16, [32768, 32768, 32768]);
@@ -885,7 +885,7 @@ fn grayf16_with_rgba_alpha_opaque() {
   let mut sink = MixedSinker::<crate::source::Grayf16>::new(2, 1)
     .with_rgba(&mut rgba)
     .unwrap();
-  grayf16_to(&frame, FR, M, &mut sink).unwrap();
+  grayf16_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   assert_eq!(&rgba[0..4], &[255, 255, 255, 0xFF]);
   assert_eq!(&rgba[4..8], &[0, 0, 0, 0xFF]);
 }
@@ -907,7 +907,7 @@ fn grayf16_width_128_and_130_smoke() {
       .unwrap()
       .with_luma_f32(&mut luma_f32)
       .unwrap();
-    grayf16_to(&frame, FR, M, &mut sink).unwrap();
+    grayf16_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
     assert_eq!(rgb[0], 0, "w={w} first R");
     assert_eq!(luma_f32[0], 0.0, "w={w} first luma_f32");
     assert!(luma_f32[w - 1] > 0.9, "w={w} last luma_f32");
@@ -948,7 +948,7 @@ fn grayf16_sinker_be_le_parity() {
     let mut sink = MixedSinker::<Grayf16>::new(w, h)
       .with_luma_f32(&mut out_le)
       .unwrap();
-    grayf16_to(&le_frame, FR, M, &mut sink).unwrap();
+    grayf16_to(&le_frame, FR, sink.set_kernel_matrix(M)).unwrap();
   }
 
   let mut out_be = std::vec![0.0f32; w * h];
@@ -957,7 +957,7 @@ fn grayf16_sinker_be_le_parity() {
     let mut sink = MixedSinker::<crate::source::Grayf16<true>>::new(w, h)
       .with_luma_f32(&mut out_be)
       .unwrap();
-    grayf16_to_endian::<_, true>(&be_frame, FR, M, &mut sink).unwrap();
+    grayf16_to_endian::<_, true>(&be_frame, FR, sink.set_kernel_matrix(M)).unwrap();
   }
 
   let expected: std::vec::Vec<f32> = intended.iter().map(|v| v.to_f32()).collect();
@@ -985,7 +985,7 @@ fn ya8_with_rgb_and_rgba_strategy_a_plus() {
     .unwrap()
     .with_rgba(&mut rgba)
     .unwrap();
-  ya8_to(&frame, FR, M, &mut sink).unwrap();
+  ya8_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   // RGB: Y broadcast, α dropped.
   assert_eq!(&rgb[0..3], &[100, 100, 100]);
   assert_eq!(&rgb[3..6], &[50, 50, 50]);
@@ -1003,7 +1003,7 @@ fn ya8_standalone_rgba_source_alpha() {
   let mut sink = MixedSinker::<crate::source::Ya8>::new(2, 1)
     .with_rgba(&mut rgba)
     .unwrap();
-  ya8_to(&frame, FR, M, &mut sink).unwrap();
+  ya8_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   assert_eq!(&rgba[0..4], &[77, 77, 77, 11]);
   assert_eq!(&rgba[4..8], &[88, 88, 88, 22]);
 }
@@ -1016,7 +1016,7 @@ fn ya8_with_luma_u16_zero_extends() {
   let mut sink = MixedSinker::<crate::source::Ya8>::new(2, 1)
     .with_luma_u16(&mut lu16)
     .unwrap();
-  ya8_to(&frame, FR, M, &mut sink).unwrap();
+  ya8_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   assert_eq!(lu16, [200, 100]);
 }
 
@@ -1030,7 +1030,7 @@ fn ya8_with_hsv_h0_s0_v_y() {
   let mut sink = MixedSinker::<crate::source::Ya8>::new(2, 1)
     .with_hsv(&mut h, &mut s, &mut v)
     .unwrap();
-  ya8_to(&frame, FR, M, &mut sink).unwrap();
+  ya8_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   assert_eq!(h, [0, 0]);
   assert_eq!(s, [0, 0]);
   assert_eq!(v, [200, 100]);
@@ -1052,7 +1052,7 @@ fn ya8_width_128_and_130_smoke() {
       .unwrap()
       .with_rgba(&mut rgba)
       .unwrap();
-    ya8_to(&frame, FR, M, &mut sink).unwrap();
+    ya8_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
     // Spot-check pixel 0: Y=0, A=255
     assert_eq!(&rgb[0..3], &[0, 0, 0], "w={w}");
     assert_eq!(&rgba[0..4], &[0, 0, 0, 255], "w={w}");
@@ -1075,7 +1075,7 @@ fn ya16_with_rgba_u16_source_alpha() {
     .unwrap()
     .with_luma_u16(&mut luma_u16)
     .unwrap();
-  ya16_to(&frame, FR, M, &mut sink).unwrap();
+  ya16_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   assert_eq!(&rgba_u16, &[0x8000, 0x8000, 0x8000, 0x4000]);
   assert_eq!(luma_u16[0], 0x8000);
 }
@@ -1089,7 +1089,7 @@ fn ya16_with_rgba_u8_source_alpha_shifted() {
   let mut sink = MixedSinker::<crate::source::Ya16>::new(2, 1)
     .with_rgba(&mut rgba)
     .unwrap();
-  ya16_to(&frame, FR, M, &mut sink).unwrap();
+  ya16_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   // Y=0x8000>>8=0x80=128, A=0x4000>>8=0x40=64
   assert_eq!(&rgba[0..4], &[0x80, 0x80, 0x80, 0x40]);
   // Y=0xFFFF>>8=0xFF=255, A=0x8000>>8=0x80=128
@@ -1107,7 +1107,7 @@ fn ya16_with_rgb_and_rgba_strategy_a_plus() {
     .unwrap()
     .with_rgba(&mut rgba)
     .unwrap();
-  ya16_to(&frame, FR, M, &mut sink).unwrap();
+  ya16_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   // Y=0x8000>>8=0x80, A dropped for rgb.
   assert_eq!(&rgb[0..3], &[0x80, 0x80, 0x80]);
   // RGBA: Y broadcast, A=0x4000>>8=0x40
@@ -1127,7 +1127,7 @@ fn ya16_with_hsv_h0_s0_v_shifted() {
   let mut sink = MixedSinker::<crate::source::Ya16>::new(2, 1)
     .with_hsv(&mut h, &mut s, &mut v)
     .unwrap();
-  ya16_to(&frame, FR, M, &mut sink).unwrap();
+  ya16_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   assert_eq!(h, [0, 0]);
   assert_eq!(s, [0, 0]);
   assert_eq!(v, [0x80, 0xFF]);
@@ -1190,7 +1190,7 @@ fn ya16_combined_rgb_and_rgba_alpha_matches_standalone_le_encoded() {
       .unwrap()
       .with_rgba(&mut rgba_combined)
       .unwrap();
-    ya16_to(&frame, FR, M, &mut sink).unwrap();
+    ya16_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   }
 
   // Run standalone (with_rgba only) — exercises the endian-aware
@@ -1201,7 +1201,7 @@ fn ya16_combined_rgb_and_rgba_alpha_matches_standalone_le_encoded() {
       .with_simd(false)
       .with_rgba(&mut rgba_standalone)
       .unwrap();
-    ya16_to(&frame, FR, M, &mut sink).unwrap();
+    ya16_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   }
 
   assert_eq!(
@@ -1248,7 +1248,7 @@ fn ya16_combined_rgb_u16_and_rgba_u16_alpha_matches_standalone_le_encoded() {
       .unwrap()
       .with_rgba_u16(&mut rgba_combined)
       .unwrap();
-    ya16_to(&frame, FR, M, &mut sink).unwrap();
+    ya16_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   }
 
   let mut rgba_standalone = std::vec![0u16; (w * h * 4) as usize];
@@ -1257,7 +1257,7 @@ fn ya16_combined_rgb_u16_and_rgba_u16_alpha_matches_standalone_le_encoded() {
       .with_simd(false)
       .with_rgba_u16(&mut rgba_standalone)
       .unwrap();
-    ya16_to(&frame, FR, M, &mut sink).unwrap();
+    ya16_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   }
 
   assert_eq!(
@@ -1285,7 +1285,7 @@ fn ya16_width_128_and_130_smoke() {
       .unwrap()
       .with_luma_u16(&mut luma_u16)
       .unwrap();
-    ya16_to(&frame, FR, M, &mut sink).unwrap();
+    ya16_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
     // Pixel 0: Y=0, A=255<<8=0xFF00 → a8=0xFF
     assert_eq!(&rgba[0..4], &[0, 0, 0, 0xFF], "w={w} px0");
   }
@@ -1369,7 +1369,7 @@ macro_rules! gray_planar_u16_le_be_roundtrip_test {
         .with_simd(use_simd)
         .with_rgba(&mut out_le)
         .unwrap();
-      $walker_le(&frame_le, true, M, &mut sink_le).unwrap();
+      $walker_le(&frame_le, true, sink_le.set_kernel_matrix(M)).unwrap();
 
       let frame_be = $be_frame::try_new(&pix_be, 16, 4, 16).unwrap();
       let mut out_be = std::vec![0u8; 16 * 4 * 4];
@@ -1377,7 +1377,7 @@ macro_rules! gray_planar_u16_le_be_roundtrip_test {
         .with_simd(use_simd)
         .with_rgba(&mut out_be)
         .unwrap();
-      $walker_be(&frame_be, true, M, &mut sink_be).unwrap();
+      $walker_be(&frame_be, true, sink_be.set_kernel_matrix(M)).unwrap();
 
       assert_eq!(
         out_le, out_be,
@@ -1472,7 +1472,7 @@ macro_rules! gray16_dual_output_le_be_roundtrip_test {
         .unwrap()
         .with_luma_u16(&mut out_le_luma_u16)
         .unwrap();
-      $walker_le(&frame_le, true, M, &mut sink_le).unwrap();
+      $walker_le(&frame_le, true, sink_le.set_kernel_matrix(M)).unwrap();
 
       let frame_be = $be_frame::try_new(&pix_be, 16, 4, 16).unwrap();
       let mut out_be_rgba = std::vec![0u8; 16 * 4 * 4];
@@ -1483,7 +1483,7 @@ macro_rules! gray16_dual_output_le_be_roundtrip_test {
         .unwrap()
         .with_luma_u16(&mut out_be_luma_u16)
         .unwrap();
-      $walker_be(&frame_be, true, M, &mut sink_be).unwrap();
+      $walker_be(&frame_be, true, sink_be.set_kernel_matrix(M)).unwrap();
 
       assert_eq!(
         out_le_rgba, out_be_rgba,
@@ -1548,7 +1548,7 @@ macro_rules! grayf32_le_be_roundtrip_test {
         .with_simd(use_simd)
         .with_rgba(&mut out_le)
         .unwrap();
-      $walker_le(&frame_le, true, M, &mut sink_le).unwrap();
+      $walker_le(&frame_le, true, sink_le.set_kernel_matrix(M)).unwrap();
 
       let frame_be = $be_frame::try_new(&pix_be, 16, 4, 16).unwrap();
       let mut out_be = std::vec![0u8; 16 * 4 * 4];
@@ -1556,7 +1556,7 @@ macro_rules! grayf32_le_be_roundtrip_test {
         .with_simd(use_simd)
         .with_rgba(&mut out_be)
         .unwrap();
-      $walker_be(&frame_be, true, M, &mut sink_be).unwrap();
+      $walker_be(&frame_be, true, sink_be.set_kernel_matrix(M)).unwrap();
 
       assert_eq!(
         out_le, out_be,
@@ -1624,7 +1624,7 @@ macro_rules! ya16_le_be_roundtrip_test {
         .unwrap()
         .with_rgba_u16(&mut out_le_rgba_u16)
         .unwrap();
-      $walker_le(&frame_le, true, M, &mut sink_le).unwrap();
+      $walker_le(&frame_le, true, sink_le.set_kernel_matrix(M)).unwrap();
 
       let frame_be = $be_frame::try_new(&pix_be, 16, 4, 16 * 2).unwrap();
       let mut out_be_rgba = std::vec![0u8; 16 * 4 * 4];
@@ -1635,7 +1635,7 @@ macro_rules! ya16_le_be_roundtrip_test {
         .unwrap()
         .with_rgba_u16(&mut out_be_rgba_u16)
         .unwrap();
-      $walker_be(&frame_be, true, M, &mut sink_be).unwrap();
+      $walker_be(&frame_be, true, sink_be.set_kernel_matrix(M)).unwrap();
 
       assert_eq!(
         out_le_rgba, out_be_rgba,
@@ -1683,7 +1683,7 @@ fn gray32_with_rgb_shifts_to_u8() {
   let mut sink = MixedSinker::<crate::source::Gray32>::new(4, 1)
     .with_rgb(&mut rgb)
     .unwrap();
-  gray32_to(&frame, FR, M, &mut sink).unwrap();
+  gray32_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   assert_eq!(rgb[0..3], [0x80, 0x80, 0x80]);
   assert_eq!(rgb[3..6], [0xFF, 0xFF, 0xFF]);
   assert_eq!(rgb[6..9], [0x00, 0x00, 0x00]);
@@ -1698,7 +1698,7 @@ fn gray32_with_rgba_alpha_is_0xff() {
   let mut sink = MixedSinker::<crate::source::Gray32>::new(4, 1)
     .with_rgba(&mut rgba)
     .unwrap();
-  gray32_to(&frame, FR, M, &mut sink).unwrap();
+  gray32_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   for i in 0..4 {
     assert_eq!(
       rgba[i * 4..i * 4 + 4],
@@ -1717,7 +1717,7 @@ fn gray32_with_rgb_u16_shifts_to_native() {
   let mut sink = MixedSinker::<crate::source::Gray32>::new(4, 1)
     .with_rgb_u16(&mut rgb)
     .unwrap();
-  gray32_to(&frame, FR, M, &mut sink).unwrap();
+  gray32_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   assert_eq!(rgb[0..3], [0x8000, 0x8000, 0x8000]);
   assert_eq!(rgb[3..6], [0x1234, 0x1234, 0x1234]);
   assert_eq!(rgb[6..9], [0xFFFF, 0xFFFF, 0xFFFF]);
@@ -1732,7 +1732,7 @@ fn gray32_with_rgba_u16_alpha_is_0xffff() {
   let mut sink = MixedSinker::<crate::source::Gray32>::new(4, 1)
     .with_rgba_u16(&mut rgba_u16)
     .unwrap();
-  gray32_to(&frame, FR, M, &mut sink).unwrap();
+  gray32_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   for i in 0..4 {
     assert_eq!(rgba_u16[i * 4 + 3], 0xFFFF, "pixel {i} alpha");
     assert_eq!(rgba_u16[i * 4], 0x1234, "pixel {i} R");
@@ -1747,7 +1747,7 @@ fn gray32_with_luma_shifts_to_u8() {
   let mut sink = MixedSinker::<crate::source::Gray32>::new(4, 1)
     .with_luma(&mut luma)
     .unwrap();
-  gray32_to(&frame, FR, M, &mut sink).unwrap();
+  gray32_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   assert_eq!(luma, [0x00, 0x40, 0x80, 0xFF]);
 }
 
@@ -1760,7 +1760,7 @@ fn gray32_with_luma_u16_shifts_to_native() {
   let mut sink = MixedSinker::<crate::source::Gray32>::new(4, 4)
     .with_luma_u16(&mut lu16)
     .unwrap();
-  gray32_to(&frame, FR, M, &mut sink).unwrap();
+  gray32_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   let expect: Vec<u16> = intended.iter().map(|&v| (v >> 16) as u16).collect();
   assert_eq!(lu16, expect);
 }
@@ -1775,7 +1775,7 @@ fn gray32_with_hsv_h0_s0_v_shift24() {
   let mut sink = MixedSinker::<crate::source::Gray32>::new(2, 1)
     .with_hsv(&mut h, &mut s, &mut v)
     .unwrap();
-  gray32_to(&frame, FR, M, &mut sink).unwrap();
+  gray32_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   assert_eq!(h, [0, 0], "H must be 0");
   assert_eq!(s, [0, 0], "S must be 0");
   assert_eq!(v, [0x80, 0x40], "V = Y >> 24");
@@ -1795,13 +1795,13 @@ fn gray32_be_endian_matches_le() {
   let mut sink_le = MixedSinker::<crate::source::Gray32>::new(4, 1)
     .with_rgb(&mut rgb_le)
     .unwrap();
-  gray32_to(&le_frame, FR, M, &mut sink_le).unwrap();
+  gray32_to(&le_frame, FR, sink_le.set_kernel_matrix(M)).unwrap();
 
   let mut rgb_be = std::vec![0u8; 12];
   let mut sink_be = MixedSinker::<crate::source::Gray32<true>>::new(4, 1)
     .with_rgb(&mut rgb_be)
     .unwrap();
-  gray32_to_endian::<_, true>(&be_frame, FR, M, &mut sink_be).unwrap();
+  gray32_to_endian::<_, true>(&be_frame, FR, sink_be.set_kernel_matrix(M)).unwrap();
 
   assert_eq!(rgb_le, rgb_be, "BE and LE Gray32 RGB must match");
 }
@@ -1850,7 +1850,7 @@ fn gray8_rgb_scratch_alloc_failure_leaves_outputs_untouched() {
     .unwrap();
 
   super::super::arm_rgb_scratch_alloc_failure();
-  let err = gray8_to(&frame, FR, M, &mut sink).unwrap_err();
+  let err = gray8_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap_err();
   drop(sink);
 
   assert!(
@@ -1896,7 +1896,7 @@ fn ya8_rgb_scratch_alloc_failure_leaves_outputs_untouched() {
     .unwrap();
 
   super::super::arm_rgb_scratch_alloc_failure();
-  let err = ya8_to(&frame, FR, M, &mut sink).unwrap_err();
+  let err = ya8_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap_err();
   drop(sink);
 
   assert!(
@@ -1944,7 +1944,7 @@ fn gray_n_rgb_scratch_alloc_failure_leaves_outputs_untouched() {
     .unwrap();
 
   super::super::arm_rgb_scratch_alloc_failure();
-  let err = gray10_to(&frame, FR, M, &mut sink).unwrap_err();
+  let err = gray10_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap_err();
   drop(sink);
 
   assert!(
@@ -1992,7 +1992,7 @@ fn ya16_rgb_scratch_alloc_failure_leaves_outputs_untouched() {
     .unwrap();
 
   super::super::arm_rgb_scratch_alloc_failure();
-  let err = ya16_to(&frame, FR, M, &mut sink).unwrap_err();
+  let err = ya16_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap_err();
   drop(sink);
 
   assert!(

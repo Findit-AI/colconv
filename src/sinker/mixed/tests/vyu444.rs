@@ -69,11 +69,11 @@ fn vyu444_matches_vuyx_reference_all_outputs() {
       let mut a = MixedSinker::<Vyu444>::new(width, height)
         .with_rgb(&mut y_rgb)
         .unwrap();
-      vyu444_to(&vy, full_range, m, &mut a).unwrap();
+      vyu444_to(&vy, full_range, a.set_kernel_matrix(m)).unwrap();
       let mut b = MixedSinker::<Vuyx>::new(width, height)
         .with_rgb(&mut x_rgb)
         .unwrap();
-      vuyx_to(&vx, full_range, m, &mut b).unwrap();
+      vuyx_to(&vx, full_range, b.set_kernel_matrix(m)).unwrap();
     }
     assert_eq!(y_rgb, x_rgb, "VYU444↔VUYX RGB (full_range={full_range})");
 
@@ -83,11 +83,11 @@ fn vyu444_matches_vuyx_reference_all_outputs() {
       let mut a = MixedSinker::<Vyu444>::new(width, height)
         .with_rgba(&mut y_rgba)
         .unwrap();
-      vyu444_to(&vy, full_range, m, &mut a).unwrap();
+      vyu444_to(&vy, full_range, a.set_kernel_matrix(m)).unwrap();
       let mut b = MixedSinker::<Vuyx>::new(width, height)
         .with_rgba(&mut x_rgba)
         .unwrap();
-      vuyx_to(&vx, full_range, m, &mut b).unwrap();
+      vuyx_to(&vx, full_range, b.set_kernel_matrix(m)).unwrap();
     }
     assert_eq!(y_rgba, x_rgba, "VYU444↔VUYX RGBA (full_range={full_range})");
     for i in 0..n {
@@ -102,11 +102,11 @@ fn vyu444_matches_vuyx_reference_all_outputs() {
     let mut a = MixedSinker::<Vyu444>::new(width, height)
       .with_luma(&mut y_l)
       .unwrap();
-    vyu444_to(&vy, false, m, &mut a).unwrap();
+    vyu444_to(&vy, false, a.set_kernel_matrix(m)).unwrap();
     let mut b = MixedSinker::<Vuyx>::new(width, height)
       .with_luma(&mut x_l)
       .unwrap();
-    vuyx_to(&vx, false, m, &mut b).unwrap();
+    vuyx_to(&vx, false, b.set_kernel_matrix(m)).unwrap();
   }
   assert_eq!(y_l, x_l, "VYU444↔VUYX luma");
   for i in 0..n {
@@ -118,11 +118,11 @@ fn vyu444_matches_vuyx_reference_all_outputs() {
     let mut a = MixedSinker::<Vyu444>::new(width, height)
       .with_luma_u16(&mut y_l16)
       .unwrap();
-    vyu444_to(&vy, false, m, &mut a).unwrap();
+    vyu444_to(&vy, false, a.set_kernel_matrix(m)).unwrap();
     let mut b = MixedSinker::<Vuyx>::new(width, height)
       .with_luma_u16(&mut x_l16)
       .unwrap();
-    vuyx_to(&vx, false, m, &mut b).unwrap();
+    vuyx_to(&vx, false, b.set_kernel_matrix(m)).unwrap();
   }
   assert_eq!(y_l16, x_l16, "VYU444↔VUYX luma_u16");
 
@@ -132,11 +132,11 @@ fn vyu444_matches_vuyx_reference_all_outputs() {
     let mut a = MixedSinker::<Vyu444>::new(width, height)
       .with_hsv(&mut yh, &mut ys, &mut yv)
       .unwrap();
-    vyu444_to(&vy, true, m, &mut a).unwrap();
+    vyu444_to(&vy, true, a.set_kernel_matrix(m)).unwrap();
     let mut b = MixedSinker::<Vuyx>::new(width, height)
       .with_hsv(&mut xh, &mut xs, &mut xv)
       .unwrap();
-    vuyx_to(&vx, true, m, &mut b).unwrap();
+    vuyx_to(&vx, true, b.set_kernel_matrix(m)).unwrap();
   }
   assert_eq!((yh, ys, yv), (xh, xs, xv), "VYU444↔VUYX HSV");
 }
@@ -185,7 +185,7 @@ fn vyu444_downscale_matches_vuyx() {
     .unwrap()
     .with_luma(&mut y_l)
     .unwrap();
-    vyu444_to(&vy, false, m, &mut a).unwrap();
+    vyu444_to(&vy, false, a.set_kernel_matrix(m)).unwrap();
     let mut b = MixedSinker::<Vuyx, crate::resample::AreaResampler>::with_resampler(
       in_w,
       in_h,
@@ -196,7 +196,7 @@ fn vyu444_downscale_matches_vuyx() {
     .unwrap()
     .with_luma(&mut x_l)
     .unwrap();
-    vuyx_to(&vx, false, m, &mut b).unwrap();
+    vuyx_to(&vx, false, b.set_kernel_matrix(m)).unwrap();
   }
   assert_eq!(y_l, x_l, "VYU444↔VUYX downscaled luma");
   assert_eq!(y_rgb, x_rgb, "VYU444↔VUYX downscaled RGB");
@@ -222,14 +222,14 @@ fn vyu444_simd_vs_scalar_parity_at_1922() {
     let mut s = MixedSinker::<Vyu444>::new(w, h)
       .with_rgba(&mut simd)
       .unwrap();
-    vyu444_to(&src, false, KernelMatrix::Bt709, &mut s).unwrap();
+    vyu444_to(&src, false, s.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   {
     let mut s = MixedSinker::<Vyu444>::new(w, h)
       .with_rgba(&mut scalar)
       .unwrap()
       .with_simd(false);
-    vyu444_to(&src, false, KernelMatrix::Bt709, &mut s).unwrap();
+    vyu444_to(&src, false, s.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   assert_eq!(simd, scalar, "VYU444 SIMD ≠ scalar at width {w}");
 }
@@ -244,7 +244,7 @@ fn vyu444_malformed_row_returns_row_shape_mismatch() {
   sink.begin_frame(4, 1).unwrap();
   // Width 4 needs 12 packed bytes; hand 10.
   let short = std::vec![0u8; 10];
-  let row = Vyu444Row::new(&short, 0, KernelMatrix::Bt709, false);
+  let row = Vyu444Row::for_tests(&short, 0, KernelMatrix::Bt709, false);
   let err = sink.process(row).unwrap_err();
   assert!(
     matches!(err, MixedSinkerError::RowShapeMismatch(e)
@@ -298,7 +298,7 @@ fn vyu444_rgb_scratch_alloc_failure_leaves_outputs_untouched() {
     .unwrap();
 
   super::super::arm_rgb_scratch_alloc_failure();
-  let err = vyu444_to(&src, false, KernelMatrix::Bt601, &mut sink).unwrap_err();
+  let err = vyu444_to(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap_err();
   drop(sink);
 
   assert!(

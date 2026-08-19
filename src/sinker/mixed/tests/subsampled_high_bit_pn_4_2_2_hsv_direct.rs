@@ -89,7 +89,7 @@ macro_rules! structural_p2xx {
         let mut sink = MixedSinker::<$marker>::new(w, h)
           .with_hsv(&mut hh, &mut ss, &mut vv)
           .unwrap();
-        $walker(&src, true, m, &mut sink).unwrap();
+        $walker(&src, true, sink.set_kernel_matrix(m)).unwrap();
         sink.rgb_scratch.len()
       };
       assert_eq!(

@@ -31,7 +31,7 @@ fn luma_only_copies_y_plane() {
   let mut sink = MixedSinker::<Yuv420p>::new(16, 8)
     .with_luma(&mut luma)
     .unwrap();
-  yuv420p_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
+  yuv420p_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
 
   assert!(luma.iter().all(|&y| y == 42), "luma should be solid 42");
 }
@@ -50,7 +50,7 @@ fn rgb_only_converts_gray_to_gray() {
   let mut sink = MixedSinker::<Yuv420p>::new(16, 8)
     .with_rgb(&mut rgb)
     .unwrap();
-  yuv420p_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
+  yuv420p_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
 
   for px in rgb.chunks(3) {
     assert!(px[0].abs_diff(128) <= 1);
@@ -77,7 +77,7 @@ fn hsv_only_is_rgb_free_and_produces_gray_hsv() {
   let mut sink = MixedSinker::<Yuv420p>::new(16, 8)
     .with_hsv(&mut h, &mut s, &mut v)
     .unwrap();
-  yuv420p_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
+  yuv420p_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   // Probe the scratch while `sink` is alive, then drop its borrows on
   // h/s/v before reading them.
   let scratch_len = sink.rgb_scratch.len();
@@ -113,7 +113,7 @@ fn mixed_all_three_outputs_populated() {
     .unwrap()
     .with_hsv(&mut h, &mut s, &mut v)
     .unwrap();
-  yuv420p_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
+  yuv420p_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
 
   // Luma = Y plane verbatim.
   assert!(luma.iter().all(|&y| y == 200));
@@ -148,7 +148,7 @@ fn rgba_only_converts_gray_to_gray_with_opaque_alpha() {
   let mut sink = MixedSinker::<Yuv420p>::new(16, 8)
     .with_rgba(&mut rgba)
     .unwrap();
-  yuv420p_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
+  yuv420p_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
 
   for px in rgba.chunks(4) {
     assert!(px[0].abs_diff(128) <= 1, "R");
@@ -173,7 +173,7 @@ fn rgba_alpha_is_opaque_for_arbitrary_color() {
   let mut sink = MixedSinker::<Yuv420p>::new(16, 8)
     .with_rgba(&mut rgba)
     .unwrap();
-  yuv420p_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
+  yuv420p_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
 
   for (i, px) in rgba.chunks(4).enumerate() {
     assert_eq!(px[3], 0xFF, "alpha must be opaque (px {i})");
@@ -210,7 +210,7 @@ fn with_rgb_and_with_rgba_produce_byte_identical_rgb_bytes() {
     .unwrap()
     .with_rgba(&mut rgba)
     .unwrap();
-  yuv420p_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
+  yuv420p_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
 
   for i in 0..(w * h) {
     assert_eq!(rgba[i * 4], rgb[i * 3], "R differs at pixel {i}");
@@ -251,13 +251,18 @@ fn rgba_with_simd_false_matches_with_simd_true() {
     let mut sink_simd = MixedSinker::<Yuv420p>::new(w, h)
       .with_rgba(&mut rgba_simd)
       .unwrap();
-    yuv420p_to(&src, true, KernelMatrix::Bt601, &mut sink_simd).unwrap();
+    yuv420p_to(&src, true, sink_simd.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
 
     let mut sink_scalar = MixedSinker::<Yuv420p>::new(w, h)
       .with_rgba(&mut rgba_scalar)
       .unwrap();
     sink_scalar.set_simd(false);
-    yuv420p_to(&src, true, KernelMatrix::Bt601, &mut sink_scalar).unwrap();
+    yuv420p_to(
+      &src,
+      true,
+      sink_scalar.set_kernel_matrix(KernelMatrix::Bt601),
+    )
+    .unwrap();
 
     assert_eq!(
       rgba_simd, rgba_scalar,
@@ -330,13 +335,13 @@ fn yuv_420_to_rgba_simd_matches_scalar_with_random_yuv() {
       let mut s_simd = MixedSinker::<Yuv420p>::new(w, h)
         .with_rgba(&mut rgba_simd)
         .unwrap();
-      yuv420p_to(&src, full_range, matrix, &mut s_simd).unwrap();
+      yuv420p_to(&src, full_range, s_simd.set_kernel_matrix(matrix)).unwrap();
 
       let mut s_scalar = MixedSinker::<Yuv420p>::new(w, h)
         .with_rgba(&mut rgba_scalar)
         .unwrap();
       s_scalar.set_simd(false);
-      yuv420p_to(&src, full_range, matrix, &mut s_scalar).unwrap();
+      yuv420p_to(&src, full_range, s_scalar.set_kernel_matrix(matrix)).unwrap();
 
       // Locate the first divergence to make backend-bug
       // diagnosis tractable instead of dumping ~30 KB of bytes.
@@ -378,7 +383,7 @@ fn rgb_with_hsv_uses_user_buffer_not_scratch() {
     .unwrap()
     .with_hsv(&mut h, &mut s, &mut v)
     .unwrap();
-  yuv420p_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
+  yuv420p_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
 
   assert_eq!(
     sink.rgb_scratch.len(),
@@ -422,8 +427,18 @@ fn with_simd_false_matches_with_simd_true() {
   assert!(sink_simd.simd());
   assert!(!sink_scalar.simd());
 
-  yuv420p_to(&src, false, KernelMatrix::Bt709, &mut sink_simd).unwrap();
-  yuv420p_to(&src, false, KernelMatrix::Bt709, &mut sink_scalar).unwrap();
+  yuv420p_to(
+    &src,
+    false,
+    sink_simd.set_kernel_matrix(KernelMatrix::Bt709),
+  )
+  .unwrap();
+  yuv420p_to(
+    &src,
+    false,
+    sink_scalar.set_kernel_matrix(KernelMatrix::Bt709),
+  )
+  .unwrap();
 
   assert_eq!(rgb_simd, rgb_scalar);
 }
@@ -470,7 +485,7 @@ fn stride_padded_source_reads_correct_pixels() {
   let mut sink = MixedSinker::<Yuv420p>::new(w, h)
     .with_luma(&mut luma)
     .unwrap();
-  yuv420p_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
+  yuv420p_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
 
   assert!(
     luma.iter().all(|&y| y == 50),
@@ -512,7 +527,7 @@ fn yuv420p_with_luma_u16_extracts_y_zero_extended() {
   let mut sink = MixedSinker::<Yuv420p>::new(width, height)
     .with_luma_u16(&mut luma_out)
     .unwrap();
-  yuv420p_to(&src, false, KernelMatrix::Bt709, &mut sink).unwrap();
+  yuv420p_to(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   let expected: std::vec::Vec<u16> = yp.iter().map(|&y| y as u16).collect();
   assert_eq!(luma_out, expected, "Yuv420p luma_u16 mismatch");

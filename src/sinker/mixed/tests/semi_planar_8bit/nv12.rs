@@ -30,7 +30,7 @@ fn nv12_luma_only_copies_y_plane() {
   let mut sink = MixedSinker::<Nv12>::new(16, 8)
     .with_luma(&mut luma)
     .unwrap();
-  nv12_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
+  nv12_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
 
   assert!(luma.iter().all(|&y| y == 42));
 }
@@ -46,7 +46,7 @@ fn nv12_rgb_only_converts_gray_to_gray() {
 
   let mut rgb = std::vec![0u8; 16 * 8 * 3];
   let mut sink = MixedSinker::<Nv12>::new(16, 8).with_rgb(&mut rgb).unwrap();
-  nv12_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
+  nv12_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
 
   for px in rgb.chunks(3) {
     assert!(px[0].abs_diff(128) <= 1);
@@ -76,7 +76,7 @@ fn nv12_mixed_all_three_outputs_populated() {
     .unwrap()
     .with_hsv(&mut h, &mut s, &mut v)
     .unwrap();
-  nv12_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
+  nv12_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
 
   assert!(luma.iter().all(|&y| y == 200));
   for px in rgb.chunks(3) {
@@ -112,8 +112,18 @@ fn nv12_with_simd_false_matches_with_simd_true() {
     .with_rgb(&mut rgb_scalar)
     .unwrap()
     .with_simd(false);
-  nv12_to(&src, false, KernelMatrix::Bt709, &mut sink_simd).unwrap();
-  nv12_to(&src, false, KernelMatrix::Bt709, &mut sink_scalar).unwrap();
+  nv12_to(
+    &src,
+    false,
+    sink_simd.set_kernel_matrix(KernelMatrix::Bt709),
+  )
+  .unwrap();
+  nv12_to(
+    &src,
+    false,
+    sink_scalar.set_kernel_matrix(KernelMatrix::Bt709),
+  )
+  .unwrap();
 
   assert_eq!(rgb_simd, rgb_scalar);
 }
@@ -203,7 +213,7 @@ fn taller_frame_returns_err_before_any_row_written() {
   let mut sink = MixedSinker::<Yuv420p>::new(16, 8)
     .with_luma(&mut luma)
     .unwrap();
-  let err = yuv420p_to(&src, true, KernelMatrix::Bt601, &mut sink)
+  let err = yuv420p_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601))
     .err()
     .unwrap();
   assert_eq!(
@@ -235,7 +245,7 @@ fn shorter_frame_returns_err_before_any_row_written() {
   let mut sink = MixedSinker::<Yuv420p>::new(16, 8)
     .with_luma(&mut luma)
     .unwrap();
-  let err = yuv420p_to(&src, true, KernelMatrix::Bt601, &mut sink)
+  let err = yuv420p_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601))
     .err()
     .unwrap();
   assert_eq!(
@@ -259,7 +269,7 @@ fn nv12_width_mismatch_returns_err() {
 
   let mut rgb = std::vec![0u8; 32 * 8 * 3];
   let mut sink = MixedSinker::<Nv12>::new(32, 8).with_rgb(&mut rgb).unwrap();
-  let err = nv12_to(&src, true, KernelMatrix::Bt601, &mut sink)
+  let err = nv12_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601))
     .err()
     .unwrap();
   assert!(
@@ -286,7 +296,7 @@ fn yuv420p_width_mismatch_returns_err() {
   let mut sink = MixedSinker::<Yuv420p>::new(32, 8)
     .with_rgb(&mut rgb)
     .unwrap();
-  let err = yuv420p_to(&src, true, KernelMatrix::Bt601, &mut sink)
+  let err = yuv420p_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601))
     .err()
     .unwrap();
   assert!(
@@ -313,7 +323,7 @@ fn nv12_shorter_frame_returns_err_before_any_row_written() {
   let mut sink = MixedSinker::<Nv12>::new(16, 8)
     .with_luma(&mut luma)
     .unwrap();
-  let err = nv12_to(&src, true, KernelMatrix::Bt601, &mut sink)
+  let err = nv12_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601))
     .err()
     .unwrap();
   assert!(matches!(err, MixedSinkerError::DimensionMismatch(_)));
@@ -350,7 +360,7 @@ fn infallible_sink_compiles_and_runs() {
   let mut counter = RowCounter(0);
   // `Result<(), Infallible>` — the compiler knows Err is
   // uninhabited, so `.unwrap()` here is free and infallible.
-  yuv420p_to(&src, true, KernelMatrix::Bt601, &mut counter).unwrap();
+  yuv420p_to(&src, true, &mut counter).unwrap();
   assert_eq!(counter.0, 8);
 }
 
@@ -457,8 +467,18 @@ fn nv12_matches_yuv420p_mixed_sinker() {
   let mut s_nv = MixedSinker::<Nv12>::new(ws, hs)
     .with_rgb(&mut rgb_nv12)
     .unwrap();
-  yuv420p_to(&yuv420p_src, false, KernelMatrix::Bt709, &mut s_yuv).unwrap();
-  nv12_to(&nv12_src, false, KernelMatrix::Bt709, &mut s_nv).unwrap();
+  yuv420p_to(
+    &yuv420p_src,
+    false,
+    s_yuv.set_kernel_matrix(KernelMatrix::Bt709),
+  )
+  .unwrap();
+  nv12_to(
+    &nv12_src,
+    false,
+    s_nv.set_kernel_matrix(KernelMatrix::Bt709),
+  )
+  .unwrap();
 
   assert_eq!(rgb_yuv420p, rgb_nv12);
 }
@@ -483,7 +503,7 @@ fn nv12_rgba_only_converts_gray_to_gray_with_opaque_alpha() {
   let mut sink = MixedSinker::<Nv12>::new(16, 8)
     .with_rgba(&mut rgba)
     .unwrap();
-  nv12_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
+  nv12_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
 
   for px in rgba.chunks(4) {
     assert!(px[0].abs_diff(128) <= 1, "R");
@@ -511,7 +531,7 @@ fn nv12_with_rgb_and_with_rgba_produce_byte_identical_rgb_bytes() {
     .unwrap()
     .with_rgba(&mut rgba)
     .unwrap();
-  nv12_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
+  nv12_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
 
   for i in 0..(w * h) {
     assert_eq!(rgba[i * 4], rgb[i * 3], "R differs at pixel {i}");
@@ -564,13 +584,13 @@ fn nv12_rgba_simd_matches_scalar_with_random_yuv() {
       let mut s_simd = MixedSinker::<Nv12>::new(w, h)
         .with_rgba(&mut rgba_simd)
         .unwrap();
-      nv12_to(&src, full_range, matrix, &mut s_simd).unwrap();
+      nv12_to(&src, full_range, s_simd.set_kernel_matrix(matrix)).unwrap();
 
       let mut s_scalar = MixedSinker::<Nv12>::new(w, h)
         .with_rgba(&mut rgba_scalar)
         .unwrap();
       s_scalar.set_simd(false);
-      nv12_to(&src, full_range, matrix, &mut s_scalar).unwrap();
+      nv12_to(&src, full_range, s_scalar.set_kernel_matrix(matrix)).unwrap();
 
       if rgba_simd != rgba_scalar {
         let mismatch = rgba_simd
@@ -627,13 +647,23 @@ fn nv12_rgba_matches_yuv420p_rgba_with_same_pixels() {
   let mut sink_yuv420p = MixedSinker::<Yuv420p>::new(ws, hs)
     .with_rgba(&mut rgba_yuv420p)
     .unwrap();
-  yuv420p_to(&yuv420p_src, true, KernelMatrix::Bt709, &mut sink_yuv420p).unwrap();
+  yuv420p_to(
+    &yuv420p_src,
+    true,
+    sink_yuv420p.set_kernel_matrix(KernelMatrix::Bt709),
+  )
+  .unwrap();
 
   let mut rgba_nv12 = std::vec![0u8; ws * hs * 4];
   let mut sink_nv12 = MixedSinker::<Nv12>::new(ws, hs)
     .with_rgba(&mut rgba_nv12)
     .unwrap();
-  nv12_to(&nv12_src, true, KernelMatrix::Bt709, &mut sink_nv12).unwrap();
+  nv12_to(
+    &nv12_src,
+    true,
+    sink_nv12.set_kernel_matrix(KernelMatrix::Bt709),
+  )
+  .unwrap();
 
   assert_eq!(rgba_yuv420p, rgba_nv12);
 }
@@ -669,7 +699,7 @@ fn nv12_with_luma_u16_extracts_y_zero_extended() {
   let mut sink = MixedSinker::<Nv12>::new(width, height)
     .with_luma_u16(&mut luma_out)
     .unwrap();
-  nv12_to(&src, false, KernelMatrix::Bt709, &mut sink).unwrap();
+  nv12_to(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   let expected: std::vec::Vec<u16> = yp.iter().map(|&y| y as u16).collect();
   assert_eq!(luma_out, expected, "Nv12 luma_u16 mismatch");
@@ -726,7 +756,7 @@ fn nv12_rgb_scratch_alloc_failure_leaves_outputs_untouched() {
     .unwrap();
 
   super::super::super::arm_rgb_scratch_alloc_failure();
-  let err = nv12_to(&src, false, KernelMatrix::Bt601, &mut sink).unwrap_err();
+  let err = nv12_to(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap_err();
   drop(sink);
 
   assert!(

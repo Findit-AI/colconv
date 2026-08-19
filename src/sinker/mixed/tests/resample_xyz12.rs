@@ -36,9 +36,10 @@ use crate::{
 // change / rejected-first-row-poison tests: those require injecting a
 // hand-built `Xyz12Row` at a non-sequential index via
 // `sink.process(...)` (the pattern the `resample_rgbf32` /
-// `resample_rgb48` tests use). `Xyz12Row::new` is `pub(crate)` in the
-// upstream `mediaframe` crate, so pixon cannot construct one — there
-// is no public Row constructor or `From` impl. The sequence-check and
+// `resample_rgb48` tests use). `Xyz12Row::new` is `pub(crate)` in the upstream
+// `mediaframe` crate; 0.4 added a `#[doc(hidden)] Xyz12Row::for_tests` door, so
+// a hand-fed row is constructible now where it was not before. The
+// sequence-check and
 // the conditional-ordered frozen-output snapshot (the sink's resample
 // route calls the shared compare-only `resample_preflight_check_only`,
 // then commits the `frozen_outputs_check` freeze only after every stream
@@ -140,7 +141,7 @@ fn full_res_linear_xyz(wire: &[u16], gamut: KernelGamut) -> Vec<f32> {
     .with_simd(false)
     .with_xyz_f32(&mut xyz)
     .unwrap();
-  xyz12_to(&src, gamut, &mut sink).unwrap();
+  xyz12_to(&src, sink.set_kernel_gamut(gamut)).unwrap();
   xyz
 }
 
@@ -218,7 +219,7 @@ fn xyz12_constant_block_outputs_match_direct_full_res() {
       .unwrap()
       .with_hsv(&mut hh, &mut ss, &mut vv)
       .unwrap();
-      xyz12_to(&src, gamut, &mut sink).unwrap();
+      xyz12_to(&src, sink.set_kernel_gamut(gamut)).unwrap();
     }
 
     // Direct full-res (scalar) outputs at SRC x SRC.
@@ -260,7 +261,7 @@ fn xyz12_constant_block_outputs_match_direct_full_res() {
         .unwrap()
         .with_hsv(&mut d_h, &mut d_s, &mut d_v)
         .unwrap();
-      xyz12_to(&src, gamut, &mut sink).unwrap();
+      xyz12_to(&src, sink.set_kernel_gamut(gamut)).unwrap();
     }
 
     for oy in 0..OUT {
@@ -344,7 +345,7 @@ fn xyz12_downscale_xyz_f32_is_linear_light_area_mean() {
         .with_simd(false)
         .with_xyz_f32(&mut xyz_f32)
         .unwrap();
-    xyz12_to(&src, gamut, &mut sink).unwrap();
+    xyz12_to(&src, sink.set_kernel_gamut(gamut)).unwrap();
   }
   for oy in 0..OUT {
     for ox in 0..OUT {
@@ -383,7 +384,7 @@ fn xyz12_downscale_rgb_f32_is_matrix_of_binned_xyz() {
         .with_simd(false)
         .with_rgb_f32(&mut rgb_f32)
         .unwrap();
-    xyz12_to(&src, gamut, &mut sink).unwrap();
+    xyz12_to(&src, sink.set_kernel_gamut(gamut)).unwrap();
   }
   for oy in 0..OUT {
     for ox in 0..OUT {
@@ -429,7 +430,7 @@ fn xyz12_downscale_preserves_hdr_and_out_of_gamut() {
         .unwrap()
         .with_rgb_f32(&mut rgb_f32)
         .unwrap();
-    xyz12_to(&src, gamut, &mut sink).unwrap();
+    xyz12_to(&src, sink.set_kernel_gamut(gamut)).unwrap();
   }
   // Block (ox=3, oy=0) is the y-only-max block.
   let op = 3;
@@ -469,7 +470,7 @@ fn xyz12_simd_downscale_matches_scalar_on_constant_blocks() {
         .unwrap()
         .with_xyz_f32(&mut xyz_f32)
         .unwrap();
-    xyz12_to(&src, gamut, &mut sink).unwrap();
+    xyz12_to(&src, sink.set_kernel_gamut(gamut)).unwrap();
     (rgb_u16, xyz_f32)
   };
   let (s_rgb_u16, s_xyz) = run(false);
@@ -500,7 +501,7 @@ fn xyz12_identity_plan_matches_new_sink() {
       .unwrap()
       .with_xyz_f32(&mut d_xyz)
       .unwrap();
-    xyz12_to(&src, gamut, &mut sink).unwrap();
+    xyz12_to(&src, sink.set_kernel_gamut(gamut)).unwrap();
   }
   let mut a_rgb = vec![0u8; SRC * SRC * 3];
   let mut a_xyz = vec![0.0f32; SRC * SRC * 3];
@@ -512,7 +513,7 @@ fn xyz12_identity_plan_matches_new_sink() {
         .unwrap()
         .with_xyz_f32(&mut a_xyz)
         .unwrap();
-    xyz12_to(&src, gamut, &mut sink).unwrap();
+    xyz12_to(&src, sink.set_kernel_gamut(gamut)).unwrap();
   }
   assert_eq!(d_rgb, a_rgb, "rgb identity");
   for (a, b) in d_xyz.iter().zip(a_xyz.iter()) {
@@ -534,7 +535,7 @@ fn xyz12_no_output_sink_is_a_noop() {
   let mut sink =
     MixedSinker::<Xyz12Le, AreaResampler>::with_resampler(SRC, SRC, AreaResampler::to(OUT, OUT))
       .unwrap();
-  xyz12_to(&src, KernelGamut::DciP3, &mut sink).unwrap();
+  xyz12_to(&src, sink.set_kernel_gamut(KernelGamut::DciP3)).unwrap();
   assert!(
     !sink.xyz_stream_f32_allocated(),
     "no-output sink allocated the linear-XYZ stream"
@@ -566,7 +567,7 @@ fn xyz12_f32_only_downscale_does_not_size_the_narrow_scratch() {
       .unwrap()
       .with_rgb_f32(&mut rgb_f32)
       .unwrap();
-  xyz12_to(&src, KernelGamut::DciP3, &mut sink).unwrap();
+  xyz12_to(&src, sink.set_kernel_gamut(KernelGamut::DciP3)).unwrap();
   assert_eq!(
     sink.rgb_scratch_capacity(),
     0,
@@ -580,7 +581,7 @@ fn xyz12_f32_only_downscale_does_not_size_the_narrow_scratch() {
       .unwrap()
       .with_rgb(&mut rgb)
       .unwrap();
-  xyz12_to(&src, KernelGamut::DciP3, &mut sink2).unwrap();
+  xyz12_to(&src, sink2.set_kernel_gamut(KernelGamut::DciP3)).unwrap();
   assert!(
     sink2.rgb_scratch_capacity() >= OUT * 3,
     "u8 output did not size the narrow scratch"
@@ -609,9 +610,9 @@ fn xyz12_begin_frame_resets_stream_between_frames() {
       .with_simd(false)
       .with_xyz_f32(&mut xyz_f32)
       .unwrap();
-  xyz12_to(&src_a, gamut, &mut sink).unwrap();
+  xyz12_to(&src_a, sink.set_kernel_gamut(gamut)).unwrap();
   // Second frame reuses the sink; begin_frame inside xyz12_to resets.
-  xyz12_to(&src_b, gamut, &mut sink).unwrap();
+  xyz12_to(&src_b, sink.set_kernel_gamut(gamut)).unwrap();
 
   // Result must equal frame B's linear-light block mean (not a blend
   // with frame A's accumulator).
@@ -659,7 +660,7 @@ fn first_row_source_scratch_oom_leaves_stream_and_freeze_uncommitted_for_retry()
     // field insert + freeze — refuses, surfacing AllocationFailed with BOTH the stream
     // field `None` and the freeze uncommitted (the commit-together atomic shape).
     crate::sinker::mixed::arm_source_xyz_f32_scratch_failure();
-    let err = xyz12_to(&src, gamut, &mut sink).unwrap_err();
+    let err = xyz12_to(&src, sink.set_kernel_gamut(gamut)).unwrap_err();
     assert!(
       matches!(
         err,
@@ -689,7 +690,7 @@ fn first_row_source_scratch_oom_leaves_stream_and_freeze_uncommitted_for_retry()
     // Extra recoverability coverage — attaching rgb (a CHANGED output set) and
     // re-walking (begin_frame re-sequences from row 0) is ACCEPTED and drives output.
     sink.set_rgb(&mut rgb).unwrap();
-    xyz12_to(&src, gamut, &mut sink)
+    xyz12_to(&src, sink.set_kernel_gamut(gamut))
       .expect("frame replay after a first-row source-XYZ scratch OOM must succeed");
   }
   assert!(
@@ -726,7 +727,7 @@ fn first_row_emit_narrow_scratch_oom_leaves_stream_and_freeze_uncommitted_for_re
     // pre-grown BEFORE the field insert + freeze — refuses. Proves the emit-owned
     // scratch is pre-grown BEFORE the commit, so nothing fallible runs post-freeze.
     crate::sinker::mixed::arm_source_rgb_scratch_failure();
-    let err = xyz12_to(&src, gamut, &mut sink).unwrap_err();
+    let err = xyz12_to(&src, sink.set_kernel_gamut(gamut)).unwrap_err();
     assert!(
       matches!(
         err,
@@ -751,7 +752,7 @@ fn first_row_emit_narrow_scratch_oom_leaves_stream_and_freeze_uncommitted_for_re
     // Extra recoverability coverage — attaching xyz_f32 (a CHANGED output set) and
     // re-walking is ACCEPTED and drives output.
     sink.set_xyz_f32(&mut xyz).unwrap();
-    xyz12_to(&src, gamut, &mut sink)
+    xyz12_to(&src, sink.set_kernel_gamut(gamut))
       .expect("frame replay after a first-row emit-narrow scratch OOM must succeed");
   }
   assert!(

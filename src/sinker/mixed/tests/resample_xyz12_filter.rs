@@ -73,7 +73,7 @@ fn full_res_linear_xyz(wire: &[u16], w: usize, h: usize, gamut: KernelGamut) -> 
     .with_simd(false)
     .with_xyz_f32(&mut xyz)
     .unwrap();
-  xyz12_to(&src, gamut, &mut sink).unwrap();
+  xyz12_to(&src, sink.set_kernel_gamut(gamut)).unwrap();
   xyz
 }
 
@@ -158,7 +158,7 @@ fn xyz12_filter_outputs<K: FilterKernel + Copy>(
     .unwrap()
     .with_rgb_f16(&mut rgb_f16)
     .unwrap();
-    xyz12_to(&src, gamut, &mut sink).unwrap();
+    xyz12_to(&src, sink.set_kernel_gamut(gamut)).unwrap();
   }
   FilterOutputs {
     rgb,
@@ -434,7 +434,7 @@ fn xyz12_filter_plan_is_accepted() {
     .unwrap()
     .with_xyz_f32(&mut xyz_f32)
     .unwrap();
-    xyz12_to(&src, KernelGamut::DciP3, &mut sink).unwrap();
+    xyz12_to(&src, sink.set_kernel_gamut(KernelGamut::DciP3)).unwrap();
   }
   assert!(
     xyz_f32.iter().all(|&v| v.to_bits() != sentinel.to_bits()),

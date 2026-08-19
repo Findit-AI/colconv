@@ -186,7 +186,7 @@ fn run_nv20<const BE: bool>(
         .unwrap()
         .with_hsv(&mut o.hsv.0, &mut o.hsv.1, &mut o.hsv.2)
         .unwrap();
-      nv20_to_endian::<_, BE>(&src, FR, M, &mut sink).unwrap();
+      nv20_to_endian::<_, BE>(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     }};
   }
   match tier {
@@ -258,7 +258,7 @@ fn run_p210<const BE: bool>(
         .unwrap()
         .with_hsv(&mut o.hsv.0, &mut o.hsv.1, &mut o.hsv.2)
         .unwrap();
-      p210_to_endian::<_, BE>(&src, FR, M, &mut sink).unwrap();
+      p210_to_endian::<_, BE>(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     }};
   }
   match tier {
@@ -383,7 +383,7 @@ fn direct_nv20<const BE: bool>(yp: &[u16], uvp: &[u16], sw: usize, sh: usize) ->
     .unwrap()
     .with_hsv(&mut o.hsv.0, &mut o.hsv.1, &mut o.hsv.2)
     .unwrap();
-  nv20_to_endian::<_, BE>(&src, FR, M, &mut sink).unwrap();
+  nv20_to_endian::<_, BE>(&src, FR, sink.set_kernel_matrix(M)).unwrap();
   o
 }
 
@@ -852,7 +852,7 @@ fn direct_nv20_sited<const BE: bool>(
     .unwrap()
     .with_hsv(&mut o.hsv.0, &mut o.hsv.1, &mut o.hsv.2)
     .unwrap();
-  nv20_to_endian::<_, BE>(&src, FR, M, &mut sink).unwrap();
+  nv20_to_endian::<_, BE>(&src, FR, sink.set_kernel_matrix(M)).unwrap();
   o
 }
 
@@ -882,7 +882,7 @@ fn direct_p210_sited<const BE: bool>(
     .unwrap()
     .with_hsv(&mut o.hsv.0, &mut o.hsv.1, &mut o.hsv.2)
     .unwrap();
-  p210_to_endian::<_, BE>(&src, FR, M, &mut sink).unwrap();
+  p210_to_endian::<_, BE>(&src, FR, sink.set_kernel_matrix(M)).unwrap();
   o
 }
 
@@ -1029,10 +1029,10 @@ fn identity_mid_frame_siting_flip_rejected() {
       .with_rgb(&mut rgb)
       .unwrap();
     PixelSink::begin_frame(&mut sink, sw as u32, sh as u32).unwrap();
-    let row0 = Nv20Row::new(&yp[0..sw], &uvp[0..2 * cw], 0, M, FR);
+    let row0 = Nv20Row::for_tests(&yp[0..sw], &uvp[0..2 * cw], 0, M, FR);
     PixelSink::process(&mut sink, row0).unwrap();
     sink.set_chroma_location(loc2.clone());
-    let row1 = Nv20Row::new(&yp[sw..2 * sw], &uvp[2 * cw..4 * cw], 1, M, FR);
+    let row1 = Nv20Row::for_tests(&yp[sw..2 * sw], &uvp[2 * cw..4 * cw], 1, M, FR);
     let err = PixelSink::process(&mut sink, row1).unwrap_err();
     assert!(
       matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
@@ -1198,10 +1198,10 @@ fn resample_mid_frame_siting_flip_rejected() {
         .with_rgb(&mut rgb)
         .unwrap();
     PixelSink::begin_frame(&mut sink, sw as u32, sh as u32).unwrap();
-    let row0 = Nv20Row::new(&yp[0..sw], &uvp[0..2 * cw], 0, M, FR);
+    let row0 = Nv20Row::for_tests(&yp[0..sw], &uvp[0..2 * cw], 0, M, FR);
     PixelSink::process(&mut sink, row0).unwrap();
     sink.set_chroma_location(loc2.clone());
-    let row1 = Nv20Row::new(&yp[sw..2 * sw], &uvp[2 * cw..4 * cw], 1, M, FR);
+    let row1 = Nv20Row::for_tests(&yp[sw..2 * sw], &uvp[2 * cw..4 * cw], 1, M, FR);
     let err = PixelSink::process(&mut sink, row1).unwrap_err();
     assert!(
       matches!(err, MixedSinkerError::ChromaSitingChanged(_)),

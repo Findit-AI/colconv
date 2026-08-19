@@ -222,7 +222,7 @@ macro_rules! yuv_planar_hb_native_suite {
           .unwrap()
           .with_luma(&mut luma)
           .unwrap();
-          $walker(&frame_le(&yl, &ul, &vl), FR, M, &mut sink).unwrap();
+          $walker(&frame_le(&yl, &ul, &vl), FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgb_u16, luma)
       }
@@ -248,7 +248,7 @@ macro_rules! yuv_planar_hb_native_suite {
           .unwrap()
           .with_luma(&mut luma)
           .unwrap();
-          $walker_be(&frame_be(&yb, &ub, &vb), FR, M, &mut sink).unwrap();
+          $walker_be(&frame_be(&yb, &ub, &vb), FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgb_u16, luma)
       }
@@ -277,7 +277,7 @@ macro_rules! yuv_planar_hb_native_suite {
             &yl, &ul, &vl, OUT as u32, OUT as u32, OUT as u32, OUT as u32, OUT as u32,
           )
           .unwrap();
-          $oracle_walker(&f, FR, M, &mut sink).unwrap();
+          $oracle_walker(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         // Luma oracle computed INDEPENDENTLY of the sinker luma path: clamp the
         // binned Y to the native max, then narrow. Routing it through the sink
@@ -626,7 +626,7 @@ macro_rules! yuv_planar_hb_native_suite {
           .unwrap()
           .with_luma(&mut luma)
           .unwrap();
-          $walker(&frame_le(&yl, &ul, &vl), FR, M, &mut sink).unwrap();
+          $walker(&frame_le(&yl, &ul, &vl), FR, sink.set_kernel_matrix(M)).unwrap();
         }
         assert_eq!(rgb, e.0, "default u8 rgb must match explicit native");
         assert_eq!(rgb_u16, e.1, "default u16 rgb must match explicit native");
@@ -661,7 +661,7 @@ macro_rules! yuv_planar_hb_native_suite {
         sink.begin_frame(SRC as u32, SRC as u32).unwrap();
         let (yr, cr) = (3 * SRC, chroma_row(3));
         let err = sink
-          .process($row::new(
+          .process($row::for_tests(
             &yl[yr..yr + SRC],
             &ul[cr..cr + CW],
             &vl[cr..cr + CW],
@@ -683,7 +683,7 @@ macro_rules! yuv_planar_hb_native_suite {
         let mut rgb = vec![0u8; OUT * OUT * 3];
         sink.set_rgb(&mut rgb).unwrap();
         sink
-          .process($row::new(&yl[..SRC], &ul[..CW], &vl[..CW], 0, M, FR))
+          .process($row::for_tests(&yl[..SRC], &ul[..CW], &vl[..CW], 0, M, FR))
           .expect("row 0 must succeed after a rejected out-of-sequence first row");
       }
 
@@ -717,7 +717,7 @@ macro_rules! yuv_planar_hb_native_suite {
         for r in 0..2 {
           let cr = chroma_row(r);
           sink
-            .process($row::new(
+            .process($row::for_tests(
               &yl[r * SRC..(r + 1) * SRC],
               &ul[cr..cr + CW],
               &vl[cr..cr + CW],
@@ -733,7 +733,7 @@ macro_rules! yuv_planar_hb_native_suite {
         crate::sinker::mixed::arm_planar_hb_native_alloc_failure();
         let cr = chroma_row(2);
         let err = sink
-          .process($row::new(
+          .process($row::for_tests(
             &yl[2 * SRC..3 * SRC],
             &ul[cr..cr + CW],
             &vl[cr..cr + CW],
@@ -764,7 +764,7 @@ macro_rules! yuv_planar_hb_native_suite {
         .with_rgb_u16(&mut rgb_u16b)
         .unwrap();
         let err2 = sink2
-          .process($row::new(&yl[..SRC], &ul[..CW], &vl[..CW], 0, M, FR))
+          .process($row::for_tests(&yl[..SRC], &ul[..CW], &vl[..CW], 0, M, FR))
           .unwrap_err();
         assert!(
           matches!(
@@ -800,12 +800,12 @@ macro_rules! yuv_planar_hb_native_suite {
         .unwrap();
         sink.begin_frame(SRC as u32, SRC as u32).unwrap();
         sink
-          .process($row::new(&yl[..SRC], &ul[..CW], &vl[..CW], 0, M, FR))
+          .process($row::for_tests(&yl[..SRC], &ul[..CW], &vl[..CW], 0, M, FR))
           .expect("native row 0 freezes the route and succeeds");
         sink.set_native(false);
         let cr = chroma_row(1);
         let err = sink
-          .process($row::new(
+          .process($row::for_tests(
             &yl[SRC..2 * SRC],
             &ul[cr..cr + CW],
             &vl[cr..cr + CW],
@@ -1065,7 +1065,8 @@ fn luma_only_native_skips_chroma_planning() {
     .with_native(true)
     .with_luma(&mut luma)
     .unwrap();
-    yuv422p10_to(&frame, FR, M, &mut sink).expect("luma-only native must not plan chroma");
+    yuv422p10_to(&frame, FR, sink.set_kernel_matrix(M))
+      .expect("luma-only native must not plan chroma");
   }
 
   // Colour: the still-armed failpoint fires at chroma planning -> Err. This
@@ -1079,7 +1080,7 @@ fn luma_only_native_skips_chroma_planning() {
       .with_rgb(&mut rgb)
       .unwrap();
   assert!(
-    yuv422p10_to(&frame, FR, M, &mut sink).is_err(),
+    yuv422p10_to(&frame, FR, sink.set_kernel_matrix(M)).is_err(),
     "colour native must reach chroma planning (the armed failpoint fires)"
   );
 }
@@ -1105,7 +1106,7 @@ fn native_colour_capability_rebuild_chroma_oom_is_transactional() {
   let v = vec![1u16 << 15; SRC * SRC];
   let (yl, ul, vl) = (as_le(&y), as_le(&u), as_le(&v));
   let row = |r: usize| {
-    Yuv444p16Row::new(
+    Yuv444p16Row::for_tests(
       &yl[r * SRC..(r + 1) * SRC],
       &ul[r * SRC..(r + 1) * SRC],
       &vl[r * SRC..(r + 1) * SRC],
@@ -1191,7 +1192,7 @@ fn native_colour_capability_rebuild_src_scratch_oom_is_transactional() {
   let v = vec![1u16 << 15; SRC * SRC];
   let (yl, ul, vl) = (as_le(&y), as_le(&u), as_le(&v));
   let row = |r: usize| {
-    Yuv444p16Row::new(
+    Yuv444p16Row::for_tests(
       &yl[r * SRC..(r + 1) * SRC],
       &ul[r * SRC..(r + 1) * SRC],
       &vl[r * SRC..(r + 1) * SRC],
@@ -1271,7 +1272,7 @@ fn native_colour_capability_rebuild_rgb_u16_scratch_oom_is_transactional() {
   let v = vec![1u16 << 15; SRC * SRC];
   let (yl, ul, vl) = (as_le(&y), as_le(&u), as_le(&v));
   let row = |r: usize| {
-    Yuv444p16Row::new(
+    Yuv444p16Row::for_tests(
       &yl[r * SRC..(r + 1) * SRC],
       &ul[r * SRC..(r + 1) * SRC],
       &vl[r * SRC..(r + 1) * SRC],
@@ -1352,7 +1353,7 @@ fn native_colour_capability_rebuild_later_source_scratch_oom_is_transactional() 
   let v = vec![1u16 << 15; SRC * SRC];
   let (yl, ul, vl) = (as_le(&y), as_le(&u), as_le(&v));
   let row = |r: usize| {
-    Yuv444p16Row::new(
+    Yuv444p16Row::for_tests(
       &yl[r * SRC..(r + 1) * SRC],
       &ul[r * SRC..(r + 1) * SRC],
       &vl[r * SRC..(r + 1) * SRC],

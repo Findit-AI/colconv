@@ -347,7 +347,7 @@ pub mod bench_internals;
 
 #[cfg(feature = "bayer")]
 pub use walker::BayerOptions;
-pub use walker::{ColorSpec, Walker, Xyz12Options, YuvOptions};
+pub use walker::{ColorSpec, Walker, YuvOptions};
 
 /// The Tier-0 golden entry point ([`Convert`]) and its sealed [`Source`] /
 /// [`FromSpec`] contract.

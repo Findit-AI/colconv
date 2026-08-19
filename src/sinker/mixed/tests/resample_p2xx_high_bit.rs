@@ -177,7 +177,7 @@ macro_rules! p2xx_high_bit_resample_suite {
         let mut sink = MixedSinker::<$marker>::new(SRC, SRC)
           .with_rgb(&mut rgb)
           .unwrap();
-        $walker(&frame(y, uv), FR, M, &mut sink).unwrap();
+        $walker(&frame(y, uv), FR, sink.set_kernel_matrix(M)).unwrap();
         rgb
       }
       fn direct_rgb_u16(y: &[u16], uv: &[u16]) -> Vec<u16> {
@@ -185,7 +185,7 @@ macro_rules! p2xx_high_bit_resample_suite {
         let mut sink = MixedSinker::<$marker>::new(SRC, SRC)
           .with_rgb_u16(&mut rgb)
           .unwrap();
-        $walker(&frame(y, uv), FR, M, &mut sink).unwrap();
+        $walker(&frame(y, uv), FR, sink.set_kernel_matrix(M)).unwrap();
         rgb
       }
 
@@ -207,7 +207,7 @@ macro_rules! p2xx_high_bit_resample_suite {
           .with_native(false)
           .with_rgb(&mut rgb)
           .unwrap();
-          $walker(&frame(&y, &uv), FR, M, &mut sink).unwrap();
+          $walker(&frame(&y, &uv), FR, sink.set_kernel_matrix(M)).unwrap();
         }
         assert_eq!(rgb, block_mean_2x2_rgb_u8(&direct_rgb_u8(&y, &uv)));
       }
@@ -230,7 +230,7 @@ macro_rules! p2xx_high_bit_resample_suite {
           .with_native(false)
           .with_rgb_u16(&mut rgb)
           .unwrap();
-          $walker(&frame(&y, &uv), FR, M, &mut sink).unwrap();
+          $walker(&frame(&y, &uv), FR, sink.set_kernel_matrix(M)).unwrap();
         }
         assert_eq!(rgb, block_mean_2x2_rgb_u16(&direct_rgb_u16(&y, &uv)));
       }
@@ -259,7 +259,7 @@ macro_rules! p2xx_high_bit_resample_suite {
           .unwrap()
           .with_rgb_u16(&mut rgb_u16)
           .unwrap();
-          $walker(&frame(&y, &uv), FR, M, &mut sink).unwrap();
+          $walker(&frame(&y, &uv), FR, sink.set_kernel_matrix(M)).unwrap();
         }
         assert_eq!(rgb_u8, block_mean_2x2_rgb_u8(&direct_rgb_u8(&y, &uv)));
         assert_eq!(rgb_u16, block_mean_2x2_rgb_u16(&direct_rgb_u16(&y, &uv)));
@@ -291,7 +291,7 @@ macro_rules! p2xx_high_bit_resample_suite {
             .with_native(false)
             .with_luma(&mut luma)
             .unwrap();
-            $walker(&frame(&y, &uv), full_range, M, &mut sink).unwrap();
+            $walker(&frame(&y, &uv), full_range, sink.set_kernel_matrix(M)).unwrap();
           }
           assert_eq!(
             luma, luma_ref,
@@ -319,7 +319,7 @@ macro_rules! p2xx_high_bit_resample_suite {
           .with_native(false)
           .with_luma(&mut luma)
           .unwrap();
-          $walker(&frame(&y, &uv), FR, M, &mut sink).unwrap();
+          $walker(&frame(&y, &uv), FR, sink.set_kernel_matrix(M)).unwrap();
         }
         let expect = (yc >> ($bits - 8)) as u8;
         assert!(
@@ -360,7 +360,7 @@ macro_rules! p2xx_high_bit_resample_suite {
           .unwrap()
           .with_hsv(&mut hh, &mut ss, &mut vv)
           .unwrap();
-          $walker(&frame(&y, &uv), FR, M, &mut sink).unwrap();
+          $walker(&frame(&y, &uv), FR, sink.set_kernel_matrix(M)).unwrap();
         }
         let g_u8 = &direct_u8[..3];
         for px in rgb.chunks_exact(3) {
@@ -417,7 +417,7 @@ macro_rules! p2xx_high_bit_resample_suite {
           .unwrap()
           .with_hsv(&mut hh, &mut ss, &mut vv)
           .unwrap();
-          $walker(&frame(&y, &uv), FR, M, &mut sink).unwrap();
+          $walker(&frame(&y, &uv), FR, sink.set_kernel_matrix(M)).unwrap();
         }
         assert_eq!(rgb, rgb_u8_ref, "all-outputs rgb");
         for (px, rgb_px) in rgba.chunks_exact(4).zip(rgb_u8_ref.chunks_exact(3)) {
@@ -474,7 +474,7 @@ macro_rules! p2xx_high_bit_resample_suite {
           .unwrap()
           .with_luma(&mut le_luma)
           .unwrap();
-          $walker(&frame(&y_le, &uv_le), FR, M, &mut sink).unwrap();
+          $walker(&frame(&y_le, &uv_le), FR, sink.set_kernel_matrix(M)).unwrap();
         }
 
         let mut be_rgb = vec![0u8; OUT * OUT * 3];
@@ -494,7 +494,7 @@ macro_rules! p2xx_high_bit_resample_suite {
           .unwrap()
           .with_luma(&mut be_luma)
           .unwrap();
-          $walker_be::<_, true>(&frame_be(&y_be, &uv_be), FR, M, &mut sink).unwrap();
+          $walker_be::<_, true>(&frame_be(&y_be, &uv_be), FR, sink.set_kernel_matrix(M)).unwrap();
         }
 
         assert_eq!(le_rgb, be_rgb, "rgb LE/BE diverge");
@@ -528,7 +528,7 @@ macro_rules! p2xx_high_bit_resample_suite {
             .unwrap()
             .with_luma(&mut luma)
             .unwrap();
-            $walker(&frame(&y, &uv), FR, M, &mut sink).unwrap();
+            $walker(&frame(&y, &uv), FR, sink.set_kernel_matrix(M)).unwrap();
           }
           (rgb, rgb_u16, luma)
         };
@@ -562,7 +562,7 @@ macro_rules! p2xx_high_bit_resample_suite {
           .unwrap()
           .with_rgb_u16(&mut rgb_u16)
           .unwrap();
-          $walker(&frame(&y, &uv), FR, M, &mut sink).unwrap();
+          $walker(&frame(&y, &uv), FR, sink.set_kernel_matrix(M)).unwrap();
         }
         assert_eq!(
           rgb,
@@ -588,7 +588,7 @@ macro_rules! p2xx_high_bit_resample_suite {
           let mut sink = MixedSinker::<$marker>::new(SRC, SRC)
             .with_rgb(&mut direct)
             .unwrap();
-          $walker(&frame(&y, &uv), FR, M, &mut sink).unwrap();
+          $walker(&frame(&y, &uv), FR, sink.set_kernel_matrix(M)).unwrap();
         }
         let mut via_area = vec![0u8; SRC * SRC * 3];
         {
@@ -601,7 +601,7 @@ macro_rules! p2xx_high_bit_resample_suite {
           .with_native(false)
           .with_rgb(&mut via_area)
           .unwrap();
-          $walker(&frame(&y, &uv), FR, M, &mut sink).unwrap();
+          $walker(&frame(&y, &uv), FR, sink.set_kernel_matrix(M)).unwrap();
         }
         assert_eq!(direct, via_area, "identity plan must match the direct sink");
       }
@@ -615,7 +615,7 @@ macro_rules! p2xx_high_bit_resample_suite {
           AreaResampler::to(OUT, OUT),
         )
         .unwrap();
-        $walker(&frame(&y, &uv), FR, M, &mut sink).unwrap();
+        $walker(&frame(&y, &uv), FR, sink.set_kernel_matrix(M)).unwrap();
         assert!(
           !sink.luma_stream_u16_allocated(),
           "no-output sink allocated a luma stream"
@@ -657,8 +657,8 @@ macro_rules! p2xx_high_bit_resample_suite {
           .unwrap()
           .with_luma(&mut luma)
           .unwrap();
-          $walker(&frame(&y1, &uv1), FR, M, &mut sink).unwrap();
-          $walker(&frame(&y2, &uv2), FR, M, &mut sink).unwrap();
+          $walker(&frame(&y1, &uv1), FR, sink.set_kernel_matrix(M)).unwrap();
+          $walker(&frame(&y2, &uv2), FR, sink.set_kernel_matrix(M)).unwrap();
         }
         assert_eq!(rgb_u16, block_mean_2x2_rgb_u16(&direct_rgb_u16(&y2, &uv2)));
         let y_ref = block_mean_2x2_u16(&logical_y(&y2));
@@ -690,7 +690,13 @@ macro_rules! p2xx_high_bit_resample_suite {
         // `SRC` u16 wide (`2 * (SRC / 2)`).
         let (yr, cr) = (3 * SRC, 3 * SRC);
         let err = sink
-          .process($row::new(&y[yr..yr + SRC], &uv[cr..cr + SRC], 3, M, FR))
+          .process($row::for_tests(
+            &y[yr..yr + SRC],
+            &uv[cr..cr + SRC],
+            3,
+            M,
+            FR,
+          ))
           .unwrap_err();
         assert!(
           matches!(
@@ -734,11 +740,17 @@ macro_rules! p2xx_high_bit_resample_suite {
         sink.begin_frame(SRC as u32, SRC as u32).unwrap();
         // 4:2:2: each luma row reads its own (same-index) chroma row.
         sink
-          .process($row::new(&y[..SRC], &uv[..SRC], 0, M, FR))
+          .process($row::for_tests(&y[..SRC], &uv[..SRC], 0, M, FR))
           .unwrap();
         sink.set_luma(&mut luma).unwrap();
         let err = sink
-          .process($row::new(&y[SRC..2 * SRC], &uv[SRC..2 * SRC], 1, M, FR))
+          .process($row::for_tests(
+            &y[SRC..2 * SRC],
+            &uv[SRC..2 * SRC],
+            1,
+            M,
+            FR,
+          ))
           .unwrap_err();
         assert!(
           matches!(err, MixedSinkerError::ResampleOutputsChanged(_)),

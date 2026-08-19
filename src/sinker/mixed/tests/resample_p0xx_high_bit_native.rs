@@ -183,7 +183,7 @@ macro_rules! p0xx_high_bit_native_suite {
           .unwrap()
           .with_luma(&mut luma)
           .unwrap();
-          $walker(&frame(&yl, &uvl), FR, M, &mut sink).unwrap();
+          $walker(&frame(&yl, &uvl), FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgb_u16, luma)
       }
@@ -208,7 +208,7 @@ macro_rules! p0xx_high_bit_native_suite {
           .unwrap()
           .with_luma(&mut luma)
           .unwrap();
-          $walker(&frame(&yl, &uvl), FR, M, &mut sink).unwrap();
+          $walker(&frame(&yl, &uvl), FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgb_u16, luma)
       }
@@ -236,7 +236,7 @@ macro_rules! p0xx_high_bit_native_suite {
           .unwrap()
           .with_luma(&mut luma)
           .unwrap();
-          $walker_be::<_, true>(&frame_be(&yb, &uvb), FR, M, &mut sink).unwrap();
+          $walker_be::<_, true>(&frame_be(&yb, &uvb), FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgb_u16, luma)
       }
@@ -309,7 +309,7 @@ macro_rules! p0xx_high_bit_native_suite {
           .unwrap()
           .with_luma(&mut luma)
           .unwrap();
-          $walker_be::<_, true>(&frame_be(&yb, &uvb), FR, M, &mut sink).unwrap();
+          $walker_be::<_, true>(&frame_be(&yb, &uvb), FR, sink.set_kernel_matrix(M)).unwrap();
         }
         assert_eq!(rgb, n_rgb_le, "BE u8 colour must match LE");
         assert_eq!(rgb_u16, n_rgb16_le, "BE u16 colour must match LE");
@@ -348,7 +348,7 @@ macro_rules! p0xx_high_bit_native_suite {
           .unwrap()
           .with_luma(&mut n_luma)
           .unwrap();
-          $walker_be::<_, true>(&frame_be(&yb, &uvb), FR, M, &mut sink).unwrap();
+          $walker_be::<_, true>(&frame_be(&yb, &uvb), FR, sink.set_kernel_matrix(M)).unwrap();
         }
         let (r_rgb, r_rgb16, r_luma) = rowstage_be_run(&y, &uv);
 
@@ -446,7 +446,7 @@ macro_rules! p0xx_high_bit_native_suite {
             .unwrap()
             .with_rgb_u16(&mut ref_rgb16)
             .unwrap();
-          $walker(&frame(&yl, &uvl), FR, M, &mut sink).unwrap();
+          $walker(&frame(&yl, &uvl), FR, sink.set_kernel_matrix(M)).unwrap();
         }
         for px in n_rgb.chunks_exact(3) {
           assert_eq!(px, &ref_rgb[..3], "uniform-gray u8 colour drifted");
@@ -485,7 +485,7 @@ macro_rules! p0xx_high_bit_native_suite {
         )
         .unwrap()
         .with_native(true);
-        $walker(&frame(&yl, &uvl), FR, M, &mut sink).unwrap();
+        $walker(&frame(&yl, &uvl), FR, sink.set_kernel_matrix(M)).unwrap();
       }
 
       #[test]
@@ -517,8 +517,8 @@ macro_rules! p0xx_high_bit_native_suite {
           .unwrap()
           .with_luma(&mut luma)
           .unwrap();
-          $walker(&frame(&y1l, &uv1l), FR, M, &mut sink).unwrap();
-          $walker(&frame(&y2l, &uv2l), FR, M, &mut sink).unwrap();
+          $walker(&frame(&y1l, &uv1l), FR, sink.set_kernel_matrix(M)).unwrap();
+          $walker(&frame(&y2l, &uv2l), FR, sink.set_kernel_matrix(M)).unwrap();
         }
         let y_ref = block_mean_2x2_u16(&logical_y(&y2));
         let luma_ref: Vec<u8> = y_ref.iter().map(|&c| (c >> ($bits - 8)) as u8).collect();
@@ -549,7 +549,13 @@ macro_rules! p0xx_high_bit_native_suite {
         // interleaved chroma row is `SRC` u16 wide.
         let (yr, cr) = (3 * SRC, 1 * SRC);
         let err = sink
-          .process($row::new(&y[yr..yr + SRC], &uv[cr..cr + SRC], 3, M, FR))
+          .process($row::for_tests(
+            &y[yr..yr + SRC],
+            &uv[cr..cr + SRC],
+            3,
+            M,
+            FR,
+          ))
           .unwrap_err();
         assert!(
           matches!(
@@ -563,7 +569,7 @@ macro_rules! p0xx_high_bit_native_suite {
         let mut rgb = vec![0u8; OUT * OUT * 3];
         sink.set_rgb(&mut rgb).unwrap();
         sink
-          .process($row::new(&y[..SRC], &uv[..SRC], 0, M, FR))
+          .process($row::for_tests(&y[..SRC], &uv[..SRC], 0, M, FR))
           .expect("row 0 must succeed after a rejected out-of-sequence first row");
       }
 
@@ -599,7 +605,7 @@ macro_rules! p0xx_high_bit_native_suite {
         for r in 0..2 {
           let cr = (r / 2) * SRC;
           sink
-            .process($row::new(
+            .process($row::for_tests(
               &y[r * SRC..(r + 1) * SRC],
               &uv[cr..cr + SRC],
               r,
@@ -613,7 +619,13 @@ macro_rules! p0xx_high_bit_native_suite {
         sink.set_rgb_u16(&mut rgb_u16).unwrap();
         crate::sinker::mixed::subsampled_4_2_0_high_bit::arm_p0xx_alloc_failure();
         let err = sink
-          .process($row::new(&y[2 * SRC..3 * SRC], &uv[SRC..2 * SRC], 2, M, FR))
+          .process($row::for_tests(
+            &y[2 * SRC..3 * SRC],
+            &uv[SRC..2 * SRC],
+            2,
+            M,
+            FR,
+          ))
           .unwrap_err();
         assert!(
           matches!(err, MixedSinkerError::ResampleOutputsChanged(_)),
@@ -637,7 +649,7 @@ macro_rules! p0xx_high_bit_native_suite {
         .with_rgb_u16(&mut rgb_u16b)
         .unwrap();
         let err2 = sink2
-          .process($row::new(&y[..SRC], &uv[..SRC], 0, M, FR))
+          .process($row::for_tests(&y[..SRC], &uv[..SRC], 0, M, FR))
           .unwrap_err();
         assert!(
           matches!(
@@ -682,7 +694,7 @@ macro_rules! p0xx_high_bit_native_suite {
         // row 0.
         crate::sinker::mixed::subsampled_4_2_0_high_bit::arm_p0xx_alloc_failure();
         let err0 = sink
-          .process($row::new(&y[..SRC], &uv[..SRC], 0, M, FR))
+          .process($row::for_tests(&y[..SRC], &uv[..SRC], 0, M, FR))
           .unwrap_err();
         assert!(
           matches!(
@@ -699,7 +711,13 @@ macro_rules! p0xx_high_bit_native_suite {
         // scratch reserve.
         crate::sinker::mixed::subsampled_4_2_0_high_bit::arm_p0xx_alloc_failure();
         let err2 = sink
-          .process($row::new(&y[2 * SRC..3 * SRC], &uv[SRC..2 * SRC], 2, M, FR))
+          .process($row::for_tests(
+            &y[2 * SRC..3 * SRC],
+            &uv[SRC..2 * SRC],
+            2,
+            M,
+            FR,
+          ))
           .unwrap_err();
         assert!(
           matches!(
@@ -728,7 +746,7 @@ macro_rules! p0xx_high_bit_native_suite {
         .with_rgb_u16(&mut rgb_u16b)
         .unwrap();
         let err3 = sink2
-          .process($row::new(&y[..SRC], &uv[..SRC], 0, M, FR))
+          .process($row::for_tests(&y[..SRC], &uv[..SRC], 0, M, FR))
           .unwrap_err();
         assert!(
           matches!(
@@ -749,7 +767,7 @@ macro_rules! p0xx_high_bit_native_suite {
       /// (semi-planar) caller reaches the same transactional commit.
       fn rebuild_row<'a>(y: &'a [u16], uv: &'a [u16], r: usize) -> $row<'a> {
         let cr = (r / 2) * SRC;
-        $row::new(&y[r * SRC..(r + 1) * SRC], &uv[cr..cr + SRC], r, M, FR)
+        $row::for_tests(&y[r * SRC..(r + 1) * SRC], &uv[cr..cr + SRC], r, M, FR)
       }
 
       /// RFC #238 — the 4:2:0 high-bit native delegate is preflight-transactional
@@ -985,12 +1003,12 @@ macro_rules! p0xx_high_bit_native_suite {
         sink.begin_frame(SRC as u32, SRC as u32).unwrap();
         // Row 0 freezes the route = native (chroma row `0 / 2 == 0`).
         sink
-          .process($row::new(&y[..SRC], &uv[..SRC], 0, M, FR))
+          .process($row::for_tests(&y[..SRC], &uv[..SRC], 0, M, FR))
           .expect("native row 0 freezes the route and succeeds");
         // Flip to the row-stage tier and feed the next in-sequence row.
         sink.set_native(false);
         let err = sink
-          .process($row::new(&y[SRC..2 * SRC], &uv[..SRC], 1, M, FR))
+          .process($row::for_tests(&y[SRC..2 * SRC], &uv[..SRC], 1, M, FR))
           .unwrap_err();
         assert!(
           matches!(err, MixedSinkerError::NativeRouteChanged(_)),
@@ -1021,12 +1039,12 @@ macro_rules! p0xx_high_bit_native_suite {
         sink.begin_frame(SRC as u32, SRC as u32).unwrap();
         // Row 0 freezes the route = row-stage.
         sink
-          .process($row::new(&y[..SRC], &uv[..SRC], 0, M, FR))
+          .process($row::for_tests(&y[..SRC], &uv[..SRC], 0, M, FR))
           .expect("row-stage row 0 freezes the route and succeeds");
         // Flip to the native tier and feed the next in-sequence row.
         sink.set_native(true);
         let err = sink
-          .process($row::new(&y[SRC..2 * SRC], &uv[..SRC], 1, M, FR))
+          .process($row::for_tests(&y[SRC..2 * SRC], &uv[..SRC], 1, M, FR))
           .unwrap_err();
         assert!(
           matches!(err, MixedSinkerError::NativeRouteChanged(_)),
@@ -1059,11 +1077,11 @@ macro_rules! p0xx_high_bit_native_suite {
         .unwrap();
         // Frame 1: native, route constant across every row — no false
         // rejection.
-        $walker(&frame(&yl, &uvl), FR, M, &mut sink).unwrap();
+        $walker(&frame(&yl, &uvl), FR, sink.set_kernel_matrix(M)).unwrap();
         // Frame 2: flip to row-stage for the WHOLE frame after begin_frame.
         // The reset cleared the frozen route, so this is allowed.
         sink.set_native(false);
-        $walker(&frame(&yl, &uvl), FR, M, &mut sink)
+        $walker(&frame(&yl, &uvl), FR, sink.set_kernel_matrix(M))
           .expect("a new frame may pick the other tier; the route reset per frame");
       }
 
@@ -1093,7 +1111,7 @@ macro_rules! p0xx_high_bit_native_suite {
         // Row 0 with NO outputs attached: a no-op under native. It must not
         // freeze the route.
         sink
-          .process($row::new(&y[..SRC], &uv[..SRC], 0, M, FR))
+          .process($row::for_tests(&y[..SRC], &uv[..SRC], 0, M, FR))
           .expect("a no-output native row is a no-op");
         // Attach an output and flip to the row-stage tier, then feed the
         // first OUTPUT-bearing row. Because the no-output call consumed no
@@ -1102,7 +1120,7 @@ macro_rules! p0xx_high_bit_native_suite {
         sink.set_rgb_u16(&mut rgb_u16).unwrap();
         sink.set_native(false);
         sink
-          .process($row::new(&y[..SRC], &uv[..SRC], 0, M, FR))
+          .process($row::for_tests(&y[..SRC], &uv[..SRC], 0, M, FR))
           .expect(
             "the first output-bearing row may pick the other tier after a \
              no-output call left the route unfrozen",
@@ -1139,7 +1157,13 @@ macro_rules! p0xx_high_bit_native_suite {
         // 0). Its shared chroma row is `3 / 2 == 1`, `SRC` u16 wide.
         let (yr, cr) = (3 * SRC, 1 * SRC);
         let err = sink
-          .process($row::new(&y[yr..yr + SRC], &uv[cr..cr + SRC], 3, M, FR))
+          .process($row::for_tests(
+            &y[yr..yr + SRC],
+            &uv[cr..cr + SRC],
+            3,
+            M,
+            FR,
+          ))
           .unwrap_err();
         assert!(
           matches!(
@@ -1152,7 +1176,7 @@ macro_rules! p0xx_high_bit_native_suite {
         // in-sequence first row under the OTHER tier must succeed.
         sink.set_native(false);
         sink
-          .process($row::new(&y[..SRC], &uv[..SRC], 0, M, FR))
+          .process($row::for_tests(&y[..SRC], &uv[..SRC], 0, M, FR))
           .expect(
             "a valid in-sequence first row under the other tier must succeed \
              after a rejected out-of-sequence row left the route unfrozen",
@@ -1204,7 +1228,7 @@ macro_rules! p0xx_high_bit_native_suite {
         // touching any stream state, so it consumes nothing.
         sink.set_native(false);
         sink
-          .process($row::new(&y[..SRC], &uv[..SRC], 0, M, FR))
+          .process($row::for_tests(&y[..SRC], &uv[..SRC], 0, M, FR))
           .expect(
             "a no-output call after a frozen route must be a true no-op, not \
              NativeRouteChanged",
@@ -1222,14 +1246,14 @@ macro_rules! p0xx_high_bit_native_suite {
         sink.set_native(true);
         sink.set_luma(&mut luma).unwrap();
         sink
-          .process($row::new(&y[..SRC], &uv[..SRC], 0, M, FR))
+          .process($row::for_tests(&y[..SRC], &uv[..SRC], 0, M, FR))
           .expect("an output-bearing row under the original native route succeeds");
         // ...while an OUTPUT-bearing flip to the OTHER route now rejects,
         // confirming the frozen route is native (the no-output call did not
         // change it to row-stage).
         sink.set_native(false);
         let err = sink
-          .process($row::new(&y[SRC..2 * SRC], &uv[..SRC], 1, M, FR))
+          .process($row::for_tests(&y[SRC..2 * SRC], &uv[..SRC], 1, M, FR))
           .unwrap_err();
         assert!(
           matches!(err, MixedSinkerError::NativeRouteChanged(_)),

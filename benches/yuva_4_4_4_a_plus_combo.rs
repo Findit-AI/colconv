@@ -134,7 +134,14 @@ fn bench_yuva444p(c: &mut Criterion) {
               .unwrap()
               .with_rgba(&mut rgba)
               .unwrap();
-            yuva444p_to(&frame, FULL_RANGE, MATRIX, &mut sinker).unwrap();
+            yuva444p_to(
+              &frame,
+              FULL_RANGE,
+              sinker
+                .set_color_spec(&pixon::ColorSpec::of_matrix(MATRIX))
+                .unwrap(),
+            )
+            .unwrap();
             black_box((&rgb, &rgba));
           });
         },
@@ -239,7 +246,14 @@ fn bench_yuva444p10_u8(c: &mut Criterion) {
               .unwrap()
               .with_rgba(&mut rgba)
               .unwrap();
-            yuva444p10_to(&frame, FULL_RANGE, MATRIX, &mut sinker).unwrap();
+            yuva444p10_to(
+              &frame,
+              FULL_RANGE,
+              sinker
+                .set_color_spec(&pixon::ColorSpec::of_matrix(MATRIX))
+                .unwrap(),
+            )
+            .unwrap();
             black_box((&rgb, &rgba));
           });
         },
@@ -342,7 +356,14 @@ fn bench_yuva444p10_u16(c: &mut Criterion) {
               .unwrap()
               .with_rgba_u16(&mut rgba)
               .unwrap();
-            yuva444p10_to(&frame, FULL_RANGE, MATRIX, &mut sinker).unwrap();
+            yuva444p10_to(
+              &frame,
+              FULL_RANGE,
+              sinker
+                .set_color_spec(&pixon::ColorSpec::of_matrix(MATRIX))
+                .unwrap(),
+            )
+            .unwrap();
             black_box((&rgb, &rgba));
           });
         },
@@ -445,7 +466,14 @@ fn bench_yuva444p16_u8(c: &mut Criterion) {
               .unwrap()
               .with_rgba(&mut rgba)
               .unwrap();
-            yuva444p16_to(&frame, FULL_RANGE, MATRIX, &mut sinker).unwrap();
+            yuva444p16_to(
+              &frame,
+              FULL_RANGE,
+              sinker
+                .set_color_spec(&pixon::ColorSpec::of_matrix(MATRIX))
+                .unwrap(),
+            )
+            .unwrap();
             black_box((&rgb, &rgba));
           });
         },
@@ -548,7 +576,14 @@ fn bench_yuva444p16_u16(c: &mut Criterion) {
               .unwrap()
               .with_rgba_u16(&mut rgba)
               .unwrap();
-            yuva444p16_to(&frame, FULL_RANGE, MATRIX, &mut sinker).unwrap();
+            yuva444p16_to(
+              &frame,
+              FULL_RANGE,
+              sinker
+                .set_color_spec(&pixon::ColorSpec::of_matrix(MATRIX))
+                .unwrap(),
+            )
+            .unwrap();
             black_box((&rgb, &rgba));
           });
         },

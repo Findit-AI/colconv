@@ -46,7 +46,7 @@ fn rgb24_rgb_reference(converted: &[u8]) -> Vec<u8> {
         .unwrap()
         .with_rgb(&mut rgb)
         .unwrap();
-    rgb24_to(&src, true, KernelMatrix::Bt601, &mut sink).unwrap();
+    rgb24_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   }
   rgb
 }
@@ -90,8 +90,7 @@ fn yuv422p_resample_rgb_matches_rgb24_of_converted_frame() {
     yuv422p_to(
       &yuv422p_frame(&y, &u, &v),
       true,
-      KernelMatrix::Bt601,
-      &mut sink,
+      sink.set_kernel_matrix(KernelMatrix::Bt601),
     )
     .unwrap();
   }
@@ -109,8 +108,7 @@ fn yuv422p_resample_rgb_matches_rgb24_of_converted_frame() {
     yuv422p_to(
       &yuv422p_frame(&y, &u, &v),
       true,
-      KernelMatrix::Bt601,
-      &mut sink,
+      sink.set_kernel_matrix(KernelMatrix::Bt601),
     )
     .unwrap();
   }
@@ -140,8 +138,7 @@ fn yuv422p_resample_luma_is_area_downscaled_y_plane() {
     yuv422p_to(
       &yuv422p_frame(&y, &u, &v),
       true,
-      KernelMatrix::Bt601,
-      &mut sink,
+      sink.set_kernel_matrix(KernelMatrix::Bt601),
     )
     .unwrap();
   }
@@ -174,8 +171,7 @@ fn yuv422p_resample_luma_from_y_not_rgb_under_saturated_chroma() {
     yuv422p_to(
       &yuv422p_frame(&y, &u, &v),
       true,
-      KernelMatrix::Bt601,
-      &mut sink,
+      sink.set_kernel_matrix(KernelMatrix::Bt601),
     )
     .unwrap();
   }
@@ -224,8 +220,7 @@ fn yuv444p_resample_rgb_matches_rgb24_of_converted_frame() {
     yuv444p_to(
       &yuv444p_frame(&y, &u, &v),
       true,
-      KernelMatrix::Bt601,
-      &mut sink,
+      sink.set_kernel_matrix(KernelMatrix::Bt601),
     )
     .unwrap();
   }
@@ -243,8 +238,7 @@ fn yuv444p_resample_rgb_matches_rgb24_of_converted_frame() {
     yuv444p_to(
       &yuv444p_frame(&y, &u, &v),
       true,
-      KernelMatrix::Bt601,
-      &mut sink,
+      sink.set_kernel_matrix(KernelMatrix::Bt601),
     )
     .unwrap();
   }
@@ -274,8 +268,7 @@ fn yuv444p_resample_luma_is_area_downscaled_y_plane() {
     yuv444p_to(
       &yuv444p_frame(&y, &u, &v),
       true,
-      KernelMatrix::Bt601,
-      &mut sink,
+      sink.set_kernel_matrix(KernelMatrix::Bt601),
     )
     .unwrap();
   }
@@ -307,8 +300,7 @@ fn yuv444p_resample_luma_from_y_not_rgb_under_saturated_chroma() {
     yuv444p_to(
       &yuv444p_frame(&y, &u, &v),
       true,
-      KernelMatrix::Bt601,
-      &mut sink,
+      sink.set_kernel_matrix(KernelMatrix::Bt601),
     )
     .unwrap();
   }
@@ -341,15 +333,13 @@ fn yuv422p_resample_reuses_luma_stream_across_frames() {
     yuv422p_to(
       &yuv422p_frame(&y1, &u, &v),
       true,
-      KernelMatrix::Bt601,
-      &mut sink,
+      sink.set_kernel_matrix(KernelMatrix::Bt601),
     )
     .unwrap();
     yuv422p_to(
       &yuv422p_frame(&y2, &u, &v),
       true,
-      KernelMatrix::Bt601,
-      &mut sink,
+      sink.set_kernel_matrix(KernelMatrix::Bt601),
     )
     .unwrap();
   }
@@ -381,15 +371,13 @@ fn yuv444p_resample_reuses_luma_stream_across_frames() {
     yuv444p_to(
       &yuv444p_frame(&y1, &u, &v),
       true,
-      KernelMatrix::Bt601,
-      &mut sink,
+      sink.set_kernel_matrix(KernelMatrix::Bt601),
     )
     .unwrap();
     yuv444p_to(
       &yuv444p_frame(&y2, &u, &v),
       true,
-      KernelMatrix::Bt601,
-      &mut sink,
+      sink.set_kernel_matrix(KernelMatrix::Bt601),
     )
     .unwrap();
   }
@@ -415,8 +403,7 @@ fn yuv422p_identity_plan_matches_new_sink() {
     yuv422p_to(
       &yuv422p_frame(&y, &u, &v),
       true,
-      KernelMatrix::Bt601,
-      &mut sink,
+      sink.set_kernel_matrix(KernelMatrix::Bt601),
     )
     .unwrap();
   }
@@ -430,8 +417,7 @@ fn yuv422p_identity_plan_matches_new_sink() {
     yuv422p_to(
       &yuv422p_frame(&y, &u, &v),
       true,
-      KernelMatrix::Bt601,
-      &mut sink,
+      sink.set_kernel_matrix(KernelMatrix::Bt601),
     )
     .unwrap();
   }

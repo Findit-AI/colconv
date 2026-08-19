@@ -363,7 +363,7 @@ macro_rules! hibit_440_resample_siting {
           let f = $F440::new(
             y, u, v, sw as u32, sh as u32, sw as u32, sw as u32, sw as u32,
           );
-          $w440(&f, FR, M, &mut sink).unwrap();
+          $w440(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgb16)
       }
@@ -399,7 +399,7 @@ macro_rules! hibit_440_resample_siting {
           let f = $F440::new(
             y, u, v, sw as u32, sh as u32, sw as u32, sw as u32, sw as u32,
           );
-          $w440(&f, FR, M, &mut sink).unwrap();
+          $w440(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgb16)
       }
@@ -437,7 +437,7 @@ macro_rules! hibit_440_resample_siting {
             &yb, &ub, &vb, sw as u32, sh as u32, sw as u32, sw as u32, sw as u32,
           )
           .unwrap();
-          $w440be(&f, FR, M, &mut sink).unwrap();
+          $w440be(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgb16)
       }
@@ -472,7 +472,7 @@ macro_rules! hibit_440_resample_siting {
           let f = $F444::new(
             &yb, &ub, &vb, ow as u32, oh as u32, ow as u32, ow as u32, ow as u32,
           );
-          $w444(&f, FR, M, &mut sink).unwrap();
+          $w444(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgb16)
       }
@@ -511,7 +511,7 @@ macro_rules! hibit_440_resample_siting {
           .unwrap()
           .with_rgb_u16(&mut rgb16)
           .unwrap();
-          $w444(&f, FR, M, &mut sink).unwrap();
+          $w444(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         } else {
           let mut sink =
             MixedSinker::<$M444, AreaResampler>::with_resampler(sw, sh, AreaResampler::to(ow, oh))
@@ -522,7 +522,7 @@ macro_rules! hibit_440_resample_siting {
               .unwrap()
               .with_rgb_u16(&mut rgb16)
               .unwrap();
-          $w444(&f, FR, M, &mut sink).unwrap();
+          $w444(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgb16)
       }
@@ -573,7 +573,7 @@ macro_rules! hibit_440_resample_siting {
           let f = $F440::new(
             y, u, v, sw as u32, sh as u32, sw as u32, sw as u32, sw as u32,
           );
-          $w440(&f, FR, M, &mut sink).unwrap();
+          $w440(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgba, (hh, ss, vv), luma, rgb16, rgba16)
       }
@@ -625,7 +625,7 @@ macro_rules! hibit_440_resample_siting {
           let f = $F440::new(
             y, u, v, sw as u32, sh as u32, sw as u32, sw as u32, sw as u32,
           );
-          $w440(&f, FR, M, &mut sink).unwrap();
+          $w440(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgba, (hh, ss, vv), luma, rgb16, rgba16)
       }
@@ -902,10 +902,10 @@ macro_rules! hibit_440_resample_siting {
       ) -> Result<(), MixedSinkerError> {
         sink.set_chroma_location(loc1.clone());
         PixelSink::begin_frame(&mut sink, 8, 8).unwrap();
-        let row0 = $Row::new(&y[0..8], &u[0..8], &v[0..8], 0, M, FR);
+        let row0 = $Row::for_tests(&y[0..8], &u[0..8], &v[0..8], 0, M, FR);
         PixelSink::process(&mut sink, row0).unwrap();
         sink.set_chroma_location(loc2.clone());
-        let row1 = $Row::new(&y[8..16], &u[0..8], &v[0..8], 1, M, FR);
+        let row1 = $Row::for_tests(&y[8..16], &u[0..8], &v[0..8], 1, M, FR);
         PixelSink::process(&mut sink, row1)
       }
 
@@ -1005,9 +1005,9 @@ macro_rules! hibit_440_resample_siting {
                 .unwrap();
             let f = $F440::new(&y, &u, &v, 8, 8, 8, 8, 8);
             sink.set_chroma_location(loc1.clone());
-            $w440(&f, FR, M, &mut sink).unwrap();
+            $w440(&f, FR, sink.set_kernel_matrix(M)).unwrap();
             sink.set_chroma_location(loc2.clone());
-            $w440(&f, FR, M, &mut sink).unwrap();
+            $w440(&f, FR, sink.set_kernel_matrix(M)).unwrap();
           }
           let fresh = run(&y, &u, &v, 8, 8, 4, 4, loc2.clone(), true, true);
           assert_eq!(
@@ -1040,9 +1040,9 @@ macro_rules! hibit_440_resample_siting {
               .with_rgb_u16(&mut rgb16)
               .unwrap();
           let fa = $F440::new(&ya, &ua, &va, 8, 8, 8, 8, 8);
-          $w440(&fa, FR, M, &mut sink).unwrap();
+          $w440(&fa, FR, sink.set_kernel_matrix(M)).unwrap();
           let fb = $F440::new(&yb, &ub, &vb, 8, 8, 8, 8, 8);
-          $w440(&fb, FR, M, &mut sink).unwrap();
+          $w440(&fb, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         let fresh = run(
           &yb,
@@ -1094,7 +1094,7 @@ macro_rules! hibit_440_resample_siting {
           let f = $F444::new(
             &yb, &ub, &vb, ow as u32, oh as u32, ow as u32, ow as u32, ow as u32,
           );
-          $w444(&f, FR, M, &mut sink).unwrap();
+          $w444(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgb16)
       }
@@ -1132,7 +1132,7 @@ macro_rules! hibit_440_resample_siting {
           .unwrap()
           .with_rgb_u16(&mut rgb16)
           .unwrap();
-          $w444(&f, FR, M, &mut sink).unwrap();
+          $w444(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         } else {
           let mut sink =
             MixedSinker::<$M444, AreaResampler>::with_resampler(sw, sh, AreaResampler::to(ow, oh))
@@ -1143,7 +1143,7 @@ macro_rules! hibit_440_resample_siting {
               .unwrap()
               .with_rgb_u16(&mut rgb16)
               .unwrap();
-          $w444(&f, FR, M, &mut sink).unwrap();
+          $w444(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgb16)
       }

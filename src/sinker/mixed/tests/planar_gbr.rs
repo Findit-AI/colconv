@@ -61,7 +61,7 @@ fn gbrp_with_rgb_reorders_planes_to_packed_rgb() {
   let mut sink = MixedSinker::<Gbrp>::new(w, h)
     .with_rgb(&mut rgb_out)
     .unwrap();
-  gbrp_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+  gbrp_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   for i in 0..w * h {
     assert_eq!(rgb_out[i * 3], r[i], "R px {i}");
@@ -86,7 +86,7 @@ fn gbrp_with_rgba_appends_opaque_alpha() {
 
   let mut rgba = std::vec![0u8; w * h * 4];
   let mut sink = MixedSinker::<Gbrp>::new(w, h).with_rgba(&mut rgba).unwrap();
-  gbrp_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+  gbrp_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   for px in rgba.chunks(4) {
     assert_eq!(px, [200, 100, 50, 0xFF]);
@@ -128,7 +128,7 @@ fn gbrp_planar_parity_with_rgb24() {
       .unwrap()
       .with_hsv(&mut h_ref, &mut s_ref, &mut v_ref)
       .unwrap();
-    rgb24_to(&rgb24, true, KernelMatrix::Bt709, &mut sink).unwrap();
+    rgb24_to(&rgb24, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
 
   // ---- Gbrp outputs from the same pixel data ----
@@ -150,7 +150,7 @@ fn gbrp_planar_parity_with_rgb24() {
       .unwrap()
       .with_hsv(&mut h_g, &mut s_g, &mut v_g)
       .unwrap();
-    gbrp_to(&gbrp, true, KernelMatrix::Bt709, &mut sink).unwrap();
+    gbrp_to(&gbrp, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
 
   assert_eq!(rgb_g, rgb_ref, "RGB mismatch Gbrp vs Rgb24");
@@ -181,7 +181,7 @@ fn gbrp_with_luma_u16_zero_extends_u8_luma() {
     .unwrap()
     .with_luma_u16(&mut luma_u16)
     .unwrap();
-  gbrp_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+  gbrp_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   for i in 0..w * h {
     assert_eq!(luma_u16[i], luma_u8[i] as u16, "px {i}");
@@ -212,7 +212,7 @@ fn gbrp_with_luma_u16_wide_row_no_alloc_regression() {
     .unwrap()
     .with_luma_u16(&mut luma_u16)
     .unwrap();
-  gbrp_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+  gbrp_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   // u16 luma == u8 luma zero-extended (same byte values, native u16).
   for i in 0..w * h {
@@ -244,7 +244,7 @@ fn gbrap_with_rgba_passes_source_alpha() {
   let mut sink = MixedSinker::<Gbrap>::new(w, h)
     .with_rgba(&mut rgba)
     .unwrap();
-  gbrap_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+  gbrap_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   for i in 0..w * h {
     assert_eq!(rgba[i * 4], r[i], "R px {i}");
@@ -274,7 +274,7 @@ fn gbrap_with_rgb_drops_alpha() {
   let mut sink = MixedSinker::<Gbrap>::new(w, h)
     .with_rgb(&mut rgb_out)
     .unwrap();
-  gbrap_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+  gbrap_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   // Output must equal the rgb_seed reconstructed from the planes.
   let (rg, rb, rr) = planes_from_packed_rgb(&rgb_out, w, h);
@@ -309,13 +309,13 @@ fn gbrap_with_rgb_and_with_rgba_strategy_a_plus_matches_independent() {
     let mut sink = MixedSinker::<Gbrap>::new(w, h)
       .with_rgb(&mut rgb_ref)
       .unwrap();
-    gbrap_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+    gbrap_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   {
     let mut sink = MixedSinker::<Gbrap>::new(w, h)
       .with_rgba(&mut rgba_ref)
       .unwrap();
-    gbrap_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+    gbrap_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
 
   // ---- Strategy A+ combo: one sinker writes both ----
@@ -327,7 +327,7 @@ fn gbrap_with_rgb_and_with_rgba_strategy_a_plus_matches_independent() {
       .unwrap()
       .with_rgba(&mut rgba_combo)
       .unwrap();
-    gbrap_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+    gbrap_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
 
   assert_eq!(rgb_combo, rgb_ref, "RGB mismatch combo vs independent");
@@ -366,7 +366,7 @@ fn gbrap_planar_parity_with_rgb24_when_alpha_drop() {
       .unwrap()
       .with_luma(&mut luma_ref)
       .unwrap();
-    rgb24_to(&rgb24, true, KernelMatrix::Bt709, &mut sink).unwrap();
+    rgb24_to(&rgb24, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
 
   // Gbrap with α-drop path.
@@ -378,7 +378,7 @@ fn gbrap_planar_parity_with_rgb24_when_alpha_drop() {
       .unwrap()
       .with_luma(&mut luma_g)
       .unwrap();
-    gbrap_to(&gbrap, true, KernelMatrix::Bt709, &mut sink).unwrap();
+    gbrap_to(&gbrap, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
 
   assert_eq!(rgb_g, rgb_ref, "RGB mismatch Gbrap vs Rgb24");
@@ -428,7 +428,7 @@ fn gbrp_simd_matches_scalar() {
       .with_hsv(&mut h1, &mut s1, &mut v1)
       .unwrap()
       .with_simd(true);
-    gbrp_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+    gbrp_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   {
     let mut sink = MixedSinker::<Gbrp>::new(w, h)
@@ -443,7 +443,7 @@ fn gbrp_simd_matches_scalar() {
       .with_hsv(&mut h2, &mut s2, &mut v2)
       .unwrap()
       .with_simd(false);
-    gbrp_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+    gbrp_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
 
   assert_eq!(r1, r2, "rgb SIMD vs scalar");
@@ -500,7 +500,7 @@ fn gbrap_simd_matches_scalar() {
       .with_hsv(&mut h1, &mut s1, &mut v1)
       .unwrap()
       .with_simd(true);
-    gbrap_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+    gbrap_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   {
     let mut sink = MixedSinker::<Gbrap>::new(w, h)
@@ -515,7 +515,7 @@ fn gbrap_simd_matches_scalar() {
       .with_hsv(&mut h2, &mut s2, &mut v2)
       .unwrap()
       .with_simd(false);
-    gbrap_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+    gbrap_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
 
   assert_eq!(r1, r2, "rgb SIMD vs scalar");
@@ -565,7 +565,7 @@ fn gbrp_with_luma_bt709_pure_red() {
 
   let mut luma = std::vec![0u8; w * h];
   let mut sink = MixedSinker::<Gbrp>::new(w, h).with_luma(&mut luma).unwrap();
-  gbrp_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+  gbrp_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   for &y in &luma {
     assert!(y.abs_diff(54) <= 1, "got Y={y}");

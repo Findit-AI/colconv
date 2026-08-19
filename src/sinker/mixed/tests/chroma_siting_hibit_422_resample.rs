@@ -230,7 +230,7 @@ macro_rules! hibit_422_resample_siting {
           let f = $F422::new(
             y, u, v, SRC as u32, SRC as u32, SRC as u32, CW as u32, CW as u32,
           );
-          $w422(&f, FR, M, &mut sink).unwrap();
+          $w422(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgb16)
       }
@@ -261,7 +261,7 @@ macro_rules! hibit_422_resample_siting {
           let f = $F422::new(
             y, u, v, SRC as u32, SRC as u32, SRC as u32, CW as u32, CW as u32,
           );
-          $w422(&f, FR, M, &mut sink).unwrap();
+          $w422(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgb16)
       }
@@ -294,7 +294,7 @@ macro_rules! hibit_422_resample_siting {
             &yb, &ub, &vb, SRC as u32, SRC as u32, SRC as u32, CW as u32, CW as u32,
           )
           .unwrap();
-          $w422be(&f, FR, M, &mut sink).unwrap();
+          $w422be(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgb16)
       }
@@ -318,7 +318,7 @@ macro_rules! hibit_422_resample_siting {
           let f = $F444::new(
             &yb, &ub, &vb, OUT as u32, OUT as u32, OUT as u32, OUT as u32, OUT as u32,
           );
-          $w444(&f, FR, M, &mut sink).unwrap();
+          $w444(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgb16)
       }
@@ -359,7 +359,7 @@ macro_rules! hibit_422_resample_siting {
           .unwrap()
           .with_rgb_u16(&mut rgb16)
           .unwrap();
-          $w444(&f, FR, M, &mut sink).unwrap();
+          $w444(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         } else {
           let mut sink = MixedSinker::<$M444, AreaResampler>::with_resampler(
             SRC,
@@ -373,7 +373,7 @@ macro_rules! hibit_422_resample_siting {
           .unwrap()
           .with_rgb_u16(&mut rgb16)
           .unwrap();
-          $w444(&f, FR, M, &mut sink).unwrap();
+          $w444(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgb16)
       }
@@ -534,10 +534,10 @@ macro_rules! hibit_422_resample_siting {
       ) -> Result<(), MixedSinkerError> {
         sink.set_chroma_location(loc1.clone());
         PixelSink::begin_frame(&mut sink, SRC as u32, SRC as u32).unwrap();
-        let row0 = $Row::new(&y[0..SRC], &u[0..CW], &v[0..CW], 0, M, FR);
+        let row0 = $Row::for_tests(&y[0..SRC], &u[0..CW], &v[0..CW], 0, M, FR);
         PixelSink::process(&mut sink, row0).unwrap();
         sink.set_chroma_location(loc2.clone());
-        let row1 = $Row::new(&y[SRC..2 * SRC], &u[CW..2 * CW], &v[CW..2 * CW], 1, M, FR);
+        let row1 = $Row::for_tests(&y[SRC..2 * SRC], &u[CW..2 * CW], &v[CW..2 * CW], 1, M, FR);
         PixelSink::process(&mut sink, row1)
       }
 

@@ -147,7 +147,7 @@ impl Yuva444Filter for VuyaF {
       .unwrap()
       .with_luma_u16(&mut luma_u16)
       .unwrap();
-      vuya_to(&src, FR, M, &mut sink).unwrap();
+      vuya_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     }
     FilterOutputs {
       rgb,
@@ -162,7 +162,7 @@ impl Yuva444Filter for VuyaF {
     let mut rgba = std::vec![0u8; w * h * 4];
     {
       let mut sink = MixedSinker::<Vuya>::new(w, h).with_rgba(&mut rgba).unwrap();
-      vuya_to(&src, FR, M, &mut sink).unwrap();
+      vuya_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     }
     rgba
   }
@@ -174,7 +174,7 @@ impl Yuva444Filter for VuyaF {
       let mut sink = MixedSinker::<Vuya>::new(w, h)
         .with_luma_u16(&mut y)
         .unwrap();
-      vuya_to(&src, FR, M, &mut sink).unwrap();
+      vuya_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     }
     y
   }
@@ -209,7 +209,7 @@ impl Yuva444Filter for VuyxF {
       .unwrap()
       .with_luma_u16(&mut luma_u16)
       .unwrap();
-      vuyx_to(&src, FR, M, &mut sink).unwrap();
+      vuyx_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     }
     FilterOutputs {
       rgb,
@@ -224,7 +224,7 @@ impl Yuva444Filter for VuyxF {
     let mut rgba = std::vec![0u8; w * h * 4];
     {
       let mut sink = MixedSinker::<Vuyx>::new(w, h).with_rgba(&mut rgba).unwrap();
-      vuyx_to(&src, FR, M, &mut sink).unwrap();
+      vuyx_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     }
     rgba
   }
@@ -236,7 +236,7 @@ impl Yuva444Filter for VuyxF {
       let mut sink = MixedSinker::<Vuyx>::new(w, h)
         .with_luma_u16(&mut y)
         .unwrap();
-      vuyx_to(&src, FR, M, &mut sink).unwrap();
+      vuyx_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     }
     y
   }
@@ -629,7 +629,7 @@ mod packed_rgba_equivalence {
       .unwrap()
       .with_rgba(&mut out)
       .unwrap();
-      rgba_to(&src, FR, M, &mut sink).unwrap();
+      rgba_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     }
     out
   }

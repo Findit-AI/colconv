@@ -108,7 +108,7 @@ fn rgbf32_filter_rgb_f32<K: FilterKernel + Copy>(
     .unwrap()
     .with_rgb_f32(&mut rgb_f32)
     .unwrap();
-    rgbf32_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+    rgbf32_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   rgb_f32
 }
@@ -205,7 +205,7 @@ fn rgbf32_filter_plan_is_accepted() {
     .unwrap()
     .with_rgb_f32(&mut rgb_f32)
     .unwrap();
-    rgbf32_to(&src, true, KernelMatrix::Bt709, &mut sink).unwrap();
+    rgbf32_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   assert!(
     rgb_f32.iter().all(|&v| v.to_bits() != sentinel.to_bits()),

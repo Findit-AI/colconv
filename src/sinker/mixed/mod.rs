@@ -1431,6 +1431,17 @@ pub enum MixedSinkerError {
   /// diagnostic.
   #[error(transparent)]
   UnsupportedColorMatrix(#[from] crate::UnsupportedKernelMatrixError),
+
+  /// The [`DcpTargetGamut`](crate::DcpTargetGamut) handed to
+  /// [`Convert::target_gamut`](crate::Convert::target_gamut) names no
+  /// tabulated XYZ → RGB matrix.
+  ///
+  /// Raised at the door, before a single row is read — an unknown gamut has
+  /// no luma basis, so it must never be silently converted as if it were
+  /// DCI-P3.
+  #[cfg(feature = "xyz")]
+  #[error(transparent)]
+  UnsupportedTargetGamut(#[from] crate::UnsupportedKernelGamutError),
 }
 
 /// Identifies which slice of a multi‑plane source row mismatched in
@@ -3719,22 +3730,17 @@ pub struct MixedSinker<'a, F: SourceFormat, R = NoopResampler> {
   /// non-affine tag → the affine path, byte-identical to the pre-#303
   /// behaviour. Set via [`Self::with_color_spec`] / [`Self::set_color_spec`].
   ///
-  /// **One description, two readers.** This field and the row's
-  /// `KernelMatrix` are not two independent knobs to keep in step: colour
-  /// intent has a single carrier, [`ColorSpec`](crate::ColorSpec), and the
-  /// two are its projections. The row's selector can only be produced by
-  /// [`ColorSpec::kernel_matrix`](crate::ColorSpec::kernel_matrix) through
-  /// [`YuvOptions::from_color_spec`](crate::YuvOptions::from_color_spec) —
-  /// [`YuvOptions`](crate::YuvOptions) has no setter that names a matrix — and
-  /// this field can only be set from a `ColorSpec` too. Feed the **same**
-  /// spec to both and the non-affine tag cannot go missing;
-  /// [`Convert::spec`](crate::Convert::spec) does that for you from one call.
+  /// **One description, one reader.** This field and
+  /// [`kernel_matrix`](Self::kernel_matrix) are not two knobs to keep in step:
+  /// colour intent has a single carrier, [`ColorSpec`](crate::ColorSpec), and
+  /// both are its projections, written together by the one call that can write
+  /// either. Since mediaframe 0.4 the row's selector is read from this same
+  /// sink rather than passed beside it, so the two provably came from one
+  /// description — there is no longer a signature anywhere that could carry a
+  /// second answer. Losing the non-affine tag by naming a matrix somewhere
+  /// else is not a mistake this API can express.
   ///
-  /// The one shape that still needs care is Tier 1 reached through
-  /// mediaframe's free `{fmt}_to` walkers, whose signature takes the row's
-  /// `KernelMatrix` positionally: a caller who passes a matrix there and hands
-  /// the sink no spec gets the affine BT.709 decode, because the non-affine
-  /// tag never arrived. Give the sink the spec.
+  /// [`Convert::spec`](crate::Convert::spec) sets both from one call.
   #[cfg(feature = "yuv-planar")]
   matrix: crate::ColorMatrix,
   /// Per-frame accumulator for the RFC #238 [`AveragingDomain::Linear`]
@@ -3770,6 +3776,42 @@ pub struct MixedSinker<'a, F: SourceFormat, R = NoopResampler> {
   /// and ignore this field). Default: BT.709 `(54, 183, 19)`.
   #[cfg(any(feature = "bayer", feature = "mono"))]
   luma_coefficients_q8: (u32, u32, u32),
+  /// The closed affine selector every row of a walk is stamped with —
+  /// returned from this sinker's
+  /// [`PixelSink::kernel_matrix`](crate::PixelSink::kernel_matrix).
+  ///
+  /// mediaframe 0.4 took the matrix off the `{fmt}_to` signature and asks
+  /// the sink for it once per walk, because the sink is the thing that
+  /// already holds a colour description and two doors onto one fact is a
+  /// bug generator. So this is where the row's selector now lives.
+  ///
+  /// It can only be written by [`Self::set_color_spec`] /
+  /// [`Self::with_color_spec`], out of
+  /// [`ColorSpec::kernel_matrix`](crate::ColorSpec::kernel_matrix) — the
+  /// single exchange point. Default
+  /// [`KernelMatrix::Bt709`](crate::KernelMatrix::Bt709): the
+  /// unnamed-colorimetry posture, identical to what a spec carrying
+  /// [`ColorMatrix::Unspecified`](crate::ColorMatrix::Unspecified) resolves
+  /// to.
+  ///
+  /// The open [`matrix`](Self::matrix) descriptor beside it is *not* a
+  /// second knob — both are projections of one
+  /// [`ColorSpec`](crate::ColorSpec), set together by the same call. The
+  /// open one carries the four non-affine tags that have no `KernelMatrix`
+  /// spelling; this one carries the affine selector the kernels index.
+  kernel_matrix: crate::KernelMatrix,
+  /// The output RGB gamut an XYZ12 walk decodes into — returned from this
+  /// sinker's [`Xyz12Sink::target_gamut`](crate::source::Xyz12Sink::target_gamut).
+  ///
+  /// Sink-held for the same reason as [`Self::kernel_matrix`], but on the
+  /// opposite axis: a gamut describes the *output*, and this sinker **is**
+  /// the output. Written only by [`Self::set_target_gamut`] /
+  /// [`Self::with_target_gamut`], out of the open
+  /// [`DcpTargetGamut`](crate::DcpTargetGamut) descriptor. Default
+  /// [`KernelGamut::DciP3`](crate::KernelGamut::DciP3) — the theatrical
+  /// decode a DCP distribution master is mastered for.
+  #[cfg(feature = "xyz")]
+  target_gamut: crate::KernelGamut,
   _fmt: PhantomData<F>,
   _resampler: PhantomData<R>,
 }
@@ -4567,6 +4609,13 @@ impl<F: SourceFormat, R> MixedSinker<'_, F, R> {
       // targets a different gamut.
       #[cfg(any(feature = "bayer", feature = "mono"))]
       luma_coefficients_q8: (54, 183, 19),
+      // The unnamed-colorimetry posture: what a spec carrying
+      // `ColorMatrix::Unspecified` resolves to, and what the walkers'
+      // matrix parameter defaulted to before mediaframe 0.4 moved the
+      // question to the sink.
+      kernel_matrix: crate::KernelMatrix::Bt709,
+      #[cfg(feature = "xyz")]
+      target_gamut: crate::KernelGamut::DciP3,
       _fmt: PhantomData,
       _resampler: PhantomData,
     }
@@ -5365,47 +5414,62 @@ impl<F: SourceFormat, R> MixedSinker<'_, F, R> {
     self
   }
 
-  /// Applies the **sink-consumed** colour metadata of a resolved
-  /// [`ColorSpec`](crate::ColorSpec) in place — its
-  /// [`ChromaLocation`](crate::ChromaLocation) (siting-aware 4:2:0
-  /// upsampling, #302) plus the [`primaries`](Self::primaries),
+  /// Applies a resolved [`ColorSpec`](crate::ColorSpec) in place — the
+  /// [`kernel_matrix`](Self::kernel_matrix) every row of the walk is stamped
+  /// with, plus the [`ChromaLocation`](crate::ChromaLocation) (siting-aware
+  /// 4:2:0 upsampling, #302), the [`primaries`](Self::primaries),
   /// [`transfer`](Self::transfer) and open matrix descriptor the non-affine
   /// decodes read (#303). See [`Self::with_color_spec`].
-  #[cfg(feature = "yuv-planar")]
+  ///
+  /// # Errors
+  ///
+  /// [`UnsupportedKernelMatrixError`](crate::UnsupportedKernelMatrixError)
+  /// when the spec names a colour matrix pixon has no decode for — see
+  /// [`ColorSpec::kernel_matrix`](crate::ColorSpec::kernel_matrix). The
+  /// refusal lands here, before a single row is read, rather than the walk
+  /// silently producing BT.709 pixels.
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub fn set_color_spec(&mut self, spec: &crate::ColorSpec) -> &mut Self {
-    self.chroma_location = spec.chroma_location();
-    self.primaries = spec.primaries();
-    self.transfer = spec.transfer();
-    self.matrix = spec.matrix();
-    self
+  pub fn set_color_spec(
+    &mut self,
+    spec: &crate::ColorSpec,
+  ) -> Result<&mut Self, crate::UnsupportedKernelMatrixError> {
+    self.kernel_matrix = spec.kernel_matrix()?;
+    #[cfg(feature = "yuv-planar")]
+    {
+      self.chroma_location = spec.chroma_location();
+      self.primaries = spec.primaries();
+      self.transfer = spec.transfer();
+      self.matrix = spec.matrix();
+    }
+    Ok(self)
   }
 
   /// Configures the sink from a resolved [`ColorSpec`](crate::ColorSpec),
   /// completing the **end-to-end ColorSpec decode path** (#301 / #302 / #303).
   ///
-  /// A `ColorSpec` is the single carrier of colour intent; it splits across
-  /// two *readers*, not two sources. Its
-  /// [`kernel_matrix`](crate::ColorSpec::kernel_matrix) and
-  /// [`full_range`](crate::ColorSpec::full_range) are **walker-consumed** —
-  /// route them via [`YuvOptions::from_color_spec`](crate::YuvOptions::from_color_spec)
-  /// to the `*_to` walk — while its
-  /// [`chroma_location`](crate::ColorSpec::chroma_location),
-  /// [`primaries`](crate::ColorSpec::primaries),
-  /// [`transfer`](crate::ColorSpec::transfer) and open
-  /// [`matrix`](crate::ColorSpec::matrix) descriptor are **sink-consumed**
-  /// (mediaframe's YUV row carries only range + kernel matrix — neither the
-  /// siting, the primaries, the transfer, nor a non-affine tag). This builder
-  /// threads that half, so passing the **same `spec`** to both keeps one
-  /// description behind both readers — the `primaries` feed the
+  /// A `ColorSpec` is the single carrier of colour intent, and since
+  /// mediaframe 0.4 this sink is its single *reader*: the walkers no longer
+  /// take a matrix beside the sink, they ask the sink. So one call configures
+  /// the whole decode — the closed
+  /// [`kernel_matrix`](crate::ColorSpec::kernel_matrix) the rows are stamped
+  /// with, the [`chroma_location`](crate::ColorSpec::chroma_location),
+  /// the [`primaries`](crate::ColorSpec::primaries),
+  /// the [`transfer`](crate::ColorSpec::transfer), and the open
+  /// [`matrix`](crate::ColorSpec::matrix) descriptor that carries the four
+  /// non-affine tags no `KernelMatrix` can spell. The spec's
+  /// [`full_range`](crate::ColorSpec::full_range) is the one half still
+  /// walker-consumed — it is a quantisation fact about the *frame*, not a
+  /// colour intent the sink owns — so route it via
+  /// [`YuvOptions::from_color_spec`](crate::YuvOptions::from_color_spec).
+  /// The `primaries` feed the
   /// [`KernelMatrix::ChromaDerivedNcl`](crate::KernelMatrix::ChromaDerivedNcl)
   /// decode (#303), whose `Kr` / `Kb` are derived from them:
   ///
   /// ```
   /// # #[cfg(all(feature = "yuv-planar", feature = "rgb"))] {
   /// use pixon::{
-  ///   ChromaLocation, ColorInfo, ColorMatrix, ColorSpec, DynamicRange, PixelFormat,
-  ///   Primaries, Transfer, YuvOptions, sinker::MixedSinker, source::Yuv420p,
+  ///   ChromaLocation, ColorInfo, ColorMatrix, ColorSpec, DynamicRange, KernelMatrix,
+  ///   PixelFormat, Primaries, Transfer, YuvOptions, sinker::MixedSinker, source::Yuv420p,
   /// };
   ///
   /// let info = ColorInfo::new(
@@ -5413,16 +5477,23 @@ impl<F: SourceFormat, R> MixedSinker<'_, F, R> {
   ///     DynamicRange::Limited, ChromaLocation::Center,
   /// );
   /// let spec = ColorSpec::from_info(PixelFormat::Yuv420p, info);
-  /// let opts = YuvOptions::from_color_spec(&spec).unwrap();
+  /// let opts = YuvOptions::from_color_spec(&spec);
   /// let mut rgb = [0u8; 4 * 2 * 3];
   /// let sink = MixedSinker::<Yuv420p>::new(4, 2)
   ///     .with_rgb(&mut rgb)
   ///     .unwrap()
-  ///     .with_color_spec(&spec); // carries ChromaLocation::Center to the decode
+  ///     .with_color_spec(&spec) // carries siting *and* the row's matrix
+  ///     .unwrap();
   /// assert_eq!(sink.chroma_location(), ChromaLocation::Center);
+  /// assert_eq!(sink.kernel_matrix(), KernelMatrix::Bt601);
   /// # let _ = opts;
   /// # }
   /// ```
+  ///
+  /// # Errors
+  ///
+  /// [`UnsupportedKernelMatrixError`](crate::UnsupportedKernelMatrixError) —
+  /// see [`Self::set_color_spec`].
   ///
   /// **`ChromaDerivedNcl` scope.** The `primaries`-derived `ChromaDerivedNcl`
   /// decode is currently wired for `Yuv420p` only (#316). Every other format —
@@ -5436,11 +5507,98 @@ impl<F: SourceFormat, R> MixedSinker<'_, F, R> {
   ///
   /// See [`Self::set_color_spec`] for the in-place variant and
   /// [`Self::with_chroma_location`] to set the siting directly.
-  #[cfg(feature = "yuv-planar")]
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub fn with_color_spec(mut self, spec: &crate::ColorSpec) -> Self {
-    self.set_color_spec(spec);
+  pub fn with_color_spec(
+    mut self,
+    spec: &crate::ColorSpec,
+  ) -> Result<Self, crate::UnsupportedKernelMatrixError> {
+    self.set_color_spec(spec)?;
+    Ok(self)
+  }
+
+  /// The closed affine selector this sinker stamps on every row of a walk —
+  /// what its [`PixelSink::kernel_matrix`](crate::PixelSink::kernel_matrix)
+  /// returns. Set by [`Self::set_color_spec`] / [`Self::with_color_spec`];
+  /// defaults to [`KernelMatrix::Bt709`](crate::KernelMatrix::Bt709).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
+
+  /// Pins the row selector alone, leaving the rest of the colour description
+  /// untouched — the in-crate twin of mediaframe's `*Row::for_tests` door.
+  ///
+  /// The kernel-parity suites drive one matrix through one kernel and assert
+  /// bytes; they are not describing a stream, so routing them through
+  /// [`ColorSpec`](crate::ColorSpec) would also reset the siting / primaries /
+  /// transfer a siting test had just set. Crate-private and `#[cfg(test)]`, so
+  /// it is not a second door onto the public surface: outside these tests a
+  /// [`KernelMatrix`](crate::KernelMatrix) still reaches a walk only through
+  /// [`ColorSpec::kernel_matrix`](crate::ColorSpec::kernel_matrix).
+  #[cfg(test)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub(crate) const fn set_kernel_matrix(&mut self, matrix: crate::KernelMatrix) -> &mut Self {
+    self.kernel_matrix = matrix;
     self
+  }
+
+  /// Pins the XYZ12 output gamut alone. The [`Self::set_kernel_matrix`]
+  /// rationale, on the gamut axis.
+  #[cfg(all(test, feature = "xyz"))]
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub(crate) const fn set_kernel_gamut(&mut self, gamut: crate::KernelGamut) -> &mut Self {
+    self.target_gamut = gamut;
+    self
+  }
+
+  /// The output RGB gamut an XYZ12 walk decodes into — what this sinker's
+  /// [`Xyz12Sink::target_gamut`](crate::source::Xyz12Sink::target_gamut)
+  /// returns. See [`Self::with_target_gamut`].
+  #[cfg(feature = "xyz")]
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn target_gamut(&self) -> crate::KernelGamut {
+    self.target_gamut
+  }
+
+  /// Sets the output RGB gamut of an XYZ12 walk in place, exchanging the open
+  /// [`DcpTargetGamut`](crate::DcpTargetGamut) descriptor for the closed
+  /// selector the 3×3 matmul indexes. See [`Self::with_target_gamut`].
+  ///
+  /// # Errors
+  ///
+  /// [`UnsupportedKernelGamutError`](crate::UnsupportedKernelGamutError) when
+  /// the descriptor names a gamut this build has no luma basis for — refused
+  /// here rather than silently decoded as if it were DCI-P3.
+  #[cfg(feature = "xyz")]
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn set_target_gamut(
+    &mut self,
+    gamut: &crate::DcpTargetGamut,
+  ) -> Result<&mut Self, crate::UnsupportedKernelGamutError> {
+    self.target_gamut = crate::KernelGamut::try_from(gamut)?;
+    Ok(self)
+  }
+
+  /// Sets the output RGB gamut of an XYZ12 walk, consuming builder.
+  ///
+  /// The gamut is an *output* axis and this sinker is the output, so — since
+  /// mediaframe 0.4 — [`xyz12_to`](crate::source::xyz12_to) asks the sink for
+  /// it instead of taking it beside the sink. This is the only door: a
+  /// [`KernelGamut`](crate::KernelGamut) cannot be conjured next to the
+  /// descriptor that was supposed to choose it.
+  ///
+  /// # Errors
+  ///
+  /// [`UnsupportedKernelGamutError`](crate::UnsupportedKernelGamutError) —
+  /// see [`Self::set_target_gamut`].
+  #[cfg(feature = "xyz")]
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn with_target_gamut(
+    mut self,
+    gamut: &crate::DcpTargetGamut,
+  ) -> Result<Self, crate::UnsupportedKernelGamutError> {
+    self.set_target_gamut(gamut)?;
+    Ok(self)
   }
 
   /// Returns how the [`AveragingDomain::Linear`] tail decodes `YUV→RGB`

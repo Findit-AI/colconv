@@ -341,6 +341,10 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Rgbf16<BE>, R> {
   type Input<'r> = Rgbf16Row<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     check_dimensions_match(self.width, self.height, width, height)?;
     if let Some(stream) = self.rgb_stream_f32.as_mut() {
@@ -551,6 +555,10 @@ impl<const BE: bool> PixelSink for MixedSinker<'_, Rgbf16<BE>> {
   type Input<'r> = Rgbf16Row<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     check_dimensions_match(self.width, self.height, width, height)
   }
@@ -923,6 +931,10 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Rgbaf16<BE>, R> {
   type Input<'r> = Rgbaf16Row<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     check_dimensions_match(self.width, self.height, width, height)?;
     if let Some(stream) = self.rgba_stream_f32.as_mut() {
@@ -1122,6 +1134,10 @@ impl<const BE: bool> PixelSink for MixedSinker<'_, Rgbaf16<BE>> {
   type Input<'r> = Rgbaf16Row<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     check_dimensions_match(self.width, self.height, width, height)
   }

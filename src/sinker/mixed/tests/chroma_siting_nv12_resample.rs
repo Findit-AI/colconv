@@ -257,7 +257,7 @@ fn run_yuv420p(
     let f = Yuv420pFrame::new(
       y, u, v, sw as u32, sh as u32, sw as u32, cw as u32, cw as u32,
     );
-    yuv420p_to(&f, FR, M, &mut sink).unwrap();
+    yuv420p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   (rgb, rgba, (hh, ss, vv), luma, luma_u16)
 }
@@ -303,7 +303,7 @@ fn native_oracle(
     let f = Yuv444pFrame::new(
       &yb, &ub, &vb, ow as u32, oh as u32, ow as u32, ow as u32, ow as u32,
     );
-    yuv444p_to(&f, FR, M, &mut sink).unwrap();
+    yuv444p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   (rgb, rgba, (hh, ss, vv), luma, luma_u16)
 }
@@ -343,7 +343,7 @@ fn encoded_oracle_rgb(
     let f = Yuv444pFrame::new(
       y, &uf, &vf, sw as u32, sh as u32, sw as u32, sw as u32, sw as u32,
     );
-    yuv444p_to(&f, FR, M, &mut sink).unwrap();
+    yuv444p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   rgb
 }
@@ -445,7 +445,7 @@ fn bottom_native_oracle(
     let f = Yuv444pFrame::new(
       &yb, &ub, &vb, ow as u32, oh as u32, ow as u32, ow as u32, ow as u32,
     );
-    yuv444p_to(&f, FR, M, &mut sink).unwrap();
+    yuv444p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   (rgb, rgba, (hh, ss, vv), luma, luma_u16)
 }
@@ -515,7 +515,7 @@ fn encoded_oracle_rgb_bottom(
     let f = Yuv444pFrame::new(
       y, &uf, &vf, sw as u32, sh as u32, sw as u32, sw as u32, sw as u32,
     );
-    yuv444p_to(&f, FR, M, &mut sink).unwrap();
+    yuv444p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   rgb
 }
@@ -591,7 +591,7 @@ macro_rules! nv_resample_siting_tests {
           .with_luma_u16(&mut luma_u16)
           .unwrap();
           let f = $Frame::new(y, &uv, sw as u32, sh as u32, sw as u32, sw as u32);
-          $walker(&f, FR, M, &mut sink).unwrap();
+          $walker(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgba, (hh, ss, vv), luma, luma_u16)
       }
@@ -623,7 +623,7 @@ macro_rules! nv_resample_siting_tests {
           .with_rgb(&mut rgb)
           .unwrap();
           let f = $Frame::new(y, &uv, sw as u32, sh as u32, sw as u32, sw as u32);
-          $walker(&f, FR, M, &mut sink).unwrap();
+          $walker(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         rgb
       }
@@ -669,9 +669,9 @@ macro_rules! nv_resample_siting_tests {
           .unwrap();
           let f = $Frame::new(y, &uv, sw as u32, sh as u32, sw as u32, sw as u32);
           sink.set_chroma_location(loc1.clone());
-          $walker(&f, FR, M, &mut sink).unwrap();
+          $walker(&f, FR, sink.set_kernel_matrix(M)).unwrap();
           sink.set_chroma_location(loc2.clone());
-          $walker(&f, FR, M, &mut sink).unwrap();
+          $walker(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgba, (hh, ss, vv), luma, luma_u16)
       }
@@ -850,7 +850,7 @@ macro_rules! nv_resample_siting_tests {
             let f = Yuv420pFrame::new(
               &y, &u, &v, sw as u32, sh as u32, sw as u32, cw as u32, cw as u32,
             );
-            yuv420p_to(&f, FR, M, &mut sink).unwrap();
+            yuv420p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
           }
           let nv = filter_rgb(&y, &u, &v, sw, sh, ow, oh, ChromaLocation::Center);
           assert_eq!(nv, rgb420, "filter centered {sw}x{sh}->{ow}x{oh}");
@@ -886,7 +886,7 @@ macro_rules! nv_resample_siting_tests {
             let f = Yuv420pFrame::new(
               &y, &u, &v, sw as u32, sh as u32, sw as u32, cw as u32, cw as u32,
             );
-            yuv420p_to(&f, FR, M, &mut sink).unwrap();
+            yuv420p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
           }
           let nv = filter_rgb(&y, &u, &v, sw, sh, ow, oh, ChromaLocation::BottomLeft);
           assert_eq!(nv, rgb420, "filter bottom-left {sw}x{sh}->{ow}x{oh}");
@@ -923,7 +923,7 @@ macro_rules! nv_resample_siting_tests {
               let f = Yuv420pFrame::new(
                 &y, &u, &v, sw as u32, sh as u32, sw as u32, cw as u32, cw as u32,
               );
-              yuv420p_to(&f, FR, M, &mut sink).unwrap();
+              yuv420p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
             }
             let nv = filter_rgb(&y, &u, &v, sw, sh, ow, oh, loc.clone());
             assert_eq!(nv, rgb420, "filter {loc:?} {sw}x{sh}->{ow}x{oh}");
@@ -1009,7 +1009,7 @@ macro_rules! nv_resample_siting_tests {
             .with_rgb(&mut rgb)
             .unwrap();
           let f = $Frame::new(y, &uv, sw as u32, sh as u32, sw as u32, sw as u32);
-          $walker(&f, FR, M, &mut sink).unwrap();
+          $walker(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         rgb
       }
@@ -1172,7 +1172,7 @@ macro_rules! nv_resample_siting_tests {
           let f = Yuv444pFrame::new(
             &y, &uf, &vf, sw as u32, sh as u32, sw as u32, sw as u32, sw as u32,
           );
-          yuv444p_to(&f, FR, M, &mut sink).unwrap();
+          yuv444p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         assert_eq!(got, oracle, "filter-tier bottom == reconstruct-then-filter");
         assert_ne!(
@@ -1231,7 +1231,7 @@ macro_rules! nv_resample_siting_tests {
               let yr = &y[r * sw..(r + 1) * sw];
               let cr = r / 2;
               let uvr = &uv[cr * full..(cr + 1) * full];
-              sink.process($Row::new(yr, uvr, r, M, FR))
+              sink.process($Row::for_tests(yr, uvr, r, M, FR))
             };
             for r in 0..sh - 1 {
               feed(&mut sink, r).unwrap();
@@ -1292,7 +1292,7 @@ macro_rules! nv_resample_siting_tests {
         let uv = vec![128u8; w];
         let mut sink =
           MixedSinker::<$Marker>::new(w, h).with_chroma_location(ChromaLocation::Bottom);
-        crate::PixelSink::process(&mut sink, $Row::new(&y, &uv, idx, M, FR)).unwrap();
+        crate::PixelSink::process(&mut sink, $Row::for_tests(&y, &uv, idx, M, FR)).unwrap();
         let prev_len = sink.chroma_prev.len();
         drop(sink);
         assert_eq!(
@@ -1324,7 +1324,7 @@ macro_rules! nv_resample_siting_tests {
           crate::PixelSink::begin_frame(&mut sink, w as u32, h as u32).unwrap();
           let feed = |sink: &mut MixedSinker<'_, $Marker>, r: usize| {
             let uvr = &uv[(r / 2) * full..(r / 2) * full + full];
-            crate::PixelSink::process(sink, $Row::new(&y[r * w..r * w + w], uvr, r, M, FR)).unwrap();
+            crate::PixelSink::process(sink, $Row::for_tests(&y[r * w..r * w + w], uvr, r, M, FR)).unwrap();
           };
           feed(&mut sink, 0);
           feed(&mut sink, 1);
@@ -1371,7 +1371,7 @@ macro_rules! nv_resample_siting_tests {
           crate::PixelSink::begin_frame(&mut sink, w as u32, h as u32).unwrap();
           let feed = |sink: &mut MixedSinker<'_, $Marker>, r: usize| {
             let uvr = &uv[(r / 2) * full..(r / 2) * full + full];
-            crate::PixelSink::process(sink, $Row::new(&y[r * w..r * w + w], uvr, r, M, FR)).unwrap();
+            crate::PixelSink::process(sink, $Row::for_tests(&y[r * w..r * w + w], uvr, r, M, FR)).unwrap();
           };
           feed(&mut sink, 0);
           feed(&mut sink, 1);
@@ -1448,7 +1448,7 @@ macro_rules! nv_resample_siting_tests {
         // Frame 1 at Left builds the native join (chroma row `r / 2` per luma row).
         PixelSink::begin_frame(&mut sink, 8, 8).unwrap();
         for r in 0..8 {
-          let row = $Row::new(
+          let row = $Row::for_tests(
             &y[r * 8..r * 8 + 8],
             &uv[(r / 2) * 8..(r / 2) * 8 + 8],
             r,
@@ -1461,7 +1461,7 @@ macro_rules! nv_resample_siting_tests {
         // Frame 2: change siting to Center, then feed an OUT-OF-SEQUENCE first row.
         PixelSink::begin_frame(&mut sink, 8, 8).unwrap();
         sink.set_chroma_location(ChromaLocation::Center);
-        let bad = $Row::new(&y[4 * 8..5 * 8], &uv[2 * 8..3 * 8], 4, M, FR);
+        let bad = $Row::for_tests(&y[4 * 8..5 * 8], &uv[2 * 8..3 * 8], 4, M, FR);
         let err = PixelSink::process(&mut sink, bad).unwrap_err();
         assert!(
           matches!(
@@ -1476,7 +1476,7 @@ macro_rules! nv_resample_siting_tests {
         );
         // The corrected retry (row 0, now rebuilding for Center) succeeds.
         for r in 0..8 {
-          let row = $Row::new(
+          let row = $Row::for_tests(
             &y[r * 8..r * 8 + 8],
             &uv[(r / 2) * 8..(r / 2) * 8 + 8],
             r,
@@ -1501,9 +1501,9 @@ macro_rules! nv_resample_siting_tests {
       ) -> Result<(), MixedSinkerError> {
         sink.set_chroma_location(loc1.clone());
         PixelSink::begin_frame(&mut sink, 8, 8).unwrap();
-        PixelSink::process(&mut sink, $Row::new(&y[0..8], &uv[0..8], 0, M, FR)).unwrap();
+        PixelSink::process(&mut sink, $Row::for_tests(&y[0..8], &uv[0..8], 0, M, FR)).unwrap();
         sink.set_chroma_location(loc2.clone());
-        PixelSink::process(&mut sink, $Row::new(&y[8..16], &uv[0..8], 1, M, FR))
+        PixelSink::process(&mut sink, $Row::for_tests(&y[8..16], &uv[0..8], 1, M, FR))
       }
 
       #[test]
@@ -1626,7 +1626,7 @@ macro_rules! nv_resample_siting_tests {
             .unwrap();
         PixelSink::begin_frame(&mut sink, 8, 8).unwrap();
         for r in 0..2 {
-          let row = $Row::new(
+          let row = $Row::for_tests(
             &y[r * 8..r * 8 + 8],
             &uv[(r / 2) * 8..(r / 2) * 8 + 8],
             r,
@@ -1636,7 +1636,7 @@ macro_rules! nv_resample_siting_tests {
           PixelSink::process(&mut sink, row).unwrap();
         }
         sink.set_chroma_location(ChromaLocation::Left);
-        let bad = $Row::new(&y[2 * 8..3 * 8], &uv[8..16], 2, M, FR);
+        let bad = $Row::for_tests(&y[2 * 8..3 * 8], &uv[8..16], 2, M, FR);
         let err = PixelSink::process(&mut sink, bad).unwrap_err();
         assert!(
           matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
@@ -1646,7 +1646,7 @@ macro_rules! nv_resample_siting_tests {
         // and a fresh frame at the new siting processes without error.
         PixelSink::begin_frame(&mut sink, 8, 8).unwrap();
         for r in 0..8 {
-          let row = $Row::new(
+          let row = $Row::for_tests(
             &y[r * 8..r * 8 + 8],
             &uv[(r / 2) * 8..(r / 2) * 8 + 8],
             r,

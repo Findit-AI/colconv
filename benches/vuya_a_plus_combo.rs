@@ -91,7 +91,14 @@ fn bench(c: &mut Criterion) {
               .unwrap()
               .with_rgba(&mut rgba)
               .unwrap();
-            vuya_to(&frame, FULL_RANGE, MATRIX, &mut sinker).unwrap();
+            vuya_to(
+              &frame,
+              FULL_RANGE,
+              sinker
+                .set_color_spec(&pixon::ColorSpec::of_matrix(MATRIX))
+                .unwrap(),
+            )
+            .unwrap();
             black_box((&rgb, &rgba));
           });
         },

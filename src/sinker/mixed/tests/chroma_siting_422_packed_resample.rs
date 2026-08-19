@@ -278,7 +278,7 @@ fn run_yuv422p(
     let f = Yuv422pFrame::new(
       y, u, v, sw as u32, sh as u32, sw as u32, cw as u32, cw as u32,
     );
-    yuv422p_to(&f, FR, M, &mut sink).unwrap();
+    yuv422p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   (rgb, rgba, (hh, ss, vv), luma, luma_u16)
 }
@@ -311,7 +311,7 @@ fn native_oracle(y: &[u8], u: &[u8], v: &[u8], sw: usize, sh: usize, ow: usize, 
     let f = Yuv444pFrame::new(
       &yb, &ub, &vb, ow as u32, oh as u32, ow as u32, ow as u32, ow as u32,
     );
-    yuv444p_to(&f, FR, M, &mut sink).unwrap();
+    yuv444p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   (rgb, rgba, (hh, ss, vv), luma, luma_u16)
 }
@@ -346,7 +346,7 @@ fn encoded_oracle_rgb(
     let f = Yuv444pFrame::new(
       y, &uf, &vf, sw as u32, sh as u32, sw as u32, sw as u32, sw as u32,
     );
-    yuv444p_to(&f, FR, M, &mut sink).unwrap();
+    yuv444p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   rgb
 }
@@ -408,7 +408,7 @@ macro_rules! packed_422_siting_resample_suite {
               .with_luma_u16(&mut luma_u16)
               .unwrap();
           let f = $frame::new(&packed, sw as u32, sh as u32, (2 * sw) as u32);
-          $drv(&f, FR, M, &mut sink).unwrap();
+          $drv(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgba, (hh, ss, vv), luma, luma_u16)
       }
@@ -576,7 +576,7 @@ macro_rules! packed_422_siting_resample_suite {
           .with_rgb(&mut rgb)
           .unwrap();
           let f = $frame::new(&packed, sw as u32, sh as u32, (2 * sw) as u32);
-          $drv(&f, FR, M, &mut sink).unwrap();
+          $drv(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         rgb
       }
@@ -607,7 +607,7 @@ macro_rules! packed_422_siting_resample_suite {
           let f = Yuv422pFrame::new(
             y, u, v, sw as u32, sh as u32, sw as u32, cw as u32, cw as u32,
           );
-          yuv422p_to(&f, FR, M, &mut sink).unwrap();
+          yuv422p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         rgb
       }
@@ -719,9 +719,9 @@ macro_rules! packed_422_siting_resample_suite {
               .unwrap();
           let f = $frame::new(&packed, sw as u32, sh as u32, (2 * sw) as u32);
           sink.set_chroma_location(loc1.clone());
-          $drv(&f, FR, M, &mut sink).unwrap();
+          $drv(&f, FR, sink.set_kernel_matrix(M)).unwrap();
           sink.set_chroma_location(loc2.clone());
-          $drv(&f, FR, M, &mut sink).unwrap();
+          $drv(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgba, (hh, ss, vv), luma, luma_u16)
       }
@@ -782,7 +782,7 @@ macro_rules! packed_422_siting_resample_suite {
         // Frame 1 at Left builds the native join.
         PixelSink::begin_frame(&mut sink, 8, 8).unwrap();
         for r in 0..8 {
-          let row = $row::new(&packed[r * 16..r * 16 + 16], r, M, FR);
+          let row = $row::for_tests(&packed[r * 16..r * 16 + 16], r, M, FR);
           PixelSink::process(&mut sink, row).unwrap();
         }
         assert!(
@@ -792,7 +792,7 @@ macro_rules! packed_422_siting_resample_suite {
         // Frame 2: change siting to Center, then feed an OUT-OF-SEQUENCE first row.
         PixelSink::begin_frame(&mut sink, 8, 8).unwrap();
         sink.set_chroma_location(ChromaLocation::Center);
-        let bad = $row::new(&packed[3 * 16..4 * 16], 3, M, FR);
+        let bad = $row::for_tests(&packed[3 * 16..4 * 16], 3, M, FR);
         let err = PixelSink::process(&mut sink, bad).unwrap_err();
         assert!(
           matches!(
@@ -807,7 +807,7 @@ macro_rules! packed_422_siting_resample_suite {
         );
         // The corrected retry (row 0, now rebuilding for Center) succeeds.
         for r in 0..8 {
-          let row = $row::new(&packed[r * 16..r * 16 + 16], r, M, FR);
+          let row = $row::for_tests(&packed[r * 16..r * 16 + 16], r, M, FR);
           PixelSink::process(&mut sink, row).unwrap();
         }
       }
@@ -825,10 +825,10 @@ macro_rules! packed_422_siting_resample_suite {
       ) -> Result<(), super::super::super::MixedSinkerError> {
         sink.set_chroma_location(loc1.clone());
         PixelSink::begin_frame(&mut sink, 8, 8).unwrap();
-        let row0 = $row::new(&packed[0..16], 0, M, FR);
+        let row0 = $row::for_tests(&packed[0..16], 0, M, FR);
         PixelSink::process(&mut sink, row0).unwrap();
         sink.set_chroma_location(loc2.clone());
-        let row1 = $row::new(&packed[16..32], 1, M, FR);
+        let row1 = $row::for_tests(&packed[16..32], 1, M, FR);
         PixelSink::process(&mut sink, row1)
       }
 
@@ -932,11 +932,11 @@ macro_rules! packed_422_siting_resample_suite {
             .unwrap();
         PixelSink::begin_frame(&mut sink, 8, 8).unwrap();
         for r in 0..2 {
-          let row = $row::new(&packed[r * 16..r * 16 + 16], r, M, FR);
+          let row = $row::for_tests(&packed[r * 16..r * 16 + 16], r, M, FR);
           PixelSink::process(&mut sink, row).unwrap();
         }
         sink.set_chroma_location(ChromaLocation::Left);
-        let bad = $row::new(&packed[5 * 16..6 * 16], 5, M, FR);
+        let bad = $row::for_tests(&packed[5 * 16..6 * 16], 5, M, FR);
         let err = PixelSink::process(&mut sink, bad).unwrap_err();
         assert!(
           matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
@@ -946,7 +946,7 @@ macro_rules! packed_422_siting_resample_suite {
         // and a fresh frame at the new siting processes without error.
         PixelSink::begin_frame(&mut sink, 8, 8).unwrap();
         for r in 0..8 {
-          let row = $row::new(&packed[r * 16..r * 16 + 16], r, M, FR);
+          let row = $row::for_tests(&packed[r * 16..r * 16 + 16], r, M, FR);
           PixelSink::process(&mut sink, row).unwrap();
         }
       }

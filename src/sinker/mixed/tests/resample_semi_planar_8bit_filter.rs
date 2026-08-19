@@ -164,7 +164,7 @@ macro_rules! semi_planar_format {
           .unwrap()
           .with_luma_u16(&mut luma_u16)
           .unwrap();
-          $walk(&src, FR, M, &mut sink).unwrap();
+          $walk(&src, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         FilterOutputs {
           rgb,
@@ -186,7 +186,7 @@ macro_rules! semi_planar_format {
         let mut rgb = vec![0u8; w * h * 3];
         {
           let mut sink = MixedSinker::<$src>::new(w, h).with_rgb(&mut rgb).unwrap();
-          $walk(&src, FR, M, &mut sink).unwrap();
+          $walk(&src, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         rgb
       }
@@ -373,8 +373,8 @@ fn nv24_filter_reuses_streams_across_frames() {
     .unwrap()
     .with_luma(&mut luma)
     .unwrap();
-    nv24_to(&frame1, FR, M, &mut sink).unwrap();
-    nv24_to(&frame2, FR, M, &mut sink).unwrap();
+    nv24_to(&frame1, FR, sink.set_kernel_matrix(M)).unwrap();
+    nv24_to(&frame2, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   let want = native_y_filter(Triangle, &y2, SW, SH, OW, OH);
   assert_eq!(
@@ -455,7 +455,7 @@ mod packed_rgb_equivalence {
       .unwrap()
       .with_rgb(&mut out)
       .unwrap();
-      rgb24_to(&src, FR, M, &mut sink).unwrap();
+      rgb24_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     }
     out
   }

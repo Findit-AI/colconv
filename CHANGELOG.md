@@ -15,10 +15,12 @@ breaking changes bump the `x` in `0.x.y`.
 ## 0.2.0 — unreleased
 
 **Breaking**, on one count with a wide blast radius: the public dependency
-`mediaframe` crosses 0.1 → 0.3, and with it the colour vocabularies pixon
-re-exports. Everything below follows from that crossing, and the headline is a
-correctness fix — **a colour matrix pixon cannot decode is now refused instead
-of silently decoded as BT.709**.
+`mediaframe` crosses 0.1 → 0.4, and with it the colour vocabularies pixon
+re-exports *and* the shape of every `{fmt}_to` walker. Everything below follows
+from that crossing. Two headlines: a correctness fix — **a colour matrix pixon
+cannot decode is now refused instead of silently decoded as BT.709** — and a
+seam move — **the walkers no longer take a matrix or a gamut beside the sink;
+they ask the sink**.
 
 ### Added
 
@@ -46,10 +48,19 @@ of silently decoded as BT.709**.
   full spec.
 - `pixon::KernelMatrix`, `pixon::KernelGamut`, `pixon::UnsupportedKernelMatrixError`
   and `pixon::UnsupportedKernelGamutError`, re-exported from mediaframe.
-- `Xyz12Options::for_target_gamut(&DcpTargetGamut)` — the same exchange for the
-  XYZ12 target gamut, refusing a gamut with no tabulated XYZ → RGB matrix.
-- `MixedSinkerError::UnsupportedColorMatrix` — how the refusal surfaces out of
-  the `Convert` tier, raised before a single row is read.
+- **`MixedSinker::with_target_gamut(&DcpTargetGamut)` / `set_target_gamut`** —
+  the same exchange for the XYZ12 output gamut, refusing a gamut with no
+  tabulated XYZ → RGB matrix. It lives on the sink because a gamut describes
+  the *output* and the sink **is** the output; `xyz12_to` reads it from there.
+- **`MixedSinker::kernel_matrix()` / `target_gamut()`** — what the walkers ask
+  for, once per walk. Both are set only from a description (`ColorSpec`,
+  `DcpTargetGamut`); neither has a setter that names a closed selector.
+- **`Convert::target_gamut(DcpTargetGamut)`** — the Tier-0 XYZ12 gamut door.
+  It exists only on an XYZ12 builder (a type-constrained `impl`), so it cannot
+  be set on a source that would ignore it.
+- `MixedSinkerError::UnsupportedColorMatrix` and
+  `MixedSinkerError::UnsupportedTargetGamut` — how the two refusals surface out
+  of the `Convert` tier, raised before a single row is read.
 
 ### Changed
 
@@ -67,41 +78,76 @@ of silently decoded as BT.709**.
   now spelled out with their rationale instead of riding a fallback.
 
 - **Breaking: the kernels take `KernelMatrix`, not `ColorMatrix`.** A walker
-  row now carries the closed selector, so `YuvOptions::matrix` and every
-  `{fmt}_to` walker argument are `KernelMatrix`; `Xyz12Options::target_gamut`
-  is `KernelGamut`. `ColorSpec` keeps the **open** `ColorMatrix` descriptor —
-  it describes a stream, and the four non-affine decodes read their tag from
-  it.
+  row now carries the closed selector, and every kernel, row and sinker
+  signature takes `KernelMatrix` (`KernelGamut` for XYZ12). `ColorSpec` keeps
+  the **open** `ColorMatrix` descriptor — it describes a stream, and the four
+  non-affine decodes read their tag from it.
 
-- **Breaking: the closed selectors are no longer settable — colour intent has
-  one source.** `YuvOptions::with_matrix(KernelMatrix)` and
-  `Xyz12Options::with_target_gamut(KernelGamut)` are **removed**. A
-  `KernelMatrix` now enters a walk only out of `ColorSpec::kernel_matrix`, via
-  `YuvOptions::from_color_spec`; a `KernelGamut` only out of
-  `Xyz12Options::for_target_gamut(&DcpTargetGamut)`. Each closed vocabulary
+- **Breaking: the walkers ask the sink for the selector.** mediaframe 0.4
+  removed the matrix from every `{fmt}_to` signature and the gamut from
+  `xyz12_to`, and reads them off `PixelSink::kernel_matrix` /
+  `Xyz12Sink::target_gamut` once per walk — two doors onto one fact being a bug
+  generator. pixon consumes that shape: `MixedSinker` answers both from the
+  description it was configured with, `YuvOptions` carries only `full_range`,
+  and `Xyz12Options` is **removed** (its one field was the gamut, so the XYZ12
+  walk options are now the unit `()`). Migration:
+
+  ```rust
+  - yuv420p_to(&frame, spec.full_range(), spec.kernel_matrix()?, &mut sink)?;
+  + let mut sink = sink.with_color_spec(&spec)?;   // the sink already knew
+  + yuv420p_to(&frame, spec.full_range(), &mut sink)?;
+
+  - xyz12_to(&frame, KernelGamut::Rec709, &mut sink)?;
+  + let mut sink = sink.with_target_gamut(&DcpTargetGamut::Rec709)?;
+  + xyz12_to(&frame, &mut sink)?;
+  ```
+
+  A sink that names no matrix decodes limited-range BT.709 — the posture the
+  walker argument defaulted to. **A caller who passed a non-BT.709 matrix
+  positionally and never gave the sink a description must now give it one**:
+  that is the one shape where the crossing changes a picture, and it changes it
+  from "whatever the caller passed" to "whatever the sink was built with",
+  which is the only answer that cannot disagree with itself.
+
+- **Breaking: `*Row::new` is `pub(crate)` upstream.** An out-of-tree
+  kernel-parity suite that drove a single row without a frame uses mediaframe's
+  `#[doc(hidden)] *Row::for_tests` door instead; it takes the identical
+  parameter list and carries no stability promise.
+
+- **Breaking: the closed selectors are not settable — colour intent has one
+  source.** `YuvOptions::with_matrix(KernelMatrix)` is **removed** and no
+  replacement names a `KernelMatrix` directly. A `KernelMatrix` enters a walk
+  only out of `ColorSpec::kernel_matrix`, through
+  `MixedSinker::with_color_spec`; a `KernelGamut` only out of
+  `MixedSinker::with_target_gamut(&DcpTargetGamut)`. Each closed vocabulary
   therefore has exactly one exchange point with the open descriptor that was
   supposed to select it, and neither can be conjured alongside — or in
   contradiction of — the description the sink is decoding against. Migration:
 
   ```rust
   - let opts = YuvOptions::new().with_matrix(KernelMatrix::Bt601);
-  + let opts = YuvOptions::from_color_spec(&ColorSpec::of_matrix(KernelMatrix::Bt601))?;
+  + let sink = sink.with_color_spec(&ColorSpec::of_matrix(KernelMatrix::Bt601))?;
   // …or, when a fuller description is at hand, straight from it:
-  + let opts = YuvOptions::from_color_spec(&spec)?;
-
-  - let opts = Xyz12Options::new().with_target_gamut(KernelGamut::Rec709);
-  + let opts = Xyz12Options::for_target_gamut(&DcpTargetGamut::Rec709)?;
+  + let sink = sink.with_color_spec(&spec)?;
   ```
 
-  `full_range` is a quantisation knob rather than colour intent and keeps its
-  own setters; `YuvOptions::new()` still means limited-range BT.709, which is
-  what `ColorMatrix::Unspecified` resolves to — no new implicit path.
+  `full_range` is a quantisation fact about the frame rather than colour intent
+  the sink owns, so it stays a walker parameter and keeps its own setters.
 
-- **Breaking: `YuvOptions::from_color_spec` and `FromSpec::from_spec` are
-  fallible** and take `&ColorSpec`. `MixedSinker::with_color_spec` /
-  `set_color_spec` take `&ColorSpec` and additionally carry the spec's matrix
-  descriptor to the sink, which is where the non-affine gate reads it now that
-  the row cannot.
+- **Breaking: `MixedSinker::with_color_spec` / `set_color_spec` are fallible**,
+  take `&ColorSpec`, and are no longer gated to `yuv-planar`. One call now
+  configures the whole decode — the row's `KernelMatrix`, the siting, the
+  primaries, the transfer and the open matrix descriptor the non-affine gate
+  reads — and refuses a matrix pixon cannot decode right there, before a row is
+  read. `YuvOptions::from_color_spec` carries only the range and is infallible;
+  `FromSpec::from_spec` keeps its `Result` shape.
+
+- **Breaking: `Convert::format_options` overrides quantisation, not colour.**
+  It could previously carry a `YuvOptions` derived from a *different* spec and
+  put a different matrix in front of each reader — the one place the
+  single-source rule was deliberately set aside. The options carry no colour
+  value any more, so the exception is gone and `Convert::spec` is the only
+  matrix door.
 
 - **Breaking: `ColorSpec` is no longer `Copy`** (`Clone` only), and neither are
   the re-exported `ColorMatrix`, `Primaries`, `Transfer`, `ChromaLocation`,
@@ -115,7 +161,10 @@ of silently decoded as BT.709**.
   spelling `ColorMatrix::Unknown(9)` becomes `ColorMatrix::other("...")`, and
   `from_u32` now returns `Option<Self>`.
 
-- Public dependency `mediaframe` 0.1 → 0.3.
+- Public dependency `mediaframe` 0.1 → 0.4. The retirement of
+  `VideoCodec::{V308,V408,V410}` in mediaframe 0.4 (FFmpeg n9.0 dropped them)
+  does not reach pixon: this crate is pixel-domain and names no codec
+  vocabulary at all.
 
 ### Fixed
 

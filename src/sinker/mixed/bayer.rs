@@ -42,6 +42,10 @@ impl<R> PixelSink for MixedSinker<'_, Bayer, R> {
   type Input<'r> = BayerRow<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     // Bayer accepts odd dimensions — see `BayerFrame::try_new` for
     // the rationale (cropped Bayer is a real workflow).
@@ -363,6 +367,10 @@ impl<const BITS: u32, const BE: bool> PixelSink for MixedSinker<'_, Bayer16<BITS
   type Input<'r> = BayerRow16<'r, BITS>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     // Bayer accepts odd dimensions — see `BayerFrame::try_new` for
     // the rationale (cropped Bayer is a real workflow).

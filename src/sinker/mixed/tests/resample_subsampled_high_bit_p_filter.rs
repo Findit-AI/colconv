@@ -115,7 +115,7 @@ fn rgb48_filter_rgb_u16<K: FilterKernel>(
     .unwrap()
     .with_rgb_u16(&mut out)
     .unwrap();
-    rgb48_to(&src, FR, M, &mut sink).unwrap();
+    rgb48_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   out
 }
@@ -143,7 +143,7 @@ fn rgb24_filter_rgb<K: FilterKernel>(
     .unwrap()
     .with_rgb(&mut out)
     .unwrap();
-    rgb24_to(&src, FR, M, &mut sink).unwrap();
+    rgb24_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   out
 }
@@ -250,7 +250,7 @@ macro_rules! p_filter_family {
               .unwrap()
               .with_luma(&mut luma)
               .unwrap();
-              $walker(&frame(y, uv, sw, sh), FR, M, &mut sink).unwrap();
+              $walker(&frame(y, uv, sw, sh), FR, sink.set_kernel_matrix(M)).unwrap();
             }
             FilterOutputs {
               rgb,
@@ -460,7 +460,7 @@ macro_rules! p_overshoot_family {
               .unwrap()
               .with_luma(&mut luma)
               .unwrap();
-              $walker(&frame(y, uv, sw, sh), FR, M, &mut sink).unwrap();
+              $walker(&frame(y, uv, sw, sh), FR, sink.set_kernel_matrix(M)).unwrap();
             }
             FilterOutputs {
               rgb,
@@ -698,7 +698,7 @@ mod packed_rgb_equivalence {
                 .unwrap()
                 .with_luma(&mut luma)
                 .unwrap();
-                $walker(&frame(y, uv, sw, sh), FR, M, &mut sink).unwrap();
+                $walker(&frame(y, uv, sw, sh), FR, sink.set_kernel_matrix(M)).unwrap();
               }
               FilterOutputs {
                 rgb,
@@ -713,7 +713,7 @@ mod packed_rgb_equivalence {
                 let mut sink = MixedSinker::<$marker>::new(w, h)
                   .with_rgb_u16(&mut rgb)
                   .unwrap();
-                $walker(&frame(y, uv, w, h), FR, M, &mut sink).unwrap();
+                $walker(&frame(y, uv, w, h), FR, sink.set_kernel_matrix(M)).unwrap();
               }
               rgb
             }
@@ -723,7 +723,7 @@ mod packed_rgb_equivalence {
                 let mut sink = MixedSinker::<$marker>::new(w, h)
                   .with_rgb(&mut rgb)
                   .unwrap();
-                $walker(&frame(y, uv, w, h), FR, M, &mut sink).unwrap();
+                $walker(&frame(y, uv, w, h), FR, sink.set_kernel_matrix(M)).unwrap();
               }
               rgb
             }
@@ -882,7 +882,7 @@ mod packed_rgb_equivalence {
                 .unwrap()
                 .with_rgb_u16(&mut rgb_u16)
                 .unwrap();
-                $walker(&frame(y, uv, sw, sh), FR, M, &mut sink).unwrap();
+                $walker(&frame(y, uv, sw, sh), FR, sink.set_kernel_matrix(M)).unwrap();
               }
               rgb_u16
             }
@@ -892,7 +892,7 @@ mod packed_rgb_equivalence {
                 let mut sink = MixedSinker::<$marker>::new(w, h)
                   .with_rgb_u16(&mut rgb)
                   .unwrap();
-                $walker(&frame(y, uv, w, h), FR, M, &mut sink).unwrap();
+                $walker(&frame(y, uv, w, h), FR, sink.set_kernel_matrix(M)).unwrap();
               }
               rgb
             }
@@ -1033,7 +1033,7 @@ mod filter_bypasses_native_route {
               .unwrap()
               .with_luma(&mut luma)
               .unwrap();
-              $walker(&frame(y, uv, sw, sh), FR, M, &mut sink).unwrap();
+              $walker(&frame(y, uv, sw, sh), FR, sink.set_kernel_matrix(M)).unwrap();
             }
             (rgb, rgb_u16, luma)
           }

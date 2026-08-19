@@ -822,6 +822,10 @@ impl<R> PixelSink for MixedSinker<'_, Yuv420p, R> {
   type Input<'r> = Yuv420pRow<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     // Reject odd-width sinkers up front — the underlying row
     // primitives assume `width & 1 == 0` and would panic on the
@@ -5446,6 +5450,10 @@ impl<R> PixelSink for MixedSinker<'_, Yuv410p, R> {
   type Input<'r> = Yuv410pRow<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     // Yuv410p requires width to be a multiple of 4 (the row kernels
     // operate on 4-pixel chroma groups). Height is unconstrained — the
@@ -6090,6 +6098,10 @@ impl<R> PixelSink for MixedSinker<'_, Yuv422p, R> {
   type Input<'r> = Yuv422pRow<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     if self.width & 1 != 0 {
       return Err(MixedSinkerError::WidthAlignment(WidthAlignment::odd(
@@ -7205,6 +7217,10 @@ impl<R> PixelSink for MixedSinker<'_, Yuv444p, R> {
   type Input<'r> = Yuv444pRow<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     check_dimensions_match(self.width, self.height, width, height)?;
     if let Some(stream) = self.rgb_stream.as_mut() {
@@ -7752,6 +7768,10 @@ impl<R> PixelSink for MixedSinker<'_, Yuv440p, R> {
   type Input<'r> = Yuv440pRow<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     check_dimensions_match(self.width, self.height, width, height)?;
     if let Some(stream) = self.rgb_stream.as_mut() {
@@ -9648,6 +9668,10 @@ impl<R> PixelSink for MixedSinker<'_, Yuv411p, R> {
   type Input<'r> = Yuv411pRow<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     // FFmpeg-compatible: arbitrary widths accepted (chroma row is
     // `width.div_ceil(4)` samples; the scalar kernel handles a
