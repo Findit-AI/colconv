@@ -65,6 +65,8 @@ fn sinker_target_gamut_comes_only_from_the_descriptor() {
 fn defaults_are_limited_bt709() {
   assert_eq!(YuvOptions::default(), YuvOptions::new());
   assert!(!YuvOptions::new().full_range());
+  // `Yuv420p` is only the witness sink, so this one assertion rides `yuv-planar`.
+  #[cfg(feature = "yuv-planar")]
   assert_eq!(
     crate::sinker::MixedSinker::<crate::source::Yuv420p>::new(2, 2).kernel_matrix(),
     KernelMatrix::Bt709
@@ -214,7 +216,9 @@ fn color_spec_of_matrix_round_trips_and_leaves_the_rest_unspecified() {
     assert_eq!(spec.transfer(), Transfer::Unspecified);
     assert_eq!(spec.chroma_location(), ChromaLocation::Unspecified);
 
-    // And it is exactly what the sink consumes.
+    // And it is exactly what the sink consumes. `Yuv420p` is only the witness
+    // sink, so this one assertion rides `yuv-planar`.
+    #[cfg(feature = "yuv-planar")]
     assert_eq!(
       crate::sinker::MixedSinker::<crate::source::Yuv420p>::new(2, 2)
         .with_color_spec(&spec)
@@ -4432,6 +4436,8 @@ mod kernel_matrix_exchange {
         spec_of(m.clone()).kernel_matrix().is_err(),
         "{m:?} must be refused, not decoded as BT.709",
       );
+      // `Yuv420p` is only the witness sink, so this one assertion rides `yuv-planar`.
+      #[cfg(feature = "yuv-planar")]
       assert!(
         crate::sinker::MixedSinker::<crate::source::Yuv420p>::new(2, 2)
           .with_color_spec(&spec_of(m.clone()))
