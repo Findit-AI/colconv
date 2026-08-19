@@ -185,34 +185,44 @@ macro_rules! impl_filter_simd_elem {
           target_arch = "aarch64" => {
             if neon_available() {
               // SAFETY: NEON available; arena bound by the caller.
-              unsafe { arch::neon::filter_reduce::$c1(row, starts, ksize, coeffs, off, h_tmp); }
+              unsafe {
+                arch::neon::filter_reduce::$c1(row, starts, ksize, coeffs, off, h_tmp);
+              }
               return;
             }
-          },
+          }
           target_arch = "x86_64" => {
             if avx512_available() {
               // SAFETY: AVX-512F+BW verified; arena bound by the caller.
-              unsafe { arch::x86_avx512::filter_reduce::$c1(row, starts, ksize, coeffs, off, h_tmp); }
+              unsafe {
+                arch::x86_avx512::filter_reduce::$c1(row, starts, ksize, coeffs, off, h_tmp);
+              }
               return;
             }
             if avx2_available() {
               // SAFETY: AVX2 verified; arena bound by the caller.
-              unsafe { arch::x86_avx2::filter_reduce::$c1(row, starts, ksize, coeffs, off, h_tmp); }
+              unsafe {
+                arch::x86_avx2::filter_reduce::$c1(row, starts, ksize, coeffs, off, h_tmp);
+              }
               return;
             }
             if sse41_available() {
               // SAFETY: SSE4.1 verified; arena bound by the caller.
-              unsafe { arch::x86_sse41::filter_reduce::$c1(row, starts, ksize, coeffs, off, h_tmp); }
+              unsafe {
+                arch::x86_sse41::filter_reduce::$c1(row, starts, ksize, coeffs, off, h_tmp);
+              }
               return;
             }
-          },
+          }
           target_arch = "wasm32" => {
             if simd128_available() {
               // SAFETY: simd128 enabled; arena bound by the caller.
-              unsafe { arch::wasm_simd128::filter_reduce::$c1(row, starts, ksize, coeffs, off, h_tmp); }
+              unsafe {
+                arch::wasm_simd128::filter_reduce::$c1(row, starts, ksize, coeffs, off, h_tmp);
+              }
               return;
             }
-          },
+          }
           _ => {}
         }
         // No SIMD tier ran (none available — e.g. `pixon_force_scalar`, or
@@ -240,34 +250,44 @@ macro_rules! impl_filter_simd_elem {
           target_arch = "aarch64" => {
             if neon_available() {
               // SAFETY: NEON available; arena bound by the caller.
-              unsafe { arch::neon::filter_reduce::$c3(row, starts, ksize, coeffs, off, h_tmp); }
+              unsafe {
+                arch::neon::filter_reduce::$c3(row, starts, ksize, coeffs, off, h_tmp);
+              }
               return;
             }
-          },
+          }
           target_arch = "x86_64" => {
             if avx512_available() {
               // SAFETY: AVX-512F+BW verified; arena bound by the caller.
-              unsafe { arch::x86_avx512::filter_reduce::$c3(row, starts, ksize, coeffs, off, h_tmp); }
+              unsafe {
+                arch::x86_avx512::filter_reduce::$c3(row, starts, ksize, coeffs, off, h_tmp);
+              }
               return;
             }
             if avx2_available() {
               // SAFETY: AVX2 verified; arena bound by the caller.
-              unsafe { arch::x86_avx2::filter_reduce::$c3(row, starts, ksize, coeffs, off, h_tmp); }
+              unsafe {
+                arch::x86_avx2::filter_reduce::$c3(row, starts, ksize, coeffs, off, h_tmp);
+              }
               return;
             }
             if sse41_available() {
               // SAFETY: SSE4.1 verified; arena bound by the caller.
-              unsafe { arch::x86_sse41::filter_reduce::$c3(row, starts, ksize, coeffs, off, h_tmp); }
+              unsafe {
+                arch::x86_sse41::filter_reduce::$c3(row, starts, ksize, coeffs, off, h_tmp);
+              }
               return;
             }
-          },
+          }
           target_arch = "wasm32" => {
             if simd128_available() {
               // SAFETY: simd128 enabled; arena bound by the caller.
-              unsafe { arch::wasm_simd128::filter_reduce::$c3(row, starts, ksize, coeffs, off, h_tmp); }
+              unsafe {
+                arch::wasm_simd128::filter_reduce::$c3(row, starts, ksize, coeffs, off, h_tmp);
+              }
               return;
             }
-          },
+          }
           _ => {}
         }
         // See `h_c1`: bound the padded-arena scalar fallback to `ksize` real
@@ -437,34 +457,44 @@ pub(crate) fn filter_v_accumulate(acc: &mut [f64], h_tmp: &[f64], w: f32, use_si
       target_arch = "aarch64" => {
         if neon_available() {
           // SAFETY: NEON available; bounds asserted above.
-          unsafe { arch::neon::filter_reduce::filter_v_accumulate(acc, h_tmp, w); }
+          unsafe {
+            arch::neon::filter_reduce::filter_v_accumulate(acc, h_tmp, w);
+          }
           return;
         }
-      },
+      }
       target_arch = "x86_64" => {
         if avx512_available() {
           // SAFETY: AVX-512F verified at runtime; bounds asserted above.
-          unsafe { arch::x86_avx512::filter_reduce::filter_v_accumulate(acc, h_tmp, w); }
+          unsafe {
+            arch::x86_avx512::filter_reduce::filter_v_accumulate(acc, h_tmp, w);
+          }
           return;
         }
         if avx2_available() {
           // SAFETY: AVX2 verified at runtime; bounds asserted above.
-          unsafe { arch::x86_avx2::filter_reduce::filter_v_accumulate(acc, h_tmp, w); }
+          unsafe {
+            arch::x86_avx2::filter_reduce::filter_v_accumulate(acc, h_tmp, w);
+          }
           return;
         }
         if sse41_available() {
           // SAFETY: SSE4.1 verified at runtime; bounds asserted above.
-          unsafe { arch::x86_sse41::filter_reduce::filter_v_accumulate(acc, h_tmp, w); }
+          unsafe {
+            arch::x86_sse41::filter_reduce::filter_v_accumulate(acc, h_tmp, w);
+          }
           return;
         }
-      },
+      }
       target_arch = "wasm32" => {
         if simd128_available() {
           // SAFETY: simd128 enabled at compile time; bounds asserted above.
-          unsafe { arch::wasm_simd128::filter_reduce::filter_v_accumulate(acc, h_tmp, w); }
+          unsafe {
+            arch::wasm_simd128::filter_reduce::filter_v_accumulate(acc, h_tmp, w);
+          }
           return;
         }
-      },
+      }
       _ => {}
     }
   }

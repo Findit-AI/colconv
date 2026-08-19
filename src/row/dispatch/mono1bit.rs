@@ -64,7 +64,7 @@ pub(crate) fn monoblack_to_rgb_or_rgba_row<const ALPHA: bool>(
         }
         return;
       }
-    },
+    }
     target_arch = "x86_64" => {
       if avx512_available() {
         unsafe {
@@ -96,7 +96,7 @@ pub(crate) fn monoblack_to_rgb_or_rgba_row<const ALPHA: bool>(
         }
         return;
       }
-    },
+    }
     target_arch = "wasm32" => {
       if simd128_available() {
         unsafe {
@@ -108,7 +108,7 @@ pub(crate) fn monoblack_to_rgb_or_rgba_row<const ALPHA: bool>(
         }
         return;
       }
-    },
+    }
     _ => {}
   }
   if ALPHA {
@@ -159,7 +159,7 @@ pub(crate) fn monoblack_to_rgb_u16_or_rgba_u16_row<const ALPHA: bool>(
         }
         return;
       }
-    },
+    }
     target_arch = "x86_64" => {
       if avx512_available() {
         unsafe {
@@ -191,7 +191,7 @@ pub(crate) fn monoblack_to_rgb_u16_or_rgba_u16_row<const ALPHA: bool>(
         }
         return;
       }
-    },
+    }
     target_arch = "wasm32" => {
       if simd128_available() {
         unsafe {
@@ -203,7 +203,7 @@ pub(crate) fn monoblack_to_rgb_u16_or_rgba_u16_row<const ALPHA: bool>(
         }
         return;
       }
-    },
+    }
     _ => {}
   }
   if ALPHA {
@@ -231,30 +231,40 @@ pub(crate) fn monoblack_to_luma_row(data: &[u8], out: &mut [u8], width: usize, u
   cfg_select! {
     target_arch = "aarch64" => {
       if neon_available() {
-        unsafe { arch::neon::mono1bit::monoblack_to_luma_row(data, out, width); }
+        unsafe {
+          arch::neon::mono1bit::monoblack_to_luma_row(data, out, width);
+        }
         return;
       }
-    },
+    }
     target_arch = "x86_64" => {
       if avx512_available() {
-        unsafe { arch::x86_avx512::monoblack_to_luma_row(data, out, width); }
+        unsafe {
+          arch::x86_avx512::monoblack_to_luma_row(data, out, width);
+        }
         return;
       }
       if avx2_available() {
-        unsafe { arch::x86_avx2::monoblack_to_luma_row(data, out, width); }
+        unsafe {
+          arch::x86_avx2::monoblack_to_luma_row(data, out, width);
+        }
         return;
       }
       if sse41_available() {
-        unsafe { arch::x86_sse41::monoblack_to_luma_row(data, out, width); }
+        unsafe {
+          arch::x86_sse41::monoblack_to_luma_row(data, out, width);
+        }
         return;
       }
-    },
+    }
     target_arch = "wasm32" => {
       if simd128_available() {
-        unsafe { arch::wasm_simd128::monoblack_to_luma_row(data, out, width); }
+        unsafe {
+          arch::wasm_simd128::monoblack_to_luma_row(data, out, width);
+        }
         return;
       }
-    },
+    }
     _ => {}
   }
   scalar::monoblack_to_luma_row(data, out, width);
@@ -283,30 +293,40 @@ pub(crate) fn monoblack_to_luma_u16_row(
   cfg_select! {
     target_arch = "aarch64" => {
       if neon_available() {
-        unsafe { arch::neon::mono1bit::monoblack_to_luma_u16_row(data, out, width); }
+        unsafe {
+          arch::neon::mono1bit::monoblack_to_luma_u16_row(data, out, width);
+        }
         return;
       }
-    },
+    }
     target_arch = "x86_64" => {
       if avx512_available() {
-        unsafe { arch::x86_avx512::monoblack_to_luma_u16_row(data, out, width); }
+        unsafe {
+          arch::x86_avx512::monoblack_to_luma_u16_row(data, out, width);
+        }
         return;
       }
       if avx2_available() {
-        unsafe { arch::x86_avx2::monoblack_to_luma_u16_row(data, out, width); }
+        unsafe {
+          arch::x86_avx2::monoblack_to_luma_u16_row(data, out, width);
+        }
         return;
       }
       if sse41_available() {
-        unsafe { arch::x86_sse41::monoblack_to_luma_u16_row(data, out, width); }
+        unsafe {
+          arch::x86_sse41::monoblack_to_luma_u16_row(data, out, width);
+        }
         return;
       }
-    },
+    }
     target_arch = "wasm32" => {
       if simd128_available() {
-        unsafe { arch::wasm_simd128::monoblack_to_luma_u16_row(data, out, width); }
+        unsafe {
+          arch::wasm_simd128::monoblack_to_luma_u16_row(data, out, width);
+        }
         return;
       }
-    },
+    }
     _ => {}
   }
   scalar::monoblack_to_luma_u16_row(data, out, width);
@@ -347,30 +367,40 @@ pub(crate) fn monoblack_to_hsv_row(
   cfg_select! {
     target_arch = "aarch64" => {
       if neon_available() {
-        unsafe { arch::neon::mono1bit::monoblack_to_hsv_row(data, h, s, v, width); }
+        unsafe {
+          arch::neon::mono1bit::monoblack_to_hsv_row(data, h, s, v, width);
+        }
         return;
       }
-    },
+    }
     target_arch = "x86_64" => {
       if avx512_available() {
-        unsafe { arch::x86_avx512::monoblack_to_hsv_row(data, h, s, v, width); }
+        unsafe {
+          arch::x86_avx512::monoblack_to_hsv_row(data, h, s, v, width);
+        }
         return;
       }
       if avx2_available() {
-        unsafe { arch::x86_avx2::monoblack_to_hsv_row(data, h, s, v, width); }
+        unsafe {
+          arch::x86_avx2::monoblack_to_hsv_row(data, h, s, v, width);
+        }
         return;
       }
       if sse41_available() {
-        unsafe { arch::x86_sse41::monoblack_to_hsv_row(data, h, s, v, width); }
+        unsafe {
+          arch::x86_sse41::monoblack_to_hsv_row(data, h, s, v, width);
+        }
         return;
       }
-    },
+    }
     target_arch = "wasm32" => {
       if simd128_available() {
-        unsafe { arch::wasm_simd128::monoblack_to_hsv_row(data, h, s, v, width); }
+        unsafe {
+          arch::wasm_simd128::monoblack_to_hsv_row(data, h, s, v, width);
+        }
         return;
       }
-    },
+    }
     _ => {}
   }
   scalar::monoblack_to_hsv_row(data, h, s, v, width);
@@ -419,7 +449,7 @@ pub(crate) fn monowhite_to_rgb_or_rgba_row<const ALPHA: bool>(
         }
         return;
       }
-    },
+    }
     target_arch = "x86_64" => {
       if avx512_available() {
         unsafe {
@@ -451,7 +481,7 @@ pub(crate) fn monowhite_to_rgb_or_rgba_row<const ALPHA: bool>(
         }
         return;
       }
-    },
+    }
     target_arch = "wasm32" => {
       if simd128_available() {
         unsafe {
@@ -463,7 +493,7 @@ pub(crate) fn monowhite_to_rgb_or_rgba_row<const ALPHA: bool>(
         }
         return;
       }
-    },
+    }
     _ => {}
   }
   if ALPHA {
@@ -514,7 +544,7 @@ pub(crate) fn monowhite_to_rgb_u16_or_rgba_u16_row<const ALPHA: bool>(
         }
         return;
       }
-    },
+    }
     target_arch = "x86_64" => {
       if avx512_available() {
         unsafe {
@@ -546,7 +576,7 @@ pub(crate) fn monowhite_to_rgb_u16_or_rgba_u16_row<const ALPHA: bool>(
         }
         return;
       }
-    },
+    }
     target_arch = "wasm32" => {
       if simd128_available() {
         unsafe {
@@ -558,7 +588,7 @@ pub(crate) fn monowhite_to_rgb_u16_or_rgba_u16_row<const ALPHA: bool>(
         }
         return;
       }
-    },
+    }
     _ => {}
   }
   if ALPHA {
@@ -586,30 +616,40 @@ pub(crate) fn monowhite_to_luma_row(data: &[u8], out: &mut [u8], width: usize, u
   cfg_select! {
     target_arch = "aarch64" => {
       if neon_available() {
-        unsafe { arch::neon::mono1bit::monowhite_to_luma_row(data, out, width); }
+        unsafe {
+          arch::neon::mono1bit::monowhite_to_luma_row(data, out, width);
+        }
         return;
       }
-    },
+    }
     target_arch = "x86_64" => {
       if avx512_available() {
-        unsafe { arch::x86_avx512::monowhite_to_luma_row(data, out, width); }
+        unsafe {
+          arch::x86_avx512::monowhite_to_luma_row(data, out, width);
+        }
         return;
       }
       if avx2_available() {
-        unsafe { arch::x86_avx2::monowhite_to_luma_row(data, out, width); }
+        unsafe {
+          arch::x86_avx2::monowhite_to_luma_row(data, out, width);
+        }
         return;
       }
       if sse41_available() {
-        unsafe { arch::x86_sse41::monowhite_to_luma_row(data, out, width); }
+        unsafe {
+          arch::x86_sse41::monowhite_to_luma_row(data, out, width);
+        }
         return;
       }
-    },
+    }
     target_arch = "wasm32" => {
       if simd128_available() {
-        unsafe { arch::wasm_simd128::monowhite_to_luma_row(data, out, width); }
+        unsafe {
+          arch::wasm_simd128::monowhite_to_luma_row(data, out, width);
+        }
         return;
       }
-    },
+    }
     _ => {}
   }
   scalar::monowhite_to_luma_row(data, out, width);
@@ -638,30 +678,40 @@ pub(crate) fn monowhite_to_luma_u16_row(
   cfg_select! {
     target_arch = "aarch64" => {
       if neon_available() {
-        unsafe { arch::neon::mono1bit::monowhite_to_luma_u16_row(data, out, width); }
+        unsafe {
+          arch::neon::mono1bit::monowhite_to_luma_u16_row(data, out, width);
+        }
         return;
       }
-    },
+    }
     target_arch = "x86_64" => {
       if avx512_available() {
-        unsafe { arch::x86_avx512::monowhite_to_luma_u16_row(data, out, width); }
+        unsafe {
+          arch::x86_avx512::monowhite_to_luma_u16_row(data, out, width);
+        }
         return;
       }
       if avx2_available() {
-        unsafe { arch::x86_avx2::monowhite_to_luma_u16_row(data, out, width); }
+        unsafe {
+          arch::x86_avx2::monowhite_to_luma_u16_row(data, out, width);
+        }
         return;
       }
       if sse41_available() {
-        unsafe { arch::x86_sse41::monowhite_to_luma_u16_row(data, out, width); }
+        unsafe {
+          arch::x86_sse41::monowhite_to_luma_u16_row(data, out, width);
+        }
         return;
       }
-    },
+    }
     target_arch = "wasm32" => {
       if simd128_available() {
-        unsafe { arch::wasm_simd128::monowhite_to_luma_u16_row(data, out, width); }
+        unsafe {
+          arch::wasm_simd128::monowhite_to_luma_u16_row(data, out, width);
+        }
         return;
       }
-    },
+    }
     _ => {}
   }
   scalar::monowhite_to_luma_u16_row(data, out, width);
@@ -702,30 +752,40 @@ pub(crate) fn monowhite_to_hsv_row(
   cfg_select! {
     target_arch = "aarch64" => {
       if neon_available() {
-        unsafe { arch::neon::mono1bit::monowhite_to_hsv_row(data, h, s, v, width); }
+        unsafe {
+          arch::neon::mono1bit::monowhite_to_hsv_row(data, h, s, v, width);
+        }
         return;
       }
-    },
+    }
     target_arch = "x86_64" => {
       if avx512_available() {
-        unsafe { arch::x86_avx512::monowhite_to_hsv_row(data, h, s, v, width); }
+        unsafe {
+          arch::x86_avx512::monowhite_to_hsv_row(data, h, s, v, width);
+        }
         return;
       }
       if avx2_available() {
-        unsafe { arch::x86_avx2::monowhite_to_hsv_row(data, h, s, v, width); }
+        unsafe {
+          arch::x86_avx2::monowhite_to_hsv_row(data, h, s, v, width);
+        }
         return;
       }
       if sse41_available() {
-        unsafe { arch::x86_sse41::monowhite_to_hsv_row(data, h, s, v, width); }
+        unsafe {
+          arch::x86_sse41::monowhite_to_hsv_row(data, h, s, v, width);
+        }
         return;
       }
-    },
+    }
     target_arch = "wasm32" => {
       if simd128_available() {
-        unsafe { arch::wasm_simd128::monowhite_to_hsv_row(data, h, s, v, width); }
+        unsafe {
+          arch::wasm_simd128::monowhite_to_hsv_row(data, h, s, v, width);
+        }
         return;
       }
-    },
+    }
     _ => {}
   }
   scalar::monowhite_to_hsv_row(data, h, s, v, width);

@@ -56,34 +56,44 @@ pub fn gbr32_to_rgb_row<const BE: bool>(
       target_arch = "aarch64" => {
         if neon_available() {
           // SAFETY: NEON verified available.
-          unsafe { arch::neon::gbr32_to_rgb_row::<BE>(g, b, r, rgb_out, width); }
+          unsafe {
+            arch::neon::gbr32_to_rgb_row::<BE>(g, b, r, rgb_out, width);
+          }
           return;
         }
-      },
+      }
       target_arch = "x86_64" => {
         if avx512_available() {
           // SAFETY: AVX-512BW verified available.
-          unsafe { arch::x86_avx512::gbr32_to_rgb_row::<BE>(g, b, r, rgb_out, width); }
+          unsafe {
+            arch::x86_avx512::gbr32_to_rgb_row::<BE>(g, b, r, rgb_out, width);
+          }
           return;
         }
         if avx2_available() {
           // SAFETY: AVX2 verified available.
-          unsafe { arch::x86_avx2::gbr32_to_rgb_row::<BE>(g, b, r, rgb_out, width); }
+          unsafe {
+            arch::x86_avx2::gbr32_to_rgb_row::<BE>(g, b, r, rgb_out, width);
+          }
           return;
         }
         if sse41_available() {
           // SAFETY: SSE4.1 verified available.
-          unsafe { arch::x86_sse41::gbr32_to_rgb_row::<BE>(g, b, r, rgb_out, width); }
+          unsafe {
+            arch::x86_sse41::gbr32_to_rgb_row::<BE>(g, b, r, rgb_out, width);
+          }
           return;
         }
-      },
+      }
       target_arch = "wasm32" => {
         if simd128_available() {
           // SAFETY: simd128 compile-time enabled.
-          unsafe { arch::wasm_simd128::gbr32_to_rgb_row::<BE>(g, b, r, rgb_out, width); }
+          unsafe {
+            arch::wasm_simd128::gbr32_to_rgb_row::<BE>(g, b, r, rgb_out, width);
+          }
           return;
         }
-      },
+      }
       _ => {}
     }
   }
@@ -115,34 +125,44 @@ pub fn gbr32_to_rgb_u16_row<const BE: bool>(
       target_arch = "aarch64" => {
         if neon_available() {
           // SAFETY: NEON verified available.
-          unsafe { arch::neon::gbr32_to_rgb_u16_row::<BE>(g, b, r, rgb_u16_out, width); }
+          unsafe {
+            arch::neon::gbr32_to_rgb_u16_row::<BE>(g, b, r, rgb_u16_out, width);
+          }
           return;
         }
-      },
+      }
       target_arch = "x86_64" => {
         if avx512_available() {
           // SAFETY: AVX-512BW verified available.
-          unsafe { arch::x86_avx512::gbr32_to_rgb_u16_row::<BE>(g, b, r, rgb_u16_out, width); }
+          unsafe {
+            arch::x86_avx512::gbr32_to_rgb_u16_row::<BE>(g, b, r, rgb_u16_out, width);
+          }
           return;
         }
         if avx2_available() {
           // SAFETY: AVX2 verified available.
-          unsafe { arch::x86_avx2::gbr32_to_rgb_u16_row::<BE>(g, b, r, rgb_u16_out, width); }
+          unsafe {
+            arch::x86_avx2::gbr32_to_rgb_u16_row::<BE>(g, b, r, rgb_u16_out, width);
+          }
           return;
         }
         if sse41_available() {
           // SAFETY: SSE4.1 verified available.
-          unsafe { arch::x86_sse41::gbr32_to_rgb_u16_row::<BE>(g, b, r, rgb_u16_out, width); }
+          unsafe {
+            arch::x86_sse41::gbr32_to_rgb_u16_row::<BE>(g, b, r, rgb_u16_out, width);
+          }
           return;
         }
-      },
+      }
       target_arch = "wasm32" => {
         if simd128_available() {
           // SAFETY: simd128 compile-time enabled.
-          unsafe { arch::wasm_simd128::gbr32_to_rgb_u16_row::<BE>(g, b, r, rgb_u16_out, width); }
+          unsafe {
+            arch::wasm_simd128::gbr32_to_rgb_u16_row::<BE>(g, b, r, rgb_u16_out, width);
+          }
           return;
         }
-      },
+      }
       _ => {}
     }
   }
@@ -177,34 +197,44 @@ pub fn gbra32_to_rgba_row<const BE: bool>(
       target_arch = "aarch64" => {
         if neon_available() {
           // SAFETY: NEON verified available.
-          unsafe { arch::neon::gbra32_to_rgba_row::<BE>(g, b, r, a, rgba_out, width); }
+          unsafe {
+            arch::neon::gbra32_to_rgba_row::<BE>(g, b, r, a, rgba_out, width);
+          }
           return;
         }
-      },
+      }
       target_arch = "x86_64" => {
         if avx512_available() {
           // SAFETY: AVX-512BW verified available.
-          unsafe { arch::x86_avx512::gbra32_to_rgba_row::<BE>(g, b, r, a, rgba_out, width); }
+          unsafe {
+            arch::x86_avx512::gbra32_to_rgba_row::<BE>(g, b, r, a, rgba_out, width);
+          }
           return;
         }
         if avx2_available() {
           // SAFETY: AVX2 verified available.
-          unsafe { arch::x86_avx2::gbra32_to_rgba_row::<BE>(g, b, r, a, rgba_out, width); }
+          unsafe {
+            arch::x86_avx2::gbra32_to_rgba_row::<BE>(g, b, r, a, rgba_out, width);
+          }
           return;
         }
         if sse41_available() {
           // SAFETY: SSE4.1 verified available.
-          unsafe { arch::x86_sse41::gbra32_to_rgba_row::<BE>(g, b, r, a, rgba_out, width); }
+          unsafe {
+            arch::x86_sse41::gbra32_to_rgba_row::<BE>(g, b, r, a, rgba_out, width);
+          }
           return;
         }
-      },
+      }
       target_arch = "wasm32" => {
         if simd128_available() {
           // SAFETY: simd128 compile-time enabled.
-          unsafe { arch::wasm_simd128::gbra32_to_rgba_row::<BE>(g, b, r, a, rgba_out, width); }
+          unsafe {
+            arch::wasm_simd128::gbra32_to_rgba_row::<BE>(g, b, r, a, rgba_out, width);
+          }
           return;
         }
-      },
+      }
       _ => {}
     }
   }
@@ -240,27 +270,35 @@ pub fn gbra32_to_rgba_u16_row<const BE: bool>(
       target_arch = "aarch64" => {
         if neon_available() {
           // SAFETY: NEON verified available.
-          unsafe { arch::neon::gbra32_to_rgba_u16_row::<BE>(g, b, r, a, rgba_u16_out, width); }
+          unsafe {
+            arch::neon::gbra32_to_rgba_u16_row::<BE>(g, b, r, a, rgba_u16_out, width);
+          }
           return;
         }
-      },
+      }
       target_arch = "x86_64" => {
         if avx512_available() {
           // SAFETY: AVX-512BW verified available.
-          unsafe { arch::x86_avx512::gbra32_to_rgba_u16_row::<BE>(g, b, r, a, rgba_u16_out, width); }
+          unsafe {
+            arch::x86_avx512::gbra32_to_rgba_u16_row::<BE>(g, b, r, a, rgba_u16_out, width);
+          }
           return;
         }
         if avx2_available() {
           // SAFETY: AVX2 verified available.
-          unsafe { arch::x86_avx2::gbra32_to_rgba_u16_row::<BE>(g, b, r, a, rgba_u16_out, width); }
+          unsafe {
+            arch::x86_avx2::gbra32_to_rgba_u16_row::<BE>(g, b, r, a, rgba_u16_out, width);
+          }
           return;
         }
         if sse41_available() {
           // SAFETY: SSE4.1 verified available.
-          unsafe { arch::x86_sse41::gbra32_to_rgba_u16_row::<BE>(g, b, r, a, rgba_u16_out, width); }
+          unsafe {
+            arch::x86_sse41::gbra32_to_rgba_u16_row::<BE>(g, b, r, a, rgba_u16_out, width);
+          }
           return;
         }
-      },
+      }
       target_arch = "wasm32" => {
         if simd128_available() {
           // SAFETY: simd128 compile-time enabled.
@@ -269,7 +307,7 @@ pub fn gbra32_to_rgba_u16_row<const BE: bool>(
           }
           return;
         }
-      },
+      }
       _ => {}
     }
   }

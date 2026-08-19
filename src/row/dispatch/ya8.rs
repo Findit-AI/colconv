@@ -35,30 +35,40 @@ pub(crate) fn ya8_to_rgb_row(packed: &[u8], out: &mut [u8], width: usize, use_si
   cfg_select! {
     target_arch = "aarch64" => {
       if neon_available() {
-        unsafe { arch::neon::ya8_to_rgb_row(packed, out, width); }
+        unsafe {
+          arch::neon::ya8_to_rgb_row(packed, out, width);
+        }
         return;
       }
-    },
+    }
     target_arch = "x86_64" => {
       if avx512_available() {
-        unsafe { arch::x86_avx512::ya8_to_rgb_row(packed, out, width); }
+        unsafe {
+          arch::x86_avx512::ya8_to_rgb_row(packed, out, width);
+        }
         return;
       }
       if avx2_available() {
-        unsafe { arch::x86_avx2::ya8_to_rgb_row(packed, out, width); }
+        unsafe {
+          arch::x86_avx2::ya8_to_rgb_row(packed, out, width);
+        }
         return;
       }
       if sse41_available() {
-        unsafe { arch::x86_sse41::ya8_to_rgb_row(packed, out, width); }
+        unsafe {
+          arch::x86_sse41::ya8_to_rgb_row(packed, out, width);
+        }
         return;
       }
-    },
+    }
     target_arch = "wasm32" => {
       if simd128_available() {
-        unsafe { arch::wasm_simd128::ya8_to_rgb_row(packed, out, width); }
+        unsafe {
+          arch::wasm_simd128::ya8_to_rgb_row(packed, out, width);
+        }
         return;
       }
-    },
+    }
     _ => {}
   }
   scalar::ya8_to_rgb_row(packed, out, width);
@@ -77,30 +87,40 @@ pub(crate) fn ya8_to_rgba_row(packed: &[u8], out: &mut [u8], width: usize, use_s
   cfg_select! {
     target_arch = "aarch64" => {
       if neon_available() {
-        unsafe { arch::neon::ya8_to_rgba_row(packed, out, width); }
+        unsafe {
+          arch::neon::ya8_to_rgba_row(packed, out, width);
+        }
         return;
       }
-    },
+    }
     target_arch = "x86_64" => {
       if avx512_available() {
-        unsafe { arch::x86_avx512::ya8_to_rgba_row(packed, out, width); }
+        unsafe {
+          arch::x86_avx512::ya8_to_rgba_row(packed, out, width);
+        }
         return;
       }
       if avx2_available() {
-        unsafe { arch::x86_avx2::ya8_to_rgba_row(packed, out, width); }
+        unsafe {
+          arch::x86_avx2::ya8_to_rgba_row(packed, out, width);
+        }
         return;
       }
       if sse41_available() {
-        unsafe { arch::x86_sse41::ya8_to_rgba_row(packed, out, width); }
+        unsafe {
+          arch::x86_sse41::ya8_to_rgba_row(packed, out, width);
+        }
         return;
       }
-    },
+    }
     target_arch = "wasm32" => {
       if simd128_available() {
-        unsafe { arch::wasm_simd128::ya8_to_rgba_row(packed, out, width); }
+        unsafe {
+          arch::wasm_simd128::ya8_to_rgba_row(packed, out, width);
+        }
         return;
       }
-    },
+    }
     _ => {}
   }
   scalar::ya8_to_rgba_row(packed, out, width);
@@ -119,30 +139,40 @@ pub(crate) fn ya8_to_rgb_u16_row(packed: &[u8], out: &mut [u16], width: usize, u
   cfg_select! {
     target_arch = "aarch64" => {
       if neon_available() {
-        unsafe { arch::neon::ya8_to_rgb_u16_row(packed, out, width); }
+        unsafe {
+          arch::neon::ya8_to_rgb_u16_row(packed, out, width);
+        }
         return;
       }
-    },
+    }
     target_arch = "x86_64" => {
       if avx512_available() {
-        unsafe { arch::x86_avx512::ya8_to_rgb_u16_row(packed, out, width); }
+        unsafe {
+          arch::x86_avx512::ya8_to_rgb_u16_row(packed, out, width);
+        }
         return;
       }
       if avx2_available() {
-        unsafe { arch::x86_avx2::ya8_to_rgb_u16_row(packed, out, width); }
+        unsafe {
+          arch::x86_avx2::ya8_to_rgb_u16_row(packed, out, width);
+        }
         return;
       }
       if sse41_available() {
-        unsafe { arch::x86_sse41::ya8_to_rgb_u16_row(packed, out, width); }
+        unsafe {
+          arch::x86_sse41::ya8_to_rgb_u16_row(packed, out, width);
+        }
         return;
       }
-    },
+    }
     target_arch = "wasm32" => {
       if simd128_available() {
-        unsafe { arch::wasm_simd128::ya8_to_rgb_u16_row(packed, out, width); }
+        unsafe {
+          arch::wasm_simd128::ya8_to_rgb_u16_row(packed, out, width);
+        }
         return;
       }
-    },
+    }
     _ => {}
   }
   scalar::ya8_to_rgb_u16_row(packed, out, width);
@@ -161,30 +191,40 @@ pub(crate) fn ya8_to_rgba_u16_row(packed: &[u8], out: &mut [u16], width: usize, 
   cfg_select! {
     target_arch = "aarch64" => {
       if neon_available() {
-        unsafe { arch::neon::ya8_to_rgba_u16_row(packed, out, width); }
+        unsafe {
+          arch::neon::ya8_to_rgba_u16_row(packed, out, width);
+        }
         return;
       }
-    },
+    }
     target_arch = "x86_64" => {
       if avx512_available() {
-        unsafe { arch::x86_avx512::ya8_to_rgba_u16_row(packed, out, width); }
+        unsafe {
+          arch::x86_avx512::ya8_to_rgba_u16_row(packed, out, width);
+        }
         return;
       }
       if avx2_available() {
-        unsafe { arch::x86_avx2::ya8_to_rgba_u16_row(packed, out, width); }
+        unsafe {
+          arch::x86_avx2::ya8_to_rgba_u16_row(packed, out, width);
+        }
         return;
       }
       if sse41_available() {
-        unsafe { arch::x86_sse41::ya8_to_rgba_u16_row(packed, out, width); }
+        unsafe {
+          arch::x86_sse41::ya8_to_rgba_u16_row(packed, out, width);
+        }
         return;
       }
-    },
+    }
     target_arch = "wasm32" => {
       if simd128_available() {
-        unsafe { arch::wasm_simd128::ya8_to_rgba_u16_row(packed, out, width); }
+        unsafe {
+          arch::wasm_simd128::ya8_to_rgba_u16_row(packed, out, width);
+        }
         return;
       }
-    },
+    }
     _ => {}
   }
   scalar::ya8_to_rgba_u16_row(packed, out, width);
@@ -203,30 +243,40 @@ pub(crate) fn ya8_to_luma_row(packed: &[u8], out: &mut [u8], width: usize, use_s
   cfg_select! {
     target_arch = "aarch64" => {
       if neon_available() {
-        unsafe { arch::neon::ya8_to_luma_row(packed, out, width); }
+        unsafe {
+          arch::neon::ya8_to_luma_row(packed, out, width);
+        }
         return;
       }
-    },
+    }
     target_arch = "x86_64" => {
       if avx512_available() {
-        unsafe { arch::x86_avx512::ya8_to_luma_row(packed, out, width); }
+        unsafe {
+          arch::x86_avx512::ya8_to_luma_row(packed, out, width);
+        }
         return;
       }
       if avx2_available() {
-        unsafe { arch::x86_avx2::ya8_to_luma_row(packed, out, width); }
+        unsafe {
+          arch::x86_avx2::ya8_to_luma_row(packed, out, width);
+        }
         return;
       }
       if sse41_available() {
-        unsafe { arch::x86_sse41::ya8_to_luma_row(packed, out, width); }
+        unsafe {
+          arch::x86_sse41::ya8_to_luma_row(packed, out, width);
+        }
         return;
       }
-    },
+    }
     target_arch = "wasm32" => {
       if simd128_available() {
-        unsafe { arch::wasm_simd128::ya8_to_luma_row(packed, out, width); }
+        unsafe {
+          arch::wasm_simd128::ya8_to_luma_row(packed, out, width);
+        }
         return;
       }
-    },
+    }
     _ => {}
   }
   scalar::ya8_to_luma_row(packed, out, width);
@@ -245,30 +295,40 @@ pub(crate) fn ya8_to_luma_u16_row(packed: &[u8], out: &mut [u16], width: usize, 
   cfg_select! {
     target_arch = "aarch64" => {
       if neon_available() {
-        unsafe { arch::neon::ya8_to_luma_u16_row(packed, out, width); }
+        unsafe {
+          arch::neon::ya8_to_luma_u16_row(packed, out, width);
+        }
         return;
       }
-    },
+    }
     target_arch = "x86_64" => {
       if avx512_available() {
-        unsafe { arch::x86_avx512::ya8_to_luma_u16_row(packed, out, width); }
+        unsafe {
+          arch::x86_avx512::ya8_to_luma_u16_row(packed, out, width);
+        }
         return;
       }
       if avx2_available() {
-        unsafe { arch::x86_avx2::ya8_to_luma_u16_row(packed, out, width); }
+        unsafe {
+          arch::x86_avx2::ya8_to_luma_u16_row(packed, out, width);
+        }
         return;
       }
       if sse41_available() {
-        unsafe { arch::x86_sse41::ya8_to_luma_u16_row(packed, out, width); }
+        unsafe {
+          arch::x86_sse41::ya8_to_luma_u16_row(packed, out, width);
+        }
         return;
       }
-    },
+    }
     target_arch = "wasm32" => {
       if simd128_available() {
-        unsafe { arch::wasm_simd128::ya8_to_luma_u16_row(packed, out, width); }
+        unsafe {
+          arch::wasm_simd128::ya8_to_luma_u16_row(packed, out, width);
+        }
         return;
       }
-    },
+    }
     _ => {}
   }
   scalar::ya8_to_luma_u16_row(packed, out, width);
@@ -296,30 +356,40 @@ pub(crate) fn ya8_to_hsv_row(
   cfg_select! {
     target_arch = "aarch64" => {
       if neon_available() {
-        unsafe { arch::neon::ya8_to_hsv_row(packed, h_out, s_out, v_out, width); }
+        unsafe {
+          arch::neon::ya8_to_hsv_row(packed, h_out, s_out, v_out, width);
+        }
         return;
       }
-    },
+    }
     target_arch = "x86_64" => {
       if avx512_available() {
-        unsafe { arch::x86_avx512::ya8_to_hsv_row(packed, h_out, s_out, v_out, width); }
+        unsafe {
+          arch::x86_avx512::ya8_to_hsv_row(packed, h_out, s_out, v_out, width);
+        }
         return;
       }
       if avx2_available() {
-        unsafe { arch::x86_avx2::ya8_to_hsv_row(packed, h_out, s_out, v_out, width); }
+        unsafe {
+          arch::x86_avx2::ya8_to_hsv_row(packed, h_out, s_out, v_out, width);
+        }
         return;
       }
       if sse41_available() {
-        unsafe { arch::x86_sse41::ya8_to_hsv_row(packed, h_out, s_out, v_out, width); }
+        unsafe {
+          arch::x86_sse41::ya8_to_hsv_row(packed, h_out, s_out, v_out, width);
+        }
         return;
       }
-    },
+    }
     target_arch = "wasm32" => {
       if simd128_available() {
-        unsafe { arch::wasm_simd128::ya8_to_hsv_row(packed, h_out, s_out, v_out, width); }
+        unsafe {
+          arch::wasm_simd128::ya8_to_hsv_row(packed, h_out, s_out, v_out, width);
+        }
         return;
       }
-    },
+    }
     _ => {}
   }
   scalar::ya8_to_hsv_row(packed, h_out, s_out, v_out, width);

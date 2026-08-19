@@ -81,7 +81,7 @@ pub(crate) fn yuv_420p_n_to_hsv_row<const BITS: u32, const BE: bool>(
           }
           return;
         }
-      },
+      }
       target_arch = "x86_64" => {
         if avx512_available() {
           // SAFETY: AVX‑512BW verified.
@@ -110,7 +110,7 @@ pub(crate) fn yuv_420p_n_to_hsv_row<const BITS: u32, const BE: bool>(
           }
           return;
         }
-      },
+      }
       target_arch = "wasm32" => {
         if simd128_available() {
           // SAFETY: simd128 compile‑time verified.
@@ -121,7 +121,7 @@ pub(crate) fn yuv_420p_n_to_hsv_row<const BITS: u32, const BE: bool>(
           }
           return;
         }
-      },
+      }
       _ => {}
     }
   }

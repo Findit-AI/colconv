@@ -74,7 +74,7 @@ pub fn yuv_420_to_rgb_row(
           }
           return;
         }
-      },
+      }
       target_arch = "x86_64" => {
         if avx512_available() {
           // SAFETY: `avx512_available()` verified AVX‑512BW is present.
@@ -109,7 +109,7 @@ pub fn yuv_420_to_rgb_row(
           }
           return;
         }
-      },
+      }
       // Future x86_64 tiers (avx512 promoted above AVX2, ssse3 below
       // SSE4.1) slot in here, each branch guarded by the matching
       // `is_x86_feature_detected!` / `cfg!(target_feature = ...)` pair.
@@ -127,7 +127,7 @@ pub fn yuv_420_to_rgb_row(
           }
           return;
         }
-      },
+      }
       _ => {
         // Targets without a SIMD backend (riscv64, powerpc, …) fall
         // through to the scalar path below.
@@ -180,7 +180,7 @@ pub fn yuv_420_to_rgba_row(
           }
           return;
         }
-      },
+      }
       target_arch = "x86_64" => {
         if avx512_available() {
           // SAFETY: `avx512_available()` verified AVX‑512BW is present.
@@ -209,7 +209,7 @@ pub fn yuv_420_to_rgba_row(
           }
           return;
         }
-      },
+      }
       target_arch = "wasm32" => {
         if simd128_available() {
           // SAFETY: simd128 compile‑time availability verified.
@@ -220,7 +220,7 @@ pub fn yuv_420_to_rgba_row(
           }
           return;
         }
-      },
+      }
       _ => {
         // Targets without a SIMD backend fall through to scalar.
       }
@@ -358,7 +358,7 @@ pub fn yuv_420_to_hsv_row(
           }
           return;
         }
-      },
+      }
       target_arch = "x86_64" => {
         if avx512_available() {
           // SAFETY: `avx512_available()` verified AVX‑512BW is present.
@@ -387,7 +387,7 @@ pub fn yuv_420_to_hsv_row(
           }
           return;
         }
-      },
+      }
       target_arch = "wasm32" => {
         if simd128_available() {
           // SAFETY: simd128 compile‑time availability verified.
@@ -398,7 +398,7 @@ pub fn yuv_420_to_hsv_row(
           }
           return;
         }
-      },
+      }
       _ => {
         // Targets without a SIMD backend fall through to scalar.
       }

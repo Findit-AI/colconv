@@ -47,34 +47,50 @@ pub(crate) fn chroma_upsample_2to1_center_h_row(
     target_arch = "aarch64" => {
       if neon_available() {
         // SAFETY: NEON is baseline on aarch64 and verified at runtime; bounds asserted.
-        unsafe { arch::neon::chroma_upsample::chroma_upsample_2to1_center_h_row(c_half, c_full, width); }
+        unsafe {
+          arch::neon::chroma_upsample::chroma_upsample_2to1_center_h_row(c_half, c_full, width);
+        }
         return;
       }
-    },
+    }
     target_arch = "x86_64" => {
       if avx512_available() {
         // SAFETY: AVX-512F + BW verified at runtime; bounds asserted.
-        unsafe { arch::x86_avx512::chroma_upsample::chroma_upsample_2to1_center_h_row(c_half, c_full, width); }
+        unsafe {
+          arch::x86_avx512::chroma_upsample::chroma_upsample_2to1_center_h_row(
+            c_half, c_full, width,
+          );
+        }
         return;
       }
       if avx2_available() {
         // SAFETY: AVX2 verified at runtime; bounds asserted.
-        unsafe { arch::x86_avx2::chroma_upsample::chroma_upsample_2to1_center_h_row(c_half, c_full, width); }
+        unsafe {
+          arch::x86_avx2::chroma_upsample::chroma_upsample_2to1_center_h_row(c_half, c_full, width);
+        }
         return;
       }
       if sse41_available() {
         // SAFETY: SSE4.1 verified at runtime; bounds asserted.
-        unsafe { arch::x86_sse41::chroma_upsample::chroma_upsample_2to1_center_h_row(c_half, c_full, width); }
+        unsafe {
+          arch::x86_sse41::chroma_upsample::chroma_upsample_2to1_center_h_row(
+            c_half, c_full, width,
+          );
+        }
         return;
       }
-    },
+    }
     target_arch = "wasm32" => {
       if simd128_available() {
         // SAFETY: simd128 enabled at compile time; bounds asserted.
-        unsafe { arch::wasm_simd128::chroma_upsample::chroma_upsample_2to1_center_h_row(c_half, c_full, width); }
+        unsafe {
+          arch::wasm_simd128::chroma_upsample::chroma_upsample_2to1_center_h_row(
+            c_half, c_full, width,
+          );
+        }
         return;
       }
-    },
+    }
     _ => {}
   }
   scalar::chroma_upsample_2to1_center_h(c_half, c_full, width);
@@ -102,34 +118,54 @@ pub(crate) fn chroma_upsample_2to1_center_h_u16_row<const BITS: u32>(
     target_arch = "aarch64" => {
       if neon_available() {
         // SAFETY: NEON is baseline on aarch64 and verified at runtime; bounds asserted.
-        unsafe { arch::neon::chroma_upsample::chroma_upsample_2to1_center_h_u16_row::<BITS>(c_half, c_full, width, big_endian); }
+        unsafe {
+          arch::neon::chroma_upsample::chroma_upsample_2to1_center_h_u16_row::<BITS>(
+            c_half, c_full, width, big_endian,
+          );
+        }
         return;
       }
-    },
+    }
     target_arch = "x86_64" => {
       if avx512_available() {
         // SAFETY: AVX-512F + BW verified at runtime; bounds asserted.
-        unsafe { arch::x86_avx512::chroma_upsample::chroma_upsample_2to1_center_h_u16_row::<BITS>(c_half, c_full, width, big_endian); }
+        unsafe {
+          arch::x86_avx512::chroma_upsample::chroma_upsample_2to1_center_h_u16_row::<BITS>(
+            c_half, c_full, width, big_endian,
+          );
+        }
         return;
       }
       if avx2_available() {
         // SAFETY: AVX2 verified at runtime; bounds asserted.
-        unsafe { arch::x86_avx2::chroma_upsample::chroma_upsample_2to1_center_h_u16_row::<BITS>(c_half, c_full, width, big_endian); }
+        unsafe {
+          arch::x86_avx2::chroma_upsample::chroma_upsample_2to1_center_h_u16_row::<BITS>(
+            c_half, c_full, width, big_endian,
+          );
+        }
         return;
       }
       if sse41_available() {
         // SAFETY: SSE4.1 verified at runtime; bounds asserted.
-        unsafe { arch::x86_sse41::chroma_upsample::chroma_upsample_2to1_center_h_u16_row::<BITS>(c_half, c_full, width, big_endian); }
+        unsafe {
+          arch::x86_sse41::chroma_upsample::chroma_upsample_2to1_center_h_u16_row::<BITS>(
+            c_half, c_full, width, big_endian,
+          );
+        }
         return;
       }
-    },
+    }
     target_arch = "wasm32" => {
       if simd128_available() {
         // SAFETY: simd128 enabled at compile time; bounds asserted.
-        unsafe { arch::wasm_simd128::chroma_upsample::chroma_upsample_2to1_center_h_u16_row::<BITS>(c_half, c_full, width, big_endian); }
+        unsafe {
+          arch::wasm_simd128::chroma_upsample::chroma_upsample_2to1_center_h_u16_row::<BITS>(
+            c_half, c_full, width, big_endian,
+          );
+        }
         return;
       }
-    },
+    }
     _ => {}
   }
   scalar::chroma_upsample_2to1_center_h_u16::<BITS>(c_half, c_full, width, big_endian);
@@ -164,34 +200,57 @@ pub(crate) fn chroma_upsample_2to1_center_h_p0xx_row<const BITS: u32, const LOW_
     target_arch = "aarch64" => {
       if neon_available() {
         // SAFETY: NEON is baseline on aarch64 and verified at runtime; bounds asserted.
-        unsafe { arch::neon::chroma_upsample::chroma_upsample_2to1_center_h_p0xx_row::<BITS, LOW_PACKED>(uv_half, uv_full, width, big_endian); }
+        unsafe {
+          arch::neon::chroma_upsample::chroma_upsample_2to1_center_h_p0xx_row::<BITS, LOW_PACKED>(
+            uv_half, uv_full, width, big_endian,
+          );
+        }
         return;
       }
-    },
+    }
     target_arch = "x86_64" => {
       if avx512_available() {
         // SAFETY: AVX-512 (hence SSE4.1) verified at runtime; bounds asserted.
-        unsafe { arch::x86_avx512::chroma_upsample::chroma_upsample_2to1_center_h_p0xx_row::<BITS, LOW_PACKED>(uv_half, uv_full, width, big_endian); }
+        unsafe {
+          arch::x86_avx512::chroma_upsample::chroma_upsample_2to1_center_h_p0xx_row::<
+            BITS,
+            LOW_PACKED,
+          >(uv_half, uv_full, width, big_endian);
+        }
         return;
       }
       if avx2_available() {
         // SAFETY: AVX2 (hence SSE4.1) verified at runtime; bounds asserted.
-        unsafe { arch::x86_avx2::chroma_upsample::chroma_upsample_2to1_center_h_p0xx_row::<BITS, LOW_PACKED>(uv_half, uv_full, width, big_endian); }
+        unsafe {
+          arch::x86_avx2::chroma_upsample::chroma_upsample_2to1_center_h_p0xx_row::<BITS, LOW_PACKED>(
+            uv_half, uv_full, width, big_endian,
+          );
+        }
         return;
       }
       if sse41_available() {
         // SAFETY: SSE4.1 verified at runtime; bounds asserted.
-        unsafe { arch::x86_sse41::chroma_upsample::chroma_upsample_2to1_center_h_p0xx_row::<BITS, LOW_PACKED>(uv_half, uv_full, width, big_endian); }
+        unsafe {
+          arch::x86_sse41::chroma_upsample::chroma_upsample_2to1_center_h_p0xx_row::<
+            BITS,
+            LOW_PACKED,
+          >(uv_half, uv_full, width, big_endian);
+        }
         return;
       }
-    },
+    }
     target_arch = "wasm32" => {
       if simd128_available() {
         // SAFETY: simd128 enabled at compile time; bounds asserted.
-        unsafe { arch::wasm_simd128::chroma_upsample::chroma_upsample_2to1_center_h_p0xx_row::<BITS, LOW_PACKED>(uv_half, uv_full, width, big_endian); }
+        unsafe {
+          arch::wasm_simd128::chroma_upsample::chroma_upsample_2to1_center_h_p0xx_row::<
+            BITS,
+            LOW_PACKED,
+          >(uv_half, uv_full, width, big_endian);
+        }
         return;
       }
-    },
+    }
     _ => {}
   }
   scalar::chroma_upsample_2to1_center_h_p0xx::<BITS, LOW_PACKED>(
@@ -222,34 +281,54 @@ pub(crate) fn chroma_upsample_420_bottom_even_h_row(
     target_arch = "aarch64" => {
       if neon_available() {
         // SAFETY: NEON is baseline on aarch64 and verified at runtime; bounds asserted.
-        unsafe { arch::neon::chroma_upsample::chroma_upsample_420_bottom_even_h_row(prev_half, cur_half, c_full, width); }
+        unsafe {
+          arch::neon::chroma_upsample::chroma_upsample_420_bottom_even_h_row(
+            prev_half, cur_half, c_full, width,
+          );
+        }
         return;
       }
-    },
+    }
     target_arch = "x86_64" => {
       if avx512_available() {
         // SAFETY: AVX-512F + BW verified at runtime; bounds asserted.
-        unsafe { arch::x86_avx512::chroma_upsample::chroma_upsample_420_bottom_even_h_row(prev_half, cur_half, c_full, width); }
+        unsafe {
+          arch::x86_avx512::chroma_upsample::chroma_upsample_420_bottom_even_h_row(
+            prev_half, cur_half, c_full, width,
+          );
+        }
         return;
       }
       if avx2_available() {
         // SAFETY: AVX2 verified at runtime; bounds asserted.
-        unsafe { arch::x86_avx2::chroma_upsample::chroma_upsample_420_bottom_even_h_row(prev_half, cur_half, c_full, width); }
+        unsafe {
+          arch::x86_avx2::chroma_upsample::chroma_upsample_420_bottom_even_h_row(
+            prev_half, cur_half, c_full, width,
+          );
+        }
         return;
       }
       if sse41_available() {
         // SAFETY: SSE4.1 verified at runtime; bounds asserted.
-        unsafe { arch::x86_sse41::chroma_upsample::chroma_upsample_420_bottom_even_h_row(prev_half, cur_half, c_full, width); }
+        unsafe {
+          arch::x86_sse41::chroma_upsample::chroma_upsample_420_bottom_even_h_row(
+            prev_half, cur_half, c_full, width,
+          );
+        }
         return;
       }
-    },
+    }
     target_arch = "wasm32" => {
       if simd128_available() {
         // SAFETY: simd128 enabled at compile time; bounds asserted.
-        unsafe { arch::wasm_simd128::chroma_upsample::chroma_upsample_420_bottom_even_h_row(prev_half, cur_half, c_full, width); }
+        unsafe {
+          arch::wasm_simd128::chroma_upsample::chroma_upsample_420_bottom_even_h_row(
+            prev_half, cur_half, c_full, width,
+          );
+        }
         return;
       }
-    },
+    }
     _ => {}
   }
   scalar::chroma_upsample_420_bottom_even_h(prev_half, cur_half, c_full, width);
@@ -278,34 +357,54 @@ pub(crate) fn chroma_upsample_420_bottomleft_even_h_row(
     target_arch = "aarch64" => {
       if neon_available() {
         // SAFETY: NEON is baseline on aarch64 and verified at runtime; bounds asserted.
-        unsafe { arch::neon::chroma_upsample::chroma_upsample_420_bottomleft_even_h_row(prev_half, cur_half, c_full, width); }
+        unsafe {
+          arch::neon::chroma_upsample::chroma_upsample_420_bottomleft_even_h_row(
+            prev_half, cur_half, c_full, width,
+          );
+        }
         return;
       }
-    },
+    }
     target_arch = "x86_64" => {
       if avx512_available() {
         // SAFETY: AVX-512F + BW verified at runtime; bounds asserted.
-        unsafe { arch::x86_avx512::chroma_upsample::chroma_upsample_420_bottomleft_even_h_row(prev_half, cur_half, c_full, width); }
+        unsafe {
+          arch::x86_avx512::chroma_upsample::chroma_upsample_420_bottomleft_even_h_row(
+            prev_half, cur_half, c_full, width,
+          );
+        }
         return;
       }
       if avx2_available() {
         // SAFETY: AVX2 verified at runtime; bounds asserted.
-        unsafe { arch::x86_avx2::chroma_upsample::chroma_upsample_420_bottomleft_even_h_row(prev_half, cur_half, c_full, width); }
+        unsafe {
+          arch::x86_avx2::chroma_upsample::chroma_upsample_420_bottomleft_even_h_row(
+            prev_half, cur_half, c_full, width,
+          );
+        }
         return;
       }
       if sse41_available() {
         // SAFETY: SSE4.1 verified at runtime; bounds asserted.
-        unsafe { arch::x86_sse41::chroma_upsample::chroma_upsample_420_bottomleft_even_h_row(prev_half, cur_half, c_full, width); }
+        unsafe {
+          arch::x86_sse41::chroma_upsample::chroma_upsample_420_bottomleft_even_h_row(
+            prev_half, cur_half, c_full, width,
+          );
+        }
         return;
       }
-    },
+    }
     target_arch = "wasm32" => {
       if simd128_available() {
         // SAFETY: simd128 enabled at compile time; bounds asserted.
-        unsafe { arch::wasm_simd128::chroma_upsample::chroma_upsample_420_bottomleft_even_h_row(prev_half, cur_half, c_full, width); }
+        unsafe {
+          arch::wasm_simd128::chroma_upsample::chroma_upsample_420_bottomleft_even_h_row(
+            prev_half, cur_half, c_full, width,
+          );
+        }
         return;
       }
-    },
+    }
     _ => {}
   }
   scalar::chroma_upsample_420_bottomleft_even_h(prev_half, cur_half, c_full, width);
@@ -337,34 +436,54 @@ pub(crate) fn chroma_upsample_420_bottom_even_h_u16_row<const BITS: u32>(
     target_arch = "aarch64" => {
       if neon_available() {
         // SAFETY: NEON is baseline on aarch64 and verified at runtime; bounds asserted.
-        unsafe { arch::neon::chroma_upsample::chroma_upsample_420_bottom_even_h_u16_row::<BITS>(prev_half, cur_half, c_full, width, big_endian); }
+        unsafe {
+          arch::neon::chroma_upsample::chroma_upsample_420_bottom_even_h_u16_row::<BITS>(
+            prev_half, cur_half, c_full, width, big_endian,
+          );
+        }
         return;
       }
-    },
+    }
     target_arch = "x86_64" => {
       if avx512_available() {
         // SAFETY: AVX-512F + BW verified at runtime; bounds asserted.
-        unsafe { arch::x86_avx512::chroma_upsample::chroma_upsample_420_bottom_even_h_u16_row::<BITS>(prev_half, cur_half, c_full, width, big_endian); }
+        unsafe {
+          arch::x86_avx512::chroma_upsample::chroma_upsample_420_bottom_even_h_u16_row::<BITS>(
+            prev_half, cur_half, c_full, width, big_endian,
+          );
+        }
         return;
       }
       if avx2_available() {
         // SAFETY: AVX2 verified at runtime; bounds asserted.
-        unsafe { arch::x86_avx2::chroma_upsample::chroma_upsample_420_bottom_even_h_u16_row::<BITS>(prev_half, cur_half, c_full, width, big_endian); }
+        unsafe {
+          arch::x86_avx2::chroma_upsample::chroma_upsample_420_bottom_even_h_u16_row::<BITS>(
+            prev_half, cur_half, c_full, width, big_endian,
+          );
+        }
         return;
       }
       if sse41_available() {
         // SAFETY: SSE4.1 verified at runtime; bounds asserted.
-        unsafe { arch::x86_sse41::chroma_upsample::chroma_upsample_420_bottom_even_h_u16_row::<BITS>(prev_half, cur_half, c_full, width, big_endian); }
+        unsafe {
+          arch::x86_sse41::chroma_upsample::chroma_upsample_420_bottom_even_h_u16_row::<BITS>(
+            prev_half, cur_half, c_full, width, big_endian,
+          );
+        }
         return;
       }
-    },
+    }
     target_arch = "wasm32" => {
       if simd128_available() {
         // SAFETY: simd128 enabled at compile time; bounds asserted.
-        unsafe { arch::wasm_simd128::chroma_upsample::chroma_upsample_420_bottom_even_h_u16_row::<BITS>(prev_half, cur_half, c_full, width, big_endian); }
+        unsafe {
+          arch::wasm_simd128::chroma_upsample::chroma_upsample_420_bottom_even_h_u16_row::<BITS>(
+            prev_half, cur_half, c_full, width, big_endian,
+          );
+        }
         return;
       }
-    },
+    }
     _ => {}
   }
   scalar::chroma_upsample_420_bottom_even_h_u16::<BITS>(
@@ -398,34 +517,54 @@ pub(crate) fn chroma_upsample_420_bottomleft_even_h_u16_row<const BITS: u32>(
     target_arch = "aarch64" => {
       if neon_available() {
         // SAFETY: NEON is baseline on aarch64 and verified at runtime; bounds asserted.
-        unsafe { arch::neon::chroma_upsample::chroma_upsample_420_bottomleft_even_h_u16_row::<BITS>(prev_half, cur_half, c_full, width, big_endian); }
+        unsafe {
+          arch::neon::chroma_upsample::chroma_upsample_420_bottomleft_even_h_u16_row::<BITS>(
+            prev_half, cur_half, c_full, width, big_endian,
+          );
+        }
         return;
       }
-    },
+    }
     target_arch = "x86_64" => {
       if avx512_available() {
         // SAFETY: AVX-512F + BW verified at runtime; bounds asserted.
-        unsafe { arch::x86_avx512::chroma_upsample::chroma_upsample_420_bottomleft_even_h_u16_row::<BITS>(prev_half, cur_half, c_full, width, big_endian); }
+        unsafe {
+          arch::x86_avx512::chroma_upsample::chroma_upsample_420_bottomleft_even_h_u16_row::<BITS>(
+            prev_half, cur_half, c_full, width, big_endian,
+          );
+        }
         return;
       }
       if avx2_available() {
         // SAFETY: AVX2 verified at runtime; bounds asserted.
-        unsafe { arch::x86_avx2::chroma_upsample::chroma_upsample_420_bottomleft_even_h_u16_row::<BITS>(prev_half, cur_half, c_full, width, big_endian); }
+        unsafe {
+          arch::x86_avx2::chroma_upsample::chroma_upsample_420_bottomleft_even_h_u16_row::<BITS>(
+            prev_half, cur_half, c_full, width, big_endian,
+          );
+        }
         return;
       }
       if sse41_available() {
         // SAFETY: SSE4.1 verified at runtime; bounds asserted.
-        unsafe { arch::x86_sse41::chroma_upsample::chroma_upsample_420_bottomleft_even_h_u16_row::<BITS>(prev_half, cur_half, c_full, width, big_endian); }
+        unsafe {
+          arch::x86_sse41::chroma_upsample::chroma_upsample_420_bottomleft_even_h_u16_row::<BITS>(
+            prev_half, cur_half, c_full, width, big_endian,
+          );
+        }
         return;
       }
-    },
+    }
     target_arch = "wasm32" => {
       if simd128_available() {
         // SAFETY: simd128 enabled at compile time; bounds asserted.
-        unsafe { arch::wasm_simd128::chroma_upsample::chroma_upsample_420_bottomleft_even_h_u16_row::<BITS>(prev_half, cur_half, c_full, width, big_endian); }
+        unsafe {
+          arch::wasm_simd128::chroma_upsample::chroma_upsample_420_bottomleft_even_h_u16_row::<BITS>(
+            prev_half, cur_half, c_full, width, big_endian,
+          );
+        }
         return;
       }
-    },
+    }
     _ => {}
   }
   scalar::chroma_upsample_420_bottomleft_even_h_u16::<BITS>(
@@ -468,34 +607,74 @@ pub(crate) fn chroma_upsample_420_bottom_even_h_p0xx_row<const BITS: u32>(
     target_arch = "aarch64" => {
       if neon_available() {
         // SAFETY: NEON is baseline on aarch64 and verified at runtime; bounds asserted.
-        unsafe { arch::neon::chroma_upsample::chroma_upsample_420_bottom_even_h_p0xx_row::<BITS>(prev_uv_half, cur_uv_half, uv_full, width, big_endian); }
+        unsafe {
+          arch::neon::chroma_upsample::chroma_upsample_420_bottom_even_h_p0xx_row::<BITS>(
+            prev_uv_half,
+            cur_uv_half,
+            uv_full,
+            width,
+            big_endian,
+          );
+        }
         return;
       }
-    },
+    }
     target_arch = "x86_64" => {
       if avx512_available() {
         // SAFETY: AVX-512 (hence SSE4.1) verified at runtime; bounds asserted.
-        unsafe { arch::x86_avx512::chroma_upsample::chroma_upsample_420_bottom_even_h_p0xx_row::<BITS>(prev_uv_half, cur_uv_half, uv_full, width, big_endian); }
+        unsafe {
+          arch::x86_avx512::chroma_upsample::chroma_upsample_420_bottom_even_h_p0xx_row::<BITS>(
+            prev_uv_half,
+            cur_uv_half,
+            uv_full,
+            width,
+            big_endian,
+          );
+        }
         return;
       }
       if avx2_available() {
         // SAFETY: AVX2 (hence SSE4.1) verified at runtime; bounds asserted.
-        unsafe { arch::x86_avx2::chroma_upsample::chroma_upsample_420_bottom_even_h_p0xx_row::<BITS>(prev_uv_half, cur_uv_half, uv_full, width, big_endian); }
+        unsafe {
+          arch::x86_avx2::chroma_upsample::chroma_upsample_420_bottom_even_h_p0xx_row::<BITS>(
+            prev_uv_half,
+            cur_uv_half,
+            uv_full,
+            width,
+            big_endian,
+          );
+        }
         return;
       }
       if sse41_available() {
         // SAFETY: SSE4.1 verified at runtime; bounds asserted.
-        unsafe { arch::x86_sse41::chroma_upsample::chroma_upsample_420_bottom_even_h_p0xx_row::<BITS>(prev_uv_half, cur_uv_half, uv_full, width, big_endian); }
+        unsafe {
+          arch::x86_sse41::chroma_upsample::chroma_upsample_420_bottom_even_h_p0xx_row::<BITS>(
+            prev_uv_half,
+            cur_uv_half,
+            uv_full,
+            width,
+            big_endian,
+          );
+        }
         return;
       }
-    },
+    }
     target_arch = "wasm32" => {
       if simd128_available() {
         // SAFETY: simd128 enabled at compile time; bounds asserted.
-        unsafe { arch::wasm_simd128::chroma_upsample::chroma_upsample_420_bottom_even_h_p0xx_row::<BITS>(prev_uv_half, cur_uv_half, uv_full, width, big_endian); }
+        unsafe {
+          arch::wasm_simd128::chroma_upsample::chroma_upsample_420_bottom_even_h_p0xx_row::<BITS>(
+            prev_uv_half,
+            cur_uv_half,
+            uv_full,
+            width,
+            big_endian,
+          );
+        }
         return;
       }
-    },
+    }
     _ => {}
   }
   scalar::chroma_upsample_420_bottom_even_h_p0xx::<BITS>(
@@ -542,34 +721,74 @@ pub(crate) fn chroma_upsample_420_bottomleft_even_h_p0xx_row<const BITS: u32>(
     target_arch = "aarch64" => {
       if neon_available() {
         // SAFETY: NEON is baseline on aarch64 and verified at runtime; bounds asserted.
-        unsafe { arch::neon::chroma_upsample::chroma_upsample_420_bottomleft_even_h_p0xx_row::<BITS>(prev_uv_half, cur_uv_half, uv_full, width, big_endian); }
+        unsafe {
+          arch::neon::chroma_upsample::chroma_upsample_420_bottomleft_even_h_p0xx_row::<BITS>(
+            prev_uv_half,
+            cur_uv_half,
+            uv_full,
+            width,
+            big_endian,
+          );
+        }
         return;
       }
-    },
+    }
     target_arch = "x86_64" => {
       if avx512_available() {
         // SAFETY: AVX-512 (hence SSE4.1) verified at runtime; bounds asserted.
-        unsafe { arch::x86_avx512::chroma_upsample::chroma_upsample_420_bottomleft_even_h_p0xx_row::<BITS>(prev_uv_half, cur_uv_half, uv_full, width, big_endian); }
+        unsafe {
+          arch::x86_avx512::chroma_upsample::chroma_upsample_420_bottomleft_even_h_p0xx_row::<BITS>(
+            prev_uv_half,
+            cur_uv_half,
+            uv_full,
+            width,
+            big_endian,
+          );
+        }
         return;
       }
       if avx2_available() {
         // SAFETY: AVX2 (hence SSE4.1) verified at runtime; bounds asserted.
-        unsafe { arch::x86_avx2::chroma_upsample::chroma_upsample_420_bottomleft_even_h_p0xx_row::<BITS>(prev_uv_half, cur_uv_half, uv_full, width, big_endian); }
+        unsafe {
+          arch::x86_avx2::chroma_upsample::chroma_upsample_420_bottomleft_even_h_p0xx_row::<BITS>(
+            prev_uv_half,
+            cur_uv_half,
+            uv_full,
+            width,
+            big_endian,
+          );
+        }
         return;
       }
       if sse41_available() {
         // SAFETY: SSE4.1 verified at runtime; bounds asserted.
-        unsafe { arch::x86_sse41::chroma_upsample::chroma_upsample_420_bottomleft_even_h_p0xx_row::<BITS>(prev_uv_half, cur_uv_half, uv_full, width, big_endian); }
+        unsafe {
+          arch::x86_sse41::chroma_upsample::chroma_upsample_420_bottomleft_even_h_p0xx_row::<BITS>(
+            prev_uv_half,
+            cur_uv_half,
+            uv_full,
+            width,
+            big_endian,
+          );
+        }
         return;
       }
-    },
+    }
     target_arch = "wasm32" => {
       if simd128_available() {
         // SAFETY: simd128 enabled at compile time; bounds asserted.
-        unsafe { arch::wasm_simd128::chroma_upsample::chroma_upsample_420_bottomleft_even_h_p0xx_row::<BITS>(prev_uv_half, cur_uv_half, uv_full, width, big_endian); }
+        unsafe {
+          arch::wasm_simd128::chroma_upsample::chroma_upsample_420_bottomleft_even_h_p0xx_row::<BITS>(
+            prev_uv_half,
+            cur_uv_half,
+            uv_full,
+            width,
+            big_endian,
+          );
+        }
         return;
       }
-    },
+    }
     _ => {}
   }
   scalar::chroma_upsample_420_bottomleft_even_h_p0xx::<BITS>(
@@ -607,34 +826,48 @@ pub(crate) fn chroma_upsample_440_bottom_v_row(
     target_arch = "aarch64" => {
       if neon_available() {
         // SAFETY: NEON is baseline on aarch64 and verified at runtime; bounds asserted.
-        unsafe { arch::neon::chroma_upsample::chroma_upsample_440_bottom_v_row(prev, cur, out, width); }
+        unsafe {
+          arch::neon::chroma_upsample::chroma_upsample_440_bottom_v_row(prev, cur, out, width);
+        }
         return;
       }
-    },
+    }
     target_arch = "x86_64" => {
       if avx512_available() {
         // SAFETY: AVX-512F + BW verified at runtime; bounds asserted.
-        unsafe { arch::x86_avx512::chroma_upsample::chroma_upsample_440_bottom_v_row(prev, cur, out, width); }
+        unsafe {
+          arch::x86_avx512::chroma_upsample::chroma_upsample_440_bottom_v_row(
+            prev, cur, out, width,
+          );
+        }
         return;
       }
       if avx2_available() {
         // SAFETY: AVX2 verified at runtime; bounds asserted.
-        unsafe { arch::x86_avx2::chroma_upsample::chroma_upsample_440_bottom_v_row(prev, cur, out, width); }
+        unsafe {
+          arch::x86_avx2::chroma_upsample::chroma_upsample_440_bottom_v_row(prev, cur, out, width);
+        }
         return;
       }
       if sse41_available() {
         // SAFETY: SSE4.1 verified at runtime; bounds asserted.
-        unsafe { arch::x86_sse41::chroma_upsample::chroma_upsample_440_bottom_v_row(prev, cur, out, width); }
+        unsafe {
+          arch::x86_sse41::chroma_upsample::chroma_upsample_440_bottom_v_row(prev, cur, out, width);
+        }
         return;
       }
-    },
+    }
     target_arch = "wasm32" => {
       if simd128_available() {
         // SAFETY: simd128 enabled at compile time; bounds asserted.
-        unsafe { arch::wasm_simd128::chroma_upsample::chroma_upsample_440_bottom_v_row(prev, cur, out, width); }
+        unsafe {
+          arch::wasm_simd128::chroma_upsample::chroma_upsample_440_bottom_v_row(
+            prev, cur, out, width,
+          );
+        }
         return;
       }
-    },
+    }
     _ => {}
   }
   scalar::chroma_upsample_440_bottom_v(prev, cur, out, width);
@@ -669,34 +902,54 @@ pub(crate) fn chroma_upsample_440_bottom_v_u16_row<const BITS: u32>(
     target_arch = "aarch64" => {
       if neon_available() {
         // SAFETY: NEON is baseline on aarch64 and verified at runtime; bounds asserted.
-        unsafe { arch::neon::chroma_upsample::chroma_upsample_440_bottom_v_u16_row::<BITS>(prev, cur, out, width, big_endian); }
+        unsafe {
+          arch::neon::chroma_upsample::chroma_upsample_440_bottom_v_u16_row::<BITS>(
+            prev, cur, out, width, big_endian,
+          );
+        }
         return;
       }
-    },
+    }
     target_arch = "x86_64" => {
       if avx512_available() {
         // SAFETY: AVX-512F + BW verified at runtime; bounds asserted.
-        unsafe { arch::x86_avx512::chroma_upsample::chroma_upsample_440_bottom_v_u16_row::<BITS>(prev, cur, out, width, big_endian); }
+        unsafe {
+          arch::x86_avx512::chroma_upsample::chroma_upsample_440_bottom_v_u16_row::<BITS>(
+            prev, cur, out, width, big_endian,
+          );
+        }
         return;
       }
       if avx2_available() {
         // SAFETY: AVX2 verified at runtime; bounds asserted.
-        unsafe { arch::x86_avx2::chroma_upsample::chroma_upsample_440_bottom_v_u16_row::<BITS>(prev, cur, out, width, big_endian); }
+        unsafe {
+          arch::x86_avx2::chroma_upsample::chroma_upsample_440_bottom_v_u16_row::<BITS>(
+            prev, cur, out, width, big_endian,
+          );
+        }
         return;
       }
       if sse41_available() {
         // SAFETY: SSE4.1 verified at runtime; bounds asserted.
-        unsafe { arch::x86_sse41::chroma_upsample::chroma_upsample_440_bottom_v_u16_row::<BITS>(prev, cur, out, width, big_endian); }
+        unsafe {
+          arch::x86_sse41::chroma_upsample::chroma_upsample_440_bottom_v_u16_row::<BITS>(
+            prev, cur, out, width, big_endian,
+          );
+        }
         return;
       }
-    },
+    }
     target_arch = "wasm32" => {
       if simd128_available() {
         // SAFETY: simd128 enabled at compile time; bounds asserted.
-        unsafe { arch::wasm_simd128::chroma_upsample::chroma_upsample_440_bottom_v_u16_row::<BITS>(prev, cur, out, width, big_endian); }
+        unsafe {
+          arch::wasm_simd128::chroma_upsample::chroma_upsample_440_bottom_v_u16_row::<BITS>(
+            prev, cur, out, width, big_endian,
+          );
+        }
         return;
       }
-    },
+    }
     _ => {}
   }
   scalar::chroma_upsample_440_bottom_v_u16_wire::<BITS>(prev, cur, out, width, big_endian);
@@ -729,34 +982,52 @@ pub(crate) fn chroma_upsample_4to1_center_h_row(
     target_arch = "aarch64" => {
       if neon_available() {
         // SAFETY: NEON is baseline on aarch64 and verified at runtime; bounds asserted.
-        unsafe { arch::neon::chroma_upsample::chroma_upsample_4to1_center_h_row(c_quarter, c_full, width); }
+        unsafe {
+          arch::neon::chroma_upsample::chroma_upsample_4to1_center_h_row(c_quarter, c_full, width);
+        }
         return;
       }
-    },
+    }
     target_arch = "x86_64" => {
       if avx512_available() {
         // SAFETY: AVX-512F + BW verified at runtime; bounds asserted.
-        unsafe { arch::x86_avx512::chroma_upsample::chroma_upsample_4to1_center_h_row(c_quarter, c_full, width); }
+        unsafe {
+          arch::x86_avx512::chroma_upsample::chroma_upsample_4to1_center_h_row(
+            c_quarter, c_full, width,
+          );
+        }
         return;
       }
       if avx2_available() {
         // SAFETY: AVX2 verified at runtime; bounds asserted.
-        unsafe { arch::x86_avx2::chroma_upsample::chroma_upsample_4to1_center_h_row(c_quarter, c_full, width); }
+        unsafe {
+          arch::x86_avx2::chroma_upsample::chroma_upsample_4to1_center_h_row(
+            c_quarter, c_full, width,
+          );
+        }
         return;
       }
       if sse41_available() {
         // SAFETY: SSE4.1 verified at runtime; bounds asserted.
-        unsafe { arch::x86_sse41::chroma_upsample::chroma_upsample_4to1_center_h_row(c_quarter, c_full, width); }
+        unsafe {
+          arch::x86_sse41::chroma_upsample::chroma_upsample_4to1_center_h_row(
+            c_quarter, c_full, width,
+          );
+        }
         return;
       }
-    },
+    }
     target_arch = "wasm32" => {
       if simd128_available() {
         // SAFETY: simd128 enabled at compile time; bounds asserted.
-        unsafe { arch::wasm_simd128::chroma_upsample::chroma_upsample_4to1_center_h_row(c_quarter, c_full, width); }
+        unsafe {
+          arch::wasm_simd128::chroma_upsample::chroma_upsample_4to1_center_h_row(
+            c_quarter, c_full, width,
+          );
+        }
         return;
       }
-    },
+    }
     _ => {}
   }
   scalar::chroma_upsample_4to1_center_h(c_quarter, c_full, width);

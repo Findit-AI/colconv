@@ -59,7 +59,7 @@ pub fn yuv_444_to_rgb_row(
           }
           return;
         }
-      },
+      }
       target_arch = "x86_64" => {
         if avx512_available() {
           // SAFETY: AVX-512BW verified.
@@ -82,7 +82,7 @@ pub fn yuv_444_to_rgb_row(
           }
           return;
         }
-      },
+      }
       target_arch = "wasm32" => {
         if simd128_available() {
           // SAFETY: simd128 verified at compile time.
@@ -91,7 +91,7 @@ pub fn yuv_444_to_rgb_row(
           }
           return;
         }
-      },
+      }
       _ => {}
     }
   }
@@ -131,7 +131,7 @@ pub fn yuv_444_to_rgba_row(
           }
           return;
         }
-      },
+      }
       target_arch = "x86_64" => {
         if avx512_available() {
           unsafe {
@@ -151,7 +151,7 @@ pub fn yuv_444_to_rgba_row(
           }
           return;
         }
-      },
+      }
       target_arch = "wasm32" => {
         if simd128_available() {
           unsafe {
@@ -159,7 +159,7 @@ pub fn yuv_444_to_rgba_row(
           }
           return;
         }
-      },
+      }
       _ => {}
     }
   }
@@ -272,13 +272,11 @@ pub fn yuv_444_to_hsv_row(
         if neon_available() {
           // SAFETY: NEON verified; bounds asserted above.
           unsafe {
-            arch::neon::yuv_444_to_hsv_row(
-              y, u, v, h_out, s_out, v_out, width, matrix, full_range,
-            );
+            arch::neon::yuv_444_to_hsv_row(y, u, v, h_out, s_out, v_out, width, matrix, full_range);
           }
           return;
         }
-      },
+      }
       target_arch = "x86_64" => {
         if avx512_available() {
           // SAFETY: AVX‑512BW verified.
@@ -307,7 +305,7 @@ pub fn yuv_444_to_hsv_row(
           }
           return;
         }
-      },
+      }
       target_arch = "wasm32" => {
         if simd128_available() {
           // SAFETY: simd128 compile‑time verified.
@@ -318,7 +316,7 @@ pub fn yuv_444_to_hsv_row(
           }
           return;
         }
-      },
+      }
       _ => {}
     }
   }

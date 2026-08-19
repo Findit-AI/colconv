@@ -58,7 +58,7 @@ pub fn nv12_to_rgb_row(
           }
           return;
         }
-      },
+      }
       target_arch = "x86_64" => {
         if avx512_available() {
           // SAFETY: `avx512_available()` verified AVX‑512BW is present.
@@ -81,7 +81,7 @@ pub fn nv12_to_rgb_row(
           }
           return;
         }
-      },
+      }
       target_arch = "wasm32" => {
         if simd128_available() {
           // SAFETY: `simd128_available()` verified simd128 is on at
@@ -91,7 +91,7 @@ pub fn nv12_to_rgb_row(
           }
           return;
         }
-      },
+      }
       _ => {
         // Targets without a SIMD backend fall through to scalar.
       }
@@ -138,7 +138,7 @@ pub fn nv21_to_rgb_row(
           }
           return;
         }
-      },
+      }
       target_arch = "x86_64" => {
         if avx512_available() {
           // SAFETY: `avx512_available()` verified AVX‑512BW is present.
@@ -161,7 +161,7 @@ pub fn nv21_to_rgb_row(
           }
           return;
         }
-      },
+      }
       target_arch = "wasm32" => {
         if simd128_available() {
           // SAFETY: simd128 verified at compile time.
@@ -170,7 +170,7 @@ pub fn nv21_to_rgb_row(
           }
           return;
         }
-      },
+      }
       _ => {
         // Targets without a SIMD backend fall through to scalar.
       }
@@ -217,7 +217,7 @@ pub fn nv12_to_rgba_row(
           }
           return;
         }
-      },
+      }
       target_arch = "x86_64" => {
         if avx512_available() {
           // SAFETY: AVX‑512BW verified.
@@ -240,7 +240,7 @@ pub fn nv12_to_rgba_row(
           }
           return;
         }
-      },
+      }
       target_arch = "wasm32" => {
         if simd128_available() {
           // SAFETY: simd128 verified at compile time.
@@ -249,7 +249,7 @@ pub fn nv12_to_rgba_row(
           }
           return;
         }
-      },
+      }
       _ => {}
     }
   }
@@ -288,7 +288,7 @@ pub fn nv21_to_rgba_row(
           }
           return;
         }
-      },
+      }
       target_arch = "x86_64" => {
         if avx512_available() {
           unsafe {
@@ -308,7 +308,7 @@ pub fn nv21_to_rgba_row(
           }
           return;
         }
-      },
+      }
       target_arch = "wasm32" => {
         if simd128_available() {
           unsafe {
@@ -316,7 +316,7 @@ pub fn nv21_to_rgba_row(
           }
           return;
         }
-      },
+      }
       _ => {}
     }
   }
@@ -371,7 +371,7 @@ pub fn nv24_to_rgb_row(
           }
           return;
         }
-      },
+      }
       target_arch = "x86_64" => {
         if avx512_available() {
           // SAFETY: AVX‑512BW verified.
@@ -394,7 +394,7 @@ pub fn nv24_to_rgb_row(
           }
           return;
         }
-      },
+      }
       target_arch = "wasm32" => {
         if simd128_available() {
           // SAFETY: simd128 verified at compile time.
@@ -403,7 +403,7 @@ pub fn nv24_to_rgb_row(
           }
           return;
         }
-      },
+      }
       _ => {
         // Targets without a SIMD backend fall through to scalar.
       }
@@ -445,7 +445,7 @@ pub fn nv42_to_rgb_row(
           }
           return;
         }
-      },
+      }
       target_arch = "x86_64" => {
         if avx512_available() {
           // SAFETY: AVX‑512BW verified.
@@ -468,7 +468,7 @@ pub fn nv42_to_rgb_row(
           }
           return;
         }
-      },
+      }
       target_arch = "wasm32" => {
         if simd128_available() {
           // SAFETY: simd128 verified at compile time.
@@ -477,7 +477,7 @@ pub fn nv42_to_rgb_row(
           }
           return;
         }
-      },
+      }
       _ => {
         // Targets without a SIMD backend fall through to scalar.
       }
@@ -522,7 +522,7 @@ pub fn nv24_to_rgba_row(
           }
           return;
         }
-      },
+      }
       target_arch = "x86_64" => {
         if avx512_available() {
           // SAFETY: AVX‑512BW verified.
@@ -545,7 +545,7 @@ pub fn nv24_to_rgba_row(
           }
           return;
         }
-      },
+      }
       target_arch = "wasm32" => {
         if simd128_available() {
           // SAFETY: simd128 verified at compile time.
@@ -554,7 +554,7 @@ pub fn nv24_to_rgba_row(
           }
           return;
         }
-      },
+      }
       _ => {}
     }
   }
@@ -595,7 +595,7 @@ pub fn nv42_to_rgba_row(
           }
           return;
         }
-      },
+      }
       target_arch = "x86_64" => {
         if avx512_available() {
           // SAFETY: AVX‑512BW verified.
@@ -618,7 +618,7 @@ pub fn nv42_to_rgba_row(
           }
           return;
         }
-      },
+      }
       target_arch = "wasm32" => {
         if simd128_available() {
           // SAFETY: simd128 verified at compile time.
@@ -627,7 +627,7 @@ pub fn nv42_to_rgba_row(
           }
           return;
         }
-      },
+      }
       _ => {}
     }
   }
@@ -675,13 +675,11 @@ pub fn nv12_to_hsv_row(
           // SAFETY: NEON verified. Bounds are the caller's obligation
           // (asserted above).
           unsafe {
-            arch::neon::nv12_to_hsv_row(
-              y, uv_half, h_out, s_out, v_out, width, matrix, full_range,
-            );
+            arch::neon::nv12_to_hsv_row(y, uv_half, h_out, s_out, v_out, width, matrix, full_range);
           }
           return;
         }
-      },
+      }
       target_arch = "x86_64" => {
         if avx512_available() {
           // SAFETY: AVX‑512BW verified.
@@ -710,7 +708,7 @@ pub fn nv12_to_hsv_row(
           }
           return;
         }
-      },
+      }
       target_arch = "wasm32" => {
         if simd128_available() {
           // SAFETY: simd128 verified at compile time.
@@ -721,7 +719,7 @@ pub fn nv12_to_hsv_row(
           }
           return;
         }
-      },
+      }
       _ => {}
     }
   }
@@ -759,13 +757,11 @@ pub fn nv21_to_hsv_row(
         if neon_available() {
           // SAFETY: NEON verified.
           unsafe {
-            arch::neon::nv21_to_hsv_row(
-              y, vu_half, h_out, s_out, v_out, width, matrix, full_range,
-            );
+            arch::neon::nv21_to_hsv_row(y, vu_half, h_out, s_out, v_out, width, matrix, full_range);
           }
           return;
         }
-      },
+      }
       target_arch = "x86_64" => {
         if avx512_available() {
           // SAFETY: AVX‑512BW verified.
@@ -794,7 +790,7 @@ pub fn nv21_to_hsv_row(
           }
           return;
         }
-      },
+      }
       target_arch = "wasm32" => {
         if simd128_available() {
           // SAFETY: simd128 verified at compile time.
@@ -805,7 +801,7 @@ pub fn nv21_to_hsv_row(
           }
           return;
         }
-      },
+      }
       _ => {}
     }
   }
@@ -850,12 +846,14 @@ pub fn nv24_to_hsv_row(
           }
           return;
         }
-      },
+      }
       target_arch = "x86_64" => {
         if avx512_available() {
           // SAFETY: AVX‑512BW verified.
           unsafe {
-            arch::x86_avx512::nv24_to_hsv_row(y, uv, h_out, s_out, v_out, width, matrix, full_range);
+            arch::x86_avx512::nv24_to_hsv_row(
+              y, uv, h_out, s_out, v_out, width, matrix, full_range,
+            );
           }
           return;
         }
@@ -873,16 +871,18 @@ pub fn nv24_to_hsv_row(
           }
           return;
         }
-      },
+      }
       target_arch = "wasm32" => {
         if simd128_available() {
           // SAFETY: simd128 verified at compile time.
           unsafe {
-            arch::wasm_simd128::nv24_to_hsv_row(y, uv, h_out, s_out, v_out, width, matrix, full_range);
+            arch::wasm_simd128::nv24_to_hsv_row(
+              y, uv, h_out, s_out, v_out, width, matrix, full_range,
+            );
           }
           return;
         }
-      },
+      }
       _ => {}
     }
   }
@@ -927,12 +927,14 @@ pub fn nv42_to_hsv_row(
           }
           return;
         }
-      },
+      }
       target_arch = "x86_64" => {
         if avx512_available() {
           // SAFETY: AVX‑512BW verified.
           unsafe {
-            arch::x86_avx512::nv42_to_hsv_row(y, vu, h_out, s_out, v_out, width, matrix, full_range);
+            arch::x86_avx512::nv42_to_hsv_row(
+              y, vu, h_out, s_out, v_out, width, matrix, full_range,
+            );
           }
           return;
         }
@@ -950,16 +952,18 @@ pub fn nv42_to_hsv_row(
           }
           return;
         }
-      },
+      }
       target_arch = "wasm32" => {
         if simd128_available() {
           // SAFETY: simd128 verified at compile time.
           unsafe {
-            arch::wasm_simd128::nv42_to_hsv_row(y, vu, h_out, s_out, v_out, width, matrix, full_range);
+            arch::wasm_simd128::nv42_to_hsv_row(
+              y, vu, h_out, s_out, v_out, width, matrix, full_range,
+            );
           }
           return;
         }
-      },
+      }
       _ => {}
     }
   }

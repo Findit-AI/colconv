@@ -81,7 +81,7 @@ pub fn yuv_411_to_rgb_row(
           }
           return;
         }
-      },
+      }
       target_arch = "x86_64" => {
         if avx512_available() {
           // SAFETY: `avx512_available()` verified AVX-512BW is present.
@@ -110,7 +110,7 @@ pub fn yuv_411_to_rgb_row(
           }
           return;
         }
-      },
+      }
       target_arch = "wasm32" => {
         if simd128_available() {
           // SAFETY: `simd128_available()` (compile-time
@@ -124,7 +124,7 @@ pub fn yuv_411_to_rgb_row(
           }
           return;
         }
-      },
+      }
       _ => {
         // Targets without a SIMD backend (riscv64, powerpc, …) fall
         // through to the scalar path below.
@@ -179,7 +179,7 @@ pub fn yuv_411_to_rgba_row(
           }
           return;
         }
-      },
+      }
       target_arch = "x86_64" => {
         if avx512_available() {
           // SAFETY: AVX-512BW verified present.
@@ -208,7 +208,7 @@ pub fn yuv_411_to_rgba_row(
           }
           return;
         }
-      },
+      }
       target_arch = "wasm32" => {
         if simd128_available() {
           // SAFETY: simd128 compile-time enabled.
@@ -219,7 +219,7 @@ pub fn yuv_411_to_rgba_row(
           }
           return;
         }
-      },
+      }
       _ => {}
     }
   }
@@ -273,7 +273,7 @@ pub fn yuv_411_to_hsv_row(
           }
           return;
         }
-      },
+      }
       target_arch = "x86_64" => {
         if avx512_available() {
           // SAFETY: AVX‑512BW verified.
@@ -302,7 +302,7 @@ pub fn yuv_411_to_hsv_row(
           }
           return;
         }
-      },
+      }
       target_arch = "wasm32" => {
         if simd128_available() {
           // SAFETY: simd128 compile‑time verified.
@@ -313,7 +313,7 @@ pub fn yuv_411_to_hsv_row(
           }
           return;
         }
-      },
+      }
       _ => {}
     }
   }

@@ -59,11 +59,13 @@ pub fn yuv_410_to_rgb_row(
           // SAFETY: `neon_available()` verified NEON is present.
           // Bounds / parity invariants are the caller's obligation.
           unsafe {
-            arch::neon::yuv_410_to_rgb_row(y, u_quarter, v_quarter, rgb_out, width, matrix, full_range);
+            arch::neon::yuv_410_to_rgb_row(
+              y, u_quarter, v_quarter, rgb_out, width, matrix, full_range,
+            );
           }
           return;
         }
-      },
+      }
       target_arch = "x86_64" => {
         if avx512_available() {
           // SAFETY: `avx512_available()` verified AVX-512BW is present.
@@ -92,7 +94,7 @@ pub fn yuv_410_to_rgb_row(
           }
           return;
         }
-      },
+      }
       target_arch = "wasm32" => {
         if simd128_available() {
           // SAFETY: simd128 compile-time availability verified.
@@ -103,7 +105,7 @@ pub fn yuv_410_to_rgb_row(
           }
           return;
         }
-      },
+      }
       _ => {
         // Targets without a SIMD backend (riscv64, powerpc, …) fall
         // through to scalar.
@@ -155,7 +157,7 @@ pub fn yuv_410_to_rgba_row(
           }
           return;
         }
-      },
+      }
       target_arch = "x86_64" => {
         if avx512_available() {
           // SAFETY: `avx512_available()` verified AVX-512BW is present.
@@ -184,7 +186,7 @@ pub fn yuv_410_to_rgba_row(
           }
           return;
         }
-      },
+      }
       target_arch = "wasm32" => {
         if simd128_available() {
           // SAFETY: simd128 compile-time availability verified.
@@ -195,7 +197,7 @@ pub fn yuv_410_to_rgba_row(
           }
           return;
         }
-      },
+      }
       _ => {
         // Targets without a SIMD backend fall through to scalar.
       }
@@ -246,7 +248,7 @@ pub fn yuv_410_to_hsv_row(
           }
           return;
         }
-      },
+      }
       target_arch = "x86_64" => {
         if avx512_available() {
           // SAFETY: AVX‑512BW verified.
@@ -275,7 +277,7 @@ pub fn yuv_410_to_hsv_row(
           }
           return;
         }
-      },
+      }
       target_arch = "wasm32" => {
         if simd128_available() {
           // SAFETY: simd128 compile‑time verified.
@@ -286,7 +288,7 @@ pub fn yuv_410_to_hsv_row(
           }
           return;
         }
-      },
+      }
       _ => {
         // Targets without a SIMD backend fall through to scalar.
       }
