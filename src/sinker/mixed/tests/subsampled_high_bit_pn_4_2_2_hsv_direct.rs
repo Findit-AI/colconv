@@ -76,7 +76,7 @@ macro_rules! structural_p2xx {
     fn $name() {
       const BITS: u32 = $bits;
       let (w, h) = (16usize, 8usize);
-      let m = ColorMatrix::Bt2020Ncl;
+      let m = KernelMatrix::Bt2020Ncl;
       let (yp, uvp) = packed_le_frame_planes(w, h, BITS);
       // 4:2:2 interleaved UV stride = `width` u16 (half-width pairs, full
       // height — one chroma row per luma row).
@@ -89,7 +89,7 @@ macro_rules! structural_p2xx {
         let mut sink = MixedSinker::<$marker>::new(w, h)
           .with_hsv(&mut hh, &mut ss, &mut vv)
           .unwrap();
-        $walker(&src, true, m, &mut sink).unwrap();
+        $walker(&src, true, sink.set_kernel_matrix(m)).unwrap();
         sink.rgb_scratch.len()
       };
       assert_eq!(

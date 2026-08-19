@@ -2,7 +2,7 @@
 use core::arch::aarch64::*;
 
 use super::miri_compat::*;
-use crate::{ColorMatrix, row::scalar};
+use crate::{KernelMatrix, row::scalar};
 
 // ===== RGB → HSV =========================================================
 
@@ -241,7 +241,7 @@ pub(crate) unsafe fn rgb_to_luma_row(
   rgb: &[u8],
   luma_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert!(rgb.len() >= width * 3, "rgb row too short");

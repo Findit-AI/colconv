@@ -55,7 +55,7 @@ pub(crate) fn packed444_to_rgb_or_rgba_row<
   packed: &[u8],
   out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // Source alpha requires RGBA output — there is no 3 bpp store with
@@ -100,7 +100,7 @@ pub(crate) fn vuya_to_rgb_or_rgba_row<const ALPHA: bool, const ALPHA_SRC: bool>(
   packed: &[u8],
   out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   packed444_to_rgb_or_rgba_row::<ALPHA, ALPHA_SRC, 0, 1, 2, 3>(
@@ -118,7 +118,7 @@ pub(crate) fn vuya_to_rgb_row(
   packed: &[u8],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   vuya_to_rgb_or_rgba_row::<false, false>(packed, rgb_out, width, matrix, full_range);
@@ -131,7 +131,7 @@ pub(crate) fn vuya_to_rgba_row(
   packed: &[u8],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   vuya_to_rgb_or_rgba_row::<true, true>(packed, rgba_out, width, matrix, full_range);
@@ -144,7 +144,7 @@ pub(crate) fn vuyx_to_rgba_row(
   packed: &[u8],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   vuya_to_rgb_or_rgba_row::<true, false>(packed, rgba_out, width, matrix, full_range);
@@ -183,7 +183,7 @@ pub(crate) fn packed444_to_hsv_row<const V_OFF: usize, const U_OFF: usize, const
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert!(packed.len() >= width * 4, "packed row too short");
@@ -229,7 +229,7 @@ pub(crate) fn vuya_to_hsv_row(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   packed444_to_hsv_row::<0, 1, 2>(packed, h_out, s_out, v_out, width, matrix, full_range);
@@ -304,7 +304,7 @@ pub(crate) fn ayuv_to_rgb_row(
   packed: &[u8],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   packed444_to_rgb_or_rgba_row::<false, false, 3, 2, 1, 0>(
@@ -319,7 +319,7 @@ pub(crate) fn ayuv_to_rgba_row(
   packed: &[u8],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   packed444_to_rgb_or_rgba_row::<true, true, 3, 2, 1, 0>(
@@ -336,7 +336,7 @@ pub(crate) fn ayuv_to_hsv_row(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   packed444_to_hsv_row::<3, 2, 1>(packed, h_out, s_out, v_out, width, matrix, full_range);
@@ -364,7 +364,7 @@ pub(crate) fn uyva_to_rgb_row(
   packed: &[u8],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   packed444_to_rgb_or_rgba_row::<false, false, 2, 0, 1, 3>(
@@ -379,7 +379,7 @@ pub(crate) fn uyva_to_rgba_row(
   packed: &[u8],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   packed444_to_rgb_or_rgba_row::<true, true, 2, 0, 1, 3>(
@@ -396,7 +396,7 @@ pub(crate) fn uyva_to_hsv_row(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   packed444_to_hsv_row::<2, 0, 1>(packed, h_out, s_out, v_out, width, matrix, full_range);
@@ -437,7 +437,7 @@ pub(crate) fn vyu444_to_rgb_or_rgba_row<const ALPHA: bool>(
   packed: &[u8],
   out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert!(packed.len() >= width * 3, "packed row too short");
@@ -477,7 +477,7 @@ pub(crate) fn vyu444_to_rgb_row(
   packed: &[u8],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   vyu444_to_rgb_or_rgba_row::<false>(packed, rgb_out, width, matrix, full_range);
@@ -490,7 +490,7 @@ pub(crate) fn vyu444_to_rgba_row(
   packed: &[u8],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   vyu444_to_rgb_or_rgba_row::<true>(packed, rgba_out, width, matrix, full_range);
@@ -504,7 +504,7 @@ pub(crate) fn vyu444_to_hsv_row(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert!(packed.len() >= width * 3, "packed row too short");
@@ -566,7 +566,7 @@ pub(crate) fn vyu444_to_luma_u16_row(packed: &[u8], out: &mut [u16], width: usiz
 #[cfg(all(test, feature = "std"))]
 mod tests {
   use super::*;
-  use crate::ColorMatrix;
+  use crate::KernelMatrix;
 
   /// Build a 4-byte VUYA pixel from explicit components.
   fn pack_vuya(v: u8, u: u8, y: u8, a: u8) -> [u8; 4] {
@@ -585,7 +585,7 @@ mod tests {
       .copied()
       .collect();
     let mut out = vec![0u8; 4 * 3];
-    vuya_to_rgb_row(&packed, &mut out, 4, ColorMatrix::Bt709, false);
+    vuya_to_rgb_row(&packed, &mut out, 4, KernelMatrix::Bt709, false);
     // Black pixels → [0, 0, 0]
     assert_eq!(&out[0..3], &[0u8, 0, 0], "black pixel 0");
     assert_eq!(&out[3..6], &[0u8, 0, 0], "black pixel 1");
@@ -601,7 +601,7 @@ mod tests {
     let p1 = pack_vuya(128, 128, 235, 0x99);
     let packed: Vec<u8> = [p0, p1].iter().flatten().copied().collect();
     let mut out = vec![0u8; 2 * 4];
-    vuya_to_rgba_row(&packed, &mut out, 2, ColorMatrix::Bt709, false);
+    vuya_to_rgba_row(&packed, &mut out, 2, KernelMatrix::Bt709, false);
     assert_eq!(out[3], 0x42, "pixel 0 alpha");
     assert_eq!(out[7], 0x99, "pixel 1 alpha");
   }
@@ -613,7 +613,7 @@ mod tests {
     let p1 = pack_vuya(128, 128, 235, 0x99);
     let packed: Vec<u8> = [p0, p1].iter().flatten().copied().collect();
     let mut out = vec![0u8; 2 * 4];
-    vuyx_to_rgba_row(&packed, &mut out, 2, ColorMatrix::Bt709, false);
+    vuyx_to_rgba_row(&packed, &mut out, 2, KernelMatrix::Bt709, false);
     assert_eq!(out[3], 0xFF, "pixel 0 alpha should be 0xFF");
     assert_eq!(out[7], 0xFF, "pixel 1 alpha should be 0xFF");
   }
@@ -673,9 +673,9 @@ mod tests {
     let ayuv = pack_n(pack_ayuv);
     for &fr in &[false, true] {
       for &m in &[
-        ColorMatrix::Bt709,
-        ColorMatrix::Bt601,
-        ColorMatrix::Bt2020Ncl,
+        KernelMatrix::Bt709,
+        KernelMatrix::Bt601,
+        KernelMatrix::Bt2020Ncl,
       ] {
         let mut a = vec![0u8; w * 3];
         let mut b = vec![0u8; w * 3];
@@ -693,8 +693,8 @@ mod tests {
     let ayuv = pack_n(pack_ayuv);
     let mut a = vec![0u8; w * 4];
     let mut b = vec![0u8; w * 4];
-    vuya_to_rgba_row(&vuya, &mut a, w, ColorMatrix::Bt709, false);
-    ayuv_to_rgba_row(&ayuv, &mut b, w, ColorMatrix::Bt709, false);
+    vuya_to_rgba_row(&vuya, &mut a, w, KernelMatrix::Bt709, false);
+    ayuv_to_rgba_row(&ayuv, &mut b, w, KernelMatrix::Bt709, false);
     assert_eq!(a, b, "AYUV RGBA (incl. source alpha) must match VUYA");
     // Spot-check the alpha bytes are the source A values.
     for (i, &(_, _, _, av)) in SAMPLES.iter().enumerate() {
@@ -720,7 +720,7 @@ mod tests {
       &mut sa,
       &mut va,
       w,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       false,
     );
     ayuv_to_hsv_row(
@@ -729,7 +729,7 @@ mod tests {
       &mut sb,
       &mut vb,
       w,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       false,
     );
     assert_eq!((ha, sa, va), (hb, sb, vb), "AYUV HSV must match VUYA");
@@ -742,9 +742,9 @@ mod tests {
     let uyva = pack_n(pack_uyva);
     for &fr in &[false, true] {
       for &m in &[
-        ColorMatrix::Bt709,
-        ColorMatrix::Bt601,
-        ColorMatrix::Bt2020Ncl,
+        KernelMatrix::Bt709,
+        KernelMatrix::Bt601,
+        KernelMatrix::Bt2020Ncl,
       ] {
         let mut a = vec![0u8; w * 3];
         let mut b = vec![0u8; w * 3];
@@ -755,8 +755,8 @@ mod tests {
     }
     let mut a = vec![0u8; w * 4];
     let mut b = vec![0u8; w * 4];
-    vuya_to_rgba_row(&vuya, &mut a, w, ColorMatrix::Bt709, true);
-    uyva_to_rgba_row(&uyva, &mut b, w, ColorMatrix::Bt709, true);
+    vuya_to_rgba_row(&vuya, &mut a, w, KernelMatrix::Bt709, true);
+    uyva_to_rgba_row(&uyva, &mut b, w, KernelMatrix::Bt709, true);
     assert_eq!(a, b, "UYVA RGBA (incl. source alpha) must match VUYA");
   }
 
@@ -778,7 +778,7 @@ mod tests {
       &mut sa,
       &mut va,
       w,
-      ColorMatrix::Bt2020Ncl,
+      KernelMatrix::Bt2020Ncl,
       true,
     );
     uyva_to_hsv_row(
@@ -787,7 +787,7 @@ mod tests {
       &mut sb,
       &mut vb,
       w,
-      ColorMatrix::Bt2020Ncl,
+      KernelMatrix::Bt2020Ncl,
       true,
     );
     assert_eq!((ha, sa, va), (hb, sb, vb), "UYVA HSV must match VUYA");
@@ -802,9 +802,9 @@ mod tests {
     let vyu = pack_n(|v, u, y, _a| pack_vyu444(v, u, y));
     for &fr in &[false, true] {
       for &m in &[
-        ColorMatrix::Bt709,
-        ColorMatrix::Bt601,
-        ColorMatrix::Bt2020Ncl,
+        KernelMatrix::Bt709,
+        KernelMatrix::Bt601,
+        KernelMatrix::Bt2020Ncl,
       ] {
         let mut a = vec![0u8; w * 3];
         let mut b = vec![0u8; w * 3];
@@ -822,8 +822,8 @@ mod tests {
     let vyu = pack_n(|v, u, y, _a| pack_vyu444(v, u, y));
     let mut a = vec![0u8; w * 4];
     let mut b = vec![0u8; w * 4];
-    vuyx_to_rgba_row(&vuyx, &mut a, w, ColorMatrix::Bt709, false);
-    vyu444_to_rgba_row(&vyu, &mut b, w, ColorMatrix::Bt709, false);
+    vuyx_to_rgba_row(&vuyx, &mut a, w, KernelMatrix::Bt709, false);
+    vyu444_to_rgba_row(&vyu, &mut b, w, KernelMatrix::Bt709, false);
     assert_eq!(a, b, "VYU444 RGBA must match VUYX (α forced 0xFF)");
     for i in 0..w {
       assert_eq!(b[i * 4 + 3], 0xFF, "VYU444 pixel {i} alpha must be 0xFF");
@@ -848,7 +848,7 @@ mod tests {
       &mut sa,
       &mut va,
       w,
-      ColorMatrix::Bt601,
+      KernelMatrix::Bt601,
       false,
     );
     vyu444_to_hsv_row(
@@ -857,7 +857,7 @@ mod tests {
       &mut sb,
       &mut vb,
       w,
-      ColorMatrix::Bt601,
+      KernelMatrix::Bt601,
       false,
     );
     assert_eq!((ha, sa, va), (hb, sb, vb), "VYU444 HSV must match VUYX");

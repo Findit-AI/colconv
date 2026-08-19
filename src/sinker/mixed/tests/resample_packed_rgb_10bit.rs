@@ -9,7 +9,7 @@
 //! kernel for this padding-source), byte-identical to the direct path.
 
 use crate::{
-  ColorMatrix, PixelSink,
+  KernelMatrix, PixelSink,
   resample::{AreaResampler, ResampleError},
   sinker::{MixedSinker, MixedSinkerError},
   source::{X2Bgr10, X2Rgb10, X2Rgb10Row, x2bgr10_to, x2rgb10_to},
@@ -18,7 +18,7 @@ use mediaframe::frame::{X2Bgr10Frame, X2Rgb10Frame};
 
 const SRC: usize = 8;
 const OUT: usize = 4;
-const MATRIX: ColorMatrix = ColorMatrix::Bt709;
+const MATRIX: KernelMatrix = KernelMatrix::Bt709;
 
 /// X2RGB10 LE word: `(MSB) 2X | 10R | 10G | 10B (LSB)`.
 fn pack_x2rgb10(r10: u32, g10: u32, b10: u32) -> u32 {
@@ -88,7 +88,7 @@ fn x2rgb10_downscale_rgb_u16_is_exact_native_area_mean() {
         .unwrap()
         .with_rgb_u16(&mut rgb_u16)
         .unwrap();
-    x2rgb10_to(&src, true, MATRIX, &mut sink).unwrap();
+    x2rgb10_to(&src, true, sink.set_kernel_matrix(MATRIX)).unwrap();
   }
   for oy in 0..OUT {
     for ox in 0..OUT {
@@ -141,7 +141,7 @@ fn x2rgb10_derived_outputs_come_from_binned_rgb() {
         .unwrap()
         .with_hsv(&mut h, &mut s_, &mut v_)
         .unwrap();
-    x2rgb10_to(&src, true, MATRIX, &mut sink).unwrap();
+    x2rgb10_to(&src, true, sink.set_kernel_matrix(MATRIX)).unwrap();
   }
 
   // The resampled rgb_u16 IS the exact native block mean; re-pack it as a
@@ -174,7 +174,7 @@ fn x2rgb10_derived_outputs_come_from_binned_rgb() {
       .unwrap()
       .with_hsv(&mut ref_h, &mut ref_s, &mut ref_v)
       .unwrap();
-    x2rgb10_to(&binned, true, MATRIX, &mut sink).unwrap();
+    x2rgb10_to(&binned, true, sink.set_kernel_matrix(MATRIX)).unwrap();
   }
   assert_eq!(rgb, ref_rgb, "rgb (narrowed >> 2)");
   assert_eq!(rgba, ref_rgba, "rgba (narrowed, alpha forced 0xFF)");
@@ -214,7 +214,7 @@ fn x2rgb10_identity_plan_matches_new_sink() {
     let mut sink = MixedSinker::<X2Rgb10>::new(SRC, SRC)
       .with_rgb_u16(&mut direct)
       .unwrap();
-    x2rgb10_to(&src, true, MATRIX, &mut sink).unwrap();
+    x2rgb10_to(&src, true, sink.set_kernel_matrix(MATRIX)).unwrap();
   }
   let mut via_area = vec![0u16; SRC * SRC * 3];
   {
@@ -223,7 +223,7 @@ fn x2rgb10_identity_plan_matches_new_sink() {
         .unwrap()
         .with_rgb_u16(&mut via_area)
         .unwrap();
-    x2rgb10_to(&src, true, MATRIX, &mut sink).unwrap();
+    x2rgb10_to(&src, true, sink.set_kernel_matrix(MATRIX)).unwrap();
   }
   assert_eq!(direct, via_area, "identity-plan resample == direct sink");
 }
@@ -242,7 +242,7 @@ fn x2rgb10_resample_no_outputs_is_a_no_op() {
   let mut sink =
     MixedSinker::<X2Rgb10, AreaResampler>::with_resampler(SRC, SRC, AreaResampler::to(OUT, OUT))
       .unwrap();
-  x2rgb10_to(&src, true, MATRIX, &mut sink).unwrap();
+  x2rgb10_to(&src, true, sink.set_kernel_matrix(MATRIX)).unwrap();
 }
 
 #[test]
@@ -274,8 +274,8 @@ fn x2rgb10_reuses_stream_across_frames() {
         .unwrap();
     let f1 = X2Rgb10Frame::try_new(&wire1, SRC as u32, SRC as u32, (SRC * 4) as u32).unwrap();
     let f2 = X2Rgb10Frame::try_new(&wire2, SRC as u32, SRC as u32, (SRC * 4) as u32).unwrap();
-    x2rgb10_to(&f1, true, MATRIX, &mut sink).unwrap();
-    x2rgb10_to(&f2, true, MATRIX, &mut sink).unwrap();
+    x2rgb10_to(&f1, true, sink.set_kernel_matrix(MATRIX)).unwrap();
+    x2rgb10_to(&f2, true, sink.set_kernel_matrix(MATRIX)).unwrap();
   }
 
   let mut expected = vec![0u16; OUT * OUT * 3];
@@ -307,7 +307,7 @@ fn x2rgb10_contracts_hold_on_the_fused_path() {
         .unwrap();
     sink.begin_frame(SRC as u32, SRC as u32).unwrap();
     let err = sink
-      .process(X2Rgb10Row::new(row0, 3, MATRIX, true))
+      .process(X2Rgb10Row::for_tests(row0, 3, MATRIX, true))
       .unwrap_err();
     assert!(matches!(
       err,
@@ -325,11 +325,16 @@ fn x2rgb10_contracts_hold_on_the_fused_path() {
         .unwrap();
     sink.begin_frame(SRC as u32, SRC as u32).unwrap();
     sink
-      .process(X2Rgb10Row::new(row0, 0, MATRIX, true))
+      .process(X2Rgb10Row::for_tests(row0, 0, MATRIX, true))
       .unwrap();
     sink.set_luma(&mut luma).unwrap();
     let err = sink
-      .process(X2Rgb10Row::new(&wire[SRC * 4..SRC * 8], 1, MATRIX, true))
+      .process(X2Rgb10Row::for_tests(
+        &wire[SRC * 4..SRC * 8],
+        1,
+        MATRIX,
+        true,
+      ))
       .unwrap_err();
     assert!(matches!(err, MixedSinkerError::ResampleOutputsChanged(_)));
   }
@@ -355,7 +360,7 @@ fn x2bgr10_downscale_rgb_u16_is_exact_native_area_mean() {
         .unwrap()
         .with_rgb_u16(&mut rgb_u16)
         .unwrap();
-    x2bgr10_to(&src, true, MATRIX, &mut sink).unwrap();
+    x2bgr10_to(&src, true, sink.set_kernel_matrix(MATRIX)).unwrap();
   }
   for oy in 0..OUT {
     for ox in 0..OUT {

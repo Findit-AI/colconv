@@ -165,7 +165,7 @@ pub use mediaframe::{
 /// single-row `process` call does not directly hold.
 #[cfg(feature = "yuv-planar")]
 #[inline]
-pub(super) const fn chroma_420_center_sited_h(loc: crate::ChromaLocation) -> bool {
+pub(super) const fn chroma_420_center_sited_h(loc: &crate::ChromaLocation) -> bool {
   matches!(
     loc,
     crate::ChromaLocation::Center | crate::ChromaLocation::Top | crate::ChromaLocation::Bottom
@@ -206,7 +206,7 @@ pub(super) const fn chroma_420_center_sited_h(loc: crate::ChromaLocation) -> boo
 /// every unspecified siting keep the byte-identical vertical-replicate decode.
 #[cfg(feature = "yuv-planar")]
 #[inline]
-pub(super) const fn chroma_420_bottom_sited_v(loc: crate::ChromaLocation) -> bool {
+pub(super) const fn chroma_420_bottom_sited_v(loc: &crate::ChromaLocation) -> bool {
   matches!(
     loc,
     crate::ChromaLocation::Bottom | crate::ChromaLocation::BottomLeft
@@ -247,7 +247,7 @@ pub(super) const fn chroma_420_bottom_sited_v(loc: crate::ChromaLocation) -> boo
 /// vertical-replicate decode.
 #[cfg(feature = "yuv-planar")]
 #[inline]
-pub(super) const fn chroma_420_top_sited_v(loc: crate::ChromaLocation) -> bool {
+pub(super) const fn chroma_420_top_sited_v(loc: &crate::ChromaLocation) -> bool {
   matches!(
     loc,
     crate::ChromaLocation::Top | crate::ChromaLocation::TopLeft
@@ -273,7 +273,7 @@ pub(super) const fn chroma_420_top_sited_v(loc: crate::ChromaLocation) -> bool {
 /// `Left`) phase keeps the byte-identical vertical-replicate decode.
 #[cfg(feature = "yuv-planar")]
 #[inline]
-pub(super) const fn chroma_440_bottom_sited_v(loc: crate::ChromaLocation) -> bool {
+pub(super) const fn chroma_440_bottom_sited_v(loc: &crate::ChromaLocation) -> bool {
   matches!(
     loc,
     crate::ChromaLocation::Bottom | crate::ChromaLocation::BottomLeft
@@ -311,7 +311,7 @@ pub(super) const fn chroma_440_bottom_sited_v(loc: crate::ChromaLocation) -> boo
 /// byte-identical vertical-replicate decode.
 #[cfg(feature = "yuv-planar")]
 #[inline]
-pub(super) const fn chroma_440_top_sited_v(loc: crate::ChromaLocation) -> bool {
+pub(super) const fn chroma_440_top_sited_v(loc: &crate::ChromaLocation) -> bool {
   matches!(
     loc,
     crate::ChromaLocation::Top | crate::ChromaLocation::TopLeft
@@ -336,7 +336,7 @@ pub(super) const fn chroma_440_top_sited_v(loc: crate::ChromaLocation) -> bool {
 /// is in [`chroma_420_center_sited_h`]).
 #[cfg(feature = "yuv-planar")]
 #[inline]
-pub(super) const fn chroma_422_center_sited_h(loc: crate::ChromaLocation) -> bool {
+pub(super) const fn chroma_422_center_sited_h(loc: &crate::ChromaLocation) -> bool {
   matches!(
     loc,
     crate::ChromaLocation::Center | crate::ChromaLocation::Top | crate::ChromaLocation::Bottom
@@ -358,7 +358,7 @@ pub(super) const fn chroma_422_center_sited_h(loc: crate::ChromaLocation) -> boo
 /// the unspecified / unknown codes, which keep the byte-identical nearest decode.
 #[cfg(feature = "yuv-planar")]
 #[inline]
-pub(super) const fn chroma_411_center_sited_h(loc: crate::ChromaLocation) -> bool {
+pub(super) const fn chroma_411_center_sited_h(loc: &crate::ChromaLocation) -> bool {
   matches!(
     loc,
     crate::ChromaLocation::Center | crate::ChromaLocation::Top | crate::ChromaLocation::Bottom
@@ -375,7 +375,7 @@ pub(super) const fn chroma_411_center_sited_h(loc: crate::ChromaLocation) -> boo
 /// byte-identical nearest decode.
 #[cfg(feature = "yuv-planar")]
 #[inline]
-pub(super) const fn chroma_410_center_sited_h(loc: crate::ChromaLocation) -> bool {
+pub(super) const fn chroma_410_center_sited_h(loc: &crate::ChromaLocation) -> bool {
   matches!(
     loc,
     crate::ChromaLocation::Center | crate::ChromaLocation::Top | crate::ChromaLocation::Bottom
@@ -1305,7 +1305,7 @@ pub enum MixedSinkerError {
   /// The linear-light tail buffers each source row linearised under the
   /// transfer function resolved on the first output-bearing row; a later
   /// row resolving a different transfer (a caller flipping
-  /// [`MixedSinker::with_transfer_function`] or the source `ColorMatrix`
+  /// [`MixedSinker::with_transfer_function`] or the source `KernelMatrix`
   /// mid-frame) would bin rows linearised under inconsistent curves. The
   /// offending `process` call fails before the row is consumed; restore the
   /// transfer and call [`PixelSink::begin_frame`] to restart the frame.
@@ -1409,7 +1409,7 @@ pub enum MixedSinkerError {
   )]
   UnsupportedMatrixResample(UnsupportedMatrixResample),
 
-  /// A [`ColorMatrix::ChromaDerivedNcl`](crate::ColorMatrix::ChromaDerivedNcl)
+  /// A [`KernelMatrix::ChromaDerivedNcl`](crate::KernelMatrix::ChromaDerivedNcl)
   /// decode was requested over [`Primaries::SmpteSt428`](crate::Primaries::SmpteSt428)
   /// while the sink is in [`St428Interpretation::CieXyz`] mode (#310).
   ///
@@ -1420,6 +1420,28 @@ pub enum MixedSinkerError {
   #[cfg(feature = "yuv-planar")]
   #[error(transparent)]
   St428CieXyzUnsupported(St428CieXyzUnsupported),
+
+  /// The [`ColorSpec`](crate::ColorSpec) handed to [`Convert`](crate::Convert)
+  /// names a colour matrix pixon implements no decode for.
+  ///
+  /// Raised at the door, before a single row is read — see
+  /// [`ColorSpec::kernel_matrix`](crate::ColorSpec::kernel_matrix) for the
+  /// exact table of what is accepted and what is refused. Through 0.1 these
+  /// matrices decoded as BT.709 and returned a wrong picture with no
+  /// diagnostic.
+  #[error(transparent)]
+  UnsupportedColorMatrix(#[from] crate::UnsupportedKernelMatrixError),
+
+  /// The [`DcpTargetGamut`](crate::DcpTargetGamut) handed to
+  /// [`Convert::target_gamut`](crate::Convert::target_gamut) names no
+  /// tabulated XYZ → RGB matrix.
+  ///
+  /// Raised at the door, before a single row is read — an unknown gamut has
+  /// no luma basis, so it must never be silently converted as if it were
+  /// DCI-P3.
+  #[cfg(feature = "xyz")]
+  #[error(transparent)]
+  UnsupportedTargetGamut(#[from] crate::UnsupportedKernelGamutError),
 }
 
 /// Identifies which slice of a multi‑plane source row mismatched in
@@ -2042,7 +2064,7 @@ impl<F: SourceFormat> DefaultAlphaMode for F {}
 
 /// How SMPTE ST 428-1 (Digital Cinema) [`Primaries::SmpteSt428`] are
 /// interpreted when they feed the
-/// [`ColorMatrix::ChromaDerivedNcl`] luma-weight derivation.
+/// [`KernelMatrix::ChromaDerivedNcl`] luma-weight derivation.
 ///
 /// ST 428-1 encodes colour directly in **CIE XYZ** — its channels *are*
 /// X, Y, Z, so colorimetrically its primaries are the XYZ axes (a
@@ -2076,7 +2098,7 @@ impl<F: SourceFormat> DefaultAlphaMode for F {}
 ///
 /// [`Primaries::SmpteSt428`]: crate::Primaries::SmpteSt428
 /// [`Primaries::chromaticities`]: crate::Primaries::chromaticities
-/// [`ColorMatrix::ChromaDerivedNcl`]: crate::ColorMatrix::ChromaDerivedNcl
+/// [`KernelMatrix::ChromaDerivedNcl`]: crate::KernelMatrix::ChromaDerivedNcl
 #[cfg(feature = "yuv-planar")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, IsVariant)]
 pub enum St428Interpretation {
@@ -2103,7 +2125,7 @@ impl St428Interpretation {
   }
 }
 
-/// A [`ColorMatrix::ChromaDerivedNcl`](crate::ColorMatrix::ChromaDerivedNcl)
+/// A [`KernelMatrix::ChromaDerivedNcl`](crate::KernelMatrix::ChromaDerivedNcl)
 /// decode was requested over [`Primaries::SmpteSt428`](crate::Primaries::SmpteSt428)
 /// while the sink is in [`St428Interpretation::CieXyz`] mode.
 ///
@@ -2137,7 +2159,7 @@ impl St428CieXyzUnsupported {
 /// Self-contained pixon knowledge, independent of the mediaframe version:
 /// Enforces the [`St428Interpretation`] contract at the single
 /// primaries-driven luma-weight derivation
-/// ([`ChromaDerivedNcl`](crate::ColorMatrix::ChromaDerivedNcl), resolved by
+/// ([`ChromaDerivedNcl`](crate::KernelMatrix::ChromaDerivedNcl), resolved by
 /// `row::scalar::Coefficients::for_matrix_with_primaries`).
 ///
 /// Returns [`St428CieXyzUnsupported`] iff `interp` is
@@ -2152,12 +2174,12 @@ impl St428CieXyzUnsupported {
 #[cfg(feature = "yuv-planar")]
 #[cfg_attr(not(tarpaulin), inline(always))]
 const fn st428_chroma_derived_guard(
-  matrix: crate::ColorMatrix,
-  primaries: crate::Primaries,
+  matrix: crate::KernelMatrix,
+  primaries: &crate::Primaries,
   interp: St428Interpretation,
 ) -> Result<(), St428CieXyzUnsupported> {
   if matches!(interp, St428Interpretation::CieXyz)
-    && matches!(matrix, crate::ColorMatrix::ChromaDerivedNcl)
+    && matches!(matrix, crate::KernelMatrix::ChromaDerivedNcl)
     && primaries.is_cie_xyz()
   {
     return Err(St428CieXyzUnsupported::new());
@@ -3128,7 +3150,7 @@ pub struct MixedSinker<'a, F: SourceFormat, R = NoopResampler> {
   /// `begin_frame` so a held row never leaks across frames. Gated to
   /// `yuv-planar`, like [`Self::chroma_prev`].
   #[cfg(feature = "yuv-planar")]
-  chroma_top_pending: Option<(usize, crate::ColorMatrix, bool)>,
+  chroma_top_pending: Option<(usize, crate::KernelMatrix, bool)>,
   /// ST 428-1 colorimetry frozen alongside [`Self::chroma_top_pending`] for the
   /// 8-bit `Yuv420p` **Top** forward-delay identity decode (#310): the source
   /// primaries and [`St428Interpretation`] active when the deferred odd row was
@@ -3632,7 +3654,7 @@ pub struct MixedSinker<'a, F: SourceFormat, R = NoopResampler> {
   averaging_domain: AveragingDomain,
   /// Optional caller override for the [`AveragingDomain::Linear`] transfer
   /// curve. `None` (the default) derives the curve from the sink's
-  /// [`ColorMatrix`](crate::ColorMatrix) via [`TransferFunction::for_matrix`]; `Some(tf)` pins
+  /// [`KernelMatrix`](crate::KernelMatrix) via [`TransferFunction::for_matrix`]; `Some(tf)` pins
   /// `tf` regardless of the matrix. Consulted only on the linear-light
   /// path; the encoded path never reads it. See
   /// [`Self::with_transfer_function`].
@@ -3654,7 +3676,7 @@ pub struct MixedSinker<'a, F: SourceFormat, R = NoopResampler> {
   /// Source colour [`Primaries`](crate::Primaries) — **sink-consumed**, like
   /// [`chroma_location`](Self::chroma_location): mediaframe's YUV row carries
   /// only range + matrix, not the primaries, so the
-  /// [`ColorMatrix::ChromaDerivedNcl`](crate::ColorMatrix::ChromaDerivedNcl)
+  /// [`KernelMatrix::ChromaDerivedNcl`](crate::KernelMatrix::ChromaDerivedNcl)
   /// decode (whose `Kr` / `Kb` are *derived* from the primaries) reads them
   /// here. Defaults to [`Primaries::Unspecified`](crate::Primaries::Unspecified)
   /// (no chromaticities → the prior BT.709 fallback, byte-identical to the
@@ -3665,7 +3687,7 @@ pub struct MixedSinker<'a, F: SourceFormat, R = NoopResampler> {
   #[cfg(feature = "yuv-planar")]
   primaries: crate::Primaries,
   /// How [`Primaries::SmpteSt428`](crate::Primaries::SmpteSt428) is interpreted
-  /// when it feeds the [`ColorMatrix::ChromaDerivedNcl`](crate::ColorMatrix::ChromaDerivedNcl)
+  /// when it feeds the [`KernelMatrix::ChromaDerivedNcl`](crate::KernelMatrix::ChromaDerivedNcl)
   /// luma-weight derivation (#310). Defaults to
   /// [`St428Interpretation::FfmpegTabulated`] — the tabulated derivation,
   /// byte-identical to the pre-#310 behaviour. [`St428Interpretation::CieXyz`]
@@ -3691,6 +3713,36 @@ pub struct MixedSinker<'a, F: SourceFormat, R = NoopResampler> {
   /// wired in.
   #[cfg(feature = "yuv-planar")]
   transfer: crate::Transfer,
+  /// Source **descriptor** [`ColorMatrix`](crate::ColorMatrix) — the open
+  /// matrix tag, sink-consumed alongside [`primaries`](Self::primaries) and
+  /// [`transfer`](Self::transfer).
+  ///
+  /// A walker row carries a [`KernelMatrix`](crate::KernelMatrix), the closed
+  /// selector of the matrices with tabulated *affine* coefficients. The four
+  /// **non-affine** decodes (#303) — [`Ictcp`](crate::ColorMatrix::Ictcp),
+  /// [`ChromaDerivedCl`](crate::ColorMatrix::ChromaDerivedCl),
+  /// [`IptC2`](crate::ColorMatrix::IptC2),
+  /// [`Smpte2085`](crate::ColorMatrix::Smpte2085) — have no such coefficients
+  /// and therefore no `KernelMatrix` spelling, so their tag cannot ride the
+  /// row; it rides here instead, with the transfer and primaries that select
+  /// their variant. Defaults to
+  /// [`ColorMatrix::Unspecified`](crate::ColorMatrix::Unspecified) — no
+  /// non-affine tag → the affine path, byte-identical to the pre-#303
+  /// behaviour. Set via [`Self::with_color_spec`] / [`Self::set_color_spec`].
+  ///
+  /// **One description, one reader.** This field and
+  /// [`kernel_matrix`](Self::kernel_matrix) are not two knobs to keep in step:
+  /// colour intent has a single carrier, [`ColorSpec`](crate::ColorSpec), and
+  /// both are its projections, written together by the one call that can write
+  /// either. Since mediaframe 0.4 the row's selector is read from this same
+  /// sink rather than passed beside it, so the two provably came from one
+  /// description — there is no longer a signature anywhere that could carry a
+  /// second answer. Losing the non-affine tag by naming a matrix somewhere
+  /// else is not a mistake this API can express.
+  ///
+  /// [`Convert::spec`](crate::Convert::spec) sets both from one call.
+  #[cfg(feature = "yuv-planar")]
+  matrix: crate::ColorMatrix,
   /// Per-frame accumulator for the RFC #238 [`AveragingDomain::Linear`]
   /// linear-light tail (planar 8-bit YUV family). Lazily created on the
   /// first output-bearing row of a linear-domain frame; reset to `None` per
@@ -3724,6 +3776,42 @@ pub struct MixedSinker<'a, F: SourceFormat, R = NoopResampler> {
   /// and ignore this field). Default: BT.709 `(54, 183, 19)`.
   #[cfg(any(feature = "bayer", feature = "mono"))]
   luma_coefficients_q8: (u32, u32, u32),
+  /// The closed affine selector every row of a walk is stamped with —
+  /// returned from this sinker's
+  /// [`PixelSink::kernel_matrix`](crate::PixelSink::kernel_matrix).
+  ///
+  /// mediaframe 0.4 took the matrix off the `{fmt}_to` signature and asks
+  /// the sink for it once per walk, because the sink is the thing that
+  /// already holds a colour description and two doors onto one fact is a
+  /// bug generator. So this is where the row's selector now lives.
+  ///
+  /// It can only be written by [`Self::set_color_spec`] /
+  /// [`Self::with_color_spec`], out of
+  /// [`ColorSpec::kernel_matrix`](crate::ColorSpec::kernel_matrix) — the
+  /// single exchange point. Default
+  /// [`KernelMatrix::Bt709`](crate::KernelMatrix::Bt709): the
+  /// unnamed-colorimetry posture, identical to what a spec carrying
+  /// [`ColorMatrix::Unspecified`](crate::ColorMatrix::Unspecified) resolves
+  /// to.
+  ///
+  /// The open [`matrix`](Self::matrix) descriptor beside it is *not* a
+  /// second knob — both are projections of one
+  /// [`ColorSpec`](crate::ColorSpec), set together by the same call. The
+  /// open one carries the four non-affine tags that have no `KernelMatrix`
+  /// spelling; this one carries the affine selector the kernels index.
+  kernel_matrix: crate::KernelMatrix,
+  /// The output RGB gamut an XYZ12 walk decodes into — returned from this
+  /// sinker's [`Xyz12Sink::target_gamut`](crate::source::Xyz12Sink::target_gamut).
+  ///
+  /// Sink-held for the same reason as [`Self::kernel_matrix`], but on the
+  /// opposite axis: a gamut describes the *output*, and this sinker **is**
+  /// the output. Written only by [`Self::set_target_gamut`] /
+  /// [`Self::with_target_gamut`], out of the open
+  /// [`DcpTargetGamut`](crate::DcpTargetGamut) descriptor. Default
+  /// [`KernelGamut::DciP3`](crate::KernelGamut::DciP3) — the theatrical
+  /// decode a DCP distribution master is mastered for.
+  #[cfg(feature = "xyz")]
+  target_gamut: crate::KernelGamut,
   _fmt: PhantomData<F>,
   _resampler: PhantomData<R>,
 }
@@ -4507,6 +4595,8 @@ impl<F: SourceFormat, R> MixedSinker<'_, F, R> {
       #[cfg(feature = "yuv-planar")]
       transfer: crate::Transfer::Unspecified,
       #[cfg(feature = "yuv-planar")]
+      matrix: crate::ColorMatrix::Unspecified,
+      #[cfg(feature = "yuv-planar")]
       linear_mode: LinearMode::DisplayReferred,
       #[cfg(all(feature = "yuv-planar", feature = "rgb"))]
       linear_light_frame: None,
@@ -4519,6 +4609,13 @@ impl<F: SourceFormat, R> MixedSinker<'_, F, R> {
       // targets a different gamut.
       #[cfg(any(feature = "bayer", feature = "mono"))]
       luma_coefficients_q8: (54, 183, 19),
+      // The unnamed-colorimetry posture: what a spec carrying
+      // `ColorMatrix::Unspecified` resolves to, and what the walkers'
+      // matrix parameter defaulted to before mediaframe 0.4 moved the
+      // question to the sink.
+      kernel_matrix: crate::KernelMatrix::Bt709,
+      #[cfg(feature = "xyz")]
+      target_gamut: crate::KernelGamut::DciP3,
       _fmt: PhantomData,
       _resampler: PhantomData,
     }
@@ -5193,7 +5290,7 @@ impl<F: SourceFormat, R> MixedSinker<'_, F, R> {
   /// Because the YUV→RGB convert is affine (no transfer), this lands at a
   /// materially different RGB than the default encoded average — the
   /// quality-vs-default trade the domain offers. The transfer curve is
-  /// resolved from the sink's [`ColorMatrix`](crate::ColorMatrix) unless overridden with
+  /// resolved from the sink's [`KernelMatrix`](crate::KernelMatrix) unless overridden with
   /// [`Self::with_transfer_function`].
   ///
   /// The domain is a no-op for every other format and for the direct
@@ -5208,7 +5305,7 @@ impl<F: SourceFormat, R> MixedSinker<'_, F, R> {
   }
 
   /// Returns the caller's [`TransferFunction`] override, or `None` when the
-  /// linear-light transfer is derived from the [`ColorMatrix`](crate::ColorMatrix). See
+  /// linear-light transfer is derived from the [`KernelMatrix`](crate::KernelMatrix). See
   /// [`Self::with_transfer_function`].
   #[cfg(feature = "yuv-planar")]
   #[cfg_attr(not(tarpaulin), inline(always))]
@@ -5226,7 +5323,7 @@ impl<F: SourceFormat, R> MixedSinker<'_, F, R> {
   }
 
   /// Pins the [`TransferFunction`] the [`AveragingDomain::Linear`] path
-  /// linearises and re-encodes through, overriding the per-`ColorMatrix`
+  /// linearises and re-encodes through, overriding the per-`KernelMatrix`
   /// default ([`TransferFunction::for_matrix`]: the [`ColorMatrix::Rgb`](crate::ColorMatrix::Rgb)
   /// identity → [`TransferFunction::Srgb`], every YCbCr video matrix →
   /// [`TransferFunction::Bt1886`]).
@@ -5249,23 +5346,23 @@ impl<F: SourceFormat, R> MixedSinker<'_, F, R> {
   /// See [`Self::with_chroma_location`].
   #[cfg(feature = "yuv-planar")]
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub const fn chroma_location(&self) -> crate::ChromaLocation {
-    self.chroma_location
+  pub fn chroma_location(&self) -> crate::ChromaLocation {
+    self.chroma_location.clone()
   }
 
   /// The source colour [`Primaries`](crate::Primaries) carried via
   /// [`Self::with_color_spec`] — the coefficient source for the
-  /// [`ColorMatrix::ChromaDerivedNcl`](crate::ColorMatrix::ChromaDerivedNcl)
+  /// [`KernelMatrix::ChromaDerivedNcl`](crate::KernelMatrix::ChromaDerivedNcl)
   /// decode (#303). Defaults to
   /// [`Primaries::Unspecified`](crate::Primaries::Unspecified).
   #[cfg(feature = "yuv-planar")]
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub const fn primaries(&self) -> crate::Primaries {
-    self.primaries
+  pub fn primaries(&self) -> crate::Primaries {
+    self.primaries.clone()
   }
 
   /// How [`Primaries::SmpteSt428`](crate::Primaries::SmpteSt428) is interpreted
-  /// for the [`ColorMatrix::ChromaDerivedNcl`](crate::ColorMatrix::ChromaDerivedNcl)
+  /// for the [`KernelMatrix::ChromaDerivedNcl`](crate::KernelMatrix::ChromaDerivedNcl)
   /// decode (#310), set via [`Self::with_st428_interpretation`]. Defaults to
   /// [`St428Interpretation::FfmpegTabulated`].
   #[cfg(feature = "yuv-planar")]
@@ -5281,15 +5378,15 @@ impl<F: SourceFormat, R> MixedSinker<'_, F, R> {
   /// [`Transfer::Unspecified`](crate::Transfer::Unspecified).
   #[cfg(feature = "yuv-planar")]
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub const fn transfer(&self) -> crate::Transfer {
-    self.transfer
+  pub fn transfer(&self) -> crate::Transfer {
+    self.transfer.clone()
   }
 
   /// Sets the chroma sample location in place. See
   /// [`Self::with_chroma_location`] for the consuming builder variant.
   #[cfg(feature = "yuv-planar")]
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub const fn set_chroma_location(&mut self, loc: crate::ChromaLocation) -> &mut Self {
+  pub fn set_chroma_location(&mut self, loc: crate::ChromaLocation) -> &mut Self {
     self.chroma_location = loc;
     self
   }
@@ -5312,45 +5409,67 @@ impl<F: SourceFormat, R> MixedSinker<'_, F, R> {
   /// extends them. See [`Self::set_chroma_location`] for the in-place variant.
   #[cfg(feature = "yuv-planar")]
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub const fn with_chroma_location(mut self, loc: crate::ChromaLocation) -> Self {
-    self.set_chroma_location(loc);
+  pub fn with_chroma_location(mut self, loc: crate::ChromaLocation) -> Self {
+    self.set_chroma_location(loc.clone());
     self
   }
 
-  /// Applies the **sink-consumed** colour metadata of a resolved
-  /// [`ColorSpec`](crate::ColorSpec) in place — currently its
-  /// [`ChromaLocation`](crate::ChromaLocation), driving siting-aware 4:2:0
-  /// upsampling (#302). See [`Self::with_color_spec`].
-  #[cfg(feature = "yuv-planar")]
+  /// Applies a resolved [`ColorSpec`](crate::ColorSpec) in place — the
+  /// [`kernel_matrix`](Self::kernel_matrix) every row of the walk is stamped
+  /// with, plus the [`ChromaLocation`](crate::ChromaLocation) (siting-aware
+  /// 4:2:0 upsampling, #302), the [`primaries`](Self::primaries),
+  /// [`transfer`](Self::transfer) and open matrix descriptor the non-affine
+  /// decodes read (#303). See [`Self::with_color_spec`].
+  ///
+  /// # Errors
+  ///
+  /// [`UnsupportedKernelMatrixError`](crate::UnsupportedKernelMatrixError)
+  /// when the spec names a colour matrix pixon has no decode for — see
+  /// [`ColorSpec::kernel_matrix`](crate::ColorSpec::kernel_matrix). The
+  /// refusal lands here, before a single row is read, rather than the walk
+  /// silently producing BT.709 pixels.
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub const fn set_color_spec(&mut self, spec: crate::ColorSpec) -> &mut Self {
-    self.chroma_location = spec.chroma_location();
-    self.primaries = spec.primaries();
-    self.transfer = spec.transfer();
-    self
+  pub fn set_color_spec(
+    &mut self,
+    spec: &crate::ColorSpec,
+  ) -> Result<&mut Self, crate::UnsupportedKernelMatrixError> {
+    self.kernel_matrix = spec.kernel_matrix()?;
+    #[cfg(feature = "yuv-planar")]
+    {
+      self.chroma_location = spec.chroma_location();
+      self.primaries = spec.primaries();
+      self.transfer = spec.transfer();
+      self.matrix = spec.matrix();
+    }
+    Ok(self)
   }
 
   /// Configures the sink from a resolved [`ColorSpec`](crate::ColorSpec),
   /// completing the **end-to-end ColorSpec decode path** (#301 / #302 / #303).
   ///
-  /// A `ColorSpec` splits across two consumers: its
-  /// [`matrix`](crate::ColorSpec::matrix) and
-  /// [`full_range`](crate::ColorSpec::full_range) are **walker-consumed** —
-  /// route them via [`YuvOptions::from_color_spec`](crate::YuvOptions::from_color_spec)
-  /// to the `*_to` walk — while its
-  /// [`chroma_location`](crate::ColorSpec::chroma_location) and
-  /// [`primaries`](crate::ColorSpec::primaries) are **sink-consumed**
-  /// (mediaframe's YUV row carries only range + matrix, neither the siting nor
-  /// the primaries). This builder threads the latter pair so the **same
-  /// `spec`** drives both halves — the `primaries` feed the
-  /// [`ColorMatrix::ChromaDerivedNcl`](crate::ColorMatrix::ChromaDerivedNcl)
+  /// A `ColorSpec` is the single carrier of colour intent, and since
+  /// mediaframe 0.4 this sink is its single *reader*: the walkers no longer
+  /// take a matrix beside the sink, they ask the sink. So one call configures
+  /// the whole decode — the closed
+  /// [`kernel_matrix`](crate::ColorSpec::kernel_matrix) the rows are stamped
+  /// with, the [`chroma_location`](crate::ColorSpec::chroma_location),
+  /// the [`primaries`](crate::ColorSpec::primaries),
+  /// the [`transfer`](crate::ColorSpec::transfer), and the open
+  /// [`matrix`](crate::ColorSpec::matrix) descriptor that carries the four
+  /// non-affine tags no `KernelMatrix` can spell. The spec's
+  /// [`full_range`](crate::ColorSpec::full_range) is the one half still
+  /// walker-consumed — it is a quantisation fact about the *frame*, not a
+  /// colour intent the sink owns — so route it via
+  /// [`YuvOptions::from_color_spec`](crate::YuvOptions::from_color_spec).
+  /// The `primaries` feed the
+  /// [`KernelMatrix::ChromaDerivedNcl`](crate::KernelMatrix::ChromaDerivedNcl)
   /// decode (#303), whose `Kr` / `Kb` are derived from them:
   ///
   /// ```
   /// # #[cfg(all(feature = "yuv-planar", feature = "rgb"))] {
   /// use pixon::{
-  ///   ChromaLocation, ColorInfo, ColorMatrix, ColorSpec, DynamicRange, PixelFormat,
-  ///   Primaries, Transfer, YuvOptions, sinker::MixedSinker, source::Yuv420p,
+  ///   ChromaLocation, ColorInfo, ColorMatrix, ColorSpec, DynamicRange, KernelMatrix,
+  ///   PixelFormat, Primaries, Transfer, YuvOptions, sinker::MixedSinker, source::Yuv420p,
   /// };
   ///
   /// let info = ColorInfo::new(
@@ -5358,16 +5477,23 @@ impl<F: SourceFormat, R> MixedSinker<'_, F, R> {
   ///     DynamicRange::Limited, ChromaLocation::Center,
   /// );
   /// let spec = ColorSpec::from_info(PixelFormat::Yuv420p, info);
-  /// let opts = YuvOptions::from_color_spec(spec);
+  /// let opts = YuvOptions::from_color_spec(&spec);
   /// let mut rgb = [0u8; 4 * 2 * 3];
   /// let sink = MixedSinker::<Yuv420p>::new(4, 2)
   ///     .with_rgb(&mut rgb)
   ///     .unwrap()
-  ///     .with_color_spec(spec); // carries ChromaLocation::Center to the decode
+  ///     .with_color_spec(&spec) // carries siting *and* the row's matrix
+  ///     .unwrap();
   /// assert_eq!(sink.chroma_location(), ChromaLocation::Center);
+  /// assert_eq!(sink.kernel_matrix(), KernelMatrix::Bt601);
   /// # let _ = opts;
   /// # }
   /// ```
+  ///
+  /// # Errors
+  ///
+  /// [`UnsupportedKernelMatrixError`](crate::UnsupportedKernelMatrixError) —
+  /// see [`Self::set_color_spec`].
   ///
   /// **`ChromaDerivedNcl` scope.** The `primaries`-derived `ChromaDerivedNcl`
   /// decode is currently wired for `Yuv420p` only (#316). Every other format —
@@ -5381,11 +5507,98 @@ impl<F: SourceFormat, R> MixedSinker<'_, F, R> {
   ///
   /// See [`Self::set_color_spec`] for the in-place variant and
   /// [`Self::with_chroma_location`] to set the siting directly.
-  #[cfg(feature = "yuv-planar")]
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub const fn with_color_spec(mut self, spec: crate::ColorSpec) -> Self {
-    self.set_color_spec(spec);
+  pub fn with_color_spec(
+    mut self,
+    spec: &crate::ColorSpec,
+  ) -> Result<Self, crate::UnsupportedKernelMatrixError> {
+    self.set_color_spec(spec)?;
+    Ok(self)
+  }
+
+  /// The closed affine selector this sinker stamps on every row of a walk —
+  /// what its [`PixelSink::kernel_matrix`](crate::PixelSink::kernel_matrix)
+  /// returns. Set by [`Self::set_color_spec`] / [`Self::with_color_spec`];
+  /// defaults to [`KernelMatrix::Bt709`](crate::KernelMatrix::Bt709).
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
+
+  /// Pins the row selector alone, leaving the rest of the colour description
+  /// untouched — the in-crate twin of mediaframe's `*Row::for_tests` door.
+  ///
+  /// The kernel-parity suites drive one matrix through one kernel and assert
+  /// bytes; they are not describing a stream, so routing them through
+  /// [`ColorSpec`](crate::ColorSpec) would also reset the siting / primaries /
+  /// transfer a siting test had just set. Crate-private and `#[cfg(test)]`, so
+  /// it is not a second door onto the public surface: outside these tests a
+  /// [`KernelMatrix`](crate::KernelMatrix) still reaches a walk only through
+  /// [`ColorSpec::kernel_matrix`](crate::ColorSpec::kernel_matrix).
+  #[cfg(test)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub(crate) const fn set_kernel_matrix(&mut self, matrix: crate::KernelMatrix) -> &mut Self {
+    self.kernel_matrix = matrix;
     self
+  }
+
+  /// Pins the XYZ12 output gamut alone. The [`Self::set_kernel_matrix`]
+  /// rationale, on the gamut axis.
+  #[cfg(all(test, feature = "xyz"))]
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub(crate) const fn set_kernel_gamut(&mut self, gamut: crate::KernelGamut) -> &mut Self {
+    self.target_gamut = gamut;
+    self
+  }
+
+  /// The output RGB gamut an XYZ12 walk decodes into — what this sinker's
+  /// [`Xyz12Sink::target_gamut`](crate::source::Xyz12Sink::target_gamut)
+  /// returns. See [`Self::with_target_gamut`].
+  #[cfg(feature = "xyz")]
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn target_gamut(&self) -> crate::KernelGamut {
+    self.target_gamut
+  }
+
+  /// Sets the output RGB gamut of an XYZ12 walk in place, exchanging the open
+  /// [`DcpTargetGamut`](crate::DcpTargetGamut) descriptor for the closed
+  /// selector the 3×3 matmul indexes. See [`Self::with_target_gamut`].
+  ///
+  /// # Errors
+  ///
+  /// [`UnsupportedKernelGamutError`](crate::UnsupportedKernelGamutError) when
+  /// the descriptor names a gamut this build has no luma basis for — refused
+  /// here rather than silently decoded as if it were DCI-P3.
+  #[cfg(feature = "xyz")]
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn set_target_gamut(
+    &mut self,
+    gamut: &crate::DcpTargetGamut,
+  ) -> Result<&mut Self, crate::UnsupportedKernelGamutError> {
+    self.target_gamut = crate::KernelGamut::try_from(gamut)?;
+    Ok(self)
+  }
+
+  /// Sets the output RGB gamut of an XYZ12 walk, consuming builder.
+  ///
+  /// The gamut is an *output* axis and this sinker is the output, so — since
+  /// mediaframe 0.4 — [`xyz12_to`](crate::source::xyz12_to) asks the sink for
+  /// it instead of taking it beside the sink. This is the only door: a
+  /// [`KernelGamut`](crate::KernelGamut) cannot be conjured next to the
+  /// descriptor that was supposed to choose it.
+  ///
+  /// # Errors
+  ///
+  /// [`UnsupportedKernelGamutError`](crate::UnsupportedKernelGamutError) —
+  /// see [`Self::set_target_gamut`].
+  #[cfg(feature = "xyz")]
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn with_target_gamut(
+    mut self,
+    gamut: &crate::DcpTargetGamut,
+  ) -> Result<Self, crate::UnsupportedKernelGamutError> {
+    self.set_target_gamut(gamut)?;
+    Ok(self)
   }
 
   /// Returns how the [`AveragingDomain::Linear`] tail decodes `YUV→RGB`
@@ -5443,7 +5656,7 @@ impl<F: SourceFormat, R> MixedSinker<'_, F, R> {
 
   /// Selects how [`Primaries::SmpteSt428`](crate::Primaries::SmpteSt428) is
   /// interpreted when it feeds the
-  /// [`ColorMatrix::ChromaDerivedNcl`](crate::ColorMatrix::ChromaDerivedNcl)
+  /// [`KernelMatrix::ChromaDerivedNcl`](crate::KernelMatrix::ChromaDerivedNcl)
   /// luma-weight derivation (#310), overriding the default
   /// [`St428Interpretation::FfmpegTabulated`].
   ///
@@ -6669,7 +6882,7 @@ pub(super) fn packed_rgb_resample_emit(
   luma_u16: &mut Option<&mut [u16]>,
   hsv: &mut Option<HsvFrameMut<'_>>,
   src_rgb: &[u8],
-  matrix: crate::ColorMatrix,
+  matrix: crate::KernelMatrix,
   full_range: bool,
   idx: usize,
   use_simd: bool,
@@ -6759,7 +6972,7 @@ pub(super) fn packed_rgb_resample(
   plan: &ResamplePlan,
   idx: usize,
   use_simd: bool,
-  matrix: crate::ColorMatrix,
+  matrix: crate::KernelMatrix,
   full_range: bool,
   convert: impl FnOnce(&mut [u8]),
 ) -> Result<(), MixedSinkerError> {
@@ -6887,7 +7100,7 @@ pub(super) fn packed_rgb_resample_filter(
   plan: &ResamplePlan,
   idx: usize,
   use_simd: bool,
-  matrix: crate::ColorMatrix,
+  matrix: crate::KernelMatrix,
   full_range: bool,
   convert: impl FnOnce(&mut [u8]),
 ) -> Result<(), MixedSinkerError> {
@@ -7025,7 +7238,7 @@ pub(super) fn packed_rgba_filter_resample(
   plan: &ResamplePlan,
   idx: usize,
   use_simd: bool,
-  matrix: crate::ColorMatrix,
+  matrix: crate::KernelMatrix,
   full_range: bool,
   convert_rgba: impl FnOnce(&mut [u8]),
 ) -> Result<(), MixedSinkerError> {
@@ -7256,7 +7469,7 @@ pub(super) fn packed_rgba_u16_filter_resample<const SRC_BITS: u32, const NATIVE_
   plan: &ResamplePlan,
   idx: usize,
   use_simd: bool,
-  matrix: crate::ColorMatrix,
+  matrix: crate::KernelMatrix,
   full_range: bool,
   convert_rgba_u16: impl FnOnce(&mut [u16]),
 ) -> Result<(), MixedSinkerError> {
@@ -7653,7 +7866,7 @@ pub(super) fn packed_rgb_u16_resample_emit<const SRC_BITS: u32, const NATIVE_LUM
   hsv: &mut Option<HsvFrameMut<'_>>,
   src_u16: &[u16],
   narrow_scratch: &mut Vec<u8>,
-  matrix: crate::ColorMatrix,
+  matrix: crate::KernelMatrix,
   full_range: bool,
   idx: usize,
   use_simd: bool,
@@ -7838,7 +8051,7 @@ pub(super) fn packed_rgb_u16_resample<const SRC_BITS: u32, const NATIVE_LUMA16: 
   plan: &ResamplePlan,
   idx: usize,
   use_simd: bool,
-  matrix: crate::ColorMatrix,
+  matrix: crate::KernelMatrix,
   full_range: bool,
   convert: impl FnOnce(&mut [u16]),
 ) -> Result<(), MixedSinkerError> {
@@ -8000,7 +8213,7 @@ pub(super) fn packed_rgb_u16_resample_filter<const SRC_BITS: u32, const NATIVE_L
   plan: &ResamplePlan,
   idx: usize,
   use_simd: bool,
-  matrix: crate::ColorMatrix,
+  matrix: crate::KernelMatrix,
   full_range: bool,
   convert: impl FnOnce(&mut [u16]),
 ) -> Result<(), MixedSinkerError> {
@@ -8311,7 +8524,7 @@ pub(super) fn packed_rgb_u32_resample<const NATIVE_LUMA16: bool>(
   plan: &ResamplePlan,
   idx: usize,
   use_simd: bool,
-  matrix: crate::ColorMatrix,
+  matrix: crate::KernelMatrix,
   full_range: bool,
   convert: impl FnOnce(&mut [u32]),
 ) -> Result<(), MixedSinkerError> {
@@ -8470,7 +8683,7 @@ pub(super) fn packed_rgb_u32_resample_filter<const NATIVE_LUMA16: bool>(
   plan: &ResamplePlan,
   idx: usize,
   use_simd: bool,
-  matrix: crate::ColorMatrix,
+  matrix: crate::KernelMatrix,
   full_range: bool,
   convert: impl FnOnce(&mut [u32]),
 ) -> Result<(), MixedSinkerError> {
@@ -8617,7 +8830,7 @@ pub(super) fn packed_rgb_u32_resample_emit<const NATIVE_LUMA16: bool>(
   src_u32: &[u32],
   binned_scratch_u16: &mut Vec<u16>,
   narrow_scratch: &mut Vec<u8>,
-  matrix: crate::ColorMatrix,
+  matrix: crate::KernelMatrix,
   full_range: bool,
   idx: usize,
   use_simd: bool,
@@ -8780,7 +8993,7 @@ fn derive_packed_rgba_u32_outputs<const NATIVE_LUMA16: bool>(
   need_narrow: bool,
   native_luma: bool,
   narrowed_luma_u16: bool,
-  matrix: crate::ColorMatrix,
+  matrix: crate::KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) {
@@ -8899,7 +9112,7 @@ pub(super) fn packed_rgba_u32_resample<const NATIVE_LUMA16: bool>(
   idx: usize,
   use_simd: bool,
   alpha_mode: AlphaMode,
-  matrix: crate::ColorMatrix,
+  matrix: crate::KernelMatrix,
   full_range: bool,
   convert_rgba_u32: impl FnOnce(&mut [u32]),
 ) -> Result<(), MixedSinkerError> {
@@ -9098,7 +9311,7 @@ pub(super) fn packed_rgba_u32_filter_resample<const NATIVE_LUMA16: bool>(
   plan: &ResamplePlan,
   idx: usize,
   use_simd: bool,
-  matrix: crate::ColorMatrix,
+  matrix: crate::KernelMatrix,
   full_range: bool,
   convert_rgba_u32: impl FnOnce(&mut [u32]),
 ) -> Result<(), MixedSinkerError> {
@@ -9597,7 +9810,7 @@ pub(super) fn packed_rgba_resample<const NATIVE_Y_LUMA: bool>(
   idx: usize,
   use_simd: bool,
   alpha_mode: AlphaMode,
-  matrix: crate::ColorMatrix,
+  matrix: crate::KernelMatrix,
   full_range: bool,
   convert_rgba: impl FnOnce(&mut [u8]),
   deinterleave_y: impl FnOnce(&mut [u8]),
@@ -9854,7 +10067,7 @@ pub(super) fn packed_rgba_resample<const NATIVE_Y_LUMA: bool>(
 ///
 /// Like the genuinely-chromatic packed-RGBA sources, `Pal8` has **no
 /// native luma plane**: its direct `luma` / `luma_u16` are derived from
-/// the looked-up RGB. But unlike them it carries **no `ColorMatrix` /
+/// the looked-up RGB. But unlike them it carries **no `KernelMatrix` /
 /// range** on the row — its luma uses the sink's configured Q8 coefficient
 /// set (`LumaCoefficients`, default BT.709), exactly as the Bayer / Pal8
 /// identity path does. So this tail emits luma via the **Q8**
@@ -10390,7 +10603,7 @@ pub(super) fn packed_rgba_u16_resample<
   idx: usize,
   use_simd: bool,
   alpha_mode: AlphaMode,
-  matrix: crate::ColorMatrix,
+  matrix: crate::KernelMatrix,
   full_range: bool,
   convert_rgba_u16: impl FnOnce(&mut [u16]),
   deinterleave_y: impl FnOnce(&mut [u16]),
@@ -10871,7 +11084,7 @@ pub(super) fn packed_yuv444_triple_resample<const SRC_BITS: u32>(
   plan: &ResamplePlan,
   idx: usize,
   use_simd: bool,
-  matrix: crate::ColorMatrix,
+  matrix: crate::KernelMatrix,
   full_range: bool,
   convert_rgb_u8: impl FnOnce(&mut [u8]),
   convert_rgb_u16: impl FnOnce(&mut [u16]),
@@ -11069,7 +11282,7 @@ fn packed_yuv444_triple_feed_emit<U8S, U16S, Y16S, const SRC_BITS: u32>(
   plan: &ResamplePlan,
   idx: usize,
   use_simd: bool,
-  matrix: crate::ColorMatrix,
+  matrix: crate::KernelMatrix,
   full_range: bool,
   convert_rgb_u8: impl FnOnce(&mut [u8]),
   convert_rgb_u16: impl FnOnce(&mut [u16]),
@@ -11262,7 +11475,7 @@ pub(super) fn packed_yuv444_triple_filter_resample<const SRC_BITS: u32>(
   plan: &ResamplePlan,
   idx: usize,
   use_simd: bool,
-  matrix: crate::ColorMatrix,
+  matrix: crate::KernelMatrix,
   full_range: bool,
   convert_rgb_u8: impl FnOnce(&mut [u8]),
   convert_rgb_u16: impl FnOnce(&mut [u16]),
@@ -12545,7 +12758,7 @@ fn y2xx_process_native<const BITS: u32, const BE: bool>(
   rgb_scratch_u16: &mut Vec<u16>,
   packed: &[u16],
   chroma_h_phase: f64,
-  matrix: crate::ColorMatrix,
+  matrix: crate::KernelMatrix,
   full_range: bool,
   idx: usize,
   w: usize,
@@ -12909,7 +13122,7 @@ fn v210_process_native<const BE: bool>(
   rgb_scratch_u16: &mut Vec<u16>,
   packed: &[u8],
   chroma_h_phase: f64,
-  matrix: crate::ColorMatrix,
+  matrix: crate::KernelMatrix,
   full_range: bool,
   idx: usize,
   w: usize,
@@ -13404,7 +13617,7 @@ fn packed_vuyx_process_native(
   hsv: &mut Option<HsvFrameMut<'_>>,
   rgb_scratch: &mut Vec<u8>,
   packed: &[u8],
-  matrix: crate::ColorMatrix,
+  matrix: crate::KernelMatrix,
   full_range: bool,
   idx: usize,
   w: usize,
@@ -13509,7 +13722,7 @@ fn packed_vyu444_process_native(
   hsv: &mut Option<HsvFrameMut<'_>>,
   rgb_scratch: &mut Vec<u8>,
   packed: &[u8],
-  matrix: crate::ColorMatrix,
+  matrix: crate::KernelMatrix,
   full_range: bool,
   idx: usize,
   w: usize,
@@ -13647,7 +13860,7 @@ fn packed_yuv444_hb_process_native<const BITS: u32>(
   rgb_scratch_u16: &mut Vec<u16>,
   fill_y: impl FnOnce(&mut [u16]),
   fill_uv: impl FnOnce(&mut [u16], &mut [u16]),
-  matrix: crate::ColorMatrix,
+  matrix: crate::KernelMatrix,
   full_range: bool,
   idx: usize,
   w: usize,
@@ -13819,7 +14032,7 @@ pub(super) fn packed_yuv422_triple_resample<const SRC_BITS: u32>(
   plan: &ResamplePlan,
   idx: usize,
   use_simd: bool,
-  matrix: crate::ColorMatrix,
+  matrix: crate::KernelMatrix,
   full_range: bool,
   deinterleave_y_u16: impl FnOnce(&mut [u16]),
   convert_rgb_u8: impl FnOnce(&mut [u8]),
@@ -14097,7 +14310,7 @@ pub(super) fn packed_yuv422_triple_filter_resample<const SRC_BITS: u32>(
   plan: &ResamplePlan,
   idx: usize,
   use_simd: bool,
-  matrix: crate::ColorMatrix,
+  matrix: crate::KernelMatrix,
   full_range: bool,
   deinterleave_y_u16: impl FnOnce(&mut [u16]),
   convert_rgb_u8: impl FnOnce(&mut [u8]),
@@ -14808,7 +15021,7 @@ pub(super) fn packed_rgb_f32_resample_emit(
   hsv: &mut Option<HsvFrameMut<'_>>,
   src_f32: &[f32],
   narrow_scratch: &mut Vec<u8>,
-  matrix: crate::ColorMatrix,
+  matrix: crate::KernelMatrix,
   full_range: bool,
   idx: usize,
   use_simd: bool,
@@ -15019,7 +15232,7 @@ pub(super) fn packed_rgb_f16_resample_emit(
   src_f32: &[f32],
   packed_scratch_f16: &mut Vec<half::f16>,
   narrow_scratch: &mut Vec<u8>,
-  matrix: crate::ColorMatrix,
+  matrix: crate::KernelMatrix,
   full_range: bool,
   idx: usize,
   use_simd: bool,
@@ -15555,7 +15768,7 @@ pub(super) fn packed_rgba_f32_resample_emit(
   hsv: &mut Option<HsvFrameMut<'_>>,
   src_rgba: &[f32],
   narrow_scratch: &mut Vec<u8>,
-  matrix: crate::ColorMatrix,
+  matrix: crate::KernelMatrix,
   full_range: bool,
   idx: usize,
   use_simd: bool,
@@ -15725,7 +15938,7 @@ pub(super) fn packed_rgba_f16_resample_emit(
   src_rgba: &[f32],
   packed_scratch_f16: &mut Vec<half::f16>,
   narrow_scratch: &mut Vec<u8>,
-  matrix: crate::ColorMatrix,
+  matrix: crate::KernelMatrix,
   full_range: bool,
   idx: usize,
   use_simd: bool,
@@ -15922,7 +16135,7 @@ pub(super) fn planar_gbr_f32_resample_emit(
   hsv: &mut Option<HsvFrameMut<'_>>,
   src_f32: &[f32],
   plane_scratch: &mut Vec<f32>,
-  matrix: crate::ColorMatrix,
+  matrix: crate::KernelMatrix,
   full_range: bool,
   idx: usize,
   use_simd: bool,
@@ -16152,7 +16365,7 @@ pub(super) fn planar_gbr_f16_resample_emit(
   hsv: &mut Option<HsvFrameMut<'_>>,
   src_f32: &[f32],
   plane_scratch_f16: &mut Vec<half::f16>,
-  matrix: crate::ColorMatrix,
+  matrix: crate::KernelMatrix,
   full_range: bool,
   idx: usize,
   use_simd: bool,
@@ -16699,7 +16912,7 @@ pub(super) fn packed_rgba_f32_resample(
   idx: usize,
   use_simd: bool,
   alpha_mode: AlphaMode,
-  matrix: crate::ColorMatrix,
+  matrix: crate::KernelMatrix,
   full_range: bool,
   convert_rgba: impl FnOnce(&mut [f32]),
 ) -> Result<(), MixedSinkerError> {
@@ -16880,7 +17093,7 @@ fn packed_rgba_f32_emit(
   use_simd: bool,
   premult: bool,
   need_planes: bool,
-  matrix: crate::ColorMatrix,
+  matrix: crate::KernelMatrix,
   full_range: bool,
   convert_rgba: impl FnOnce(&mut [f32]),
 ) -> Result<(), MixedSinkerError> {
@@ -17111,7 +17324,7 @@ pub(super) fn packed_rgba_f32_filter_resample(
   plan: &ResamplePlan,
   idx: usize,
   use_simd: bool,
-  matrix: crate::ColorMatrix,
+  matrix: crate::KernelMatrix,
   full_range: bool,
   convert_rgba: impl FnOnce(&mut [f32]),
 ) -> Result<(), MixedSinkerError> {
@@ -17292,7 +17505,7 @@ pub(super) fn packed_rgba_f16_resample(
   idx: usize,
   use_simd: bool,
   alpha_mode: AlphaMode,
-  matrix: crate::ColorMatrix,
+  matrix: crate::KernelMatrix,
   full_range: bool,
   convert_rgba: impl FnOnce(&mut [f32]),
 ) -> Result<(), MixedSinkerError> {
@@ -17452,7 +17665,7 @@ fn packed_rgba_f16_emit(
   use_simd: bool,
   premult: bool,
   need_planes: bool,
-  matrix: crate::ColorMatrix,
+  matrix: crate::KernelMatrix,
   full_range: bool,
   convert_rgba: impl FnOnce(&mut [f32]),
 ) -> Result<(), MixedSinkerError> {
@@ -17728,7 +17941,7 @@ pub(super) fn packed_rgba_f16_filter_resample(
   plan: &ResamplePlan,
   idx: usize,
   use_simd: bool,
-  matrix: crate::ColorMatrix,
+  matrix: crate::KernelMatrix,
   full_range: bool,
   convert_rgba: impl FnOnce(&mut [f32]),
 ) -> Result<(), MixedSinkerError> {
@@ -17981,7 +18194,7 @@ pub(super) fn xyz12_resample_emit(
   hsv: &mut Option<HsvFrameMut<'_>>,
   src_xyz: &[f32],
   narrow_scratch: &mut Vec<u8>,
-  target_gamut: crate::DcpTargetGamut,
+  target_gamut: crate::KernelGamut,
   luma_q15: (i32, i32, i32),
   idx: usize,
   use_simd: bool,
@@ -18151,7 +18364,7 @@ pub(super) fn xyz12_resample_emit(
 /// has no native luma plane to memcpy from. YUV source impls take
 /// their luma directly off the Y plane and don't go through this
 /// helper, so they don't need a configurable coefficient set —
-/// the source's `ColorMatrix` already fixed it at encode time.
+/// the source's `KernelMatrix` already fixed it at encode time.
 #[cfg(any(feature = "bayer", feature = "mono"))]
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(super) fn rgb_row_to_luma_row(rgb: &[u8], luma: &mut [u8], coeffs_q8: (u32, u32, u32)) {

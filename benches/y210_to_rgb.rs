@@ -12,7 +12,7 @@
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;
 
-use pixon::{ColorMatrix, bench_internals::y210_to_rgb_row};
+use pixon::{KernelMatrix, bench_internals::y210_to_rgb_row};
 
 /// Fills a `u16` buffer with deterministic Y210‑packed pseudo‑random
 /// samples — 10‑bit values shifted into the high 10 bits of each
@@ -28,7 +28,7 @@ fn fill_pseudo_random_y210(buf: &mut [u16], seed: u32) {
 fn bench(c: &mut Criterion) {
   // 720p / 1080p / 4K — all even (Y210 requires even width).
   const WIDTHS: &[usize] = &[1280, 1920, 3840];
-  const MATRIX: ColorMatrix = ColorMatrix::Bt2020Ncl;
+  const MATRIX: KernelMatrix = KernelMatrix::Bt2020Ncl;
   const FULL_RANGE: bool = false;
 
   let mut group = c.benchmark_group("y210_to_rgb_row");

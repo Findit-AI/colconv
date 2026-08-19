@@ -37,7 +37,7 @@
 //! build.
 
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   frame::{Yuv420pFrame, Yuv422pFrame, Yuv444pFrame, Yuva420pFrame, Yuva422pFrame, Yuva444pFrame},
   resample::{
     CatmullRom, FilterKernel, FilterStream, FilteredResampler, Lanczos3, Resampler, Triangle,
@@ -49,7 +49,7 @@ use crate::{
   },
 };
 
-const M: ColorMatrix = ColorMatrix::Bt709;
+const M: KernelMatrix = KernelMatrix::Bt709;
 const FR: bool = true;
 const NATIVE_MAX: u16 = 255; // 8-bit native Y / colour max (pre-fix u16 clamp)
 
@@ -192,7 +192,7 @@ impl Yuva8Filter for Yuva420pF {
       .unwrap()
       .with_luma_u16(&mut luma_u16)
       .unwrap();
-      yuva420p_to(&src, FR, M, &mut sink).unwrap();
+      yuva420p_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     }
     FilterOutputs {
       rgb,
@@ -214,7 +214,7 @@ impl Yuva8Filter for Yuva420pF {
       let mut sink = MixedSinker::<Yuva420p>::new(w, h)
         .with_rgba(&mut rgba)
         .unwrap();
-      yuva420p_to(&src, FR, M, &mut sink).unwrap();
+      yuva420p_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     }
     rgba
   }
@@ -246,7 +246,7 @@ impl Yuva8Filter for Yuva420pF {
       .unwrap()
       .with_luma_u16(&mut luma_u16)
       .unwrap();
-      yuv420p_to(&src, FR, M, &mut sink).unwrap();
+      yuv420p_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     }
     (luma, luma_u16)
   }
@@ -292,7 +292,7 @@ impl Yuva8Filter for Yuva422pF {
       .unwrap()
       .with_luma_u16(&mut luma_u16)
       .unwrap();
-      yuva422p_to(&src, FR, M, &mut sink).unwrap();
+      yuva422p_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     }
     FilterOutputs {
       rgb,
@@ -314,7 +314,7 @@ impl Yuva8Filter for Yuva422pF {
       let mut sink = MixedSinker::<Yuva422p>::new(w, h)
         .with_rgba(&mut rgba)
         .unwrap();
-      yuva422p_to(&src, FR, M, &mut sink).unwrap();
+      yuva422p_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     }
     rgba
   }
@@ -346,7 +346,7 @@ impl Yuva8Filter for Yuva422pF {
       .unwrap()
       .with_luma_u16(&mut luma_u16)
       .unwrap();
-      yuv422p_to(&src, FR, M, &mut sink).unwrap();
+      yuv422p_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     }
     (luma, luma_u16)
   }
@@ -391,7 +391,7 @@ impl Yuva8Filter for Yuva444pF {
       .unwrap()
       .with_luma_u16(&mut luma_u16)
       .unwrap();
-      yuva444p_to(&src, FR, M, &mut sink).unwrap();
+      yuva444p_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     }
     FilterOutputs {
       rgb,
@@ -412,7 +412,7 @@ impl Yuva8Filter for Yuva444pF {
       let mut sink = MixedSinker::<Yuva444p>::new(w, h)
         .with_rgba(&mut rgba)
         .unwrap();
-      yuva444p_to(&src, FR, M, &mut sink).unwrap();
+      yuva444p_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     }
     rgba
   }
@@ -443,7 +443,7 @@ impl Yuva8Filter for Yuva444pF {
       .unwrap()
       .with_luma_u16(&mut luma_u16)
       .unwrap();
-      yuv444p_to(&src, FR, M, &mut sink).unwrap();
+      yuv444p_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     }
     (luma, luma_u16)
   }
@@ -972,7 +972,7 @@ mod packed_rgba_equivalence {
       .unwrap()
       .with_rgba(&mut out)
       .unwrap();
-      rgba_to(&src, FR, M, &mut sink).unwrap();
+      rgba_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     }
     out
   }

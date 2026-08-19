@@ -8,7 +8,7 @@
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;
 
-use pixon::{ColorMatrix, bench_internals::y212_to_rgb_row};
+use pixon::{KernelMatrix, bench_internals::y212_to_rgb_row};
 
 /// Fills a `u16` buffer with deterministic Y212‑packed pseudo‑random
 /// samples — 12‑bit values shifted into the high 12 bits (low 4 bits
@@ -23,7 +23,7 @@ fn fill_pseudo_random_y212(buf: &mut [u16], seed: u32) {
 
 fn bench(c: &mut Criterion) {
   const WIDTHS: &[usize] = &[1280, 1920, 3840];
-  const MATRIX: ColorMatrix = ColorMatrix::Bt2020Ncl;
+  const MATRIX: KernelMatrix = KernelMatrix::Bt2020Ncl;
   const FULL_RANGE: bool = false;
 
   let mut group = c.benchmark_group("y212_to_rgb_row");

@@ -38,14 +38,14 @@
 //! `u16::MAX`, so a 16-bit format has no over-native-max overshoot to clip.
 
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   resample::{
     CatmullRom, FilterKernel, FilterStream, FilteredResampler, Lanczos3, Resampler, Triangle,
   },
   sinker::MixedSinker,
 };
 
-const M: ColorMatrix = ColorMatrix::Bt709;
+const M: KernelMatrix = KernelMatrix::Bt709;
 const FR: bool = true;
 const SRC: usize = 8;
 const OUT: usize = 4;
@@ -117,7 +117,7 @@ fn rgb48_filter_rgb_u16<K: FilterKernel>(
     .unwrap()
     .with_rgb_u16(&mut out)
     .unwrap();
-    rgb48_to(&src, FR, M, &mut sink).unwrap();
+    rgb48_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   out
 }
@@ -145,7 +145,7 @@ fn rgb24_filter_rgb<K: FilterKernel>(
     .unwrap()
     .with_rgb(&mut out)
     .unwrap();
-    rgb24_to(&src, FR, M, &mut sink).unwrap();
+    rgb24_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   out
 }
@@ -250,7 +250,7 @@ macro_rules! planar_hb_filter_suite {
           .unwrap()
           .with_luma(&mut luma)
           .unwrap();
-          $walker(&frame(y, u, v), FR, M, &mut sink).unwrap();
+          $walker(&frame(y, u, v), FR, sink.set_kernel_matrix(M)).unwrap();
         }
         FilterOutputs {
           rgb,
@@ -484,7 +484,7 @@ macro_rules! planar_hb_filter_suite {
           let mut sink = MixedSinker::<$marker>::new(SRC, SRC)
             .with_rgb_u16(&mut rgb)
             .unwrap();
-          $walker(&frame(y, u, v), FR, M, &mut sink).unwrap();
+          $walker(&frame(y, u, v), FR, sink.set_kernel_matrix(M)).unwrap();
         }
         rgb
       }
@@ -496,7 +496,7 @@ macro_rules! planar_hb_filter_suite {
           let mut sink = MixedSinker::<$marker>::new(SRC, SRC)
             .with_rgb(&mut rgb)
             .unwrap();
-          $walker(&frame(y, u, v), FR, M, &mut sink).unwrap();
+          $walker(&frame(y, u, v), FR, sink.set_kernel_matrix(M)).unwrap();
         }
         rgb
       }

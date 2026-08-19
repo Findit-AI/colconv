@@ -20,7 +20,7 @@
 //! direct kernels; LE/BE parity exercises the `<const BE>` propagation.
 
 use crate::{
-  ColorMatrix, PixelSink,
+  KernelMatrix, PixelSink,
   frame::{Ayuv64BeFrame, Ayuv64Frame, Ayuv64LeFrame},
   resample::{AreaResampler, ResampleError},
   sinker::{AlphaMode, MixedSinker, MixedSinkerError},
@@ -29,7 +29,7 @@ use crate::{
 
 const SRC: usize = 8;
 const OUT: usize = 4;
-const M: ColorMatrix = ColorMatrix::Bt709;
+const M: KernelMatrix = KernelMatrix::Bt709;
 const FR: bool = true;
 const FR_LIMITED: bool = false;
 const MAX16: u32 = 65535;
@@ -57,7 +57,7 @@ fn direct_rgba_u8(packed: &[u16], full_range: bool) -> Vec<u8> {
     let mut sink = MixedSinker::<Ayuv64>::new(SRC, SRC)
       .with_rgba(&mut rgba)
       .unwrap();
-    ayuv64_to(&frame, full_range, M, &mut sink).unwrap();
+    ayuv64_to(&frame, full_range, sink.set_kernel_matrix(M)).unwrap();
   }
   rgba
 }
@@ -72,7 +72,7 @@ fn direct_rgba_u16(packed: &[u16], full_range: bool) -> Vec<u16> {
     let mut sink = MixedSinker::<Ayuv64>::new(SRC, SRC)
       .with_rgba_u16(&mut rgba)
       .unwrap();
-    ayuv64_to(&frame, full_range, M, &mut sink).unwrap();
+    ayuv64_to(&frame, full_range, sink.set_kernel_matrix(M)).unwrap();
   }
   rgba
 }
@@ -215,7 +215,7 @@ fn ayuv64_straight_all_outputs_match_their_own_block_mean() {
         .unwrap()
         .with_hsv(&mut hh, &mut ss, &mut vv)
         .unwrap();
-    ayuv64_to(&frame, FR, M, &mut sink).unwrap();
+    ayuv64_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   }
 
   let rgba_ref = block_mean_rgba_u8(&direct_rgba_u8(&packed, FR));
@@ -270,7 +270,7 @@ fn ayuv64_straight_alpha_is_averaged_not_forced_opaque() {
         .unwrap()
         .with_rgba_u16(&mut rgba_u16)
         .unwrap();
-    ayuv64_to(&frame, FR, M, &mut sink).unwrap();
+    ayuv64_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(rgba_u16, block_mean_rgba_u16(&direct_rgba_u16(&packed, FR)));
   assert!(
@@ -307,7 +307,7 @@ fn ayuv64_uniform_gray_independent_u8_vs_u16_colour() {
         .unwrap()
         .with_rgb_u16(&mut rgb_u16)
         .unwrap();
-    ayuv64_to(&ayuv64_frame(&packed), FR, M, &mut sink).unwrap();
+    ayuv64_to(&ayuv64_frame(&packed), FR, sink.set_kernel_matrix(M)).unwrap();
   }
   let gray_u8 = &full_u8[..3];
   for px in rgb.chunks_exact(3) {
@@ -350,7 +350,7 @@ fn ayuv64_saturated_chroma_u8_is_not_a_narrowing_of_u16() {
         .unwrap()
         .with_rgb_u16(&mut rgb_u16)
         .unwrap();
-    ayuv64_to(&frame, FR, M, &mut sink).unwrap();
+    ayuv64_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   let rgb_ref = drop_alpha_u8(&block_mean_rgba_u8(&direct_rgba_u8(&packed, FR)));
   let rgb_u16_ref = drop_alpha_u16(&block_mean_rgba_u16(&direct_rgba_u16(&packed, FR)));
@@ -391,7 +391,7 @@ fn ayuv64_premultiplied_independent_u8_and_u16() {
         .unwrap()
         .with_luma_u16(&mut luma_u16)
         .unwrap();
-    ayuv64_to(&frame, FR, M, &mut sink).unwrap();
+    ayuv64_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   }
 
   // u8 premult: premult at 255 → bin → un-premult at 255.
@@ -435,7 +435,7 @@ fn ayuv64_premultiplied_transparent_block_does_not_bleed() {
         .with_alpha_mode(AlphaMode::Premultiplied)
         .with_rgba_u16(&mut rgba_u16)
         .unwrap();
-    ayuv64_to(&frame, FR, M, &mut sink).unwrap();
+    ayuv64_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(
     &rgba_u16[..4],
@@ -478,7 +478,7 @@ fn ayuv64_premultiplied_nonuniform_alpha_luma_is_native_y_not_colour() {
         .unwrap()
         .with_luma_u16(&mut luma_u16)
         .unwrap();
-    ayuv64_to(&frame, FR, M, &mut sink).unwrap();
+    ayuv64_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   let y_binned = block_mean_native_y(&packed);
   // (0 + 65535 + 0 + 65535 + 2) / 4 = 32768.
@@ -515,7 +515,7 @@ fn ayuv64_limited_range_luma_is_native_y() {
         .unwrap()
         .with_luma_u16(&mut luma_u16)
         .unwrap();
-    ayuv64_to(&frame, full_range, M, &mut sink).unwrap();
+    ayuv64_to(&frame, full_range, sink.set_kernel_matrix(M)).unwrap();
     luma_u16
   };
   let lim = render(FR_LIMITED);
@@ -547,7 +547,7 @@ fn ayuv64_straight_and_premult_differ_under_varying_alpha() {
         .with_alpha_mode(mode)
         .with_rgba_u16(&mut rgba_u16)
         .unwrap();
-    ayuv64_to(&frame, FR, M, &mut sink).unwrap();
+    ayuv64_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
     rgba_u16
   };
   assert_ne!(
@@ -592,7 +592,7 @@ fn ayuv64_le_be_resample_byte_identical() {
         .unwrap()
         .with_luma_u16(&mut luma_u16)
         .unwrap();
-    ayuv64_to(&frame, FR, M, &mut sink).unwrap();
+    ayuv64_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
     (rgba, rgba_u16, luma_u16)
   };
   let render_be = || {
@@ -612,7 +612,7 @@ fn ayuv64_le_be_resample_byte_identical() {
     .unwrap()
     .with_luma_u16(&mut luma_u16)
     .unwrap();
-    ayuv64_to_endian(&frame, FR, M, &mut sink).unwrap();
+    ayuv64_to_endian(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
     (rgba, rgba_u16, luma_u16)
   };
   assert_eq!(
@@ -636,7 +636,7 @@ fn ayuv64_identity_plan_matches_direct() {
         .unwrap()
         .with_rgba_u16(&mut rgba_u16)
         .unwrap();
-    ayuv64_to(&ayuv64_frame(&packed), FR, M, &mut sink).unwrap();
+    ayuv64_to(&ayuv64_frame(&packed), FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(
     rgba_u16,
@@ -666,8 +666,8 @@ fn ayuv64_cross_frame_reset_reuses_streams() {
         .unwrap()
         .with_rgba_u16(&mut rgba_u16)
         .unwrap();
-    ayuv64_to(&frame, FR, M, &mut sink).unwrap();
-    ayuv64_to(&frame, FR, M, &mut sink).unwrap();
+    ayuv64_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
+    ayuv64_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(rgba_u16, block_mean_rgba_u16(&direct_rgba_u16(&packed, FR)));
 }
@@ -687,9 +687,10 @@ fn ayuv64_accepts_alpha_mode_change_across_frames() {
         .unwrap()
         .with_rgba_u16(&mut rgba_u16)
         .unwrap();
-    ayuv64_to(&frame, FR, M, &mut sink).unwrap();
+    ayuv64_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
     sink.set_alpha_mode(AlphaMode::Premultiplied);
-    ayuv64_to(&frame, FR, M, &mut sink).expect("a fresh frame must accept a different alpha mode");
+    ayuv64_to(&frame, FR, sink.set_kernel_matrix(M))
+      .expect("a fresh frame must accept a different alpha mode");
   }
   let mut pm16 = direct_rgba_u16(&packed, FR);
   premultiply(&mut pm16, MAX16);
@@ -713,11 +714,16 @@ fn ayuv64_mid_frame_alpha_mode_flip_is_rejected() {
       .unwrap();
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   sink
-    .process(Ayuv64Row::new(&packed[..row_elems], 0, M, FR))
+    .process(Ayuv64Row::for_tests(&packed[..row_elems], 0, M, FR))
     .unwrap();
   sink.set_alpha_mode(AlphaMode::Premultiplied);
   let err = sink
-    .process(Ayuv64Row::new(&packed[row_elems..2 * row_elems], 1, M, FR))
+    .process(Ayuv64Row::for_tests(
+      &packed[row_elems..2 * row_elems],
+      1,
+      M,
+      FR,
+    ))
     .unwrap_err();
   assert!(
     matches!(err, MixedSinkerError::ResampleOutputsChanged(_)),
@@ -737,7 +743,12 @@ fn ayuv64_out_of_sequence_first_row_is_rejected() {
       .unwrap();
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   let err = sink
-    .process(Ayuv64Row::new(&packed[row_elems..2 * row_elems], 1, M, FR))
+    .process(Ayuv64Row::for_tests(
+      &packed[row_elems..2 * row_elems],
+      1,
+      M,
+      FR,
+    ))
     .unwrap_err();
   assert!(
     matches!(
@@ -759,7 +770,7 @@ fn ayuv64_no_output_sink_is_a_noop() {
   let mut sink =
     MixedSinker::<Ayuv64, AreaResampler>::with_resampler(SRC, SRC, AreaResampler::to(OUT, OUT))
       .unwrap();
-  ayuv64_to(&frame, FR, M, &mut sink).unwrap();
+  ayuv64_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
 }
 
 #[test]
@@ -784,7 +795,7 @@ fn ayuv64_resample_simd_matches_scalar() {
         .unwrap()
         .with_luma_u16(&mut luma_u16)
         .unwrap();
-    ayuv64_to(&frame, FR, M, &mut sink).unwrap();
+    ayuv64_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
     (rgb, rgb_u16, luma_u16)
   };
   assert_eq!(run(true), run(false), "Ayuv64 resample SIMD != scalar");

@@ -35,7 +35,7 @@
 //! `ch = sh / 2` chroma rows.
 
 use crate::{
-  ChromaLocation, ColorMatrix, PixelSink,
+  ChromaLocation, KernelMatrix, PixelSink,
   resample::{AreaResampler, FilteredResampler, Triangle},
   sinker::{MixedSinker, MixedSinkerError},
   source::{
@@ -50,7 +50,7 @@ use mediaframe::frame::{
   Yuv420p12Frame, Yuv420p16Frame, Yuv444p10Frame, Yuv444p12Frame, Yuv444p16Frame,
 };
 
-const M: ColorMatrix = ColorMatrix::Bt601;
+const M: KernelMatrix = KernelMatrix::Bt601;
 const FR: bool = true;
 
 /// Round-half-up integer divide.
@@ -373,7 +373,7 @@ macro_rules! hibit_420_semiplanar_resample_siting {
             MixedSinker::<$M420, AreaResampler>::with_resampler(sw, sh, AreaResampler::to(ow, oh))
               .unwrap()
               .with_native(native)
-              .with_chroma_location(loc)
+              .with_chroma_location(loc.clone())
               .with_simd(simd)
               .with_rgb(&mut rgb)
               .unwrap()
@@ -382,7 +382,7 @@ macro_rules! hibit_420_semiplanar_resample_siting {
           let f = $F420::new(
             &y_wire, &uv_wire, sw as u32, sh as u32, sw as u32, sw as u32,
           );
-          $w420(&f, FR, M, &mut sink).unwrap();
+          $w420(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgb16)
       }
@@ -410,7 +410,7 @@ macro_rules! hibit_420_semiplanar_resample_siting {
             FilteredResampler::new(ow, oh, Triangle),
           )
           .unwrap()
-          .with_chroma_location(loc)
+          .with_chroma_location(loc.clone())
           .with_simd(simd)
           .with_rgb(&mut rgb)
           .unwrap()
@@ -419,7 +419,7 @@ macro_rules! hibit_420_semiplanar_resample_siting {
           let f = $F420::new(
             &y_wire, &uv_wire, sw as u32, sh as u32, sw as u32, sw as u32,
           );
-          $w420(&f, FR, M, &mut sink).unwrap();
+          $w420(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgb16)
       }
@@ -448,7 +448,7 @@ macro_rules! hibit_420_semiplanar_resample_siting {
           )
           .unwrap()
           .with_native(native)
-          .with_chroma_location(loc)
+          .with_chroma_location(loc.clone())
           .with_rgb(&mut rgb)
           .unwrap()
           .with_rgb_u16(&mut rgb16)
@@ -457,7 +457,7 @@ macro_rules! hibit_420_semiplanar_resample_siting {
             &y_wire, &uv_wire, sw as u32, sh as u32, sw as u32, sw as u32,
           )
           .unwrap();
-          $w420be(&f, FR, M, &mut sink).unwrap();
+          $w420be(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgb16)
       }
@@ -489,7 +489,7 @@ macro_rules! hibit_420_semiplanar_resample_siting {
           )
           .unwrap()
           .with_native(native)
-          .with_chroma_location(loc)
+          .with_chroma_location(loc.clone())
           .with_simd(simd)
           .with_rgb(&mut rgb)
           .unwrap()
@@ -498,7 +498,7 @@ macro_rules! hibit_420_semiplanar_resample_siting {
           let f = $Fplanar::new(
             y, u, v, sw as u32, sh as u32, sw as u32, cw as u32, cw as u32,
           );
-          $wplanar(&f, FR, M, &mut sink).unwrap();
+          $wplanar(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgb16)
       }
@@ -533,7 +533,7 @@ macro_rules! hibit_420_semiplanar_resample_siting {
           let f = $F444::new(
             &yb, &ub, &vb, ow as u32, oh as u32, ow as u32, ow as u32, ow as u32,
           );
-          $w444(&f, FR, M, &mut sink).unwrap();
+          $w444(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgb16)
       }
@@ -583,7 +583,7 @@ macro_rules! hibit_420_semiplanar_resample_siting {
           .unwrap()
           .with_rgb_u16(&mut rgb16)
           .unwrap();
-          $w444(&f, FR, M, &mut sink).unwrap();
+          $w444(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         } else {
           let mut sink =
             MixedSinker::<$M444, AreaResampler>::with_resampler(sw, sh, AreaResampler::to(ow, oh))
@@ -594,7 +594,7 @@ macro_rules! hibit_420_semiplanar_resample_siting {
               .unwrap()
               .with_rgb_u16(&mut rgb16)
               .unwrap();
-          $w444(&f, FR, M, &mut sink).unwrap();
+          $w444(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgb16)
       }
@@ -621,9 +621,9 @@ macro_rules! hibit_420_semiplanar_resample_siting {
             );
             // `TopLeft` (`v = 0`) now folds the forward vertical triangle (RFC #238
             // Top), so it LEAVES the co-sited byte-identity group.
-            for loc in [ChromaLocation::Left, ChromaLocation::Unknown(7)] {
+            for loc in [ChromaLocation::Left, ChromaLocation::other("unassigned-7")] {
               assert_eq!(
-                run(&y, &u, &v, sw, sh, ow, oh, loc, native, true),
+                run(&y, &u, &v, sw, sh, ow, oh, loc.clone(), native, true),
                 base,
                 "co-sited {loc:?} must keep the byte-identical decode \
                  (native={native}, {sw}x{sh}->{ow}x{oh})"
@@ -670,8 +670,8 @@ macro_rules! hibit_420_semiplanar_resample_siting {
           ] {
             for native in [true, false] {
               assert_eq!(
-                run(&y, &u, &v, sw, sh, ow, oh, loc, native, true),
-                run_yuv420p(&y, &u, &v, sw, sh, ow, oh, loc, native, true),
+                run(&y, &u, &v, sw, sh, ow, oh, loc.clone(), native, true),
+                run_yuv420p(&y, &u, &v, sw, sh, ow, oh, loc.clone(), native, true),
                 "centered semi-planar {loc:?} must equal centered planar Yuv420p \
                  (native={native}, {sw}x{sh}->{ow}x{oh})"
               );
@@ -698,7 +698,7 @@ macro_rules! hibit_420_semiplanar_resample_siting {
               let f = $Fplanar::new(
                 &y, &u, &v, sw as u32, sh as u32, sw as u32, cw as u32, cw as u32,
               );
-              $wplanar(&f, FR, M, &mut sink).unwrap();
+              $wplanar(&f, FR, sink.set_kernel_matrix(M)).unwrap();
               (rgb, rgb16)
             },
             "centered semi-planar filter must equal centered planar Yuv420p filter \
@@ -719,7 +719,7 @@ macro_rules! hibit_420_semiplanar_resample_siting {
           // folds the `v = 0` forward triangle — see `top_native_equals_*`.)
           for loc in [ChromaLocation::Center] {
             assert_eq!(
-              run(&y, &u, &v, sw, sh, ow, oh, loc, true, true),
+              run(&y, &u, &v, sw, sh, ow, oh, loc.clone(), true, true),
               want,
               "centered native {loc:?} must equal the code-domain oracle \
                ({sw}x{sh}->{ow}x{oh})"
@@ -740,7 +740,7 @@ macro_rules! hibit_420_semiplanar_resample_siting {
           // `top_row_stage_equals_rgb_reconstruct_then_bin`.
           for loc in [ChromaLocation::Center] {
             assert_eq!(
-              run(&y, &u, &v, sw, sh, ow, oh, loc, false, true),
+              run(&y, &u, &v, sw, sh, ow, oh, loc.clone(), false, true),
               want,
               "centered row-stage {loc:?} must equal the RGB-domain oracle \
                ({sw}x{sh}->{ow}x{oh})"
@@ -853,12 +853,12 @@ macro_rules! hibit_420_semiplanar_resample_siting {
         loc2: ChromaLocation,
       ) -> Result<(), MixedSinkerError> {
         let (y_wire, uv_wire) = (pack_y(y), interleave_pack(u, v, 8, 8));
-        sink.set_chroma_location(loc1);
+        sink.set_chroma_location(loc1.clone());
         PixelSink::begin_frame(&mut sink, 8, 8).unwrap();
-        let row0 = $Row::new(&y_wire[0..8], &uv_wire[0..8], 0, M, FR);
+        let row0 = $Row::for_tests(&y_wire[0..8], &uv_wire[0..8], 0, M, FR);
         PixelSink::process(&mut sink, row0).unwrap();
-        sink.set_chroma_location(loc2);
-        let row1 = $Row::new(&y_wire[8..16], &uv_wire[0..8], 1, M, FR);
+        sink.set_chroma_location(loc2.clone());
+        let row1 = $Row::for_tests(&y_wire[8..16], &uv_wire[0..8], 1, M, FR);
         PixelSink::process(&mut sink, row1)
       }
 
@@ -878,7 +878,7 @@ macro_rules! hibit_420_semiplanar_resample_siting {
               .with_native(true)
               .with_rgb(&mut rgb)
               .unwrap();
-          let err = flip_row1(sink, &y, &u, &v, loc1, loc2).unwrap_err();
+          let err = flip_row1(sink, &y, &u, &v, loc1.clone(), loc2.clone()).unwrap_err();
           assert!(
             matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
             "native {loc1:?}->{loc2:?}: want ChromaSitingChanged, got {err:?}"
@@ -892,7 +892,7 @@ macro_rules! hibit_420_semiplanar_resample_siting {
               .with_native(false)
               .with_rgb(&mut rgb)
               .unwrap();
-          let err = flip_row1(sink, &y, &u, &v, loc1, loc2).unwrap_err();
+          let err = flip_row1(sink, &y, &u, &v, loc1.clone(), loc2.clone()).unwrap_err();
           assert!(
             matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
             "row-stage {loc1:?}->{loc2:?}: want ChromaSitingChanged, got {err:?}"
@@ -908,7 +908,7 @@ macro_rules! hibit_420_semiplanar_resample_siting {
           .unwrap()
           .with_rgb(&mut rgb)
           .unwrap();
-          let err = flip_row1(sink, &y, &u, &v, loc1, loc2).unwrap_err();
+          let err = flip_row1(sink, &y, &u, &v, loc1.clone(), loc2.clone()).unwrap_err();
           assert!(
             matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
             "filter {loc1:?}->{loc2:?}: want ChromaSitingChanged, got {err:?}"
@@ -1027,7 +1027,7 @@ macro_rules! hibit_420_semiplanar_resample_siting {
           let f = $F444::new(
             &yb, &ub, &vb, ow as u32, oh as u32, ow as u32, ow as u32, ow as u32,
           );
-          $w444(&f, FR, M, &mut sink).unwrap();
+          $w444(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgb16)
       }
@@ -1101,7 +1101,7 @@ macro_rules! hibit_420_semiplanar_resample_siting {
           .unwrap()
           .with_rgb_u16(&mut rgb16)
           .unwrap();
-          $w444(&f, FR, M, &mut sink).unwrap();
+          $w444(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         } else {
           let mut sink =
             MixedSinker::<$M444, AreaResampler>::with_resampler(sw, sh, AreaResampler::to(ow, oh))
@@ -1112,7 +1112,7 @@ macro_rules! hibit_420_semiplanar_resample_siting {
               .unwrap()
               .with_rgb_u16(&mut rgb16)
               .unwrap();
-          $w444(&f, FR, M, &mut sink).unwrap();
+          $w444(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgb16)
       }
@@ -1144,7 +1144,7 @@ macro_rules! hibit_420_semiplanar_resample_siting {
           let f = $F420::new(
             &y_wire, &uv_wire, sw as u32, sh as u32, sw as u32, sw as u32,
           );
-          $w420(&f, FR, M, &mut sink).unwrap();
+          $w420(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgb16)
       }
@@ -1532,7 +1532,7 @@ macro_rules! hibit_420_semiplanar_resample_siting {
             )
             .unwrap()
             .with_native(false)
-            .with_chroma_location(loc)
+            .with_chroma_location(loc.clone())
             .with_rgb(&mut rgb)
             .unwrap();
             sink.begin_frame(sw as u32, sh as u32).unwrap();
@@ -1540,7 +1540,7 @@ macro_rules! hibit_420_semiplanar_resample_siting {
               let yr = &y_wire[r * sw..(r + 1) * sw];
               let cr = r / 2;
               let uvr = &uv_wire[cr * sw..(cr + 1) * sw];
-              sink.process($Row::new(yr, uvr, r, M, FR))
+              sink.process($Row::for_tests(yr, uvr, r, M, FR))
             };
             for r in 0..sh - 1 {
               feed(&mut sink, r).unwrap();
@@ -1594,7 +1594,7 @@ macro_rules! hibit_420_semiplanar_resample_siting {
                 .with_native(native)
                 .with_rgb(&mut rgb)
                 .unwrap();
-            let err = flip_row1(sink, &y, &u, &v, loc1, loc2).unwrap_err();
+            let err = flip_row1(sink, &y, &u, &v, loc1.clone(), loc2.clone()).unwrap_err();
             assert!(
               matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
               "native={native} {loc1:?}->{loc2:?}: want ChromaSitingChanged, got {err:?}"
@@ -1609,7 +1609,7 @@ macro_rules! hibit_420_semiplanar_resample_siting {
           .unwrap()
           .with_rgb(&mut rgb)
           .unwrap();
-          let err = flip_row1(sink, &y, &u, &v, loc1, loc2).unwrap_err();
+          let err = flip_row1(sink, &y, &u, &v, loc1.clone(), loc2.clone()).unwrap_err();
           assert!(
             matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
             "filter {loc1:?}->{loc2:?}: want ChromaSitingChanged, got {err:?}"
@@ -1649,7 +1649,7 @@ macro_rules! hibit_420_semiplanar_resample_siting {
           let f = $F444::new(
             &yb, &ub, &vb, ow as u32, oh as u32, ow as u32, ow as u32, ow as u32,
           );
-          $w444(&f, FR, M, &mut sink).unwrap();
+          $w444(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgb16)
       }
@@ -1688,7 +1688,7 @@ macro_rules! hibit_420_semiplanar_resample_siting {
           .unwrap()
           .with_rgb_u16(&mut rgb16)
           .unwrap();
-          $w444(&f, FR, M, &mut sink).unwrap();
+          $w444(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         } else {
           let mut sink =
             MixedSinker::<$M444, AreaResampler>::with_resampler(sw, sh, AreaResampler::to(ow, oh))
@@ -1699,7 +1699,7 @@ macro_rules! hibit_420_semiplanar_resample_siting {
               .unwrap()
               .with_rgb_u16(&mut rgb16)
               .unwrap();
-          $w444(&f, FR, M, &mut sink).unwrap();
+          $w444(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgb16)
       }
@@ -1731,7 +1731,7 @@ macro_rules! hibit_420_semiplanar_resample_siting {
           let f = $F420::new(
             &y_wire, &uv_wire, sw as u32, sh as u32, sw as u32, sw as u32,
           );
-          $w420(&f, FR, M, &mut sink).unwrap();
+          $w420(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgb16)
       }
@@ -1986,7 +1986,7 @@ macro_rules! hibit_420_semiplanar_resample_siting {
                 .with_native(native)
                 .with_rgb(&mut rgb)
                 .unwrap();
-            let err = flip_row1(sink, &y, &u, &v, loc1, loc2).unwrap_err();
+            let err = flip_row1(sink, &y, &u, &v, loc1.clone(), loc2.clone()).unwrap_err();
             assert!(
               matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
               "native={native} {loc1:?}->{loc2:?}: want ChromaSitingChanged, got {err:?}"
@@ -2001,7 +2001,7 @@ macro_rules! hibit_420_semiplanar_resample_siting {
           .unwrap()
           .with_rgb(&mut rgb)
           .unwrap();
-          let err = flip_row1(sink, &y, &u, &v, loc1, loc2).unwrap_err();
+          let err = flip_row1(sink, &y, &u, &v, loc1.clone(), loc2.clone()).unwrap_err();
           assert!(
             matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
             "filter {loc1:?}->{loc2:?}: want ChromaSitingChanged, got {err:?}"

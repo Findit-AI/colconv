@@ -168,6 +168,10 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Y212<BE>, R> {
   type Input<'r> = Y212Row<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     check_dimensions_match(self.width, self.height, width, height)?;
     if !self.width.is_multiple_of(2) {
@@ -253,7 +257,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Y212<BE>, R> {
     // Chroma siting drives the horizontal chroma phase; `Copy`, so read it out
     // before the field split-borrow below.
     #[cfg(all(feature = "y2xx", feature = "yuv-planar"))]
-    let chroma_location = self.chroma_location;
+    let chroma_location = self.chroma_location.clone();
 
     let Self {
       rgb,
@@ -322,7 +326,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Y212<BE>, R> {
       // phase-0.5 upsample) and decode 4:4:4 via the `yuv444pN` full-chroma
       // kernels — the co-sited arms keep the fused `y212_*` half-chroma decode.
       #[cfg(all(feature = "y2xx", feature = "yuv-planar"))]
-      let center_sited = chroma_422_center_sited_h(chroma_location);
+      let center_sited = chroma_422_center_sited_h(&chroma_location);
       #[cfg(all(feature = "y2xx", feature = "yuv-planar"))]
       let chroma_h_phase = if center_sited {
         YUV422P_CENTERED_H_PHASE

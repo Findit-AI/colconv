@@ -16,7 +16,7 @@ use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_m
 use std::hint::black_box;
 
 use pixon::{
-  ColorMatrix,
+  KernelMatrix,
   frame::Yuv440p10Frame,
   sinker::MixedSinker,
   source::{Yuv440p10, yuv440p10_to},
@@ -37,7 +37,7 @@ fn fill_pseudo_random_u16(buf: &mut [u16], seed: u32) {
 
 fn bench(c: &mut Criterion) {
   const WIDTHS: &[u32] = &[1280, 1920, 3840];
-  const MATRIX: ColorMatrix = ColorMatrix::Bt2020Ncl;
+  const MATRIX: KernelMatrix = KernelMatrix::Bt2020Ncl;
   const FULL_RANGE: bool = false;
 
   let mut group = c.benchmark_group("yuv440p10_to_rgb");
@@ -75,7 +75,14 @@ fn bench(c: &mut Criterion) {
             .with_simd(use_simd)
             .with_rgb(&mut rgb)
             .unwrap();
-          yuv440p10_to(&frame, FULL_RANGE, MATRIX, &mut sinker).unwrap();
+          yuv440p10_to(
+            &frame,
+            FULL_RANGE,
+            sinker
+              .set_color_spec(&pixon::ColorSpec::of_matrix(MATRIX))
+              .unwrap(),
+          )
+          .unwrap();
           black_box(&rgb);
         });
       });

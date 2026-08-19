@@ -405,7 +405,7 @@ pub(crate) fn gbr_to_luma_u16_high_bit_row<const BITS: u32, const BE: bool>(
   r: &[u16],
   luma_out: &mut [u16],
   width: usize,
-  matrix: crate::ColorMatrix,
+  matrix: crate::KernelMatrix,
   full_range: bool,
 ) {
   const {

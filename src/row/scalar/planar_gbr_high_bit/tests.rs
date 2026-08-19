@@ -1,7 +1,7 @@
 //! Tests for `crate::row::scalar::planar_gbr_high_bit`.
 
 use super::*;
-use crate::ColorMatrix;
+use crate::KernelMatrix;
 
 /// Re-encode a host-native u16 slice as LE-encoded byte storage. Kernels
 /// called with `BE = false` recover the intended logical values via
@@ -520,7 +520,7 @@ fn luma_u16_high_bit_bits10_max_white_not_banded() {
   let b = as_le_u16(&[max; 1]);
   let r = as_le_u16(&[max; 1]);
   let mut out = [0u16; 1];
-  gbr_to_luma_u16_high_bit_row::<10, false>(&g, &b, &r, &mut out, 1, ColorMatrix::Bt709, true);
+  gbr_to_luma_u16_high_bit_row::<10, false>(&g, &b, &r, &mut out, 1, KernelMatrix::Bt709, true);
   // For BT.709 full-range all-white: Y = round(Kr*max + Kg*max + Kb*max).
   // = round((6966 + 23436 + 2366) / 32768 * 1023) ≈ round(32768/32768 * 1023) = 1023.
   assert!(
@@ -543,7 +543,7 @@ fn luma_u16_high_bit_bits12_max_white_not_banded() {
   let b = as_le_u16(&[max; 1]);
   let r = as_le_u16(&[max; 1]);
   let mut out = [0u16; 1];
-  gbr_to_luma_u16_high_bit_row::<12, false>(&g, &b, &r, &mut out, 1, ColorMatrix::Bt601, true);
+  gbr_to_luma_u16_high_bit_row::<12, false>(&g, &b, &r, &mut out, 1, KernelMatrix::Bt601, true);
   assert!(
     out[0] >= 4090,
     "max-white luma_u16 bits12 must be near 4095 (was {})",
@@ -561,7 +561,7 @@ fn luma_u16_high_bit_bits16_max_white_not_banded() {
   let b = as_le_u16(&[max; 1]);
   let r = as_le_u16(&[max; 1]);
   let mut out = [0u16; 1];
-  gbr_to_luma_u16_high_bit_row::<16, false>(&g, &b, &r, &mut out, 1, ColorMatrix::Bt709, true);
+  gbr_to_luma_u16_high_bit_row::<16, false>(&g, &b, &r, &mut out, 1, KernelMatrix::Bt709, true);
   assert!(
     out[0] >= 65520,
     "max-white luma_u16 bits16 must be near 65535 (was {}), old banded gives 65280",
@@ -578,7 +578,7 @@ fn luma_u16_high_bit_bits10_neutral_gray_midrange() {
   let b = as_le_u16(&[mid; 1]);
   let r = as_le_u16(&[mid; 1]);
   let mut out = [0u16; 1];
-  gbr_to_luma_u16_high_bit_row::<10, false>(&g, &b, &r, &mut out, 1, ColorMatrix::Bt709, true);
+  gbr_to_luma_u16_high_bit_row::<10, false>(&g, &b, &r, &mut out, 1, KernelMatrix::Bt709, true);
   assert!(
     out[0] >= 510 && out[0] <= 514,
     "neutral gray luma_u16 must be ~512 (was {})",
@@ -592,7 +592,7 @@ fn luma_u16_high_bit_bits10_zero_gives_zero() {
   let b = as_le_u16(&[0u16; 2]);
   let r = as_le_u16(&[0u16; 2]);
   let mut out = [0xFFFFu16; 2];
-  gbr_to_luma_u16_high_bit_row::<10, false>(&g, &b, &r, &mut out, 2, ColorMatrix::Bt709, true);
+  gbr_to_luma_u16_high_bit_row::<10, false>(&g, &b, &r, &mut out, 2, KernelMatrix::Bt709, true);
   assert!(out.iter().all(|&v| v == 0), "all-black must give zero luma");
 }
 
@@ -605,8 +605,24 @@ fn luma_u16_high_bit_bits10_full_range_vs_limited_range() {
   let r = as_le_u16(&[mid; 1]);
   let mut out_full = [0u16; 1];
   let mut out_lim = [0u16; 1];
-  gbr_to_luma_u16_high_bit_row::<10, false>(&g, &b, &r, &mut out_full, 1, ColorMatrix::Bt601, true);
-  gbr_to_luma_u16_high_bit_row::<10, false>(&g, &b, &r, &mut out_lim, 1, ColorMatrix::Bt601, false);
+  gbr_to_luma_u16_high_bit_row::<10, false>(
+    &g,
+    &b,
+    &r,
+    &mut out_full,
+    1,
+    KernelMatrix::Bt601,
+    true,
+  );
+  gbr_to_luma_u16_high_bit_row::<10, false>(
+    &g,
+    &b,
+    &r,
+    &mut out_lim,
+    1,
+    KernelMatrix::Bt601,
+    false,
+  );
   let y_off = 16u16 << 2; // 64
   let y_max = 235u16 << 2; // 940
   assert!(
@@ -632,7 +648,7 @@ fn luma_u16_high_bit_bits16_limited_range_black_gives_min_offset() {
   let b = as_le_u16(&[0u16; 1]);
   let r = as_le_u16(&[0u16; 1]);
   let mut out = [0u16; 1];
-  gbr_to_luma_u16_high_bit_row::<16, false>(&g, &b, &r, &mut out, 1, ColorMatrix::Bt709, false);
+  gbr_to_luma_u16_high_bit_row::<16, false>(&g, &b, &r, &mut out, 1, KernelMatrix::Bt709, false);
   let y_off = 16u16 << 8; // 4096
   assert_eq!(
     out[0], y_off,
@@ -656,7 +672,7 @@ fn luma_u16_high_bit_bits16_limited_range_max_white_maps_to_y_max() {
   let b = as_le_u16(&[u16::MAX; 1]);
   let r = as_le_u16(&[u16::MAX; 1]);
   let mut out = [0u16; 1];
-  gbr_to_luma_u16_high_bit_row::<16, false>(&g, &b, &r, &mut out, 1, ColorMatrix::Bt709, false);
+  gbr_to_luma_u16_high_bit_row::<16, false>(&g, &b, &r, &mut out, 1, KernelMatrix::Bt709, false);
   let y_max = 235u16 << 8; // 60160
   assert_eq!(
     out[0], y_max,
@@ -677,7 +693,7 @@ fn luma_u16_high_bit_bits16_limited_range_near_white_keeps_gradation() {
     let b = as_le_u16(&[v; 1]);
     let r = as_le_u16(&[v; 1]);
     let mut out = [0u16; 1];
-    gbr_to_luma_u16_high_bit_row::<16, false>(&g, &b, &r, &mut out, 1, ColorMatrix::Bt709, false);
+    gbr_to_luma_u16_high_bit_row::<16, false>(&g, &b, &r, &mut out, 1, KernelMatrix::Bt709, false);
     // Native-depth limited-range: y_lim = 4096 + v x 56064 / 65535
     let expected = 4096 + ((v as u64 * 56064 + 65535 / 2) / 65535) as u16;
     // Allow ±1 LSB for matrix-multiply rounding (BT.709 weights aren't
@@ -709,7 +725,7 @@ fn luma_u16_high_bit_bits10_limited_range_endpoints() {
     let b = as_le_u16(&[input; 1]);
     let r = as_le_u16(&[input; 1]);
     let mut out = [0u16; 1];
-    gbr_to_luma_u16_high_bit_row::<10, false>(&g, &b, &r, &mut out, 1, ColorMatrix::Bt709, false);
+    gbr_to_luma_u16_high_bit_row::<10, false>(&g, &b, &r, &mut out, 1, KernelMatrix::Bt709, false);
     let diff = (out[0] as i32 - expected as i32).abs();
     assert!(
       diff <= 1,

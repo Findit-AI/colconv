@@ -65,7 +65,7 @@ fn neon_yuv_420p10_be_parity_u8() {
   let u_be = as_be_u16_buf(&u_intended);
   let v_be = as_be_u16_buf(&v_intended);
 
-  for matrix in [ColorMatrix::Bt709, ColorMatrix::Bt2020Ncl] {
+  for matrix in [KernelMatrix::Bt709, KernelMatrix::Bt2020Ncl] {
     for full_range in [true, false] {
       let mut out_le = std::vec![0u8; width * 3];
       let mut out_be = std::vec![0u8; width * 3];
@@ -121,7 +121,7 @@ fn neon_yuv_420p10_be_parity_u16() {
       &v_le,
       &mut out_le,
       width,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       true,
     );
     yuv_420p_n_to_rgb_u16_row::<10, true>(
@@ -130,7 +130,7 @@ fn neon_yuv_420p10_be_parity_u16() {
       &v_be,
       &mut out_be,
       width,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       true,
     );
   }
@@ -166,7 +166,7 @@ fn neon_yuv_444p12_be_parity_u8() {
       &v_le,
       &mut out_le,
       width,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       true,
     );
     yuv_444p_n_to_rgb_row::<12, true>(
@@ -175,7 +175,7 @@ fn neon_yuv_444p12_be_parity_u8() {
       &v_be,
       &mut out_be,
       width,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       true,
     );
   }
@@ -211,7 +211,7 @@ fn neon_yuv_420p16_be_parity_u8() {
       &v_le,
       &mut out_le,
       width,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       true,
     );
     yuv_420p16_to_rgb_row::<true>(
@@ -220,7 +220,7 @@ fn neon_yuv_420p16_be_parity_u8() {
       &v_be,
       &mut out_be,
       width,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       true,
     );
   }
@@ -254,7 +254,7 @@ fn neon_yuv_444p16_be_parity_u16() {
       &v_le,
       &mut out_le,
       width,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       true,
     );
     yuv_444p16_to_rgb_u16_row::<true>(
@@ -263,7 +263,7 @@ fn neon_yuv_444p16_be_parity_u16() {
       &v_be,
       &mut out_be,
       width,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       true,
     );
   }
@@ -298,8 +298,8 @@ fn neon_p010_be_parity_u8() {
   let mut out_le = std::vec![0u8; width * 3];
   let mut out_be = std::vec![0u8; width * 3];
   unsafe {
-    p_n_to_rgb_row::<10, false>(&y_le, &uv_le, &mut out_le, width, ColorMatrix::Bt709, true);
-    p_n_to_rgb_row::<10, true>(&y_be, &uv_be, &mut out_be, width, ColorMatrix::Bt709, true);
+    p_n_to_rgb_row::<10, false>(&y_le, &uv_le, &mut out_le, width, KernelMatrix::Bt709, true);
+    p_n_to_rgb_row::<10, true>(&y_be, &uv_be, &mut out_be, width, KernelMatrix::Bt709, true);
   }
   assert_eq!(out_le, out_be);
 }
@@ -327,8 +327,8 @@ fn neon_p012_be_parity_u16() {
   let mut out_le = std::vec![0u16; width * 3];
   let mut out_be = std::vec![0u16; width * 3];
   unsafe {
-    p_n_to_rgb_u16_row::<12, false>(&y_le, &uv_le, &mut out_le, width, ColorMatrix::Bt709, true);
-    p_n_to_rgb_u16_row::<12, true>(&y_be, &uv_be, &mut out_be, width, ColorMatrix::Bt709, true);
+    p_n_to_rgb_u16_row::<12, false>(&y_le, &uv_le, &mut out_le, width, KernelMatrix::Bt709, true);
+    p_n_to_rgb_u16_row::<12, true>(&y_be, &uv_be, &mut out_be, width, KernelMatrix::Bt709, true);
   }
   assert_eq!(out_le, out_be);
 }
@@ -353,8 +353,8 @@ fn neon_p410_be_parity_u8() {
   let mut out_le = std::vec![0u8; width * 3];
   let mut out_be = std::vec![0u8; width * 3];
   unsafe {
-    p_n_444_to_rgb_row::<10, false>(&y_le, &uv_le, &mut out_le, width, ColorMatrix::Bt709, true);
-    p_n_444_to_rgb_row::<10, true>(&y_be, &uv_be, &mut out_be, width, ColorMatrix::Bt709, true);
+    p_n_444_to_rgb_row::<10, false>(&y_le, &uv_le, &mut out_le, width, KernelMatrix::Bt709, true);
+    p_n_444_to_rgb_row::<10, true>(&y_be, &uv_be, &mut out_be, width, KernelMatrix::Bt709, true);
   }
   assert_eq!(out_le, out_be);
 }
@@ -387,10 +387,17 @@ fn neon_p412_be_parity_u16() {
       &uv_le,
       &mut out_le,
       width,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       true,
     );
-    p_n_444_to_rgb_u16_row::<12, true>(&y_be, &uv_be, &mut out_be, width, ColorMatrix::Bt709, true);
+    p_n_444_to_rgb_u16_row::<12, true>(
+      &y_be,
+      &uv_be,
+      &mut out_be,
+      width,
+      KernelMatrix::Bt709,
+      true,
+    );
   }
   assert_eq!(out_le, out_be);
 }
@@ -415,8 +422,8 @@ fn neon_p016_be_parity_u8() {
   let mut out_le = std::vec![0u8; width * 3];
   let mut out_be = std::vec![0u8; width * 3];
   unsafe {
-    p16_to_rgb_row::<false>(&y_le, &uv_le, &mut out_le, width, ColorMatrix::Bt709, true);
-    p16_to_rgb_row::<true>(&y_be, &uv_be, &mut out_be, width, ColorMatrix::Bt709, true);
+    p16_to_rgb_row::<false>(&y_le, &uv_le, &mut out_le, width, KernelMatrix::Bt709, true);
+    p16_to_rgb_row::<true>(&y_be, &uv_be, &mut out_be, width, KernelMatrix::Bt709, true);
   }
   assert_eq!(out_le, out_be);
 }
@@ -443,8 +450,8 @@ fn neon_p016_be_parity_u16() {
   let mut out_le = std::vec![0u16; width * 3];
   let mut out_be = std::vec![0u16; width * 3];
   unsafe {
-    p16_to_rgb_u16_row::<false>(&y_le, &uv_le, &mut out_le, width, ColorMatrix::Bt709, true);
-    p16_to_rgb_u16_row::<true>(&y_be, &uv_be, &mut out_be, width, ColorMatrix::Bt709, true);
+    p16_to_rgb_u16_row::<false>(&y_le, &uv_le, &mut out_le, width, KernelMatrix::Bt709, true);
+    p16_to_rgb_u16_row::<true>(&y_be, &uv_be, &mut out_be, width, KernelMatrix::Bt709, true);
   }
   assert_eq!(out_le, out_be);
 }
@@ -469,8 +476,15 @@ fn neon_p416_be_parity_u16() {
   let mut out_le = std::vec![0u16; width * 3];
   let mut out_be = std::vec![0u16; width * 3];
   unsafe {
-    p_n_444_16_to_rgb_u16_row::<false>(&y_le, &uv_le, &mut out_le, width, ColorMatrix::Bt709, true);
-    p_n_444_16_to_rgb_u16_row::<true>(&y_be, &uv_be, &mut out_be, width, ColorMatrix::Bt709, true);
+    p_n_444_16_to_rgb_u16_row::<false>(
+      &y_le,
+      &uv_le,
+      &mut out_le,
+      width,
+      KernelMatrix::Bt709,
+      true,
+    );
+    p_n_444_16_to_rgb_u16_row::<true>(&y_be, &uv_be, &mut out_be, width, KernelMatrix::Bt709, true);
   }
   assert_eq!(out_le, out_be);
 }

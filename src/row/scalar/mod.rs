@@ -29,7 +29,7 @@
 //! Cross-format consistency on this distinction is verified by the
 //! per-arch SIMD-vs-scalar parity tests.
 
-use crate::ColorMatrix;
+use crate::KernelMatrix;
 #[cfg(feature = "yuv-planar")]
 use crate::Primaries;
 
@@ -615,14 +615,14 @@ pub(crate) struct Coefficients {
 ))]
 impl Coefficients {
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub(super) const fn for_matrix(m: ColorMatrix) -> Self {
+  pub(super) const fn for_matrix(m: KernelMatrix) -> Self {
     match m {
       // BT.601: r_v=1.402, g_u=-0.344136, g_v=-0.714136, b_u=1.772.
       // SMPTE 170M (BT.601 525-line) and BT.470 System BG (BT.601
       // 625-line) carry the identical Kr=0.299/Kb=0.114 coefficients, so
       // they share this arm exactly; FCC (Kr=0.30/Kb=0.11) is a close
       // numerical approximation grouped here historically.
-      ColorMatrix::Bt601 | ColorMatrix::Fcc | ColorMatrix::Smpte170M | ColorMatrix::Bt470Bg => {
+      KernelMatrix::Bt601 | KernelMatrix::Fcc | KernelMatrix::Smpte170M | KernelMatrix::Bt470Bg => {
         Self {
           r_u: 0,
           r_v: 45941,
@@ -633,7 +633,7 @@ impl Coefficients {
         }
       }
       // BT.709: r_v=1.5748, g_u=-0.1873, g_v=-0.4681, b_u=1.8556.
-      ColorMatrix::Bt709 => Self {
+      KernelMatrix::Bt709 => Self {
         r_u: 0,
         r_v: 51606,
         g_u: -6136,
@@ -642,7 +642,7 @@ impl Coefficients {
         b_v: 0,
       },
       // BT.2020-NCL: r_v=1.4746, g_u=-0.164553, g_v=-0.571353, b_u=1.8814.
-      ColorMatrix::Bt2020Ncl => Self {
+      KernelMatrix::Bt2020Ncl => Self {
         r_u: 0,
         r_v: 48325,
         g_u: -5391,
@@ -658,7 +658,7 @@ impl Coefficients {
       // within rounding tolerance and matches the standard's published
       // text — do not "fix" to the analytic value without coordinating
       // with downstream pipelines that also use the published table.
-      ColorMatrix::Smpte240m => Self {
+      KernelMatrix::Smpte240m => Self {
         r_u: 0,
         r_v: 51642,
         g_u: -7383,
@@ -672,7 +672,7 @@ impl Coefficients {
       //   G = Y + (Cg - 128)              = Y + u_d
       //   B = Y - (Cg - 128) - (Co - 128) = Y - u_d - v_d
       // Each coefficient is ±1.0 → ±32768 in Q15.
-      ColorMatrix::YCgCo => Self {
+      KernelMatrix::YCgCo => Self {
         r_u: -32768,
         r_v: 32768,
         g_u: 32768,
@@ -680,9 +680,24 @@ impl Coefficients {
         b_u: -32768,
         b_v: -32768,
       },
-      // ColorMatrix is #[non_exhaustive] in mediaframe; fall back to BT.709
-      // for any future variants added there before pixon is updated.
-      _ => Self {
+      // The two matrices whose coefficients this primaries-blind entry point
+      // cannot derive, spelled out rather than left to a wildcard so the
+      // BT.709 result is a decision on the record and not a fallback:
+      //
+      // - `Unspecified` is `Matrix`'s own default and reaches the kernels
+      //   routinely. mediaframe documents the resolution as the consumer's,
+      //   and pixon's is BT.709 unconditionally (FFmpeg infers BT.709 for
+      //   `height >= 720` and BT.601 below; a row kernel has no height).
+      // - `ChromaDerivedNcl` is *derived* from the signalled primaries, which
+      //   this entry point is not given — see
+      //   [`for_matrix_with_primaries`](Self::for_matrix_with_primaries),
+      //   which resolves it properly and lands back here only when the
+      //   primaries carry no chromaticities.
+      //
+      // There is no `_` arm: `KernelMatrix` is a closed vocabulary, so this
+      // match is exhaustiveness-checked and a new coefficient set upstream
+      // becomes a compile error here rather than a silent BT.709 picture.
+      KernelMatrix::Unspecified | KernelMatrix::ChromaDerivedNcl => Self {
         r_u: 0,
         r_v: 51606,
         g_u: -6136,
@@ -723,7 +738,7 @@ impl Coefficients {
 
 /// Chromaticity-derived **non-constant-luminance** luma weights
 /// `(Kr, Kg, Kb)` for a set of colour [`Primaries`], per ITU-T H.273
-/// `MatrixCoefficients = 12` ([`ColorMatrix::ChromaDerivedNcl`]).
+/// `MatrixCoefficients = 12` ([`KernelMatrix::ChromaDerivedNcl`]).
 ///
 /// The weights are the **Y row** of the RGB→XYZ matrix built from the
 /// primaries' CIE 1931 `xy` chromaticities and reference white point — the
@@ -741,7 +756,7 @@ impl Coefficients {
 /// functions — so it stays `no_std` / `libm`-free. It is evaluated once per
 /// frame at coefficient-resolution time, never per pixel.
 #[cfg(feature = "yuv-planar")]
-pub(crate) fn chroma_derived_luma_weights(primaries: Primaries) -> Option<(f64, f64, f64)> {
+pub(crate) fn chroma_derived_luma_weights(primaries: &Primaries) -> Option<(f64, f64, f64)> {
   let rgb = primaries.chromaticities()?;
   let white = primaries.white_point()?;
   // ST 2086 raw units → CIE `xy` (raw / 50000.0), then the unscaled primary
@@ -822,7 +837,7 @@ impl Coefficients {
   }
 
   /// [`for_matrix`](Self::for_matrix), extended to resolve
-  /// [`ColorMatrix::ChromaDerivedNcl`] (ITU-T H.273 `MatrixCoefficients =
+  /// [`KernelMatrix::ChromaDerivedNcl`] (ITU-T H.273 `MatrixCoefficients =
   /// 12`) from the signalled colour [`Primaries`].
   ///
   /// `ChromaDerivedNcl` is **affine**: its `Kr` / `Kb` are *derived* from
@@ -852,11 +867,11 @@ impl Coefficients {
   /// full XYZ↔RGB matrix derivation (tabulated → real matrix vs CIE-XYZ →
   /// identity) is future work with no consumer today.
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub(crate) fn for_matrix_with_primaries(matrix: ColorMatrix, primaries: Primaries) -> Self {
+  pub(crate) fn for_matrix_with_primaries(matrix: KernelMatrix, primaries: &Primaries) -> Self {
     match matrix {
-      ColorMatrix::ChromaDerivedNcl => match chroma_derived_luma_weights(primaries) {
+      KernelMatrix::ChromaDerivedNcl => match chroma_derived_luma_weights(primaries) {
         Some((kr, kg, kb)) => Self::from_luma_weights(kr, kg, kb),
-        None => Self::for_matrix(ColorMatrix::Bt709),
+        None => Self::for_matrix(KernelMatrix::Bt709),
       },
       other => Self::for_matrix(other),
     }

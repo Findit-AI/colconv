@@ -84,7 +84,7 @@ pub(crate) unsafe fn p_n_to_rgb_row<const BITS: u32, const BE: bool>(
   uv_half: &[u16],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // SAFETY: caller obligations forwarded to the shared impl.
@@ -106,7 +106,7 @@ pub(crate) unsafe fn p_n_to_rgba_row<const BITS: u32, const BE: bool>(
   uv_half: &[u16],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // SAFETY: caller obligations forwarded to the shared impl.
@@ -131,7 +131,7 @@ pub(crate) unsafe fn nv20_to_rgb_row<const BE: bool>(
   uv_half: &[u16],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // SAFETY: caller obligations forwarded to the shared impl.
@@ -153,7 +153,7 @@ pub(crate) unsafe fn nv20_to_rgba_row<const BE: bool>(
   uv_half: &[u16],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // SAFETY: caller obligations forwarded to the shared impl.
@@ -184,7 +184,7 @@ pub(crate) unsafe fn p_n_to_rgb_or_rgba_row<
   uv_half: &[u16],
   out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   const { assert!(BITS == 10 || BITS == 12) };
@@ -332,7 +332,7 @@ pub(crate) unsafe fn p_n_to_rgb_u16_row<const BITS: u32, const BE: bool>(
   uv_half: &[u16],
   rgb_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   unsafe {
@@ -356,7 +356,7 @@ pub(crate) unsafe fn p_n_to_rgba_u16_row<const BITS: u32, const BE: bool>(
   uv_half: &[u16],
   rgba_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   unsafe {
@@ -380,7 +380,7 @@ pub(crate) unsafe fn nv20_to_rgb_u16_row<const BE: bool>(
   uv_half: &[u16],
   rgb_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   unsafe {
@@ -404,7 +404,7 @@ pub(crate) unsafe fn nv20_to_rgba_u16_row<const BE: bool>(
   uv_half: &[u16],
   rgba_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   unsafe {
@@ -439,7 +439,7 @@ pub(crate) unsafe fn p_n_to_rgb_or_rgba_u16_row<
   uv_half: &[u16],
   out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   const { assert!(BITS == 10 || BITS == 12) };
@@ -628,7 +628,7 @@ pub(crate) unsafe fn p16_to_rgb_row<const BE: bool>(
   uv_half: &[u16],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // SAFETY: caller obligations forwarded to the shared impl.
@@ -647,7 +647,7 @@ pub(crate) unsafe fn p16_to_rgba_row<const BE: bool>(
   uv_half: &[u16],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // SAFETY: caller obligations forwarded to the shared impl.
@@ -665,7 +665,7 @@ pub(crate) unsafe fn p16_to_rgb_or_rgba_row<const ALPHA: bool, const BE: bool>(
   uv_half: &[u16],
   out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   let bpp: usize = if ALPHA { 4 } else { 3 };
@@ -786,7 +786,7 @@ pub(crate) unsafe fn p16_to_rgb_u16_row<const BE: bool>(
   uv_half: &[u16],
   rgb_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   unsafe {
@@ -807,7 +807,7 @@ pub(crate) unsafe fn p16_to_rgba_u16_row<const BE: bool>(
   uv_half: &[u16],
   rgba_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   unsafe {
@@ -832,7 +832,7 @@ pub(crate) unsafe fn p16_to_rgb_or_rgba_u16_row<const ALPHA: bool, const BE: boo
   uv_half: &[u16],
   out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   let bpp: usize = if ALPHA { 4 } else { 3 };
@@ -1091,7 +1091,7 @@ pub(crate) unsafe fn p_n_to_hsv_row<const BITS: u32, const BE: bool, const LOW_P
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert_eq!(width & 1, 0, "semi-planar high-bit requires even width");
@@ -1136,7 +1136,7 @@ pub(crate) unsafe fn nv20_to_hsv_row<const BE: bool>(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // SAFETY: forwarded to the shared AVX2 HSV kernel with `LOW_PACKED = true`.
@@ -1164,7 +1164,7 @@ pub(crate) unsafe fn p16_to_hsv_row<const BE: bool>(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert_eq!(width & 1, 0, "semi-planar 4:2:0 requires even width");

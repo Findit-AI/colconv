@@ -25,7 +25,7 @@
 // `:ty` / `:path` macro fragment from the call site does not mark a call-site
 // import as used), so they are passed by full path there instead of imported.
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   resample::{AreaResampler, AreaStream, ResamplePlan},
   row::yuv_444_to_hsv_row,
   sinker::MixedSinker,
@@ -33,10 +33,10 @@ use crate::{
 };
 use mediaframe::frame::{Yuv410pFrame, Yuv411pFrame, Yuv420pFrame};
 
-const MATRICES: [ColorMatrix; 3] = [
-  ColorMatrix::Bt601,
-  ColorMatrix::Bt709,
-  ColorMatrix::Bt2020Ncl,
+const MATRICES: [KernelMatrix; 3] = [
+  KernelMatrix::Bt601,
+  KernelMatrix::Bt709,
+  KernelMatrix::Bt2020Ncl,
 ];
 
 /// A non-gray pseudo-random byte so the HSV hue / saturation branches are
@@ -90,7 +90,7 @@ fn yuv_domain_hsv_reference(
   ch: usize,
   out_w: usize,
   out_h: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
   let yb = area_bin(y, src_w, src_h, out_w, out_h);
@@ -172,7 +172,7 @@ macro_rules! parity_vs_native {
                 .unwrap();
                 sink.set_native(native);
                 let mut sink = sink.with_hsv(&mut hh, &mut ss, &mut vv).unwrap();
-                $walker(&frame, full_range, matrix, &mut sink).unwrap();
+                $walker(&frame, full_range, sink.set_kernel_matrix(matrix)).unwrap();
                 sink.rgb_scratch.len()
               };
               ((hh, ss, vv), scratch_len)
@@ -255,7 +255,7 @@ fn yuv410p_hsv_only_matches_yuv_domain_reference() {
             .unwrap()
             .with_hsv(&mut hh, &mut ss, &mut vv)
             .unwrap();
-        yuv410p_to(&frame, full_range, matrix, &mut sink).unwrap();
+        yuv410p_to(&frame, full_range, sink.set_kernel_matrix(matrix)).unwrap();
         sink.rgb_scratch.len()
       };
       let want = yuv_domain_hsv_reference(&yp, &up, &vp, w, h, cw, ch, ow, oh, matrix, full_range);
@@ -292,7 +292,7 @@ fn yuv411p_hsv_only_matches_yuv_domain_reference() {
             .unwrap()
             .with_hsv(&mut hh, &mut ss, &mut vv)
             .unwrap();
-        yuv411p_to(&frame, full_range, matrix, &mut sink).unwrap();
+        yuv411p_to(&frame, full_range, sink.set_kernel_matrix(matrix)).unwrap();
         sink.rgb_scratch.len()
       };
       let want = yuv_domain_hsv_reference(&yp, &up, &vp, w, h, cw, ch, ow, oh, matrix, full_range);
@@ -333,7 +333,7 @@ fn yuv410p_hsv_only_vertical_chroma_upsample() {
               .unwrap()
               .with_hsv(&mut hh, &mut ss, &mut vv)
               .unwrap();
-          yuv410p_to(&frame, full_range, matrix, &mut sink).unwrap();
+          yuv410p_to(&frame, full_range, sink.set_kernel_matrix(matrix)).unwrap();
           sink.rgb_scratch.len()
         };
         let yb = area_resample_plane(&ResamplePlan::area(w, h, ow, oh).unwrap(), &yp, w, h);
@@ -407,7 +407,7 @@ fn yuv410p_hsv_only_odd_height_chroma_weighting() {
             .unwrap()
             .with_hsv(&mut hh, &mut ss, &mut vv)
             .unwrap();
-            yuv410p_to(&frame, full_range, matrix, &mut sink).unwrap();
+            yuv410p_to(&frame, full_range, sink.set_kernel_matrix(matrix)).unwrap();
             sink.rgb_scratch.len()
           };
           let lp = ResamplePlan::area(w, h, ow, oh).unwrap();
@@ -481,7 +481,7 @@ fn yuv411p_hsv_only_odd_width_chroma_weighting() {
             .unwrap()
             .with_hsv(&mut hh, &mut ss, &mut vv)
             .unwrap();
-            yuv411p_to(&frame, full_range, matrix, &mut sink).unwrap();
+            yuv411p_to(&frame, full_range, sink.set_kernel_matrix(matrix)).unwrap();
             sink.rgb_scratch.len()
           };
           let lp = ResamplePlan::area(w, h, ow, oh).unwrap();
@@ -548,7 +548,7 @@ fn luma_plus_hsv_only_rowstage_is_rgb_free_and_matches_native() {
         .unwrap()
         .with_hsv(&mut hh, &mut ss, &mut vv)
         .unwrap();
-      yuv420p_to(&frame, true, ColorMatrix::Bt709, &mut sink).unwrap();
+      yuv420p_to(&frame, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
       sink.rgb_scratch.len()
     };
     (luma, (hh, ss, vv), scratch_len)
@@ -589,7 +589,7 @@ fn rgb_plus_hsv_rowstage_still_stages_rgb_scratch() {
         .unwrap()
         .with_hsv(&mut hh, &mut ss, &mut vv)
         .unwrap();
-    yuv420p_to(&frame, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    yuv420p_to(&frame, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
     sink.rgb_scratch.len()
   };
   assert_eq!(
@@ -626,7 +626,7 @@ fn hsv_only_rowstage_reused_sink_resets_between_frames() {
         .with_native(false)
         .with_hsv(&mut rh, &mut rs, &mut rv)
         .unwrap();
-    yuv420p_to(&frame, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    yuv420p_to(&frame, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   }
 
   // Two frames in a row through the same sink; the walker calls begin_frame
@@ -640,8 +640,8 @@ fn hsv_only_rowstage_reused_sink_resets_between_frames() {
       .with_native(false)
       .with_hsv(&mut hh, &mut ss, &mut vv)
       .unwrap();
-  yuv420p_to(&frame, true, ColorMatrix::Bt601, &mut sink).unwrap();
-  yuv420p_to(&frame, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuv420p_to(&frame, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
+  yuv420p_to(&frame, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   drop(sink);
   assert_eq!(
     (hh, ss, vv),

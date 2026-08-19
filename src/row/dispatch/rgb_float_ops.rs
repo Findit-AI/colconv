@@ -46,34 +46,44 @@ pub fn rgbf32_to_rgb_row<const BE: bool>(
       target_arch = "aarch64" => {
         if neon_available() {
           // SAFETY: `neon_available()` verified NEON is present.
-          unsafe { arch::neon::rgbf32_to_rgb_row::<BE>(rgb_in, rgb_out, width); }
+          unsafe {
+            arch::neon::rgbf32_to_rgb_row::<BE>(rgb_in, rgb_out, width);
+          }
           return;
         }
-      },
+      }
       target_arch = "x86_64" => {
         if avx512_available() {
           // SAFETY: AVX-512F verified.
-          unsafe { arch::x86_avx512::rgbf32_to_rgb_row::<BE>(rgb_in, rgb_out, width); }
+          unsafe {
+            arch::x86_avx512::rgbf32_to_rgb_row::<BE>(rgb_in, rgb_out, width);
+          }
           return;
         }
         if avx2_available() {
           // SAFETY: AVX2 verified.
-          unsafe { arch::x86_avx2::rgbf32_to_rgb_row::<BE>(rgb_in, rgb_out, width); }
+          unsafe {
+            arch::x86_avx2::rgbf32_to_rgb_row::<BE>(rgb_in, rgb_out, width);
+          }
           return;
         }
         if sse41_available() {
           // SAFETY: SSE4.1 verified.
-          unsafe { arch::x86_sse41::rgbf32_to_rgb_row::<BE>(rgb_in, rgb_out, width); }
+          unsafe {
+            arch::x86_sse41::rgbf32_to_rgb_row::<BE>(rgb_in, rgb_out, width);
+          }
           return;
         }
-      },
+      }
       target_arch = "wasm32" => {
         if simd128_available() {
           // SAFETY: simd128 compile-time verified.
-          unsafe { arch::wasm_simd128::rgbf32_to_rgb_row::<BE>(rgb_in, rgb_out, width); }
+          unsafe {
+            arch::wasm_simd128::rgbf32_to_rgb_row::<BE>(rgb_in, rgb_out, width);
+          }
           return;
         }
-      },
+      }
       _ => {}
     }
   }
@@ -100,30 +110,40 @@ pub fn rgbf32_to_rgba_row<const BE: bool>(
     cfg_select! {
       target_arch = "aarch64" => {
         if neon_available() {
-          unsafe { arch::neon::rgbf32_to_rgba_row::<BE>(rgb_in, rgba_out, width); }
+          unsafe {
+            arch::neon::rgbf32_to_rgba_row::<BE>(rgb_in, rgba_out, width);
+          }
           return;
         }
-      },
+      }
       target_arch = "x86_64" => {
         if avx512_available() {
-          unsafe { arch::x86_avx512::rgbf32_to_rgba_row::<BE>(rgb_in, rgba_out, width); }
+          unsafe {
+            arch::x86_avx512::rgbf32_to_rgba_row::<BE>(rgb_in, rgba_out, width);
+          }
           return;
         }
         if avx2_available() {
-          unsafe { arch::x86_avx2::rgbf32_to_rgba_row::<BE>(rgb_in, rgba_out, width); }
+          unsafe {
+            arch::x86_avx2::rgbf32_to_rgba_row::<BE>(rgb_in, rgba_out, width);
+          }
           return;
         }
         if sse41_available() {
-          unsafe { arch::x86_sse41::rgbf32_to_rgba_row::<BE>(rgb_in, rgba_out, width); }
+          unsafe {
+            arch::x86_sse41::rgbf32_to_rgba_row::<BE>(rgb_in, rgba_out, width);
+          }
           return;
         }
-      },
+      }
       target_arch = "wasm32" => {
         if simd128_available() {
-          unsafe { arch::wasm_simd128::rgbf32_to_rgba_row::<BE>(rgb_in, rgba_out, width); }
+          unsafe {
+            arch::wasm_simd128::rgbf32_to_rgba_row::<BE>(rgb_in, rgba_out, width);
+          }
           return;
         }
-      },
+      }
       _ => {}
     }
   }
@@ -150,30 +170,40 @@ pub fn rgbf32_to_rgb_u16_row<const BE: bool>(
     cfg_select! {
       target_arch = "aarch64" => {
         if neon_available() {
-          unsafe { arch::neon::rgbf32_to_rgb_u16_row::<BE>(rgb_in, rgb_out, width); }
+          unsafe {
+            arch::neon::rgbf32_to_rgb_u16_row::<BE>(rgb_in, rgb_out, width);
+          }
           return;
         }
-      },
+      }
       target_arch = "x86_64" => {
         if avx512_available() {
-          unsafe { arch::x86_avx512::rgbf32_to_rgb_u16_row::<BE>(rgb_in, rgb_out, width); }
+          unsafe {
+            arch::x86_avx512::rgbf32_to_rgb_u16_row::<BE>(rgb_in, rgb_out, width);
+          }
           return;
         }
         if avx2_available() {
-          unsafe { arch::x86_avx2::rgbf32_to_rgb_u16_row::<BE>(rgb_in, rgb_out, width); }
+          unsafe {
+            arch::x86_avx2::rgbf32_to_rgb_u16_row::<BE>(rgb_in, rgb_out, width);
+          }
           return;
         }
         if sse41_available() {
-          unsafe { arch::x86_sse41::rgbf32_to_rgb_u16_row::<BE>(rgb_in, rgb_out, width); }
+          unsafe {
+            arch::x86_sse41::rgbf32_to_rgb_u16_row::<BE>(rgb_in, rgb_out, width);
+          }
           return;
         }
-      },
+      }
       target_arch = "wasm32" => {
         if simd128_available() {
-          unsafe { arch::wasm_simd128::rgbf32_to_rgb_u16_row::<BE>(rgb_in, rgb_out, width); }
+          unsafe {
+            arch::wasm_simd128::rgbf32_to_rgb_u16_row::<BE>(rgb_in, rgb_out, width);
+          }
           return;
         }
-      },
+      }
       _ => {}
     }
   }
@@ -200,30 +230,40 @@ pub fn rgbf32_to_rgba_u16_row<const BE: bool>(
     cfg_select! {
       target_arch = "aarch64" => {
         if neon_available() {
-          unsafe { arch::neon::rgbf32_to_rgba_u16_row::<BE>(rgb_in, rgba_out, width); }
+          unsafe {
+            arch::neon::rgbf32_to_rgba_u16_row::<BE>(rgb_in, rgba_out, width);
+          }
           return;
         }
-      },
+      }
       target_arch = "x86_64" => {
         if avx512_available() {
-          unsafe { arch::x86_avx512::rgbf32_to_rgba_u16_row::<BE>(rgb_in, rgba_out, width); }
+          unsafe {
+            arch::x86_avx512::rgbf32_to_rgba_u16_row::<BE>(rgb_in, rgba_out, width);
+          }
           return;
         }
         if avx2_available() {
-          unsafe { arch::x86_avx2::rgbf32_to_rgba_u16_row::<BE>(rgb_in, rgba_out, width); }
+          unsafe {
+            arch::x86_avx2::rgbf32_to_rgba_u16_row::<BE>(rgb_in, rgba_out, width);
+          }
           return;
         }
         if sse41_available() {
-          unsafe { arch::x86_sse41::rgbf32_to_rgba_u16_row::<BE>(rgb_in, rgba_out, width); }
+          unsafe {
+            arch::x86_sse41::rgbf32_to_rgba_u16_row::<BE>(rgb_in, rgba_out, width);
+          }
           return;
         }
-      },
+      }
       target_arch = "wasm32" => {
         if simd128_available() {
-          unsafe { arch::wasm_simd128::rgbf32_to_rgba_u16_row::<BE>(rgb_in, rgba_out, width); }
+          unsafe {
+            arch::wasm_simd128::rgbf32_to_rgba_u16_row::<BE>(rgb_in, rgba_out, width);
+          }
           return;
         }
-      },
+      }
       _ => {}
     }
   }
@@ -251,30 +291,40 @@ pub fn rgbf32_to_rgb_f32_row<const BE: bool>(
     cfg_select! {
       target_arch = "aarch64" => {
         if neon_available() {
-          unsafe { arch::neon::rgbf32_to_rgb_f32_row::<BE>(rgb_in, rgb_out, width); }
+          unsafe {
+            arch::neon::rgbf32_to_rgb_f32_row::<BE>(rgb_in, rgb_out, width);
+          }
           return;
         }
-      },
+      }
       target_arch = "x86_64" => {
         if avx512_available() {
-          unsafe { arch::x86_avx512::rgbf32_to_rgb_f32_row::<BE>(rgb_in, rgb_out, width); }
+          unsafe {
+            arch::x86_avx512::rgbf32_to_rgb_f32_row::<BE>(rgb_in, rgb_out, width);
+          }
           return;
         }
         if avx2_available() {
-          unsafe { arch::x86_avx2::rgbf32_to_rgb_f32_row::<BE>(rgb_in, rgb_out, width); }
+          unsafe {
+            arch::x86_avx2::rgbf32_to_rgb_f32_row::<BE>(rgb_in, rgb_out, width);
+          }
           return;
         }
         if sse41_available() {
-          unsafe { arch::x86_sse41::rgbf32_to_rgb_f32_row::<BE>(rgb_in, rgb_out, width); }
+          unsafe {
+            arch::x86_sse41::rgbf32_to_rgb_f32_row::<BE>(rgb_in, rgb_out, width);
+          }
           return;
         }
-      },
+      }
       target_arch = "wasm32" => {
         if simd128_available() {
-          unsafe { arch::wasm_simd128::rgbf32_to_rgb_f32_row::<BE>(rgb_in, rgb_out, width); }
+          unsafe {
+            arch::wasm_simd128::rgbf32_to_rgb_f32_row::<BE>(rgb_in, rgb_out, width);
+          }
           return;
         }
-      },
+      }
       _ => {}
     }
   }
@@ -313,34 +363,44 @@ pub fn rgbaf32_to_rgb_row<const BE: bool>(
       target_arch = "aarch64" => {
         if neon_available() {
           // SAFETY: `neon_available()` verified NEON is present.
-          unsafe { arch::neon::rgbaf32_to_rgb_row::<BE>(rgba_in, rgb_out, width); }
+          unsafe {
+            arch::neon::rgbaf32_to_rgb_row::<BE>(rgba_in, rgb_out, width);
+          }
           return;
         }
-      },
+      }
       target_arch = "x86_64" => {
         if avx512_available() {
           // SAFETY: AVX-512F verified.
-          unsafe { arch::x86_avx512::rgbaf32_to_rgb_row::<BE>(rgba_in, rgb_out, width); }
+          unsafe {
+            arch::x86_avx512::rgbaf32_to_rgb_row::<BE>(rgba_in, rgb_out, width);
+          }
           return;
         }
         if avx2_available() {
           // SAFETY: AVX2 verified.
-          unsafe { arch::x86_avx2::rgbaf32_to_rgb_row::<BE>(rgba_in, rgb_out, width); }
+          unsafe {
+            arch::x86_avx2::rgbaf32_to_rgb_row::<BE>(rgba_in, rgb_out, width);
+          }
           return;
         }
         if sse41_available() {
           // SAFETY: SSE4.1 verified.
-          unsafe { arch::x86_sse41::rgbaf32_to_rgb_row::<BE>(rgba_in, rgb_out, width); }
+          unsafe {
+            arch::x86_sse41::rgbaf32_to_rgb_row::<BE>(rgba_in, rgb_out, width);
+          }
           return;
         }
-      },
+      }
       target_arch = "wasm32" => {
         if simd128_available() {
           // SAFETY: simd128 compile-time verified.
-          unsafe { arch::wasm_simd128::rgbaf32_to_rgb_row::<BE>(rgba_in, rgb_out, width); }
+          unsafe {
+            arch::wasm_simd128::rgbaf32_to_rgb_row::<BE>(rgba_in, rgb_out, width);
+          }
           return;
         }
-      },
+      }
       _ => {}
     }
   }
@@ -369,30 +429,40 @@ pub fn rgbaf32_to_rgba_row<const BE: bool>(
     cfg_select! {
       target_arch = "aarch64" => {
         if neon_available() {
-          unsafe { arch::neon::rgbaf32_to_rgba_row::<BE>(rgba_in, rgba_out, width); }
+          unsafe {
+            arch::neon::rgbaf32_to_rgba_row::<BE>(rgba_in, rgba_out, width);
+          }
           return;
         }
-      },
+      }
       target_arch = "x86_64" => {
         if avx512_available() {
-          unsafe { arch::x86_avx512::rgbaf32_to_rgba_row::<BE>(rgba_in, rgba_out, width); }
+          unsafe {
+            arch::x86_avx512::rgbaf32_to_rgba_row::<BE>(rgba_in, rgba_out, width);
+          }
           return;
         }
         if avx2_available() {
-          unsafe { arch::x86_avx2::rgbaf32_to_rgba_row::<BE>(rgba_in, rgba_out, width); }
+          unsafe {
+            arch::x86_avx2::rgbaf32_to_rgba_row::<BE>(rgba_in, rgba_out, width);
+          }
           return;
         }
         if sse41_available() {
-          unsafe { arch::x86_sse41::rgbaf32_to_rgba_row::<BE>(rgba_in, rgba_out, width); }
+          unsafe {
+            arch::x86_sse41::rgbaf32_to_rgba_row::<BE>(rgba_in, rgba_out, width);
+          }
           return;
         }
-      },
+      }
       target_arch = "wasm32" => {
         if simd128_available() {
-          unsafe { arch::wasm_simd128::rgbaf32_to_rgba_row::<BE>(rgba_in, rgba_out, width); }
+          unsafe {
+            arch::wasm_simd128::rgbaf32_to_rgba_row::<BE>(rgba_in, rgba_out, width);
+          }
           return;
         }
-      },
+      }
       _ => {}
     }
   }
@@ -421,30 +491,40 @@ pub fn rgbaf32_to_rgb_u16_row<const BE: bool>(
     cfg_select! {
       target_arch = "aarch64" => {
         if neon_available() {
-          unsafe { arch::neon::rgbaf32_to_rgb_u16_row::<BE>(rgba_in, rgb_out, width); }
+          unsafe {
+            arch::neon::rgbaf32_to_rgb_u16_row::<BE>(rgba_in, rgb_out, width);
+          }
           return;
         }
-      },
+      }
       target_arch = "x86_64" => {
         if avx512_available() {
-          unsafe { arch::x86_avx512::rgbaf32_to_rgb_u16_row::<BE>(rgba_in, rgb_out, width); }
+          unsafe {
+            arch::x86_avx512::rgbaf32_to_rgb_u16_row::<BE>(rgba_in, rgb_out, width);
+          }
           return;
         }
         if avx2_available() {
-          unsafe { arch::x86_avx2::rgbaf32_to_rgb_u16_row::<BE>(rgba_in, rgb_out, width); }
+          unsafe {
+            arch::x86_avx2::rgbaf32_to_rgb_u16_row::<BE>(rgba_in, rgb_out, width);
+          }
           return;
         }
         if sse41_available() {
-          unsafe { arch::x86_sse41::rgbaf32_to_rgb_u16_row::<BE>(rgba_in, rgb_out, width); }
+          unsafe {
+            arch::x86_sse41::rgbaf32_to_rgb_u16_row::<BE>(rgba_in, rgb_out, width);
+          }
           return;
         }
-      },
+      }
       target_arch = "wasm32" => {
         if simd128_available() {
-          unsafe { arch::wasm_simd128::rgbaf32_to_rgb_u16_row::<BE>(rgba_in, rgb_out, width); }
+          unsafe {
+            arch::wasm_simd128::rgbaf32_to_rgb_u16_row::<BE>(rgba_in, rgb_out, width);
+          }
           return;
         }
-      },
+      }
       _ => {}
     }
   }
@@ -473,30 +553,40 @@ pub fn rgbaf32_to_rgba_u16_row<const BE: bool>(
     cfg_select! {
       target_arch = "aarch64" => {
         if neon_available() {
-          unsafe { arch::neon::rgbaf32_to_rgba_u16_row::<BE>(rgba_in, rgba_out, width); }
+          unsafe {
+            arch::neon::rgbaf32_to_rgba_u16_row::<BE>(rgba_in, rgba_out, width);
+          }
           return;
         }
-      },
+      }
       target_arch = "x86_64" => {
         if avx512_available() {
-          unsafe { arch::x86_avx512::rgbaf32_to_rgba_u16_row::<BE>(rgba_in, rgba_out, width); }
+          unsafe {
+            arch::x86_avx512::rgbaf32_to_rgba_u16_row::<BE>(rgba_in, rgba_out, width);
+          }
           return;
         }
         if avx2_available() {
-          unsafe { arch::x86_avx2::rgbaf32_to_rgba_u16_row::<BE>(rgba_in, rgba_out, width); }
+          unsafe {
+            arch::x86_avx2::rgbaf32_to_rgba_u16_row::<BE>(rgba_in, rgba_out, width);
+          }
           return;
         }
         if sse41_available() {
-          unsafe { arch::x86_sse41::rgbaf32_to_rgba_u16_row::<BE>(rgba_in, rgba_out, width); }
+          unsafe {
+            arch::x86_sse41::rgbaf32_to_rgba_u16_row::<BE>(rgba_in, rgba_out, width);
+          }
           return;
         }
-      },
+      }
       target_arch = "wasm32" => {
         if simd128_available() {
-          unsafe { arch::wasm_simd128::rgbaf32_to_rgba_u16_row::<BE>(rgba_in, rgba_out, width); }
+          unsafe {
+            arch::wasm_simd128::rgbaf32_to_rgba_u16_row::<BE>(rgba_in, rgba_out, width);
+          }
           return;
         }
-      },
+      }
       _ => {}
     }
   }
@@ -526,30 +616,40 @@ pub fn rgbaf32_to_rgb_f32_row<const BE: bool>(
     cfg_select! {
       target_arch = "aarch64" => {
         if neon_available() {
-          unsafe { arch::neon::rgbaf32_to_rgb_f32_row::<BE>(rgba_in, rgb_out, width); }
+          unsafe {
+            arch::neon::rgbaf32_to_rgb_f32_row::<BE>(rgba_in, rgb_out, width);
+          }
           return;
         }
-      },
+      }
       target_arch = "x86_64" => {
         if avx512_available() {
-          unsafe { arch::x86_avx512::rgbaf32_to_rgb_f32_row::<BE>(rgba_in, rgb_out, width); }
+          unsafe {
+            arch::x86_avx512::rgbaf32_to_rgb_f32_row::<BE>(rgba_in, rgb_out, width);
+          }
           return;
         }
         if avx2_available() {
-          unsafe { arch::x86_avx2::rgbaf32_to_rgb_f32_row::<BE>(rgba_in, rgb_out, width); }
+          unsafe {
+            arch::x86_avx2::rgbaf32_to_rgb_f32_row::<BE>(rgba_in, rgb_out, width);
+          }
           return;
         }
         if sse41_available() {
-          unsafe { arch::x86_sse41::rgbaf32_to_rgb_f32_row::<BE>(rgba_in, rgb_out, width); }
+          unsafe {
+            arch::x86_sse41::rgbaf32_to_rgb_f32_row::<BE>(rgba_in, rgb_out, width);
+          }
           return;
         }
-      },
+      }
       target_arch = "wasm32" => {
         if simd128_available() {
-          unsafe { arch::wasm_simd128::rgbaf32_to_rgb_f32_row::<BE>(rgba_in, rgb_out, width); }
+          unsafe {
+            arch::wasm_simd128::rgbaf32_to_rgb_f32_row::<BE>(rgba_in, rgb_out, width);
+          }
           return;
         }
-      },
+      }
       _ => {}
     }
   }
@@ -578,30 +678,40 @@ pub fn rgbaf32_to_rgba_f32_row<const BE: bool>(
     cfg_select! {
       target_arch = "aarch64" => {
         if neon_available() {
-          unsafe { arch::neon::rgbaf32_to_rgba_f32_row::<BE>(rgba_in, rgba_out, width); }
+          unsafe {
+            arch::neon::rgbaf32_to_rgba_f32_row::<BE>(rgba_in, rgba_out, width);
+          }
           return;
         }
-      },
+      }
       target_arch = "x86_64" => {
         if avx512_available() {
-          unsafe { arch::x86_avx512::rgbaf32_to_rgba_f32_row::<BE>(rgba_in, rgba_out, width); }
+          unsafe {
+            arch::x86_avx512::rgbaf32_to_rgba_f32_row::<BE>(rgba_in, rgba_out, width);
+          }
           return;
         }
         if avx2_available() {
-          unsafe { arch::x86_avx2::rgbaf32_to_rgba_f32_row::<BE>(rgba_in, rgba_out, width); }
+          unsafe {
+            arch::x86_avx2::rgbaf32_to_rgba_f32_row::<BE>(rgba_in, rgba_out, width);
+          }
           return;
         }
         if sse41_available() {
-          unsafe { arch::x86_sse41::rgbaf32_to_rgba_f32_row::<BE>(rgba_in, rgba_out, width); }
+          unsafe {
+            arch::x86_sse41::rgbaf32_to_rgba_f32_row::<BE>(rgba_in, rgba_out, width);
+          }
           return;
         }
-      },
+      }
       target_arch = "wasm32" => {
         if simd128_available() {
-          unsafe { arch::wasm_simd128::rgbaf32_to_rgba_f32_row::<BE>(rgba_in, rgba_out, width); }
+          unsafe {
+            arch::wasm_simd128::rgbaf32_to_rgba_f32_row::<BE>(rgba_in, rgba_out, width);
+          }
           return;
         }
-      },
+      }
       _ => {}
     }
   }

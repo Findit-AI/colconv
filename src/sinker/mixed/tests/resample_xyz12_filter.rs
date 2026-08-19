@@ -30,7 +30,7 @@
 //!    raise `UnsupportedFilter` at the `Xyz12` fence.
 
 use crate::{
-  DcpTargetGamut,
+  KernelGamut,
   frame::Xyz12LeFrame,
   resample::{
     CatmullRom, FilterKernel, FilterStream, FilteredResampler, Lanczos3, Resampler, Triangle,
@@ -66,14 +66,14 @@ fn varying_frame(w: usize, h: usize) -> Vec<u16> {
 /// Full-res `with_xyz_f32` of a wire frame — the production source of
 /// truth for source-width **linear XYZ** (SMPTE ST 428-1 inverse-OETF,
 /// no matrix). This is the per-plane filter oracle's input.
-fn full_res_linear_xyz(wire: &[u16], w: usize, h: usize, gamut: DcpTargetGamut) -> Vec<f32> {
+fn full_res_linear_xyz(wire: &[u16], w: usize, h: usize, gamut: KernelGamut) -> Vec<f32> {
   let src = Xyz12LeFrame::try_new(wire, w as u32, h as u32, (w * 3) as u32).unwrap();
   let mut xyz = vec![0.0f32; w * h * 3];
   let mut sink = MixedSinker::<Xyz12Le>::new(w, h)
     .with_simd(false)
     .with_xyz_f32(&mut xyz)
     .unwrap();
-  xyz12_to(&src, gamut, &mut sink).unwrap();
+  xyz12_to(&src, sink.set_kernel_gamut(gamut)).unwrap();
   xyz
 }
 
@@ -131,7 +131,7 @@ fn xyz12_filter_outputs<K: FilterKernel + Copy>(
   sh: usize,
   ow: usize,
   oh: usize,
-  gamut: DcpTargetGamut,
+  gamut: KernelGamut,
   kernel: K,
 ) -> FilterOutputs {
   let src = Xyz12LeFrame::try_new(wire, sw as u32, sh as u32, (sw * 3) as u32).unwrap();
@@ -158,7 +158,7 @@ fn xyz12_filter_outputs<K: FilterKernel + Copy>(
     .unwrap()
     .with_rgb_f16(&mut rgb_f16)
     .unwrap();
-    xyz12_to(&src, gamut, &mut sink).unwrap();
+    xyz12_to(&src, sink.set_kernel_gamut(gamut)).unwrap();
   }
   FilterOutputs {
     rgb,
@@ -182,7 +182,7 @@ fn assert_filter_is_per_channel<K: FilterKernel + Copy>(
   sh: usize,
   ow: usize,
   oh: usize,
-  gamut: DcpTargetGamut,
+  gamut: KernelGamut,
   ctx: &str,
 ) -> f32 {
   let got = xyz12_filter_outputs(wire, sw, sh, ow, oh, gamut, kernel);
@@ -263,9 +263,9 @@ fn xyz12_downscale_filter_is_per_channel() {
   const OH: usize = 4;
   let wire = varying_frame(SW, SH);
   for &gamut in &[
-    DcpTargetGamut::DciP3,
-    DcpTargetGamut::Rec709,
-    DcpTargetGamut::Rec2020,
+    KernelGamut::DciP3,
+    KernelGamut::Rec709,
+    KernelGamut::Rec2020,
   ] {
     assert_filter_is_per_channel(Triangle, &wire, SW, SH, OW, OH, gamut, "triangle down");
     assert_filter_is_per_channel(CatmullRom, &wire, SW, SH, OW, OH, gamut, "catmullrom down");
@@ -285,9 +285,9 @@ fn xyz12_upscale_filter_is_per_channel() {
   const OH: usize = 7;
   let wire = varying_frame(SW, SH);
   for &gamut in &[
-    DcpTargetGamut::DciP3,
-    DcpTargetGamut::Rec709,
-    DcpTargetGamut::Rec2020,
+    KernelGamut::DciP3,
+    KernelGamut::Rec709,
+    KernelGamut::Rec2020,
   ] {
     assert_filter_is_per_channel(Triangle, &wire, SW, SH, OW, OH, gamut, "triangle up");
     assert_filter_is_per_channel(CatmullRom, &wire, SW, SH, OW, OH, gamut, "catmullrom up");
@@ -312,7 +312,7 @@ fn xyz12_filter_preserves_hdr_and_out_of_gamut_while_clamped_outputs_stay_in_ran
   const SH: usize = 8;
   const OW: usize = 6;
   const OH: usize = 6;
-  let gamut = DcpTargetGamut::Rec709;
+  let gamut = KernelGamut::Rec709;
 
   // Half-and-half edge: left columns max-Y (HDR + out-of-gamut), right
   // columns black. A reconstruction filter overshoots near the boundary.
@@ -434,7 +434,7 @@ fn xyz12_filter_plan_is_accepted() {
     .unwrap()
     .with_xyz_f32(&mut xyz_f32)
     .unwrap();
-    xyz12_to(&src, DcpTargetGamut::DciP3, &mut sink).unwrap();
+    xyz12_to(&src, sink.set_kernel_gamut(KernelGamut::DciP3)).unwrap();
   }
   assert!(
     xyz_f32.iter().all(|&v| v.to_bits() != sentinel.to_bits()),

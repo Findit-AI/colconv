@@ -211,7 +211,7 @@ fn neon_gbrpf32_to_rgba_f16_matches_scalar() {
 #[test]
 #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
 fn neon_gbrpf32_to_luma_matches_scalar() {
-  use crate::ColorMatrix;
+  use crate::KernelMatrix;
   for &w in WIDTHS {
     let mut g = std::vec![0.0f32; w];
     let mut b = std::vec![0.0f32; w];
@@ -222,7 +222,7 @@ fn neon_gbrpf32_to_luma_matches_scalar() {
     let mut simd = std::vec![0u8; w];
     let mut scal = std::vec![0u8; w];
     unsafe {
-      gbrpf32_to_luma_row::<false>(&g, &b, &r, &mut simd, w, ColorMatrix::Bt709, true);
+      gbrpf32_to_luma_row::<false>(&g, &b, &r, &mut simd, w, KernelMatrix::Bt709, true);
     }
     scalar::planar_gbr_float::gbrpf32_to_luma_row::<false>(
       &g,
@@ -230,7 +230,7 @@ fn neon_gbrpf32_to_luma_matches_scalar() {
       &r,
       &mut scal,
       w,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       true,
     );
     assert_eq!(simd, scal, "gbrpf32_to_luma width={w}");
@@ -242,7 +242,7 @@ fn neon_gbrpf32_to_luma_matches_scalar() {
 #[test]
 #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
 fn neon_gbrpf32_to_luma_u16_matches_scalar() {
-  use crate::ColorMatrix;
+  use crate::KernelMatrix;
   for &w in WIDTHS {
     let mut g = std::vec![0.0f32; w];
     let mut b = std::vec![0.0f32; w];
@@ -253,7 +253,7 @@ fn neon_gbrpf32_to_luma_u16_matches_scalar() {
     let mut simd = std::vec![0u16; w];
     let mut scal = std::vec![0u16; w];
     unsafe {
-      gbrpf32_to_luma_u16_row::<false>(&g, &b, &r, &mut simd, w, ColorMatrix::Bt709, true);
+      gbrpf32_to_luma_u16_row::<false>(&g, &b, &r, &mut simd, w, KernelMatrix::Bt709, true);
     }
     scalar::planar_gbr_float::gbrpf32_to_luma_u16_row::<false>(
       &g,
@@ -261,7 +261,7 @@ fn neon_gbrpf32_to_luma_u16_matches_scalar() {
       &r,
       &mut scal,
       w,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       true,
     );
     assert_eq!(simd, scal, "gbrpf32_to_luma_u16 width={w}");
@@ -621,7 +621,7 @@ fn neon_gbrpf16_to_rgba_f16_lossless_matches_scalar() {
 #[test]
 #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
 fn neon_gbrpf16_to_luma_matches_scalar() {
-  use crate::ColorMatrix;
+  use crate::KernelMatrix;
   if !std::arch::is_aarch64_feature_detected!("fp16") {
     return;
   }
@@ -635,7 +635,7 @@ fn neon_gbrpf16_to_luma_matches_scalar() {
     let mut simd = std::vec![0u8; w];
     let mut scal = std::vec![0u8; w];
     unsafe {
-      gbrpf16_to_luma_row_fp16::<false>(&g, &b, &r, &mut simd, w, ColorMatrix::Bt709, true);
+      gbrpf16_to_luma_row_fp16::<false>(&g, &b, &r, &mut simd, w, KernelMatrix::Bt709, true);
     }
     let gf: std::vec::Vec<f32> = g.iter().map(|v| v.to_f32()).collect();
     let bf: std::vec::Vec<f32> = b.iter().map(|v| v.to_f32()).collect();
@@ -646,7 +646,7 @@ fn neon_gbrpf16_to_luma_matches_scalar() {
       &rf,
       &mut scal,
       w,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       true,
     );
     assert_eq!(simd, scal, "gbrpf16_to_luma width={w}");
@@ -658,7 +658,7 @@ fn neon_gbrpf16_to_luma_matches_scalar() {
 #[test]
 #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
 fn neon_gbrpf16_to_luma_u16_matches_scalar() {
-  use crate::ColorMatrix;
+  use crate::KernelMatrix;
   if !std::arch::is_aarch64_feature_detected!("fp16") {
     return;
   }
@@ -672,7 +672,7 @@ fn neon_gbrpf16_to_luma_u16_matches_scalar() {
     let mut simd = std::vec![0u16; w];
     let mut scal = std::vec![0u16; w];
     unsafe {
-      gbrpf16_to_luma_u16_row_fp16::<false>(&g, &b, &r, &mut simd, w, ColorMatrix::Bt709, true);
+      gbrpf16_to_luma_u16_row_fp16::<false>(&g, &b, &r, &mut simd, w, KernelMatrix::Bt709, true);
     }
     let gf: std::vec::Vec<f32> = g.iter().map(|v| v.to_f32()).collect();
     let bf: std::vec::Vec<f32> = b.iter().map(|v| v.to_f32()).collect();
@@ -683,7 +683,7 @@ fn neon_gbrpf16_to_luma_u16_matches_scalar() {
       &rf,
       &mut scal,
       w,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       true,
     );
     assert_eq!(simd, scal, "gbrpf16_to_luma_u16 width={w}");

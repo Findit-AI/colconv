@@ -12,7 +12,7 @@
 //! independence, straight vs premultiplied colour, the α patch).
 
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   frame::Yaf32Frame,
   resample::{AreaResampler, FilteredResampler, ResampleError, Triangle},
   sinker::{AlphaMode, MixedSinker, MixedSinkerError},
@@ -22,7 +22,7 @@ use crate::{
 const SRC: usize = 8;
 const OUT: usize = 4;
 const FR: bool = true;
-const M: ColorMatrix = ColorMatrix::Bt709;
+const M: KernelMatrix = KernelMatrix::Bt709;
 
 /// Per-output-block luma in `[0, 15/16]`.
 fn y_block(oy: usize, ox: usize) -> f32 {
@@ -75,7 +75,7 @@ fn yaf32_downscale_luma_f32_is_native_block_mean() {
         .unwrap()
         .with_luma_f32(&mut luma_f32)
         .unwrap();
-    yaf32_to(&src, FR, M, &mut sink).unwrap();
+    yaf32_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   for oy in 0..OUT {
     for ox in 0..OUT {
@@ -105,7 +105,7 @@ fn yaf32_downscale_rgba_straight() {
         .unwrap()
         .with_rgba(&mut rgba)
         .unwrap();
-    yaf32_to(&src, FR, M, &mut sink).unwrap();
+    yaf32_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   for oy in 0..OUT {
     for ox in 0..OUT {
@@ -142,7 +142,7 @@ fn yaf32_downscale_rgba_premultiplied_unpremultiplies_and_keeps_native_luma() {
         .unwrap()
         .with_luma_f32(&mut luma_f32)
         .unwrap();
-    yaf32_to(&src, FR, M, &mut sink).unwrap();
+    yaf32_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   for oy in 0..OUT {
     for ox in 0..OUT {
@@ -188,7 +188,7 @@ fn yaf32_premultiplied_filter_is_unsupported() {
   .with_alpha_mode(AlphaMode::Premultiplied)
   .with_rgba(&mut rgba)
   .unwrap();
-  let err = yaf32_to(&src, FR, M, &mut sink).unwrap_err();
+  let err = yaf32_to(&src, FR, sink.set_kernel_matrix(M)).unwrap_err();
   assert!(
     matches!(
       err,
@@ -221,7 +221,7 @@ fn yaf32_straight_filter_populates_rgba_and_luma() {
     .unwrap()
     .with_luma(&mut luma)
     .unwrap();
-    yaf32_to(&src, FR, M, &mut sink).unwrap();
+    yaf32_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   // The straight filter path must have written every output (no sentinel left).
   assert!(rgba.iter().any(|&b| b != 0xAB), "rgba must be filtered");

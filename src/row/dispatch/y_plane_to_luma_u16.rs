@@ -40,34 +40,44 @@ pub(crate) fn y_plane_to_luma_u16_row(plane: &[u8], out: &mut [u16], width: usiz
     target_arch = "aarch64" => {
       if neon_available() {
         // SAFETY: NEON is baseline on aarch64 and verified at runtime.
-        unsafe { arch::neon::y_plane_to_luma_u16_row(plane, out, width); }
+        unsafe {
+          arch::neon::y_plane_to_luma_u16_row(plane, out, width);
+        }
         return;
       }
-    },
+    }
     target_arch = "x86_64" => {
       if avx512_available() {
         // SAFETY: AVX-512F + AVX-512BW verified at runtime.
-        unsafe { arch::x86_avx512::y_plane_to_luma_u16_row(plane, out, width); }
+        unsafe {
+          arch::x86_avx512::y_plane_to_luma_u16_row(plane, out, width);
+        }
         return;
       }
       if avx2_available() {
         // SAFETY: AVX2 verified at runtime.
-        unsafe { arch::x86_avx2::y_plane_to_luma_u16_row(plane, out, width); }
+        unsafe {
+          arch::x86_avx2::y_plane_to_luma_u16_row(plane, out, width);
+        }
         return;
       }
       if sse41_available() {
         // SAFETY: SSE4.1 verified at runtime.
-        unsafe { arch::x86_sse41::y_plane_to_luma_u16_row(plane, out, width); }
+        unsafe {
+          arch::x86_sse41::y_plane_to_luma_u16_row(plane, out, width);
+        }
         return;
       }
-    },
+    }
     target_arch = "wasm32" => {
       if simd128_available() {
         // SAFETY: simd128 enabled at compile time.
-        unsafe { arch::wasm_simd128::y_plane_to_luma_u16_row(plane, out, width); }
+        unsafe {
+          arch::wasm_simd128::y_plane_to_luma_u16_row(plane, out, width);
+        }
         return;
       }
-    },
+    }
     _ => {}
   }
   scalar::y_plane_to_luma_u16_row(plane, out, width);

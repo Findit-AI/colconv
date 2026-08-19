@@ -151,7 +151,7 @@ fn legacy_rgb_resample_emit(
   src_native: &[u8],
   rgb_stage_scratch: &mut std::vec::Vec<u8>,
   packed_scratch: &mut std::vec::Vec<u8>,
-  matrix: crate::ColorMatrix,
+  matrix: crate::KernelMatrix,
   full_range: bool,
   idx: usize,
   use_simd: bool,
@@ -396,6 +396,10 @@ macro_rules! impl_legacy_rgb_sinker {
       type Input<'r> = $row_ty<'r>;
       type Error = MixedSinkerError;
 
+      #[cfg_attr(not(tarpaulin), inline(always))]
+      fn kernel_matrix(&self) -> crate::KernelMatrix {
+        self.kernel_matrix
+      }
       fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
         check_dimensions_match(self.width, self.height, width, height)?;
         if let Some(stream) = self.rgb_stream.as_mut() {
@@ -906,7 +910,7 @@ fn legacy_rgb_packed_resample_emit(
   src_native: &[u8],
   rgb_stage_scratch: &mut std::vec::Vec<u8>,
   packed_scratch: &mut std::vec::Vec<u8>,
-  matrix: crate::ColorMatrix,
+  matrix: crate::KernelMatrix,
   full_range: bool,
   idx: usize,
   use_simd: bool,
@@ -1135,6 +1139,10 @@ macro_rules! impl_legacy_rgb_packed_sinker {
       type Input<'r> = $row_ty<'r>;
       type Error = MixedSinkerError;
 
+      #[cfg_attr(not(tarpaulin), inline(always))]
+      fn kernel_matrix(&self) -> crate::KernelMatrix {
+        self.kernel_matrix
+      }
       fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
         check_dimensions_match(self.width, self.height, width, height)?;
         if let Some(stream) = self.rgb_stream.as_mut() {

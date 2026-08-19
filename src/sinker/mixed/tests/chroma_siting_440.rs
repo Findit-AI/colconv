@@ -120,9 +120,9 @@ fn convert_rgb_with(loc: ChromaLocation, simd: bool, yp: &[u8], up: &[u8], vp: &
   let mut sink = MixedSinker::<Yuv440p>::new(W as usize, H as usize)
     .with_rgb(&mut rgb)
     .unwrap()
-    .with_chroma_location(loc)
+    .with_chroma_location(loc.clone())
     .with_simd(simd);
-  yuv440p_to(&src, false, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuv440p_to(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   rgb
 }
 
@@ -170,12 +170,12 @@ fn default_and_cosited_and_horizontal_sitings_are_byte_identical() {
   let baseline = convert_rgb_with(ChromaLocation::Unspecified, true, &yp, &up, &vp);
   for loc in [
     ChromaLocation::Unspecified,
-    ChromaLocation::Unknown(99),
+    ChromaLocation::other("unassigned-99"),
     ChromaLocation::Left,
     ChromaLocation::Center,
   ] {
     assert_eq!(
-      convert_rgb_with(loc, true, &yp, &up, &vp),
+      convert_rgb_with(loc.clone(), true, &yp, &up, &vp),
       baseline,
       "siting {loc:?} must keep the byte-identical co-sited 4:4:0 decode"
     );
@@ -224,7 +224,12 @@ fn bottom_rgb_matches_vblend_then_444_reference() {
   let mut ref_sink = MixedSinker::<Yuv444p>::new(W as usize, H as usize)
     .with_rgb(&mut rgb_ref)
     .unwrap();
-  yuv444p_to(&ref_src, false, ColorMatrix::Bt601, &mut ref_sink).unwrap();
+  yuv444p_to(
+    &ref_src,
+    false,
+    ref_sink.set_kernel_matrix(KernelMatrix::Bt601),
+  )
+  .unwrap();
 
   assert_eq!(
     convert_rgb_with(ChromaLocation::Bottom, true, &yp, &up, &vp),
@@ -252,7 +257,7 @@ fn bottom_differs_from_cosited_on_vertical_ramp() {
   ] {
     assert_ne!(
       bottom,
-      convert_rgb_with(loc, true, &yp, &up, &vp),
+      convert_rgb_with(loc.clone(), true, &yp, &up, &vp),
       "Bottom (v=1) must differ from {loc:?} on a vertical chroma ramp"
     );
   }
@@ -291,14 +296,19 @@ fn bottom_rgba_and_hsv_match_vblend_then_444_reference() {
       .with_rgba(&mut rgba)
       .unwrap()
       .with_chroma_location(ChromaLocation::Bottom);
-    yuv440p_to(&src, false, ColorMatrix::Bt601, &mut sink).unwrap();
+    yuv440p_to(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
 
     let ref_src = Yuv444pFrame::new(&yp, &u444, &v444, W, H, W, W, W);
     let mut rgba_ref = std::vec![0u8; (W * H * 4) as usize];
     let mut ref_sink = MixedSinker::<Yuv444p>::new(W as usize, H as usize)
       .with_rgba(&mut rgba_ref)
       .unwrap();
-    yuv444p_to(&ref_src, false, ColorMatrix::Bt601, &mut ref_sink).unwrap();
+    yuv444p_to(
+      &ref_src,
+      false,
+      ref_sink.set_kernel_matrix(KernelMatrix::Bt601),
+    )
+    .unwrap();
     assert_eq!(rgba, rgba_ref, "bottom RGBA must equal vblend-then-4:4:4");
   }
 
@@ -314,7 +324,7 @@ fn bottom_rgba_and_hsv_match_vblend_then_444_reference() {
       .with_hsv(&mut h, &mut s, &mut v)
       .unwrap()
       .with_chroma_location(ChromaLocation::Bottom);
-    yuv440p_to(&src, false, ColorMatrix::Bt601, &mut sink).unwrap();
+    yuv440p_to(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
 
     let ref_src = Yuv444pFrame::new(&yp, &u444, &v444, W, H, W, W, W);
     let (mut hr, mut sr, mut vr) = (
@@ -325,7 +335,12 @@ fn bottom_rgba_and_hsv_match_vblend_then_444_reference() {
     let mut ref_sink = MixedSinker::<Yuv444p>::new(W as usize, H as usize)
       .with_hsv(&mut hr, &mut sr, &mut vr)
       .unwrap();
-    yuv444p_to(&ref_src, false, ColorMatrix::Bt601, &mut ref_sink).unwrap();
+    yuv444p_to(
+      &ref_src,
+      false,
+      ref_sink.set_kernel_matrix(KernelMatrix::Bt601),
+    )
+    .unwrap();
     assert_eq!(
       (h, s, v),
       (hr, sr, vr),
@@ -363,7 +378,7 @@ fn bottom_grows_full_width_chroma_prev_lookback() {
     .with_rgb(&mut rgb)
     .unwrap()
     .with_chroma_location(ChromaLocation::Bottom);
-  yuv440p_to(&src, false, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuv440p_to(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   let prev_len = sink.chroma_prev.len();
   drop(sink);
   assert_eq!(
@@ -393,8 +408,8 @@ fn non_bottom_sitings_do_not_grow_chroma_prev() {
     let mut sink = MixedSinker::<Yuv440p>::new(W as usize, H as usize)
       .with_rgb(&mut rgb)
       .unwrap()
-      .with_chroma_location(loc);
-    yuv440p_to(&src, false, ColorMatrix::Bt601, &mut sink).unwrap();
+      .with_chroma_location(loc.clone());
+    yuv440p_to(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
     let prev_len = sink.chroma_prev.len();
     drop(sink);
     assert_eq!(
@@ -417,7 +432,7 @@ fn bottom_no_output_row_does_not_grow_chroma_prev() {
   let src = Yuv440pFrame::new(&yp, &up, &vp, W, H, W, W, W);
   let mut sink = MixedSinker::<Yuv440p>::new(W as usize, H as usize)
     .with_chroma_location(ChromaLocation::Bottom);
-  yuv440p_to(&src, false, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuv440p_to(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   let prev_len = sink.chroma_prev.len();
   drop(sink);
   assert_eq!(
@@ -450,7 +465,7 @@ fn ref_cosited_row_rgb(
     vrow,
     &mut rgb,
     w,
-    ColorMatrix::Bt601,
+    KernelMatrix::Bt601,
     false,
     true,
   );
@@ -472,12 +487,12 @@ fn drive_bottom_rows(yp: &[u8], up: &[u8], vp: &[u8], rows: &[usize]) -> Vec<u8>
   crate::PixelSink::begin_frame(&mut sink, W, H).unwrap();
   for &r in rows {
     let cr = r / 2;
-    let row = Yuv440pRow::new(
+    let row = Yuv440pRow::for_tests(
       &yp[r * w..r * w + w],
       &up[cr * w..cr * w + w],
       &vp[cr * w..cr * w + w],
       r,
-      ColorMatrix::Bt601,
+      KernelMatrix::Bt601,
       false,
     );
     crate::PixelSink::process(&mut sink, row).unwrap();
@@ -540,23 +555,23 @@ fn bottom_two_frames_no_cross_frame_stale_blend() {
   crate::PixelSink::begin_frame(&mut sink, W, H).unwrap();
   for r in 0..h {
     let cr = r / 2;
-    let row = Yuv440pRow::new(
+    let row = Yuv440pRow::for_tests(
       &ya[r * w..r * w + w],
       &ua[cr * w..cr * w + w],
       &va[cr * w..cr * w + w],
       r,
-      ColorMatrix::Bt601,
+      KernelMatrix::Bt601,
       false,
     );
     crate::PixelSink::process(&mut sink, row).unwrap();
   }
   crate::PixelSink::begin_frame(&mut sink, W, H).unwrap();
-  let row0 = Yuv440pRow::new(
+  let row0 = Yuv440pRow::for_tests(
     &yb[0..w],
     &ub[0..w],
     &vb[0..w],
     0,
-    ColorMatrix::Bt601,
+    KernelMatrix::Bt601,
     false,
   );
   crate::PixelSink::process(&mut sink, row0).unwrap();
@@ -608,26 +623,26 @@ fn direct_path_mid_frame_siting_flip_is_rejected() {
     let mut sink = MixedSinker::<Yuv440p>::new(w, h)
       .with_rgb(&mut rgb)
       .unwrap()
-      .with_chroma_location(loc1);
+      .with_chroma_location(loc1.clone());
     crate::PixelSink::begin_frame(&mut sink, W, H).unwrap();
     // Row 0 with the first siting freezes the vertical phase.
-    let row0 = Yuv440pRow::new(
+    let row0 = Yuv440pRow::for_tests(
       &yp[0..w],
       &up[0..w],
       &vp[0..w],
       0,
-      ColorMatrix::Bt601,
+      KernelMatrix::Bt601,
       false,
     );
     crate::PixelSink::process(&mut sink, row0).unwrap();
     // Flip the siting and deliver the next in-sequence row.
-    sink.set_chroma_location(loc2);
-    let row1 = Yuv440pRow::new(
+    sink.set_chroma_location(loc2.clone());
+    let row1 = Yuv440pRow::for_tests(
       &yp[w..2 * w],
       &up[0..w],
       &vp[0..w],
       1,
-      ColorMatrix::Bt601,
+      KernelMatrix::Bt601,
       false,
     );
     let err = crate::PixelSink::process(&mut sink, row1).unwrap_err();
@@ -700,7 +715,12 @@ fn top_rgb_matches_vfold_then_444_reference() {
   let mut ref_sink = MixedSinker::<Yuv444p>::new(W as usize, H as usize)
     .with_rgb(&mut rgb_ref)
     .unwrap();
-  yuv444p_to(&ref_src, false, ColorMatrix::Bt601, &mut ref_sink).unwrap();
+  yuv444p_to(
+    &ref_src,
+    false,
+    ref_sink.set_kernel_matrix(KernelMatrix::Bt601),
+  )
+  .unwrap();
   assert_eq!(
     convert_rgb_with(ChromaLocation::Top, true, &yp, &up, &vp),
     rgb_ref,
@@ -731,14 +751,19 @@ fn top_rgba_and_hsv_match_vfold_then_444_reference() {
       .with_rgba(&mut rgba)
       .unwrap()
       .with_chroma_location(ChromaLocation::Top);
-    yuv440p_to(&src, false, ColorMatrix::Bt601, &mut sink).unwrap();
+    yuv440p_to(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
 
     let ref_src = Yuv444pFrame::new(&yp, &u444, &v444, W, H, W, W, W);
     let mut rgba_ref = std::vec![0u8; (W * H * 4) as usize];
     let mut ref_sink = MixedSinker::<Yuv444p>::new(W as usize, H as usize)
       .with_rgba(&mut rgba_ref)
       .unwrap();
-    yuv444p_to(&ref_src, false, ColorMatrix::Bt601, &mut ref_sink).unwrap();
+    yuv444p_to(
+      &ref_src,
+      false,
+      ref_sink.set_kernel_matrix(KernelMatrix::Bt601),
+    )
+    .unwrap();
     assert_eq!(
       rgba, rgba_ref,
       "top RGBA must equal forward-vfold-then-4:4:4"
@@ -757,7 +782,7 @@ fn top_rgba_and_hsv_match_vfold_then_444_reference() {
       .with_hsv(&mut h, &mut s, &mut v)
       .unwrap()
       .with_chroma_location(ChromaLocation::Top);
-    yuv440p_to(&src, false, ColorMatrix::Bt601, &mut sink).unwrap();
+    yuv440p_to(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
 
     let ref_src = Yuv444pFrame::new(&yp, &u444, &v444, W, H, W, W, W);
     let (mut hr, mut sr, mut vr) = (
@@ -768,7 +793,12 @@ fn top_rgba_and_hsv_match_vfold_then_444_reference() {
     let mut ref_sink = MixedSinker::<Yuv444p>::new(W as usize, H as usize)
       .with_hsv(&mut hr, &mut sr, &mut vr)
       .unwrap();
-    yuv444p_to(&ref_src, false, ColorMatrix::Bt601, &mut ref_sink).unwrap();
+    yuv444p_to(
+      &ref_src,
+      false,
+      ref_sink.set_kernel_matrix(KernelMatrix::Bt601),
+    )
+    .unwrap();
     assert_eq!(
       (h, s, v),
       (hr, sr, vr),
@@ -801,7 +831,7 @@ fn top_rgb_and_ref_hw(w: usize, h: usize) -> (Vec<u8>, Vec<u8>) {
     .with_rgb(&mut rgb)
     .unwrap()
     .with_chroma_location(ChromaLocation::Top);
-  yuv440p_to(&src, false, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuv440p_to(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   drop(sink);
 
   let (u444, v444) = ref_full_chroma_top_hw(&u, &v, w, h, ch);
@@ -812,7 +842,12 @@ fn top_rgb_and_ref_hw(w: usize, h: usize) -> (Vec<u8>, Vec<u8>) {
   let mut ref_sink = MixedSinker::<Yuv444p>::new(w, h)
     .with_rgb(&mut rgb_ref)
     .unwrap();
-  yuv444p_to(&ref_src, false, ColorMatrix::Bt601, &mut ref_sink).unwrap();
+  yuv444p_to(
+    &ref_src,
+    false,
+    ref_sink.set_kernel_matrix(KernelMatrix::Bt601),
+  )
+  .unwrap();
   (rgb, rgb_ref)
 }
 
@@ -852,7 +887,7 @@ fn top_differs_from_bottom_and_cosited_on_vertical_ramp() {
   ] {
     assert_ne!(
       top,
-      convert_rgb_with(loc, true, &yp, &up, &vp),
+      convert_rgb_with(loc.clone(), true, &yp, &up, &vp),
       "Top (v=0) must differ from {loc:?} on a vertical chroma ramp"
     );
   }
@@ -903,7 +938,7 @@ fn top_grows_full_width_chroma_prev_lookback() {
     .with_rgb(&mut rgb)
     .unwrap()
     .with_chroma_location(ChromaLocation::Top);
-  yuv440p_to(&src, false, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuv440p_to(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   let prev_len = sink.chroma_prev.len();
   drop(sink);
   assert_eq!(
@@ -933,12 +968,12 @@ fn top_begin_frame_after_held_odd_row_clears_state() {
   crate::PixelSink::begin_frame(&mut sink, W, H).unwrap();
   // Deliver ONLY row 1 (odd) — it is HELD in the forward delay, producing no output.
   let cr = 1 / 2;
-  let row1 = Yuv440pRow::new(
+  let row1 = Yuv440pRow::for_tests(
     &yp[w..2 * w],
     &up[cr * w..cr * w + w],
     &vp[cr * w..cr * w + w],
     1,
-    ColorMatrix::Bt601,
+    KernelMatrix::Bt601,
     false,
   );
   crate::PixelSink::process(&mut sink, row1).unwrap();
@@ -955,12 +990,12 @@ fn top_begin_frame_after_held_odd_row_clears_state() {
   // A full in-order decode now matches a clean decode — no stale held row leaked.
   for r in 0..h {
     let cr = r / 2;
-    let row = Yuv440pRow::new(
+    let row = Yuv440pRow::for_tests(
       &yp[r * w..r * w + w],
       &up[cr * w..cr * w + w],
       &vp[cr * w..cr * w + w],
       r,
-      ColorMatrix::Bt601,
+      KernelMatrix::Bt601,
       false,
     );
     crate::PixelSink::process(&mut sink, row).unwrap();

@@ -25,7 +25,7 @@
 //! value — they FAIL without the clamp.
 
 use crate::{
-  ColorMatrix, PixelSink,
+  KernelMatrix, PixelSink,
   frame::GrayNFrame,
   resample::{
     AreaResampler, CatmullRom, FilterKernel, FilterStream, FilteredResampler, Lanczos3,
@@ -42,7 +42,7 @@ const SRC: usize = 8;
 const OUT: usize = 4;
 // Gray is luma-only; the walker still threads a matrix / range through.
 const FR: bool = true;
-const M: ColorMatrix = ColorMatrix::Bt709;
+const M: KernelMatrix = KernelMatrix::Bt709;
 
 /// Re-encode a host-native u16 slice as LE-encoded byte storage (the
 /// `grayNle` plane contract). The loader recovers the logical values via
@@ -131,7 +131,7 @@ macro_rules! gray_n_area_tests {
           .unwrap()
           .with_luma_u16(&mut luma_u16)
           .unwrap();
-          $walker(&frame(&pix, SRC, SRC), FR, M, &mut sink).unwrap();
+          $walker(&frame(&pix, SRC, SRC), FR, sink.set_kernel_matrix(M)).unwrap();
         }
         assert_eq!(
           luma_u16,
@@ -179,7 +179,7 @@ macro_rules! gray_n_area_tests {
           .unwrap()
           .with_hsv(&mut h, &mut s_, &mut v_)
           .unwrap();
-          $walker(&frame(&pix, SRC, SRC), FR, M, &mut sink).unwrap();
+          $walker(&frame(&pix, SRC, SRC), FR, sink.set_kernel_matrix(M)).unwrap();
         }
 
         // Reference: the direct sink over the exact binned luma plane (an
@@ -211,7 +211,7 @@ macro_rules! gray_n_area_tests {
             .unwrap()
             .with_hsv(&mut ref_h, &mut ref_s, &mut ref_v)
             .unwrap();
-          $walker(&frame(&binned_pix, OUT, OUT), FR, M, &mut sink).unwrap();
+          $walker(&frame(&binned_pix, OUT, OUT), FR, sink.set_kernel_matrix(M)).unwrap();
         }
         assert_eq!(luma, ref_luma, "luma");
         assert_eq!(luma_u16, ref_luma_u16, "luma_u16");
@@ -238,7 +238,7 @@ macro_rules! gray_n_area_tests {
           let mut sink = MixedSinker::<$marker>::new(SRC, SRC)
             .with_rgb_u16(&mut direct)
             .unwrap();
-          $walker(&frame(&pix, SRC, SRC), FR, M, &mut sink).unwrap();
+          $walker(&frame(&pix, SRC, SRC), FR, sink.set_kernel_matrix(M)).unwrap();
         }
         let mut via_area = vec![0u16; SRC * SRC * 3];
         {
@@ -250,7 +250,7 @@ macro_rules! gray_n_area_tests {
           .unwrap()
           .with_rgb_u16(&mut via_area)
           .unwrap();
-          $walker(&frame(&pix, SRC, SRC), FR, M, &mut sink).unwrap();
+          $walker(&frame(&pix, SRC, SRC), FR, sink.set_kernel_matrix(M)).unwrap();
         }
         assert_eq!(direct, via_area, "identity plan must match the direct sink");
       }
@@ -266,7 +266,7 @@ macro_rules! gray_n_area_tests {
         )
         .unwrap();
         // No outputs: a legal no-op, accepted without allocation.
-        $walker(&frame(&pix, SRC, SRC), FR, M, &mut sink).unwrap();
+        $walker(&frame(&pix, SRC, SRC), FR, sink.set_kernel_matrix(M)).unwrap();
         assert!(
           !sink.luma_stream_u16_allocated(),
           "no-output sink allocated a u16 luma stream"
@@ -300,7 +300,9 @@ fn area_out_of_sequence_first_row_rejected_before_allocation() {
       .with_luma_u16(&mut luma_u16)
       .unwrap();
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
-  let err = sink.process(Gray12Row::new(row3, 3, M, FR)).unwrap_err();
+  let err = sink
+    .process(Gray12Row::for_tests(row3, 3, M, FR))
+    .unwrap_err();
   assert!(
     matches!(
       err,
@@ -330,7 +332,7 @@ fn area_rejected_first_row_does_not_poison_output_retry() {
       .unwrap();
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   let err = sink
-    .process(Gray12Row::new(&pix[3 * SRC..4 * SRC], 3, M, FR))
+    .process(Gray12Row::for_tests(&pix[3 * SRC..4 * SRC], 3, M, FR))
     .unwrap_err();
   assert!(
     matches!(
@@ -342,7 +344,7 @@ fn area_rejected_first_row_does_not_poison_output_retry() {
   let mut rgb_u16 = vec![0u16; OUT * OUT * 3];
   sink.set_rgb_u16(&mut rgb_u16).unwrap();
   sink
-    .process(Gray12Row::new(&pix[..SRC], 0, M, FR))
+    .process(Gray12Row::for_tests(&pix[..SRC], 0, M, FR))
     .expect("row 0 must succeed after a rejected out-of-sequence first row");
 }
 
@@ -358,10 +360,12 @@ fn area_rejects_mid_frame_output_change() {
       .with_rgb_u16(&mut rgb_u16)
       .unwrap();
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
-  sink.process(Gray12Row::new(&pix[..SRC], 0, M, FR)).unwrap();
+  sink
+    .process(Gray12Row::for_tests(&pix[..SRC], 0, M, FR))
+    .unwrap();
   sink.set_luma_u16(&mut luma_u16).unwrap();
   let err = sink
-    .process(Gray12Row::new(&pix[SRC..2 * SRC], 1, M, FR))
+    .process(Gray12Row::for_tests(&pix[SRC..2 * SRC], 1, M, FR))
     .unwrap_err();
   assert!(
     matches!(err, MixedSinkerError::ResampleOutputsChanged(_)),
@@ -394,8 +398,8 @@ fn area_reuses_luma_stream_across_frames() {
         .unwrap();
     let f1 = GrayNFrame::<12>::new(&pix1, SRC as u32, SRC as u32, SRC as u32);
     let f2 = GrayNFrame::<12>::new(&pix2, SRC as u32, SRC as u32, SRC as u32);
-    gray12_to(&f1, FR, M, &mut sink).unwrap();
-    gray12_to(&f2, FR, M, &mut sink).unwrap();
+    gray12_to(&f1, FR, sink.set_kernel_matrix(M)).unwrap();
+    gray12_to(&f2, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(
     luma_u16,
@@ -557,7 +561,7 @@ macro_rules! gray_n_filter_tests {
           .unwrap()
           .with_hsv(&mut hp, &mut sp, &mut vp)
           .unwrap();
-          $walker(&frame(&pix, FW, FH), FR, M, &mut sink).unwrap();
+          $walker(&frame(&pix, FW, FH), FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (luma, luma_u16, rgb, rgba, rgb_u16, rgba_u16, hp, sp, vp)
       }
@@ -612,7 +616,7 @@ macro_rules! gray_n_filter_tests {
             .unwrap()
             .with_hsv(&mut ref_h, &mut ref_s, &mut ref_v)
             .unwrap();
-          $walker(&frame(&ref_pix, ow, oh), FR, M, &mut sink).unwrap();
+          $walker(&frame(&ref_pix, ow, oh), FR, sink.set_kernel_matrix(M)).unwrap();
         }
         assert_eq!(luma, ref_luma, "{ctx} luma (>> BITS-8)");
         assert_eq!(rgb, ref_rgb, "{ctx} rgb");
@@ -670,7 +674,8 @@ macro_rules! gray_n_filter_tests {
           .unwrap()
           .with_luma_u16(&mut luma_u16)
           .unwrap();
-          $walker(&frame(&pix, FW, FH), FR, M, &mut sink).expect("filter plan must be accepted");
+          $walker(&frame(&pix, FW, FH), FR, sink.set_kernel_matrix(M))
+            .expect("filter plan must be accepted");
         }
         let y_ref =
           native_luma_filter_clamped(Triangle, BITS, &plane, FW, FH, FOUT_DOWN, FOUT_DOWN);
@@ -724,7 +729,7 @@ macro_rules! gray_n_filter_tests {
                   .unwrap()
                   .with_luma_u16(&mut out)
                   .unwrap();
-                $walker(&frame(&pix, FW, FH), FR, M, &mut sink).unwrap();
+                $walker(&frame(&pix, FW, FH), FR, sink.set_kernel_matrix(M)).unwrap();
               }
               (
                 out,
@@ -742,7 +747,7 @@ macro_rules! gray_n_filter_tests {
                 .unwrap()
                 .with_luma_u16(&mut out)
                 .unwrap();
-                $walker(&frame(&pix, FW, FH), FR, M, &mut sink).unwrap();
+                $walker(&frame(&pix, FW, FH), FR, sink.set_kernel_matrix(M)).unwrap();
               }
               (out, native_luma_filter(Lanczos3, &plane, FW, FH, FUP, FUP))
             }
@@ -826,7 +831,7 @@ macro_rules! gray_n_le_be_tests {
           .unwrap()
           .with_rgba(&mut le_rgba)
           .unwrap();
-          $walker(&frame, FR, M, &mut sink).unwrap();
+          $walker(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         let mut be_luma_u16 = vec![0u16; OUT * OUT];
         let mut be_rgb_u16 = vec![0u16; OUT * OUT * 3];
@@ -845,7 +850,7 @@ macro_rules! gray_n_le_be_tests {
           .unwrap()
           .with_rgba(&mut be_rgba)
           .unwrap();
-          $walker_be::<_, true>(&frame, FR, M, &mut sink).unwrap();
+          $walker_be::<_, true>(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         assert_eq!(le_luma_u16, be_luma_u16, "area luma_u16 LE/BE diverge");
         assert_eq!(le_rgb_u16, be_rgb_u16, "area rgb_u16 LE/BE diverge");
@@ -881,7 +886,7 @@ macro_rules! gray_n_le_be_tests {
           .unwrap()
           .with_rgb_u16(&mut le_rgb_u16)
           .unwrap();
-          $walker(&frame, FR, M, &mut sink).unwrap();
+          $walker(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         let mut be_luma_u16 = vec![0u16; FOUT_DOWN * FOUT_DOWN];
         let mut be_rgb_u16 = vec![0u16; FOUT_DOWN * FOUT_DOWN * 3];
@@ -897,7 +902,7 @@ macro_rules! gray_n_le_be_tests {
           .unwrap()
           .with_rgb_u16(&mut be_rgb_u16)
           .unwrap();
-          $walker_be::<_, true>(&frame, FR, M, &mut sink).unwrap();
+          $walker_be::<_, true>(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         assert_eq!(le_luma_u16, be_luma_u16, "filter luma_u16 LE/BE diverge");
         assert_eq!(le_rgb_u16, be_rgb_u16, "filter rgb_u16 LE/BE diverge");

@@ -15,7 +15,7 @@ use super::super::{
 };
 #[cfg(all(feature = "yuv-semi-planar", feature = "yuv-planar"))]
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   resample::{
     AveragingDomain, InsertionContext, InsertionPoint, PlanGeometry, ResampleError, ResamplePlan,
     select_insertion_point,
@@ -156,7 +156,7 @@ fn p4xx_process_native<const BITS: u32, const BE: bool>(
   rgb_scratch_u16: &mut std::vec::Vec<u16>,
   y_row: &[u16],
   uv_full: &[u16],
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   idx: usize,
   w: usize,
@@ -349,6 +349,10 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P410<BE>, R> {
   type Input<'r> = P410Row<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     check_dimensions_match(self.width, self.height, width, height)?;
     reset_high_bit_yuv_streams(self);
@@ -827,6 +831,10 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P412<BE>, R> {
   type Input<'r> = P412Row<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     check_dimensions_match(self.width, self.height, width, height)?;
     reset_high_bit_yuv_streams(self);
@@ -1292,6 +1300,10 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, P416<BE>, R> {
   type Input<'r> = P416Row<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     check_dimensions_match(self.width, self.height, width, height)?;
     reset_high_bit_yuv_streams(self);

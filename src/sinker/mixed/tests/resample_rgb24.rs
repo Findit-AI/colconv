@@ -3,7 +3,7 @@
 //! output values are exact area means.
 
 use crate::{
-  ColorMatrix, PixelSink,
+  KernelMatrix, PixelSink,
   resample::{AreaResampler, ResampleError},
   sinker::{MixedSinker, MixedSinkerError},
   source::{Rgb24, Rgb24Row, rgb24_to},
@@ -49,7 +49,7 @@ fn rgb24_downscale_is_exact_area_mean() {
         .unwrap()
         .with_rgb(&mut rgb)
         .unwrap();
-    rgb24_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    rgb24_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   for oy in 0..OUT {
     for ox in 0..OUT {
@@ -89,7 +89,7 @@ fn rgb24_derived_outputs_come_from_binned_rgb() {
         .unwrap()
         .with_hsv(&mut h, &mut s_, &mut v_)
         .unwrap();
-    rgb24_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    rgb24_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
 
   // Reference: run the FULL-RES sink over a frame that already
@@ -108,7 +108,7 @@ fn rgb24_derived_outputs_come_from_binned_rgb() {
       .unwrap()
       .with_hsv(&mut ref_h, &mut ref_s, &mut ref_v)
       .unwrap();
-    rgb24_to(&binned, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    rgb24_to(&binned, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   assert_eq!(luma, ref_luma);
   assert_eq!(h, ref_h);
@@ -127,7 +127,7 @@ fn rgb24_identity_plan_matches_new_sink() {
     let mut sink = MixedSinker::<Rgb24>::new(SRC, SRC)
       .with_rgb(&mut direct)
       .unwrap();
-    rgb24_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    rgb24_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   let mut via_area = vec![0u8; SRC * SRC * 3];
   {
@@ -136,7 +136,7 @@ fn rgb24_identity_plan_matches_new_sink() {
         .unwrap()
         .with_rgb(&mut via_area)
         .unwrap();
-    rgb24_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    rgb24_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   assert_eq!(direct, via_area);
 }
@@ -156,7 +156,7 @@ fn rgb24_contracts_hold_on_the_fused_path() {
         .unwrap();
     sink.begin_frame(SRC as u32, SRC as u32).unwrap();
     let err = sink
-      .process(Rgb24Row::new(row0, 3, ColorMatrix::Bt709, true))
+      .process(Rgb24Row::for_tests(row0, 3, KernelMatrix::Bt709, true))
       .unwrap_err();
     assert!(matches!(
       err,
@@ -174,14 +174,14 @@ fn rgb24_contracts_hold_on_the_fused_path() {
         .unwrap();
     sink.begin_frame(SRC as u32, SRC as u32).unwrap();
     sink
-      .process(Rgb24Row::new(row0, 0, ColorMatrix::Bt709, true))
+      .process(Rgb24Row::for_tests(row0, 0, KernelMatrix::Bt709, true))
       .unwrap();
     sink.set_luma(&mut luma).unwrap();
     let err = sink
-      .process(Rgb24Row::new(
+      .process(Rgb24Row::for_tests(
         &buf[SRC * 3..SRC * 6],
         1,
-        ColorMatrix::Bt709,
+        KernelMatrix::Bt709,
         true,
       ))
       .unwrap_err();
@@ -205,10 +205,10 @@ fn rgb24_rejected_first_row_does_not_poison_output_retry() {
       .unwrap();
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   let err = sink
-    .process(Rgb24Row::new(
+    .process(Rgb24Row::for_tests(
       &buf[3 * SRC * 3..4 * SRC * 3],
       3,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       true,
     ))
     .unwrap_err();
@@ -222,7 +222,12 @@ fn rgb24_rejected_first_row_does_not_poison_output_retry() {
   let mut luma = vec![0u8; OUT * OUT];
   sink.set_luma(&mut luma).unwrap();
   sink
-    .process(Rgb24Row::new(&buf[..SRC * 3], 0, ColorMatrix::Bt709, true))
+    .process(Rgb24Row::for_tests(
+      &buf[..SRC * 3],
+      0,
+      KernelMatrix::Bt709,
+      true,
+    ))
     .expect("row 0 must succeed after a rejected out-of-sequence first row");
 }
 
@@ -256,7 +261,12 @@ fn rgb24_first_row_stream_alloc_failure_leaves_freeze_uncommitted_for_retry() {
     // uncommitted (the helper freezes only after the alloc succeeds).
     crate::resample::arm_box_failure();
     let err = sink
-      .process(Rgb24Row::new(&buf[..SRC * 3], 0, ColorMatrix::Bt709, true))
+      .process(Rgb24Row::for_tests(
+        &buf[..SRC * 3],
+        0,
+        KernelMatrix::Bt709,
+        true,
+      ))
       .unwrap_err();
     assert!(
       matches!(
@@ -275,10 +285,10 @@ fn rgb24_first_row_stream_alloc_failure_leaves_freeze_uncommitted_for_retry() {
     sink.set_luma(&mut luma).unwrap();
     for r in 0..SRC {
       sink
-        .process(Rgb24Row::new(
+        .process(Rgb24Row::for_tests(
           &buf[r * SRC * 3..(r + 1) * SRC * 3],
           r,
-          ColorMatrix::Bt709,
+          KernelMatrix::Bt709,
           true,
         ))
         .expect("frame replay after a first-row stream-alloc OOM must succeed");

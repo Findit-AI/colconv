@@ -59,8 +59,14 @@ fn decode_rgb(
     let mut sink = MixedSinker::<crate::source::Yuv444p12>::new(w, h)
       .with_rgb(&mut rgb)
       .unwrap()
-      .with_color_spec(spec);
-    crate::source::yuv444p12_to(&src, full_range, matrix, &mut sink).unwrap();
+      .with_color_spec(&spec)
+      .unwrap();
+    crate::source::yuv444p12_to(
+      &src,
+      full_range,
+      sink.set_kernel_matrix(spec.kernel_matrix().unwrap()),
+    )
+    .unwrap();
   }
   rgb
 }
@@ -103,8 +109,14 @@ fn decode_rgb_u16(
     let mut sink = MixedSinker::<crate::source::Yuv444p12>::new(w, h)
       .with_rgb_u16(&mut rgb)
       .unwrap()
-      .with_color_spec(spec);
-    crate::source::yuv444p12_to(&src, full_range, matrix, &mut sink).unwrap();
+      .with_color_spec(&spec)
+      .unwrap();
+    crate::source::yuv444p12_to(
+      &src,
+      full_range,
+      sink.set_kernel_matrix(spec.kernel_matrix().unwrap()),
+    )
+    .unwrap();
   }
   rgb
 }
@@ -155,14 +167,26 @@ fn decode_rgba_u16(
       .unwrap()
       .with_rgb_u16(&mut rgb)
       .unwrap()
-      .with_color_spec(spec);
-    crate::source::yuv444p12_to(&src, full_range, ColorMatrix::Ictcp, &mut sink).unwrap();
+      .with_color_spec(&spec)
+      .unwrap();
+    crate::source::yuv444p12_to(
+      &src,
+      full_range,
+      sink.set_kernel_matrix(spec.kernel_matrix().unwrap()),
+    )
+    .unwrap();
   } else {
     let mut sink = MixedSinker::<crate::source::Yuv444p12>::new(w, h)
       .with_rgba_u16(&mut rgba)
       .unwrap()
-      .with_color_spec(spec);
-    crate::source::yuv444p12_to(&src, full_range, ColorMatrix::Ictcp, &mut sink).unwrap();
+      .with_color_spec(&spec)
+      .unwrap();
+    crate::source::yuv444p12_to(
+      &src,
+      full_range,
+      sink.set_kernel_matrix(spec.kernel_matrix().unwrap()),
+    )
+    .unwrap();
   }
   rgba
 }
@@ -322,12 +346,12 @@ fn ictcp_u16_rgba_route_consistent_and_native_depth() {
   // Both RGB and the opaque alpha must match, and every value must be native
   // 12-bit [0, 4095] (not full-16-bit). Guards the over-scaled-RGB +
   // route-dependent-alpha defect. PQ (full) and HLG (studio) both covered.
-  for &(tf, full) in &[
+  for (tf, full) in [
     (Transfer::SmpteSt2084Pq, true),
     (Transfer::AribStdB67Hlg, false),
   ] {
-    let only = decode_rgba_u16(2048, 2148, 2248, full, tf, false);
-    let with_rgb = decode_rgba_u16(2048, 2148, 2248, full, tf, true);
+    let only = decode_rgba_u16(2048, 2148, 2248, full, tf.clone(), false);
+    let with_rgb = decode_rgba_u16(2048, 2148, 2248, full, tf.clone(), true);
     assert_eq!(
       only, with_rgb,
       "rgba_u16-only must equal rgb_u16+rgba_u16 ({tf:?}, full={full})"
@@ -399,8 +423,14 @@ fn decode_hsv(
       let mut sink = MixedSinker::<crate::source::Yuv444p12>::new(w, h)
         .with_hsv(&mut hh, &mut ss, &mut vv)
         .unwrap()
-        .with_color_spec(spec);
-      crate::source::yuv444p12_to(&src, full_range, matrix, &mut sink).unwrap();
+        .with_color_spec(&spec)
+        .unwrap();
+      crate::source::yuv444p12_to(
+        &src,
+        full_range,
+        sink.set_kernel_matrix(spec.kernel_matrix().unwrap()),
+      )
+      .unwrap();
     }
     HsvCo::RgbU8 => {
       let mut sink = MixedSinker::<crate::source::Yuv444p12>::new(w, h)
@@ -408,8 +438,14 @@ fn decode_hsv(
         .unwrap()
         .with_hsv(&mut hh, &mut ss, &mut vv)
         .unwrap()
-        .with_color_spec(spec);
-      crate::source::yuv444p12_to(&src, full_range, matrix, &mut sink).unwrap();
+        .with_color_spec(&spec)
+        .unwrap();
+      crate::source::yuv444p12_to(
+        &src,
+        full_range,
+        sink.set_kernel_matrix(spec.kernel_matrix().unwrap()),
+      )
+      .unwrap();
     }
     HsvCo::RgbU16 => {
       let mut sink = MixedSinker::<crate::source::Yuv444p12>::new(w, h)
@@ -417,8 +453,14 @@ fn decode_hsv(
         .unwrap()
         .with_hsv(&mut hh, &mut ss, &mut vv)
         .unwrap()
-        .with_color_spec(spec);
-      crate::source::yuv444p12_to(&src, full_range, matrix, &mut sink).unwrap();
+        .with_color_spec(&spec)
+        .unwrap();
+      crate::source::yuv444p12_to(
+        &src,
+        full_range,
+        sink.set_kernel_matrix(spec.kernel_matrix().unwrap()),
+      )
+      .unwrap();
     }
   }
   (hh, ss, vv)
@@ -434,15 +476,31 @@ fn ictcp_hsv_only_uses_non_affine_decode() {
   //     transfer, which is NOT a defined ICtCp transfer) — so the output is
   //     genuinely ICtCp-derived, not YCbCr-derived.
   for tf in [Transfer::SmpteSt2084Pq, Transfer::AribStdB67Hlg] {
-    let only = decode_hsv(2048, 2148, 2248, true, ColorMatrix::Ictcp, tf, HsvCo::None);
-    let via_rgb = decode_hsv(2048, 2148, 2248, true, ColorMatrix::Ictcp, tf, HsvCo::RgbU8);
+    let only = decode_hsv(
+      2048,
+      2148,
+      2248,
+      true,
+      ColorMatrix::Ictcp,
+      tf.clone(),
+      HsvCo::None,
+    );
+    let via_rgb = decode_hsv(
+      2048,
+      2148,
+      2248,
+      true,
+      ColorMatrix::Ictcp,
+      tf.clone(),
+      HsvCo::RgbU8,
+    );
     let via_rgb16 = decode_hsv(
       2048,
       2148,
       2248,
       true,
       ColorMatrix::Ictcp,
-      tf,
+      tf.clone(),
       HsvCo::RgbU16,
     );
     let affine = decode_hsv(
@@ -541,8 +599,13 @@ fn resample_rgb(
   .unwrap()
   .with_rgb(&mut rgb)
   .unwrap()
-  .with_color_spec(spec);
-  crate::source::yuv444p12_to(&src, true, ColorMatrix::Ictcp, &mut sink)
+  .with_color_spec(&spec)
+  .unwrap();
+  crate::source::yuv444p12_to(
+    &src,
+    true,
+    sink.set_kernel_matrix(spec.kernel_matrix().unwrap()),
+  )
 }
 
 /// A resolved ICtCp frame (PQ transfer) + a resize plan must return the typed

@@ -48,7 +48,7 @@ use super::{
   rgba_plane_row_slice,
 };
 use crate::{
-  ColorMatrix, PixelSink,
+  KernelMatrix, PixelSink,
   row::{
     expand_rgb_to_rgba_row, gbrapf16_to_rgba_f16_row, gbrapf32_to_rgba_f32_row,
     gbrapf32_to_rgba_u16_row, gbrpf16_to_rgb_f16_row, gbrpf16_to_rgb_row, gbrpf16_to_rgba_f16_row,
@@ -62,7 +62,7 @@ use crate::{
 
 // Float-planar GBR sources are already component RGB (no chroma matrix).
 // BT.709 full-range is the conventional default for luma derivation.
-const GBR_F16_LUMA_MATRIX: ColorMatrix = ColorMatrix::Bt709;
+const GBR_F16_LUMA_MATRIX: KernelMatrix = KernelMatrix::Bt709;
 const GBR_F16_FULL_RANGE: bool = true;
 
 // Chunk size for the inline f16→f32 widening scratch arrays (stack-allocated).
@@ -274,6 +274,10 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Gbrpf16<BE>, R> {
   type Input<'r> = Gbrpf16Row<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     check_dimensions_match(self.width, self.height, width, height)?;
     if let Some(stream) = self.rgb_stream_f32.as_mut() {
@@ -923,6 +927,10 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Gbrapf16<BE>, R> {
   type Input<'r> = Gbrapf16Row<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     check_dimensions_match(self.width, self.height, width, height)?;
     if let Some(stream) = self.rgba_stream_f32.as_mut() {

@@ -1,6 +1,6 @@
 //! 8-bit semi-planar (NV12/NV16/NV21/NV24/NV42) MixedSinker tests,
 //! split per format. `pub(super) use super::*;` forwards
-//! `tests/mod.rs`'s prelude — `crate::{ColorMatrix, frame::*, raw::*,
+//! `tests/mod.rs`'s prelude — `crate::{KernelMatrix, frame::*, raw::*,
 //! source::*}` plus cross-cutting helpers like `pseudo_random_u8` and
 //! `solid_yuv420p_frame` — into this module so the per-format
 //! submodules can pick them up via their own `use super::*;`.

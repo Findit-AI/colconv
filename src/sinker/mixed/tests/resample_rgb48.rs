@@ -6,7 +6,7 @@
 //! source-of-truth ordering the direct path uses.
 
 use crate::{
-  ColorMatrix, PixelSink,
+  KernelMatrix, PixelSink,
   resample::{AreaResampler, ResampleError},
   sinker::{MixedSinker, MixedSinkerError},
   source::{Bgr48, Bgr48Row, Rgb48, Rgb48Row, bgr48_to, rgb48_to},
@@ -64,7 +64,7 @@ fn rgb48_downscale_rgb_u16_is_exact_area_mean() {
         .unwrap()
         .with_rgb_u16(&mut rgb_u16)
         .unwrap();
-    rgb48_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    rgb48_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   for oy in 0..OUT {
     for ox in 0..OUT {
@@ -115,7 +115,7 @@ fn rgb48_derived_outputs_come_from_binned_rgb() {
         .unwrap()
         .with_hsv(&mut h, &mut s_, &mut v_)
         .unwrap();
-    rgb48_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    rgb48_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
 
   // Reference: the full-res sink over the (exact) binned u16 RGB.
@@ -143,7 +143,7 @@ fn rgb48_derived_outputs_come_from_binned_rgb() {
       .unwrap()
       .with_hsv(&mut ref_h, &mut ref_s, &mut ref_v)
       .unwrap();
-    rgb48_to(&binned, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    rgb48_to(&binned, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   assert_eq!(rgb, ref_rgb, "rgb");
   assert_eq!(rgba, ref_rgba, "rgba");
@@ -166,7 +166,7 @@ fn rgb48_identity_plan_matches_new_sink() {
     let mut sink = MixedSinker::<Rgb48>::new(SRC, SRC)
       .with_rgb_u16(&mut direct)
       .unwrap();
-    rgb48_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    rgb48_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   let mut via_area = vec![0u16; SRC * SRC * 3];
   {
@@ -175,7 +175,7 @@ fn rgb48_identity_plan_matches_new_sink() {
         .unwrap()
         .with_rgb_u16(&mut via_area)
         .unwrap();
-    rgb48_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    rgb48_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   assert_eq!(direct, via_area);
 }
@@ -196,7 +196,7 @@ fn rgb48_contracts_hold_on_the_fused_path() {
         .unwrap();
     sink.begin_frame(SRC as u32, SRC as u32).unwrap();
     let err = sink
-      .process(Rgb48Row::new(row0, 3, ColorMatrix::Bt709, true))
+      .process(Rgb48Row::for_tests(row0, 3, KernelMatrix::Bt709, true))
       .unwrap_err();
     assert!(matches!(
       err,
@@ -214,14 +214,14 @@ fn rgb48_contracts_hold_on_the_fused_path() {
         .unwrap();
     sink.begin_frame(SRC as u32, SRC as u32).unwrap();
     sink
-      .process(Rgb48Row::new(row0, 0, ColorMatrix::Bt709, true))
+      .process(Rgb48Row::for_tests(row0, 0, KernelMatrix::Bt709, true))
       .unwrap();
     sink.set_luma(&mut luma).unwrap();
     let err = sink
-      .process(Rgb48Row::new(
+      .process(Rgb48Row::for_tests(
         &wire[SRC * 3..SRC * 6],
         1,
-        ColorMatrix::Bt709,
+        KernelMatrix::Bt709,
         true,
       ))
       .unwrap_err();
@@ -246,7 +246,7 @@ fn bgr48_downscale_rgb_u16_is_exact_area_mean() {
         .unwrap()
         .with_rgb_u16(&mut rgb_u16)
         .unwrap();
-    bgr48_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    bgr48_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   let swap = [2usize, 1, 0];
   for oy in 0..OUT {
@@ -276,7 +276,7 @@ fn rgb48_u16_only_downscale_does_not_size_the_narrow_scratch() {
       .unwrap()
       .with_rgb_u16(&mut rgb_u16)
       .unwrap();
-  rgb48_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  rgb48_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   assert_eq!(
     sink.rgb_scratch_capacity(),
     0,
@@ -294,7 +294,7 @@ fn rgb48_u16_only_downscale_does_not_size_the_narrow_scratch() {
       .unwrap()
       .with_rgb(&mut rgb)
       .unwrap();
-  rgb48_to(&src, true, ColorMatrix::Bt709, &mut sink2).unwrap();
+  rgb48_to(&src, true, sink2.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   assert!(
     sink2.rgb_scratch_capacity() >= OUT * 3,
     "u8 output did not size the narrow scratch"
@@ -315,7 +315,7 @@ fn rgb48_out_of_sequence_first_row_rejected_before_allocation() {
       .unwrap();
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   let err = sink
-    .process(Rgb48Row::new(row3, 3, ColorMatrix::Bt709, true))
+    .process(Rgb48Row::for_tests(row3, 3, KernelMatrix::Bt709, true))
     .unwrap_err();
   assert!(
     matches!(
@@ -361,7 +361,12 @@ fn bgr48_first_row_scratch_oom_leaves_stream_and_freeze_uncommitted_for_retry() 
     // pre-fix ordering would have left the stream committed).
     crate::sinker::mixed::arm_source_rgb_u16_scratch_failure();
     let err = sink
-      .process(Bgr48Row::new(&wire[..SRC * 3], 0, ColorMatrix::Bt709, true))
+      .process(Bgr48Row::for_tests(
+        &wire[..SRC * 3],
+        0,
+        KernelMatrix::Bt709,
+        true,
+      ))
       .unwrap_err();
     assert!(
       matches!(
@@ -384,10 +389,10 @@ fn bgr48_first_row_scratch_oom_leaves_stream_and_freeze_uncommitted_for_retry() 
     sink.set_luma(&mut luma).unwrap();
     for r in 0..SRC {
       sink
-        .process(Bgr48Row::new(
+        .process(Bgr48Row::for_tests(
           &wire[r * SRC * 3..(r + 1) * SRC * 3],
           r,
-          ColorMatrix::Bt709,
+          KernelMatrix::Bt709,
           true,
         ))
         .expect("frame replay after a first-row scratch OOM must succeed");
@@ -419,10 +424,10 @@ fn rgb48_rejected_first_row_does_not_poison_output_retry() {
       .unwrap();
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   let err = sink
-    .process(Rgb48Row::new(
+    .process(Rgb48Row::for_tests(
       &wire[3 * SRC * 3..4 * SRC * 3],
       3,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       true,
     ))
     .unwrap_err();
@@ -436,6 +441,11 @@ fn rgb48_rejected_first_row_does_not_poison_output_retry() {
   let mut luma = vec![0u8; OUT * OUT];
   sink.set_luma(&mut luma).unwrap();
   sink
-    .process(Rgb48Row::new(&wire[..SRC * 3], 0, ColorMatrix::Bt709, true))
+    .process(Rgb48Row::for_tests(
+      &wire[..SRC * 3],
+      0,
+      KernelMatrix::Bt709,
+      true,
+    ))
     .expect("row 0 must succeed after a rejected out-of-sequence first row");
 }

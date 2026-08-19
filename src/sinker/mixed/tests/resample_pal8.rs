@@ -556,7 +556,7 @@ fn fractional_ratio_matches_direct_then_bin() {
   let canonical = direct_rgba(&indices, &palette);
   let mut rgba_ref = std::vec![0u8; F * F * 4];
   {
-    use crate::{ColorMatrix, frame::RgbaFrame, source::rgba_to};
+    use crate::{KernelMatrix, frame::RgbaFrame, source::rgba_to};
     let rsrc = RgbaFrame::new(&canonical, SRC as u32, SRC as u32, (SRC * 4) as u32);
     let mut sink = MixedSinker::<crate::source::Rgba, AreaResampler>::with_resampler(
       SRC,
@@ -566,7 +566,7 @@ fn fractional_ratio_matches_direct_then_bin() {
     .unwrap()
     .with_rgba(&mut rgba_ref)
     .unwrap();
-    rgba_to(&rsrc, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    rgba_to(&rsrc, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   assert_eq!(rgba, rgba_ref, "Pal8 8->3 != packed-RGBA 8->3 of canonical");
 }
@@ -642,11 +642,11 @@ fn mid_frame_alpha_mode_flip_is_rejected() {
       .unwrap();
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   sink
-    .process(Pal8Row::new(&indices[..SRC], &palette, 0))
+    .process(Pal8Row::for_tests(&indices[..SRC], &palette, 0))
     .unwrap();
   sink.set_alpha_mode(AlphaMode::Premultiplied);
   let err = sink
-    .process(Pal8Row::new(&indices[SRC..2 * SRC], &palette, 1))
+    .process(Pal8Row::for_tests(&indices[SRC..2 * SRC], &palette, 1))
     .unwrap_err();
   assert!(
     matches!(err, MixedSinkerError::ResampleOutputsChanged(_)),
@@ -672,7 +672,7 @@ fn out_of_sequence_first_row_is_rejected() {
       .unwrap();
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   let err = sink
-    .process(Pal8Row::new(&indices[SRC..2 * SRC], &palette, 1))
+    .process(Pal8Row::for_tests(&indices[SRC..2 * SRC], &palette, 1))
     .unwrap_err();
   assert!(
     matches!(
@@ -733,7 +733,7 @@ fn area_first_row_scratch_oom_leaves_stream_and_freeze_uncommitted_for_retry() {
     // uncommitted (the commit-together atomic shape).
     crate::sinker::mixed::arm_source_rgb_scratch_failure();
     let err = sink
-      .process(Pal8Row::new(&indices[..SRC], &palette, 0))
+      .process(Pal8Row::for_tests(&indices[..SRC], &palette, 0))
       .unwrap_err();
     assert!(
       matches!(
@@ -764,7 +764,11 @@ fn area_first_row_scratch_oom_leaves_stream_and_freeze_uncommitted_for_retry() {
     sink.set_luma(&mut luma).unwrap();
     for r in 0..SRC {
       sink
-        .process(Pal8Row::new(&indices[r * SRC..(r + 1) * SRC], &palette, r))
+        .process(Pal8Row::for_tests(
+          &indices[r * SRC..(r + 1) * SRC],
+          &palette,
+          r,
+        ))
         .expect("frame replay after a first-row scratch OOM must succeed");
     }
   }

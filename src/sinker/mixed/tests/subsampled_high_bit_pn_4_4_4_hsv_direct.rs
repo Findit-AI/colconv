@@ -22,10 +22,10 @@ use crate::row::{
   p416_to_hsv_row_endian, p416_to_rgb_row_endian, rgb_to_hsv_row,
 };
 
-const MATRICES: [ColorMatrix; 3] = [
-  ColorMatrix::Bt601,
-  ColorMatrix::Bt709,
-  ColorMatrix::Bt2020Ncl,
+const MATRICES: [KernelMatrix; 3] = [
+  KernelMatrix::Bt601,
+  KernelMatrix::Bt709,
+  KernelMatrix::Bt2020Ncl,
 ];
 
 /// A non-trivial, non-gray pseudo-random logical sample masked to `bits`
@@ -189,7 +189,7 @@ macro_rules! structural_p4xx {
     fn $name() {
       const BITS: u32 = $bits;
       let (w, h) = (16usize, 8usize);
-      let m = ColorMatrix::Bt709;
+      let m = KernelMatrix::Bt709;
       let (yp, uvp) = packed_le_frame_planes(w, h, BITS);
       // 4:4:4 interleaved UV stride = `2 * width` u16.
       let src = $frame::new(&yp, &uvp, w as u32, h as u32, w as u32, 2 * w as u32);
@@ -201,7 +201,7 @@ macro_rules! structural_p4xx {
         let mut sink = MixedSinker::<$marker>::new(w, h)
           .with_hsv(&mut hh, &mut ss, &mut vv)
           .unwrap();
-        $walker(&src, true, m, &mut sink).unwrap();
+        $walker(&src, true, sink.set_kernel_matrix(m)).unwrap();
         sink.rgb_scratch.len()
       };
       assert_eq!(

@@ -18,7 +18,7 @@
 //!   ranges, AND every alpha mode). `Vuya` exposes no u16 colour outputs.
 
 use crate::{
-  ColorMatrix, PixelSink,
+  KernelMatrix, PixelSink,
   frame::VuyaFrame,
   resample::{AreaResampler, ResampleError},
   sinker::{AlphaMode, MixedSinker, MixedSinkerError},
@@ -27,7 +27,7 @@ use crate::{
 
 const SRC: usize = 8;
 const OUT: usize = 4;
-const M: ColorMatrix = ColorMatrix::Bt709;
+const M: KernelMatrix = KernelMatrix::Bt709;
 const FR: bool = true;
 const FR_LIMITED: bool = false;
 
@@ -49,7 +49,7 @@ fn direct_rgba(packed: &[u8]) -> Vec<u8> {
     let mut sink = MixedSinker::<Vuya>::new(SRC, SRC)
       .with_rgba(&mut rgba)
       .unwrap();
-    vuya_to(&frame, FR, M, &mut sink).unwrap();
+    vuya_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   rgba
 }
@@ -143,7 +143,7 @@ fn direct_luma_of_binned_y(binned_y: &[u8], full_range: bool) -> (Vec<u8>, Vec<u
       .unwrap()
       .with_luma_u16(&mut lu16)
       .unwrap();
-    vuya_to(&frame, full_range, M, &mut sink).unwrap();
+    vuya_to(&frame, full_range, sink.set_kernel_matrix(M)).unwrap();
   }
   (luma, lu16)
 }
@@ -163,7 +163,7 @@ fn vuya_straight_rgba_is_block_mean_of_direct() {
         .unwrap()
         .with_rgba(&mut rgba)
         .unwrap();
-    vuya_to(&frame, FR, M, &mut sink).unwrap();
+    vuya_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   let oracle = block_mean_rgba(&direct_rgba(&packed));
   assert_eq!(rgba, oracle, "straight rgba == block mean");
@@ -203,7 +203,7 @@ fn vuya_straight_all_outputs_derive_correctly() {
         .unwrap()
         .with_hsv(&mut h, &mut s, &mut v)
         .unwrap();
-    vuya_to(&frame, FR, M, &mut sink).unwrap();
+    vuya_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   }
 
   let binned = block_mean_rgba(&direct_rgba(&packed));
@@ -258,7 +258,7 @@ fn vuya_premultiplied_matches_premult_bin_unpremult_oracle() {
         .unwrap()
         .with_luma_u16(&mut lu16)
         .unwrap();
-    vuya_to(&frame, FR, M, &mut sink).unwrap();
+    vuya_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   }
 
   let mut pm = direct_rgba(&packed);
@@ -298,7 +298,7 @@ fn vuya_premultiplied_transparent_block_does_not_bleed() {
         .with_alpha_mode(AlphaMode::Premultiplied)
         .with_rgba(&mut rgba)
         .unwrap();
-    vuya_to(&frame, FR, M, &mut sink).unwrap();
+    vuya_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(&rgba[..4], &[0, 0, 0, 0], "transparent block bled colour");
   let mut pm = direct_rgba(&packed);
@@ -338,7 +338,7 @@ fn vuya_premultiplied_nonuniform_alpha_luma_is_native_y_not_colour() {
         .unwrap()
         .with_luma_u16(&mut lu16)
         .unwrap();
-    vuya_to(&frame, FR, M, &mut sink).unwrap();
+    vuya_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert!(
     luma.iter().all(|&y| y == 128),
@@ -386,7 +386,7 @@ fn vuya_straight_and_premult_differ_under_varying_alpha() {
         .with_alpha_mode(mode)
         .with_rgba(&mut rgba)
         .unwrap();
-    vuya_to(&frame, FR, M, &mut sink).unwrap();
+    vuya_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
     rgba
   };
   assert_ne!(
@@ -417,7 +417,7 @@ fn vuya_identity_plan_matches_direct() {
         .unwrap()
         .with_rgba(&mut rgba)
         .unwrap();
-    vuya_to(&frame, FR, M, &mut sink).unwrap();
+    vuya_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(rgba, direct_rgba(&packed), "identity plan == direct");
 }
@@ -443,7 +443,7 @@ fn vuya_limited_range_luma_is_native_y() {
         .unwrap()
         .with_luma_u16(&mut lu16)
         .unwrap();
-    vuya_to(&frame, full_range, M, &mut sink).unwrap();
+    vuya_to(&frame, full_range, sink.set_kernel_matrix(M)).unwrap();
     (luma, lu16)
   };
   let (luma_lim, lu16_lim) = render(FR_LIMITED);
@@ -478,8 +478,8 @@ fn vuya_cross_frame_reset_reuses_streams() {
         .unwrap()
         .with_rgba(&mut rgba)
         .unwrap();
-    vuya_to(&frame, FR, M, &mut sink).unwrap();
-    vuya_to(&frame, FR, M, &mut sink).unwrap();
+    vuya_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
+    vuya_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(rgba, block_mean_rgba(&direct_rgba(&packed)));
 }
@@ -499,9 +499,10 @@ fn vuya_accepts_alpha_mode_change_across_frames() {
         .unwrap()
         .with_rgba(&mut rgba)
         .unwrap();
-    vuya_to(&frame, FR, M, &mut sink).unwrap();
+    vuya_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
     sink.set_alpha_mode(AlphaMode::Premultiplied);
-    vuya_to(&frame, FR, M, &mut sink).expect("a fresh frame must accept a different alpha mode");
+    vuya_to(&frame, FR, sink.set_kernel_matrix(M))
+      .expect("a fresh frame must accept a different alpha mode");
   }
   let mut pm = direct_rgba(&packed);
   premultiply(&mut pm);
@@ -525,11 +526,16 @@ fn vuya_mid_frame_alpha_mode_flip_is_rejected() {
       .unwrap();
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   sink
-    .process(VuyaRow::new(&packed[..row_bytes], 0, M, FR))
+    .process(VuyaRow::for_tests(&packed[..row_bytes], 0, M, FR))
     .unwrap();
   sink.set_alpha_mode(AlphaMode::Premultiplied);
   let err = sink
-    .process(VuyaRow::new(&packed[row_bytes..2 * row_bytes], 1, M, FR))
+    .process(VuyaRow::for_tests(
+      &packed[row_bytes..2 * row_bytes],
+      1,
+      M,
+      FR,
+    ))
     .unwrap_err();
   assert!(
     matches!(err, MixedSinkerError::ResampleOutputsChanged(_)),
@@ -549,7 +555,12 @@ fn vuya_out_of_sequence_first_row_is_rejected() {
       .unwrap();
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   let err = sink
-    .process(VuyaRow::new(&packed[row_bytes..2 * row_bytes], 1, M, FR))
+    .process(VuyaRow::for_tests(
+      &packed[row_bytes..2 * row_bytes],
+      1,
+      M,
+      FR,
+    ))
     .unwrap_err();
   assert!(
     matches!(
@@ -568,7 +579,7 @@ fn vuya_no_output_sink_is_a_noop() {
   let mut sink =
     MixedSinker::<Vuya, AreaResampler>::with_resampler(SRC, SRC, AreaResampler::to(OUT, OUT))
       .unwrap();
-  vuya_to(&frame, FR, M, &mut sink).unwrap();
+  vuya_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
 }
 
 #[test]
@@ -590,7 +601,7 @@ fn vuya_resample_simd_matches_scalar() {
         .unwrap()
         .with_luma(&mut luma)
         .unwrap();
-    vuya_to(&frame, FR, M, &mut sink).unwrap();
+    vuya_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
     (rgba, luma)
   };
   assert_eq!(run(true), run(false), "Vuya resample SIMD != scalar");

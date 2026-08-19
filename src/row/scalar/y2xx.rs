@@ -51,7 +51,7 @@ pub(crate) fn y2xx_n_to_rgb_or_rgba_row<const BITS: u32, const ALPHA: bool, cons
   packed: &[u16],
   out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   const {
@@ -127,7 +127,7 @@ pub(crate) fn y2xx_n_to_rgb_u16_or_rgba_u16_row<
   packed: &[u16],
   out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   const {
@@ -294,7 +294,7 @@ pub(crate) fn y2xx_n_to_hsv_row<const BITS: u32, const BE: bool>(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   const {
@@ -364,7 +364,7 @@ pub(crate) fn y210_to_rgb_or_rgba_row<const ALPHA: bool, const BE: bool>(
   packed: &[u16],
   out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   y2xx_n_to_rgb_or_rgba_row::<10, ALPHA, BE>(packed, out, width, matrix, full_range);
@@ -377,7 +377,7 @@ pub(crate) fn y210_to_rgb_u16_or_rgba_u16_row<const ALPHA: bool, const BE: bool>
   packed: &[u16],
   out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   y2xx_n_to_rgb_u16_or_rgba_u16_row::<10, ALPHA, BE>(packed, out, width, matrix, full_range);
@@ -411,7 +411,7 @@ pub(crate) fn y210_to_hsv_row<const BE: bool>(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   y2xx_n_to_hsv_row::<10, BE>(packed, h_out, s_out, v_out, width, matrix, full_range);
@@ -429,7 +429,7 @@ pub(crate) fn y212_to_rgb_or_rgba_row<const ALPHA: bool, const BE: bool>(
   packed: &[u16],
   out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   y2xx_n_to_rgb_or_rgba_row::<12, ALPHA, BE>(packed, out, width, matrix, full_range);
@@ -442,7 +442,7 @@ pub(crate) fn y212_to_rgb_u16_or_rgba_u16_row<const ALPHA: bool, const BE: bool>
   packed: &[u16],
   out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   y2xx_n_to_rgb_u16_or_rgba_u16_row::<12, ALPHA, BE>(packed, out, width, matrix, full_range);
@@ -476,7 +476,7 @@ pub(crate) fn y212_to_hsv_row<const BE: bool>(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   y2xx_n_to_hsv_row::<12, BE>(packed, h_out, s_out, v_out, width, matrix, full_range);
@@ -485,7 +485,7 @@ pub(crate) fn y212_to_hsv_row<const BE: bool>(
 #[cfg(all(test, feature = "std"))]
 mod tests {
   use super::*;
-  use crate::ColorMatrix;
+  use crate::KernelMatrix;
 
   /// Build one Y210-shaped u16 quadruple `[Y0, U, Y1, V]` with each
   /// sample shifted to MSB-aligned 10-bit form (low 6 bits zero).
@@ -553,7 +553,7 @@ mod tests {
   fn ref_y2xx_to_rgb_u8<const BITS: u32>(
     intended: &[u16],
     width: usize,
-    matrix: ColorMatrix,
+    matrix: KernelMatrix,
     full_range: bool,
   ) -> std::vec::Vec<u8> {
     let coeffs = Coefficients::for_matrix(matrix);
@@ -586,7 +586,7 @@ mod tests {
   fn ref_y2xx_to_rgb_u16<const BITS: u32>(
     intended: &[u16],
     width: usize,
-    matrix: ColorMatrix,
+    matrix: KernelMatrix,
     full_range: bool,
   ) -> std::vec::Vec<u16> {
     let coeffs = Coefficients::for_matrix(matrix);
@@ -646,7 +646,7 @@ mod tests {
     // Full-range gray: Y=512, U=V=512 (10-bit center) → RGB ~128.
     let buf = solid_y210(8, 512, 512, 512);
     let mut rgb = [0u8; 8 * 3];
-    y210_to_rgb_or_rgba_row::<false, false>(&buf, &mut rgb, 8, ColorMatrix::Bt709, true);
+    y210_to_rgb_or_rgba_row::<false, false>(&buf, &mut rgb, 8, KernelMatrix::Bt709, true);
     for px in rgb.chunks(3) {
       assert!(px[0].abs_diff(128) <= 1);
       assert_eq!(px[0], px[1]);
@@ -658,7 +658,7 @@ mod tests {
   fn scalar_y210_to_rgba_alpha_is_opaque() {
     let buf = solid_y210(8, 512, 512, 512);
     let mut rgba = [0u8; 8 * 4];
-    y210_to_rgb_or_rgba_row::<true, false>(&buf, &mut rgba, 8, ColorMatrix::Bt709, true);
+    y210_to_rgb_or_rgba_row::<true, false>(&buf, &mut rgba, 8, KernelMatrix::Bt709, true);
     for px in rgba.chunks(4) {
       assert_eq!(px[3], 0xFF);
     }
@@ -669,7 +669,7 @@ mod tests {
     // Full-range gray Y=512 → ~512 in 10-bit RGB out (out_max = 1023).
     let buf = solid_y210(8, 512, 512, 512);
     let mut rgb = [0u16; 8 * 3];
-    y210_to_rgb_u16_or_rgba_u16_row::<false, false>(&buf, &mut rgb, 8, ColorMatrix::Bt709, true);
+    y210_to_rgb_u16_or_rgba_u16_row::<false, false>(&buf, &mut rgb, 8, KernelMatrix::Bt709, true);
     for px in rgb.chunks(3) {
       assert!(px[0].abs_diff(512) <= 2, "px expected ~512, got {}", px[0]);
       assert_eq!(px[0], px[1]);
@@ -681,7 +681,7 @@ mod tests {
   fn scalar_y210_to_rgba_u16_alpha_is_max() {
     let buf = solid_y210(8, 512, 512, 512);
     let mut rgba = [0u16; 8 * 4];
-    y210_to_rgb_u16_or_rgba_u16_row::<true, false>(&buf, &mut rgba, 8, ColorMatrix::Bt709, true);
+    y210_to_rgb_u16_or_rgba_u16_row::<true, false>(&buf, &mut rgba, 8, KernelMatrix::Bt709, true);
     for px in rgba.chunks(4) {
       assert_eq!(px[3], 1023, "alpha must be (1 << 10) - 1");
     }
@@ -746,9 +746,9 @@ mod tests {
     let be = as_be_u16(&intended);
     let mut rgb_le = [0u8; 8 * 3];
     let mut rgb_be = [0u8; 8 * 3];
-    y210_to_rgb_or_rgba_row::<false, false>(&le, &mut rgb_le, 8, ColorMatrix::Bt709, true);
-    y210_to_rgb_or_rgba_row::<false, true>(&be, &mut rgb_be, 8, ColorMatrix::Bt709, true);
-    let expected = ref_y2xx_to_rgb_u8::<10>(&intended, 8, ColorMatrix::Bt709, true);
+    y210_to_rgb_or_rgba_row::<false, false>(&le, &mut rgb_le, 8, KernelMatrix::Bt709, true);
+    y210_to_rgb_or_rgba_row::<false, true>(&be, &mut rgb_be, 8, KernelMatrix::Bt709, true);
+    let expected = ref_y2xx_to_rgb_u8::<10>(&intended, 8, KernelMatrix::Bt709, true);
     assert_eq!(
       rgb_le.as_slice(),
       expected,
@@ -769,9 +769,9 @@ mod tests {
     let be = as_be_u16(&intended);
     let mut out_le = [0u16; 8 * 3];
     let mut out_be = [0u16; 8 * 3];
-    y210_to_rgb_u16_or_rgba_u16_row::<false, false>(&le, &mut out_le, 8, ColorMatrix::Bt709, true);
-    y210_to_rgb_u16_or_rgba_u16_row::<false, true>(&be, &mut out_be, 8, ColorMatrix::Bt709, true);
-    let expected = ref_y2xx_to_rgb_u16::<10>(&intended, 8, ColorMatrix::Bt709, true);
+    y210_to_rgb_u16_or_rgba_u16_row::<false, false>(&le, &mut out_le, 8, KernelMatrix::Bt709, true);
+    y210_to_rgb_u16_or_rgba_u16_row::<false, true>(&be, &mut out_be, 8, KernelMatrix::Bt709, true);
+    let expected = ref_y2xx_to_rgb_u16::<10>(&intended, 8, KernelMatrix::Bt709, true);
     assert_eq!(
       out_le.as_slice(),
       expected,

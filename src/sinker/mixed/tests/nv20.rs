@@ -74,7 +74,7 @@ fn nv20_gray_to_gray_real_low_bits() {
 
   let mut rgb = std::vec![0u8; 16 * 8 * 3];
   let mut sink = MixedSinker::<Nv20>::new(16, 8).with_rgb(&mut rgb).unwrap();
-  nv20_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  nv20_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   for px in rgb.chunks(3) {
     assert!(px[0].abs_diff(128) <= 1, "got {px:?}");
@@ -112,22 +112,22 @@ fn nv20_low_bit_decodes_same_as_p210_with_equal_logical_sample() {
   let p_src = crate::frame::P210Frame::new(&p_y, &p_uv, w, h, w, w);
 
   for &(fr, m) in &[
-    (true, ColorMatrix::Bt709),
-    (false, ColorMatrix::Bt709),
-    (true, ColorMatrix::Bt601),
-    (false, ColorMatrix::Bt601),
+    (true, KernelMatrix::Bt709),
+    (false, KernelMatrix::Bt709),
+    (true, KernelMatrix::Bt601),
+    (false, KernelMatrix::Bt601),
   ] {
     let mut nv_rgb = std::vec![0u8; (w * h * 3) as usize];
     let mut nv_sink = MixedSinker::<Nv20>::new(w as usize, h as usize)
       .with_rgb(&mut nv_rgb)
       .unwrap();
-    nv20_to(&nv_src, fr, m, &mut nv_sink).unwrap();
+    nv20_to(&nv_src, fr, nv_sink.set_kernel_matrix(m)).unwrap();
 
     let mut p_rgb = std::vec![0u8; (w * h * 3) as usize];
     let mut p_sink = MixedSinker::<P210>::new(w as usize, h as usize)
       .with_rgb(&mut p_rgb)
       .unwrap();
-    p210_to(&p_src, fr, m, &mut p_sink).unwrap();
+    p210_to(&p_src, fr, p_sink.set_kernel_matrix(m)).unwrap();
 
     assert_eq!(
       nv_rgb, p_rgb,
@@ -162,13 +162,18 @@ fn nv20_and_p210_disagree_on_identical_wire_bytes() {
   let mut nv_sink = MixedSinker::<Nv20>::new(w as usize, h as usize)
     .with_rgb(&mut nv_rgb)
     .unwrap();
-  nv20_to(&nv_src, true, ColorMatrix::Bt709, &mut nv_sink).unwrap();
+  nv20_to(
+    &nv_src,
+    true,
+    nv_sink.set_kernel_matrix(KernelMatrix::Bt709),
+  )
+  .unwrap();
 
   let mut p_rgb = std::vec![0u8; (w * h * 3) as usize];
   let mut p_sink = MixedSinker::<P210>::new(w as usize, h as usize)
     .with_rgb(&mut p_rgb)
     .unwrap();
-  p210_to(&p_src, true, ColorMatrix::Bt709, &mut p_sink).unwrap();
+  p210_to(&p_src, true, p_sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   assert_ne!(
     nv_rgb, p_rgb,
@@ -208,7 +213,7 @@ fn nv20_run_all<const BE: bool>(
   uvp: &[u16],
   w: u32,
   h: u32,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   simd: bool,
 ) -> (
@@ -245,7 +250,7 @@ fn nv20_run_all<const BE: bool>(
       .with_hsv(&mut hh, &mut ss, &mut vv)
       .unwrap();
     sink.set_simd(simd);
-    nv20_to_endian::<_, BE>(&src, full_range, matrix, &mut sink).unwrap();
+    nv20_to_endian::<_, BE>(&src, full_range, sink.set_kernel_matrix(matrix)).unwrap();
   }
   // rgba (u8) standalone — exercises the rgba-only kernel path.
   {
@@ -253,7 +258,7 @@ fn nv20_run_all<const BE: bool>(
       .with_rgba(&mut rgba)
       .unwrap();
     sink.set_simd(simd);
-    nv20_to_endian::<_, BE>(&src, full_range, matrix, &mut sink).unwrap();
+    nv20_to_endian::<_, BE>(&src, full_range, sink.set_kernel_matrix(matrix)).unwrap();
   }
   // rgba_u16 standalone.
   {
@@ -261,7 +266,7 @@ fn nv20_run_all<const BE: bool>(
       .with_rgba_u16(&mut rgba_u16)
       .unwrap();
     sink.set_simd(simd);
-    nv20_to_endian::<_, BE>(&src, full_range, matrix, &mut sink).unwrap();
+    nv20_to_endian::<_, BE>(&src, full_range, sink.set_kernel_matrix(matrix)).unwrap();
   }
 
   (rgb, rgb_u16, rgba, rgba_u16, luma, (hh, ss, vv))
@@ -274,7 +279,7 @@ fn nv20_run_all<const BE: bool>(
 /// `rgb_to_hsv_row` itself is not byte-stable SIMD-vs-scalar (a
 /// pre-existing property exercised by the HSV-direct suites); it is
 /// covered by [`nv20_hsv_within_tier_equals_rgb_then_hsv`] instead.
-fn nv20_assert_simd_eq_scalar<const BE: bool>(w: u32, h: u32, matrix: ColorMatrix, fr: bool) {
+fn nv20_assert_simd_eq_scalar<const BE: bool>(w: u32, h: u32, matrix: KernelMatrix, fr: bool) {
   let (yp, uvp) = nv20_random::<BE>(w, h, 0x9E37_79B9 ^ ((BE as u32) << 16) ^ (fr as u32));
   let simd = nv20_run_all::<BE>(&yp, &uvp, w, h, matrix, fr, true);
   let scal = nv20_run_all::<BE>(&yp, &uvp, w, h, matrix, fr, false);
@@ -298,10 +303,10 @@ fn nv20_simd_matches_scalar_all_outputs() {
   // (1922 % {16, 32, 64} != 0). Cover full/limited × Bt709/Bt601 × LE/BE.
   let (w, h) = (1922u32, 3u32);
   for &(fr, m) in &[
-    (true, ColorMatrix::Bt709),
-    (false, ColorMatrix::Bt709),
-    (true, ColorMatrix::Bt601),
-    (false, ColorMatrix::Bt601),
+    (true, KernelMatrix::Bt709),
+    (false, KernelMatrix::Bt709),
+    (true, KernelMatrix::Bt601),
+    (false, KernelMatrix::Bt601),
   ] {
     nv20_assert_simd_eq_scalar::<false>(w, h, m, fr);
     nv20_assert_simd_eq_scalar::<true>(w, h, m, fr);
@@ -322,7 +327,7 @@ fn nv20_hsv_within_tier_equals_rgb_then_hsv() {
   // tail width.
   let (w, h) = (66u32, 3u32);
 
-  fn check<const BE: bool>(w: u32, h: u32, m: ColorMatrix, fr: bool, use_simd: bool) {
+  fn check<const BE: bool>(w: u32, h: u32, m: KernelMatrix, fr: bool, use_simd: bool) {
     let (yp, uvp) = nv20_random::<BE>(w, h, 0x0BAD_F00D ^ (use_simd as u32));
     let wz = w as usize;
     let hz = h as usize;
@@ -337,7 +342,7 @@ fn nv20_hsv_within_tier_equals_rgb_then_hsv() {
         .with_hsv(&mut sh, &mut ss, &mut sv)
         .unwrap();
       sink.set_simd(use_simd);
-      nv20_to_endian::<_, BE>(&src, fr, m, &mut sink).unwrap();
+      nv20_to_endian::<_, BE>(&src, fr, sink.set_kernel_matrix(m)).unwrap();
     }
 
     // Row-direct: nv20_to_hsv_row_endian, and rgb_to_hsv_row(nv20 rgb).
@@ -385,7 +390,7 @@ fn nv20_hsv_within_tier_equals_rgb_then_hsv() {
     assert_eq!(dv, rv, "direct V != rgb_to_hsv V");
   }
 
-  for &(fr, m) in &[(true, ColorMatrix::Bt709), (false, ColorMatrix::Bt601)] {
+  for &(fr, m) in &[(true, KernelMatrix::Bt709), (false, KernelMatrix::Bt601)] {
     for &simd in &[false, true] {
       check::<false>(w, h, m, fr, simd);
       check::<true>(w, h, m, fr, simd);
@@ -406,7 +411,7 @@ fn nv20_be_equals_le_on_matching_logical_samples() {
   let (yl, uvl) = nv20_random::<false>(w, h, 0xABCD_1234);
   let (yb, uvb) = nv20_random::<true>(w, h, 0xABCD_1234);
 
-  for &(fr, m) in &[(true, ColorMatrix::Bt601), (false, ColorMatrix::Bt709)] {
+  for &(fr, m) in &[(true, KernelMatrix::Bt601), (false, KernelMatrix::Bt709)] {
     let le = nv20_run_all::<false>(&yl, &uvl, w, h, m, fr, true);
     let be = nv20_run_all::<true>(&yb, &uvb, w, h, m, fr, true);
     assert_eq!(le.0, be.0, "rgb LE != BE (fr={fr} {m:?})");
@@ -431,7 +436,7 @@ fn nv20_rgba_u16_only_native_depth_gray_with_opaque_alpha() {
   let mut sink = MixedSinker::<Nv20>::new(16, 8)
     .with_rgba_u16(&mut rgba)
     .unwrap();
-  nv20_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  nv20_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   for px in rgba.chunks(4) {
     assert!(px[0].abs_diff(512) <= 1, "got {px:?}");
@@ -456,7 +461,7 @@ fn nv20_luma_is_depacked_y_narrowed_to_8bit() {
   let mut sink = MixedSinker::<Nv20>::new(16, 8)
     .with_luma(&mut luma)
     .unwrap();
-  nv20_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  nv20_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   assert!(luma.iter().all(|&l| l == 175), "luma must be 700>>2 = 175");
 }
@@ -477,7 +482,7 @@ fn nv20_with_rgb_and_rgba_produce_byte_identical_rgb_bytes() {
   let mut s_solo = MixedSinker::<Nv20>::new(48, 8)
     .with_rgb(&mut rgb_solo)
     .unwrap();
-  nv20_to(&src, true, ColorMatrix::Bt709, &mut s_solo).unwrap();
+  nv20_to(&src, true, s_solo.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   let mut rgb_combined = std::vec![0u8; 48 * 8 * 3];
   let mut rgba = std::vec![0u8; 48 * 8 * 4];
@@ -486,7 +491,12 @@ fn nv20_with_rgb_and_rgba_produce_byte_identical_rgb_bytes() {
     .unwrap()
     .with_rgba(&mut rgba)
     .unwrap();
-  nv20_to(&src, true, ColorMatrix::Bt709, &mut s_combined).unwrap();
+  nv20_to(
+    &src,
+    true,
+    s_combined.set_kernel_matrix(KernelMatrix::Bt709),
+  )
+  .unwrap();
 
   assert_eq!(rgb_solo, rgb_combined, "RGB bytes must match across runs");
   for (rgb_px, rgba_px) in rgb_combined.chunks(3).zip(rgba.chunks(4)) {
@@ -519,8 +529,7 @@ fn nv20_rgba_too_short_returns_err() {
 #[allow(deprecated)]
 fn nv20_walker_matches_direct_le_and_be() {
   let (w, h) = (40u32, 4u32);
-  let opts = YuvOptions::new()
-    .with_matrix(ColorMatrix::Bt601)
+  let opts = YuvOptions::from_color_spec(&crate::ColorSpec::of_matrix(KernelMatrix::Bt601))
     .with_full_range();
 
   // LE.
@@ -532,13 +541,19 @@ fn nv20_walker_matches_direct_le_and_be() {
     let mut sink_w = MixedSinker::<Nv20<false>>::new(w as usize, h as usize)
       .with_rgb(&mut rgb_w)
       .unwrap();
-    <Nv20<false> as Walker<_>>::walk(&src, &opts, &mut sink_w).unwrap();
+    <Nv20<false> as Walker<_>>::walk(&src, &opts, sink_w.set_kernel_matrix(KernelMatrix::Bt601))
+      .unwrap();
 
     let mut rgb_d = std::vec![0u8; (w * h * 3) as usize];
     let mut sink_d = MixedSinker::<Nv20<false>>::new(w as usize, h as usize)
       .with_rgb(&mut rgb_d)
       .unwrap();
-    nv20_to(&src, opts.full_range(), opts.matrix(), &mut sink_d).unwrap();
+    nv20_to(
+      &src,
+      opts.full_range(),
+      sink_d.set_kernel_matrix(KernelMatrix::Bt601),
+    )
+    .unwrap();
 
     assert_eq!(rgb_w, rgb_d, "LE Walker::walk != nv20_to");
   }
@@ -552,13 +567,19 @@ fn nv20_walker_matches_direct_le_and_be() {
     let mut sink_w = MixedSinker::<Nv20<true>>::new(w as usize, h as usize)
       .with_rgb(&mut rgb_w)
       .unwrap();
-    <Nv20<true> as Walker<_>>::walk(&src, &opts, &mut sink_w).unwrap();
+    <Nv20<true> as Walker<_>>::walk(&src, &opts, sink_w.set_kernel_matrix(KernelMatrix::Bt601))
+      .unwrap();
 
     let mut rgb_d = std::vec![0u8; (w * h * 3) as usize];
     let mut sink_d = MixedSinker::<Nv20<true>>::new(w as usize, h as usize)
       .with_rgb(&mut rgb_d)
       .unwrap();
-    nv20_to_endian::<_, true>(&src, opts.full_range(), opts.matrix(), &mut sink_d).unwrap();
+    nv20_to_endian::<_, true>(
+      &src,
+      opts.full_range(),
+      sink_d.set_kernel_matrix(KernelMatrix::Bt601),
+    )
+    .unwrap();
 
     assert_eq!(rgb_w, rgb_d, "BE Walker::walk != nv20_to_endian");
   }
@@ -599,7 +620,7 @@ fn nv20_rgb_scratch_alloc_failure_leaves_outputs_untouched() {
     .unwrap();
 
   super::super::arm_rgb_scratch_alloc_failure();
-  let err = nv20_to(&src, false, ColorMatrix::Bt601, &mut sink).unwrap_err();
+  let err = nv20_to(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap_err();
   drop(sink);
 
   assert!(

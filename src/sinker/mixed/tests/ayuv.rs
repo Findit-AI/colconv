@@ -65,18 +65,18 @@ fn ayuv_matches_vuya_reference_all_outputs() {
   let vu = VuyaFrame::try_new(&vuya_buf, width as u32, height as u32, (width * 4) as u32).unwrap();
 
   for full_range in [true, false] {
-    let m = ColorMatrix::Bt709;
+    let m = KernelMatrix::Bt709;
     // RGB
     let (mut a_rgb, mut v_rgb) = (std::vec![0u8; n * 3], std::vec![0u8; n * 3]);
     {
       let mut a = MixedSinker::<Ayuv>::new(width, height)
         .with_rgb(&mut a_rgb)
         .unwrap();
-      ayuv_to(&ay, full_range, m, &mut a).unwrap();
+      ayuv_to(&ay, full_range, a.set_kernel_matrix(m)).unwrap();
       let mut v = MixedSinker::<Vuya>::new(width, height)
         .with_rgb(&mut v_rgb)
         .unwrap();
-      vuya_to(&vu, full_range, m, &mut v).unwrap();
+      vuya_to(&vu, full_range, v.set_kernel_matrix(m)).unwrap();
     }
     assert_eq!(a_rgb, v_rgb, "AYUV↔VUYA RGB (full_range={full_range})");
 
@@ -86,11 +86,11 @@ fn ayuv_matches_vuya_reference_all_outputs() {
       let mut a = MixedSinker::<Ayuv>::new(width, height)
         .with_rgba(&mut a_rgba)
         .unwrap();
-      ayuv_to(&ay, full_range, m, &mut a).unwrap();
+      ayuv_to(&ay, full_range, a.set_kernel_matrix(m)).unwrap();
       let mut v = MixedSinker::<Vuya>::new(width, height)
         .with_rgba(&mut v_rgba)
         .unwrap();
-      vuya_to(&vu, full_range, m, &mut v).unwrap();
+      vuya_to(&vu, full_range, v.set_kernel_matrix(m)).unwrap();
     }
     assert_eq!(a_rgba, v_rgba, "AYUV↔VUYA RGBA (full_range={full_range})");
     // Alpha bytes equal source A.
@@ -107,13 +107,13 @@ fn ayuv_matches_vuya_reference_all_outputs() {
         .unwrap()
         .with_rgba(&mut a_crgba)
         .unwrap();
-      ayuv_to(&ay, full_range, m, &mut a).unwrap();
+      ayuv_to(&ay, full_range, a.set_kernel_matrix(m)).unwrap();
       let mut v = MixedSinker::<Vuya>::new(width, height)
         .with_rgb(&mut v_crgb)
         .unwrap()
         .with_rgba(&mut v_crgba)
         .unwrap();
-      vuya_to(&vu, full_range, m, &mut v).unwrap();
+      vuya_to(&vu, full_range, v.set_kernel_matrix(m)).unwrap();
     }
     assert_eq!(
       a_crgb, v_crgb,
@@ -126,17 +126,17 @@ fn ayuv_matches_vuya_reference_all_outputs() {
   }
 
   // Luma / luma_u16 / HSV.
-  let m = ColorMatrix::Bt709;
+  let m = KernelMatrix::Bt709;
   let (mut a_l, mut v_l) = (std::vec![0u8; n], std::vec![0u8; n]);
   {
     let mut a = MixedSinker::<Ayuv>::new(width, height)
       .with_luma(&mut a_l)
       .unwrap();
-    ayuv_to(&ay, false, m, &mut a).unwrap();
+    ayuv_to(&ay, false, a.set_kernel_matrix(m)).unwrap();
     let mut v = MixedSinker::<Vuya>::new(width, height)
       .with_luma(&mut v_l)
       .unwrap();
-    vuya_to(&vu, false, m, &mut v).unwrap();
+    vuya_to(&vu, false, v.set_kernel_matrix(m)).unwrap();
   }
   assert_eq!(a_l, v_l, "AYUV↔VUYA luma");
   // luma == source Y at offset 1.
@@ -149,11 +149,11 @@ fn ayuv_matches_vuya_reference_all_outputs() {
     let mut a = MixedSinker::<Ayuv>::new(width, height)
       .with_luma_u16(&mut a_l16)
       .unwrap();
-    ayuv_to(&ay, false, m, &mut a).unwrap();
+    ayuv_to(&ay, false, a.set_kernel_matrix(m)).unwrap();
     let mut v = MixedSinker::<Vuya>::new(width, height)
       .with_luma_u16(&mut v_l16)
       .unwrap();
-    vuya_to(&vu, false, m, &mut v).unwrap();
+    vuya_to(&vu, false, v.set_kernel_matrix(m)).unwrap();
   }
   assert_eq!(a_l16, v_l16, "AYUV↔VUYA luma_u16");
 
@@ -163,11 +163,11 @@ fn ayuv_matches_vuya_reference_all_outputs() {
     let mut a = MixedSinker::<Ayuv>::new(width, height)
       .with_hsv(&mut ah, &mut as_, &mut av)
       .unwrap();
-    ayuv_to(&ay, true, m, &mut a).unwrap();
+    ayuv_to(&ay, true, a.set_kernel_matrix(m)).unwrap();
     let mut v = MixedSinker::<Vuya>::new(width, height)
       .with_hsv(&mut vh, &mut vs, &mut vv)
       .unwrap();
-    vuya_to(&vu, true, m, &mut v).unwrap();
+    vuya_to(&vu, true, v.set_kernel_matrix(m)).unwrap();
   }
   assert_eq!((ah, as_, av), (vh, vs, vv), "AYUV↔VUYA HSV");
 }
@@ -190,14 +190,14 @@ fn ayuv_simd_vs_scalar_parity_at_1922() {
   let mut scalar = std::vec![0u8; w * h * 4];
   {
     let mut s = MixedSinker::<Ayuv>::new(w, h).with_rgba(&mut simd).unwrap();
-    ayuv_to(&src, false, ColorMatrix::Bt709, &mut s).unwrap();
+    ayuv_to(&src, false, s.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   {
     let mut s = MixedSinker::<Ayuv>::new(w, h)
       .with_rgba(&mut scalar)
       .unwrap()
       .with_simd(false);
-    ayuv_to(&src, false, ColorMatrix::Bt709, &mut s).unwrap();
+    ayuv_to(&src, false, s.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   assert_eq!(simd, scalar, "AYUV SIMD ≠ scalar at width {w}");
 }
@@ -214,7 +214,7 @@ fn ayuv_malformed_row_returns_row_shape_mismatch() {
   sink.begin_frame(4, 1).unwrap();
   // Width 4 needs 16 packed bytes; hand 12.
   let short = std::vec![0u8; 12];
-  let row = AyuvRow::new(&short, 0, ColorMatrix::Bt709, false);
+  let row = AyuvRow::for_tests(&short, 0, KernelMatrix::Bt709, false);
   let err = sink.process(row).unwrap_err();
   assert!(
     matches!(err, MixedSinkerError::RowShapeMismatch(e)
@@ -269,7 +269,7 @@ fn ayuv_rgb_scratch_alloc_failure_leaves_outputs_untouched() {
     .unwrap();
 
   super::super::arm_rgb_scratch_alloc_failure();
-  let err = ayuv_to(&src, false, ColorMatrix::Bt601, &mut sink).unwrap_err();
+  let err = ayuv_to(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap_err();
   drop(sink);
 
   assert!(

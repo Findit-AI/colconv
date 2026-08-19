@@ -378,7 +378,7 @@ fn pal8_error_row_shape_mismatch() {
 
   // Construct a row with the wrong length (2 instead of 4).
   let wrong_indices = [0u8; 2];
-  let row = Pal8Row::new(&wrong_indices, &palette, 0);
+  let row = Pal8Row::for_tests(&wrong_indices, &palette, 0);
   let err = sink.process(row).unwrap_err();
 
   match err {

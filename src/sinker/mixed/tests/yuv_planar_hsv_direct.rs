@@ -16,10 +16,10 @@ use crate::row::{
   yuv_420_to_hsv_row, yuv_420_to_rgb_row, yuv_444_to_hsv_row, yuv_444_to_rgb_row,
 };
 
-const MATRICES: [ColorMatrix; 3] = [
-  ColorMatrix::Bt601,
-  ColorMatrix::Bt709,
-  ColorMatrix::Bt2020Ncl,
+const MATRICES: [KernelMatrix; 3] = [
+  KernelMatrix::Bt601,
+  KernelMatrix::Bt709,
+  KernelMatrix::Bt2020Ncl,
 ];
 
 /// A non-trivial, non-gray pseudo-random byte at a given position so the
@@ -231,7 +231,7 @@ fn yuv420p_hsv_only_grows_no_rgb_scratch() {
     let mut sink = MixedSinker::<Yuv420p>::new(w, h)
       .with_hsv(&mut hh, &mut ss, &mut vv)
       .unwrap();
-    yuv420p_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    yuv420p_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
     sink.rgb_scratch.len()
   };
   assert_eq!(
@@ -247,7 +247,7 @@ fn yuv420p_hsv_only_grows_no_rgb_scratch() {
     &vp[..w / 2],
     &mut rgb0,
     w,
-    ColorMatrix::Bt601,
+    KernelMatrix::Bt601,
     true,
     true,
   );
@@ -290,7 +290,7 @@ fn yuv420p_luma_plus_hsv_only_is_correct_and_rgb_free() {
       .unwrap()
       .with_hsv(&mut hh, &mut ss, &mut vv)
       .unwrap();
-    yuv420p_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    yuv420p_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
     sink.rgb_scratch.len()
   };
 
@@ -308,7 +308,7 @@ fn yuv420p_luma_plus_hsv_only_is_correct_and_rgb_free() {
     &vp[..w / 2],
     &mut rgb0,
     w,
-    ColorMatrix::Bt709,
+    KernelMatrix::Bt709,
     true,
     true,
   );
@@ -348,7 +348,7 @@ fn planar_yuv_hsv_only_grows_no_rgb_scratch_all_formats() {
       let mut sink = MixedSinker::<Yuv422p>::new(w, h)
         .with_hsv(&mut hh, &mut ss, &mut vv)
         .unwrap();
-      yuv422p_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+      yuv422p_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
       sink.rgb_scratch.len()
     };
     assert_eq!(scratch_len, 0, "Yuv422p HSV-only RGB-free");
@@ -369,7 +369,7 @@ fn planar_yuv_hsv_only_grows_no_rgb_scratch_all_formats() {
       let mut sink = MixedSinker::<Yuv444p>::new(w, h)
         .with_hsv(&mut hh, &mut ss, &mut vv)
         .unwrap();
-      yuv444p_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+      yuv444p_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
       sink.rgb_scratch.len()
     };
     assert_eq!(scratch_len, 0, "Yuv444p HSV-only RGB-free");
@@ -390,7 +390,7 @@ fn planar_yuv_hsv_only_grows_no_rgb_scratch_all_formats() {
       let mut sink = MixedSinker::<Yuv440p>::new(w, h)
         .with_hsv(&mut hh, &mut ss, &mut vv)
         .unwrap();
-      yuv440p_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+      yuv440p_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
       sink.rgb_scratch.len()
     };
     assert_eq!(scratch_len, 0, "Yuv440p HSV-only RGB-free");
@@ -418,7 +418,7 @@ fn planar_yuv_hsv_only_grows_no_rgb_scratch_all_formats() {
       let mut sink = MixedSinker::<Yuv410p>::new(w, h)
         .with_hsv(&mut hh, &mut ss, &mut vv)
         .unwrap();
-      yuv410p_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+      yuv410p_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
       sink.rgb_scratch.len()
     };
     assert_eq!(scratch_len, 0, "Yuv410p HSV-only RGB-free");
@@ -446,7 +446,7 @@ fn planar_yuv_hsv_only_grows_no_rgb_scratch_all_formats() {
       let mut sink = MixedSinker::<Yuv411p>::new(w, h)
         .with_hsv(&mut hh, &mut ss, &mut vv)
         .unwrap();
-      yuv411p_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+      yuv411p_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
       sink.rgb_scratch.len()
     };
     assert_eq!(scratch_len, 0, "Yuv411p HSV-only RGB-free");

@@ -14,7 +14,7 @@
 //! simple block average.
 
 use crate::{
-  ColorMatrix, PixelSink,
+  KernelMatrix, PixelSink,
   frame::Rgbf16LeFrame,
   resample::{AreaResampler, ResampleError},
   sinker::{MixedSinker, MixedSinkerError},
@@ -98,7 +98,7 @@ fn rgbf16_downscale_rgb_f32_is_f16_rounded_area_mean() {
         .unwrap()
         .with_rgb_f32(&mut rgb_f32)
         .unwrap();
-    rgbf16_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    rgbf16_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   let prebinned = prebinned_packed_f16(&host);
   for oy in 0..OUT {
@@ -132,7 +132,7 @@ fn rgbf16_downscale_rgb_f32_preserves_hdr_and_negative() {
         .unwrap()
         .with_rgb_f32(&mut rgb_f32)
         .unwrap();
-    rgbf16_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    rgbf16_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   assert!(
     rgb_f32.iter().any(|&v| v > 1.0),
@@ -192,7 +192,7 @@ fn rgbf16_all_outputs_match_direct_conversion_of_prebinned_frame() {
         .unwrap()
         .with_hsv(&mut h, &mut s_, &mut v_)
         .unwrap();
-    rgbf16_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    rgbf16_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
 
   // Reference: the full-res direct sink over the pre-binned packed f16
@@ -232,7 +232,7 @@ fn rgbf16_all_outputs_match_direct_conversion_of_prebinned_frame() {
       .unwrap()
       .with_hsv(&mut ref_h, &mut ref_s, &mut ref_v)
       .unwrap();
-    rgbf16_to(&binned, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    rgbf16_to(&binned, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
 
   assert_eq!(rgb, ref_rgb, "rgb");
@@ -273,7 +273,7 @@ fn rgbf16_identity_plan_matches_new_sink() {
     let mut sink = MixedSinker::<Rgbf16>::new(SRC, SRC)
       .with_rgb_f32(&mut direct)
       .unwrap();
-    rgbf16_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    rgbf16_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   let mut via_area = std::vec![0.0f32; SRC * SRC * 3];
   {
@@ -282,7 +282,7 @@ fn rgbf16_identity_plan_matches_new_sink() {
         .unwrap()
         .with_rgb_f32(&mut via_area)
         .unwrap();
-    rgbf16_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    rgbf16_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   assert_eq!(direct, via_area, "identity-plan resample == direct sink");
 }
@@ -302,7 +302,7 @@ fn rgbf16_no_output_sink_is_a_noop() {
   let mut sink =
     MixedSinker::<Rgbf16, AreaResampler>::with_resampler(SRC, SRC, AreaResampler::to(OUT, OUT))
       .unwrap();
-  rgbf16_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  rgbf16_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   assert!(
     !sink.rgb_stream_f32_allocated(),
     "no-output sink allocated the f32 stream"
@@ -341,7 +341,7 @@ fn rgbf16_scratch_sizing_is_output_gated() {
       .unwrap()
       .with_rgb_f32(&mut rgb_f32)
       .unwrap();
-  rgbf16_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  rgbf16_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   assert!(
     sink.rgb_packed_scratch_f16_capacity() >= OUT * 3,
     "f32 output did not size the packed f16 scratch"
@@ -360,7 +360,7 @@ fn rgbf16_scratch_sizing_is_output_gated() {
       .unwrap()
       .with_rgb_u16(&mut rgb_u16)
       .unwrap();
-  rgbf16_to(&src, true, ColorMatrix::Bt709, &mut sink_u16).unwrap();
+  rgbf16_to(&src, true, sink_u16.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   assert_eq!(
     sink_u16.rgb_scratch_capacity(),
     0,
@@ -375,7 +375,7 @@ fn rgbf16_scratch_sizing_is_output_gated() {
       .unwrap()
       .with_rgb(&mut rgb)
       .unwrap();
-  rgbf16_to(&src, true, ColorMatrix::Bt709, &mut sink2).unwrap();
+  rgbf16_to(&src, true, sink2.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   assert!(
     sink2.rgb_scratch_capacity() >= OUT * 3,
     "u8 output did not size the narrow scratch"
@@ -410,8 +410,8 @@ fn rgbf16_resample_reuses_stream_across_frames() {
         .unwrap()
         .with_rgb_f32(&mut out)
         .unwrap();
-    rgbf16_to(&src1, true, ColorMatrix::Bt709, &mut sink).unwrap();
-    rgbf16_to(&src2, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    rgbf16_to(&src1, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
+    rgbf16_to(&src2, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
 
   let prebinned2 = prebinned_packed_f16(&host2);
@@ -438,7 +438,7 @@ fn rgbf16_out_of_sequence_first_row_rejected_before_allocation() {
       .unwrap();
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   let err = sink
-    .process(Rgbf16Row::new(row3, 3, ColorMatrix::Bt709, true))
+    .process(Rgbf16Row::for_tests(row3, 3, KernelMatrix::Bt709, true))
     .unwrap_err();
   assert!(
     matches!(
@@ -477,19 +477,19 @@ fn rgbf16_mid_frame_out_of_sequence_rejected() {
       .unwrap();
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   sink
-    .process(Rgbf16Row::new(
+    .process(Rgbf16Row::for_tests(
       &wire[..SRC * 3],
       0,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       true,
     ))
     .unwrap();
   // Skip row 1 — feeding row 2 next must be rejected.
   let err = sink
-    .process(Rgbf16Row::new(
+    .process(Rgbf16Row::for_tests(
       &wire[2 * SRC * 3..3 * SRC * 3],
       2,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       true,
     ))
     .unwrap_err();
@@ -518,19 +518,19 @@ fn rgbf16_mid_frame_output_change_rejected() {
         .unwrap();
     sink.begin_frame(SRC as u32, SRC as u32).unwrap();
     sink
-      .process(Rgbf16Row::new(
+      .process(Rgbf16Row::for_tests(
         &wire[..SRC * 3],
         0,
-        ColorMatrix::Bt709,
+        KernelMatrix::Bt709,
         true,
       ))
       .unwrap();
     sink.set_luma(&mut luma).unwrap();
     let err = sink
-      .process(Rgbf16Row::new(
+      .process(Rgbf16Row::for_tests(
         &wire[SRC * 3..SRC * 6],
         1,
-        ColorMatrix::Bt709,
+        KernelMatrix::Bt709,
         true,
       ))
       .unwrap_err();
@@ -568,10 +568,10 @@ fn rgbf16_first_row_emit_scratch_oom_leaves_stream_and_freeze_uncommitted_for_re
     // field `None` and the freeze uncommitted.
     crate::sinker::mixed::arm_source_rgb_scratch_failure();
     let err = sink
-      .process(Rgbf16Row::new(
+      .process(Rgbf16Row::for_tests(
         &wire[..SRC * 3],
         0,
-        ColorMatrix::Bt709,
+        KernelMatrix::Bt709,
         true,
       ))
       .unwrap_err();
@@ -594,10 +594,10 @@ fn rgbf16_first_row_emit_scratch_oom_leaves_stream_and_freeze_uncommitted_for_re
     sink.set_luma(&mut luma).unwrap();
     for r in 0..SRC {
       sink
-        .process(Rgbf16Row::new(
+        .process(Rgbf16Row::for_tests(
           &wire[r * SRC * 3..(r + 1) * SRC * 3],
           r,
-          ColorMatrix::Bt709,
+          KernelMatrix::Bt709,
           true,
         ))
         .expect("frame replay after a first-row emit-scratch OOM must succeed");

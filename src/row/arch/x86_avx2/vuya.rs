@@ -71,7 +71,7 @@
 //! `scalar::vuya_to_rgb_or_rgba_row`.
 
 use super::*;
-use crate::{ColorMatrix, row::scalar};
+use crate::{KernelMatrix, row::scalar};
 
 // ---- Deinterleave helper ------------------------------------------------
 
@@ -259,7 +259,7 @@ pub(crate) unsafe fn packed444_to_rgb_or_rgba_row<
   packed: &[u8],
   out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // Source alpha requires RGBA output.
@@ -420,7 +420,7 @@ pub(crate) unsafe fn vuya_to_rgb_or_rgba_row<const ALPHA: bool, const ALPHA_SRC:
   packed: &[u8],
   out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   unsafe {
@@ -440,7 +440,7 @@ pub(crate) unsafe fn vuya_to_rgb_row(
   packed: &[u8],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // SAFETY: AVX2 availability is the caller's obligation.
@@ -457,7 +457,7 @@ pub(crate) unsafe fn vuya_to_rgba_row(
   packed: &[u8],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // SAFETY: AVX2 availability is the caller's obligation.
@@ -474,7 +474,7 @@ pub(crate) unsafe fn vuyx_to_rgba_row(
   packed: &[u8],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // SAFETY: AVX2 availability is the caller's obligation.
@@ -715,7 +715,7 @@ pub(crate) unsafe fn packed444_to_hsv_row<
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert!(packed.len() >= width * 4, "packed row too short");
@@ -753,7 +753,7 @@ pub(crate) unsafe fn vuya_to_hsv_row(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   unsafe {
@@ -774,7 +774,7 @@ pub(crate) unsafe fn ayuv_to_rgb_row(
   packed: &[u8],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   unsafe {
@@ -795,7 +795,7 @@ pub(crate) unsafe fn ayuv_to_rgba_row(
   packed: &[u8],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   unsafe {
@@ -818,7 +818,7 @@ pub(crate) unsafe fn ayuv_to_hsv_row(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   unsafe {
@@ -864,7 +864,7 @@ pub(crate) unsafe fn uyva_to_rgb_row(
   packed: &[u8],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   unsafe {
@@ -885,7 +885,7 @@ pub(crate) unsafe fn uyva_to_rgba_row(
   packed: &[u8],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   unsafe {
@@ -908,7 +908,7 @@ pub(crate) unsafe fn uyva_to_hsv_row(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   unsafe {
@@ -967,7 +967,7 @@ pub(crate) unsafe fn vyu444_to_rgb_row(
   packed: &[u8],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   unsafe {
@@ -987,7 +987,7 @@ pub(crate) unsafe fn vyu444_to_rgba_row(
   packed: &[u8],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   unsafe {
@@ -1009,7 +1009,7 @@ pub(crate) unsafe fn vyu444_to_hsv_row(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   unsafe {

@@ -1,5 +1,5 @@
 use super::super::*;
-use crate::{ColorMatrix, row::scalar};
+use crate::{KernelMatrix, row::scalar};
 
 /// Pack one V410 word: `(v << 20) | (y << 10) | u` with each channel
 /// masked to 10-bit range.
@@ -22,7 +22,7 @@ fn pseudo_random_v410(width: usize, seed: usize) -> std::vec::Vec<u32> {
     .collect()
 }
 
-fn check_rgb<const ALPHA: bool>(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_rgb<const ALPHA: bool>(width: usize, matrix: KernelMatrix, full_range: bool) {
   let p = pseudo_random_v410(width, 0xAA55);
   let bpp = if ALPHA { 4 } else { 3 };
   let mut s = std::vec![0u8; width * bpp];
@@ -39,7 +39,7 @@ fn check_rgb<const ALPHA: bool>(width: usize, matrix: ColorMatrix, full_range: b
   );
 }
 
-fn check_rgb_u16<const ALPHA: bool>(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_rgb_u16<const ALPHA: bool>(width: usize, matrix: KernelMatrix, full_range: bool) {
   let p = pseudo_random_v410(width, 0xAA55);
   let bpp = if ALPHA { 4 } else { 3 };
   let mut s = std::vec![0u16; width * bpp];
@@ -88,12 +88,12 @@ fn avx2_v410_rgb_matches_scalar_all_matrices() {
     return;
   }
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       // Width 16 = two main-loop iterations (no tail).
@@ -118,10 +118,10 @@ fn avx2_v410_matches_scalar_widths() {
   // (1..7 — <8 pixels, no main loop), and large production widths
   // (1920p, 1921 = 1920+1 tail, 1923 = 1920+3 tail).
   for w in [1usize, 2, 3, 4, 5, 6, 7, 8, 9, 15, 16, 17, 1920, 1921, 1923] {
-    check_rgb::<false>(w, ColorMatrix::Bt709, false);
-    check_rgb::<true>(w, ColorMatrix::Bt709, true);
-    check_rgb_u16::<false>(w, ColorMatrix::Bt2020Ncl, true);
-    check_rgb_u16::<true>(w, ColorMatrix::Bt601, false);
+    check_rgb::<false>(w, KernelMatrix::Bt709, false);
+    check_rgb::<true>(w, KernelMatrix::Bt709, true);
+    check_rgb_u16::<false>(w, KernelMatrix::Bt2020Ncl, true);
+    check_rgb_u16::<true>(w, KernelMatrix::Bt601, false);
   }
 }
 
@@ -196,7 +196,7 @@ fn avx2_v410_lane_order_per_pixel_y_and_u() {
       &packed,
       &mut simd_rgb,
       W,
-      crate::ColorMatrix::Bt709,
+      crate::KernelMatrix::Bt709,
       false,
     );
   }
@@ -204,7 +204,7 @@ fn avx2_v410_lane_order_per_pixel_y_and_u() {
     &packed,
     &mut scalar_rgb,
     W,
-    crate::ColorMatrix::Bt709,
+    crate::KernelMatrix::Bt709,
     false,
   );
   assert_eq!(
@@ -248,11 +248,11 @@ fn avx2_v410_be_le_simd_parity() {
       let mut out_be = std::vec![0u8; w * bpp];
       unsafe {
         if alpha {
-          v410_to_rgb_or_rgba_row::<true, false>(&le, &mut out_le, w, ColorMatrix::Bt709, false);
-          v410_to_rgb_or_rgba_row::<true, true>(&be, &mut out_be, w, ColorMatrix::Bt709, false);
+          v410_to_rgb_or_rgba_row::<true, false>(&le, &mut out_le, w, KernelMatrix::Bt709, false);
+          v410_to_rgb_or_rgba_row::<true, true>(&be, &mut out_be, w, KernelMatrix::Bt709, false);
         } else {
-          v410_to_rgb_or_rgba_row::<false, false>(&le, &mut out_le, w, ColorMatrix::Bt709, false);
-          v410_to_rgb_or_rgba_row::<false, true>(&be, &mut out_be, w, ColorMatrix::Bt709, false);
+          v410_to_rgb_or_rgba_row::<false, false>(&le, &mut out_le, w, KernelMatrix::Bt709, false);
+          v410_to_rgb_or_rgba_row::<false, true>(&be, &mut out_be, w, KernelMatrix::Bt709, false);
         }
       }
       assert_eq!(
@@ -270,14 +270,14 @@ fn avx2_v410_be_le_simd_parity() {
             &le,
             &mut out_le,
             w,
-            ColorMatrix::Bt709,
+            KernelMatrix::Bt709,
             true,
           );
           v410_to_rgb_u16_or_rgba_u16_row::<true, true>(
             &be,
             &mut out_be,
             w,
-            ColorMatrix::Bt709,
+            KernelMatrix::Bt709,
             true,
           );
         } else {
@@ -285,14 +285,14 @@ fn avx2_v410_be_le_simd_parity() {
             &le,
             &mut out_le,
             w,
-            ColorMatrix::Bt709,
+            KernelMatrix::Bt709,
             true,
           );
           v410_to_rgb_u16_or_rgba_u16_row::<false, true>(
             &be,
             &mut out_be,
             w,
-            ColorMatrix::Bt709,
+            KernelMatrix::Bt709,
             true,
           );
         }

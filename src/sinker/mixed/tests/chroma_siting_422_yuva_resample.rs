@@ -32,14 +32,14 @@
 //!  - the centered reserve sits BEHIND the resample preflight (#180 atomicity).
 
 use crate::{
-  ChromaLocation, ColorMatrix, PixelSink,
+  ChromaLocation, KernelMatrix, PixelSink,
   resample::{AreaResampler, Bicublin, FilteredResampler, ResampleError, Triangle},
   sinker::{AlphaMode, MixedSinker, MixedSinkerError},
   source::{Yuv422p, Yuva422p, Yuva422pRow, Yuva444p, yuv422p_to, yuva422p_to, yuva444p_to},
 };
 use mediaframe::frame::{Yuv422pFrame, Yuva422pFrame, Yuva444pFrame};
 
-const M: ColorMatrix = ColorMatrix::Bt601;
+const M: KernelMatrix = KernelMatrix::Bt601;
 const FR: bool = true;
 
 /// Independent #302 centered horizontal upsample (`1/4`–`3/4`, edge clamp,
@@ -142,7 +142,7 @@ fn run(
       MixedSinker::<Yuva422p, AreaResampler>::with_resampler(sw, sh, AreaResampler::to(ow, oh))
         .unwrap()
         .with_alpha_mode(AlphaMode::Straight)
-        .with_chroma_location(loc)
+        .with_chroma_location(loc.clone())
         .with_simd(simd)
         .with_rgb(&mut rgb)
         .unwrap()
@@ -158,7 +158,7 @@ fn run(
       y, u, v, a, sw as u32, sh as u32, sw as u32, cw as u32, cw as u32, sw as u32,
     )
     .unwrap();
-    yuva422p_to(&f, FR, M, &mut sink).unwrap();
+    yuva422p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   (rgb, rgba, (hh, ss, vv), luma, luma16)
 }
@@ -191,7 +191,7 @@ fn run_filter(
     )
     .unwrap()
     .with_alpha_mode(AlphaMode::Straight)
-    .with_chroma_location(loc)
+    .with_chroma_location(loc.clone())
     .with_simd(simd)
     .with_rgb(&mut rgb)
     .unwrap()
@@ -207,7 +207,7 @@ fn run_filter(
       y, u, v, a, sw as u32, sh as u32, sw as u32, cw as u32, cw as u32, sw as u32,
     )
     .unwrap();
-    yuva422p_to(&f, FR, M, &mut sink).unwrap();
+    yuva422p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   (rgb, rgba, (hh, ss, vv), luma, luma16)
 }
@@ -254,7 +254,7 @@ fn rgba_oracle(
     .with_simd(simd)
     .with_rgba(&mut rgba)
     .unwrap();
-    yuva444p_to(&f, FR, M, &mut sink).unwrap();
+    yuva444p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   } else {
     let mut sink =
       MixedSinker::<Yuva444p, AreaResampler>::with_resampler(sw, sh, AreaResampler::to(ow, oh))
@@ -263,7 +263,7 @@ fn rgba_oracle(
         .with_simd(simd)
         .with_rgba(&mut rgba)
         .unwrap();
-    yuva444p_to(&f, FR, M, &mut sink).unwrap();
+    yuva444p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   rgba
 }
@@ -294,7 +294,7 @@ fn run_yuv(
       MixedSinker::<Yuv422p, AreaResampler>::with_resampler(sw, sh, AreaResampler::to(ow, oh))
         .unwrap()
         .with_native(false)
-        .with_chroma_location(loc)
+        .with_chroma_location(loc.clone())
         .with_simd(simd)
         .with_rgb(&mut rgb)
         .unwrap()
@@ -307,7 +307,7 @@ fn run_yuv(
     let f = Yuv422pFrame::new(
       y, u, v, sw as u32, sh as u32, sw as u32, cw as u32, cw as u32,
     );
-    yuv422p_to(&f, FR, M, &mut sink).unwrap();
+    yuv422p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   (rgb, (hh, ss, vv), luma, luma16)
 }
@@ -335,10 +335,10 @@ fn cosited_group_is_byte_identical_across_tiers() {
       ChromaLocation::Left,
       ChromaLocation::TopLeft,
       ChromaLocation::BottomLeft,
-      ChromaLocation::Unknown(7),
+      ChromaLocation::other("unassigned-7"),
     ] {
       assert_eq!(
-        run(&y, &u, &v, &a, sw, sh, ow, oh, loc, true),
+        run(&y, &u, &v, &a, sw, sh, ow, oh, loc.clone(), true),
         base,
         "co-sited {loc:?} area must keep the byte-identical decode ({sw}x{sh}->{ow}x{oh})"
       );
@@ -372,7 +372,7 @@ fn centered_area_rgba_equals_rgb_domain_oracle() {
     let (y, u, v, a) = ramp(sw, sh);
     let want = rgba_oracle(&y, &u, &v, &a, sw, sh, ow, oh, true, false);
     for loc in [ChromaLocation::Center, ChromaLocation::Top] {
-      let got = run(&y, &u, &v, &a, sw, sh, ow, oh, loc, true);
+      let got = run(&y, &u, &v, &a, sw, sh, ow, oh, loc.clone(), true);
       assert_eq!(
         got.1, want,
         "centered area rgba {loc:?} ({sw}x{sh}->{ow}x{oh})"
@@ -405,8 +405,8 @@ fn centered_chroma_matches_yuv422p_centered() {
   for (sw, sh, ow, oh) in GEOMS {
     let (y, u, v, a) = ramp(sw, sh);
     for loc in [ChromaLocation::Center, ChromaLocation::Top] {
-      let ya = run(&y, &u, &v, &a, sw, sh, ow, oh, loc, true);
-      let yv = run_yuv(&y, &u, &v, sw, sh, ow, oh, loc, true);
+      let ya = run(&y, &u, &v, &a, sw, sh, ow, oh, loc.clone(), true);
+      let yv = run_yuv(&y, &u, &v, sw, sh, ow, oh, loc.clone(), true);
       assert_eq!(ya.0, yv.0, "rgb {loc:?} ({sw}x{sh}->{ow}x{oh})");
       assert_eq!(ya.2, yv.1, "hsv {loc:?} ({sw}x{sh}->{ow}x{oh})");
       assert_eq!(ya.3, yv.2, "luma {loc:?} ({sw}x{sh}->{ow}x{oh})");
@@ -513,12 +513,12 @@ fn flip_row1<R>(
   loc1: ChromaLocation,
   loc2: ChromaLocation,
 ) -> Result<(), MixedSinkerError> {
-  sink.set_chroma_location(loc1);
+  sink.set_chroma_location(loc1.clone());
   PixelSink::begin_frame(&mut sink, 8, 8).unwrap();
-  let row0 = Yuva422pRow::new(&y[0..8], &u[0..4], &v[0..4], &a[0..8], 0, M, FR);
+  let row0 = Yuva422pRow::for_tests(&y[0..8], &u[0..4], &v[0..4], &a[0..8], 0, M, FR);
   PixelSink::process(&mut sink, row0).unwrap();
-  sink.set_chroma_location(loc2);
-  let row1 = Yuva422pRow::new(&y[8..16], &u[4..8], &v[4..8], &a[8..16], 1, M, FR);
+  sink.set_chroma_location(loc2.clone());
+  let row1 = Yuva422pRow::for_tests(&y[8..16], &u[4..8], &v[4..8], &a[8..16], 1, M, FR);
   PixelSink::process(&mut sink, row1)
 }
 
@@ -538,7 +538,7 @@ fn mid_frame_siting_change_rejected() {
         .with_alpha_mode(AlphaMode::Straight)
         .with_rgba(&mut rgba)
         .unwrap();
-    let err = flip_row1(sink, &y, &u, &v, &a, loc1, loc2).unwrap_err();
+    let err = flip_row1(sink, &y, &u, &v, &a, loc1.clone(), loc2.clone()).unwrap_err();
     assert!(
       matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
       "area {loc1:?}->{loc2:?}: want ChromaSitingChanged, got {err:?}"
@@ -552,7 +552,7 @@ fn mid_frame_siting_change_rejected() {
         .with_alpha_mode(AlphaMode::Straight)
         .with_hsv(&mut hh, &mut ss, &mut vv)
         .unwrap();
-    let err = flip_row1(sink, &y, &u, &v, &a, loc1, loc2).unwrap_err();
+    let err = flip_row1(sink, &y, &u, &v, &a, loc1.clone(), loc2.clone()).unwrap_err();
     assert!(
       matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
       "hsv {loc1:?}->{loc2:?}: want ChromaSitingChanged, got {err:?}"
@@ -569,7 +569,7 @@ fn mid_frame_siting_change_rejected() {
     .with_alpha_mode(AlphaMode::Straight)
     .with_rgba(&mut rgba)
     .unwrap();
-    let err = flip_row1(sink, &y, &u, &v, &a, loc1, loc2).unwrap_err();
+    let err = flip_row1(sink, &y, &u, &v, &a, loc1.clone(), loc2.clone()).unwrap_err();
     assert!(
       matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
       "filter {loc1:?}->{loc2:?}: want ChromaSitingChanged, got {err:?}"
@@ -597,7 +597,7 @@ fn out_of_sequence_centered_first_row_is_rejected_before_the_chroma_reserve() {
   PixelSink::begin_frame(&mut sink, 8, 8).unwrap();
   super::super::arm_chroma_full_alloc_failure();
   // First process call is row 5 — the stream expects row 0.
-  let bad = Yuva422pRow::new(
+  let bad = Yuva422pRow::for_tests(
     &y[5 * 8..6 * 8],
     &u[5 * cw..6 * cw],
     &v[5 * cw..6 * cw],
@@ -621,7 +621,7 @@ fn out_of_sequence_centered_first_row_is_rejected_before_the_chroma_reserve() {
   );
   // Non-vacuous: the failpoint is still armed, so a VALID first row now REACHES the
   // reserve (proving the guard is ordering, not a disabled reserve).
-  let good = Yuva422pRow::new(&y[0..8], &u[0..cw], &v[0..cw], &a[0..8], 0, M, FR);
+  let good = Yuva422pRow::for_tests(&y[0..8], &u[0..cw], &v[0..cw], &a[0..8], 0, M, FR);
   let err0 = PixelSink::process(&mut sink, good).unwrap_err();
   assert!(
     matches!(
@@ -650,7 +650,7 @@ fn luma_only_centered_area_does_not_reserve_chroma() {
     PixelSink::begin_frame(&mut sink, 8, 8).unwrap();
     super::super::arm_chroma_full_alloc_failure();
     for r in 0..8 {
-      let row = Yuva422pRow::new(
+      let row = Yuva422pRow::for_tests(
         &y[r * 8..r * 8 + 8],
         &u[r * cw..r * cw + cw],
         &v[r * cw..r * cw + cw],
@@ -677,7 +677,7 @@ fn luma_only_centered_area_does_not_reserve_chroma() {
       .with_rgb(&mut rgb)
       .unwrap();
   let f = Yuva422pFrame::try_new(&y, &u, &v, &a, 8, 8, 8, cw as u32, cw as u32, 8).unwrap();
-  let _ = yuva422p_to(&f, FR, M, &mut sink);
+  let _ = yuva422p_to(&f, FR, sink.set_kernel_matrix(M));
 }
 
 #[test]
@@ -697,7 +697,7 @@ fn centered_filter_bicublin_rejected_before_the_chroma_reserve() {
     .unwrap();
   let f = Yuva422pFrame::try_new(&y, &u, &v, &a, 8, 8, 8, cw as u32, cw as u32, 8).unwrap();
   super::super::arm_chroma_full_alloc_failure();
-  let err = yuva422p_to(&f, FR, M, &mut sink).unwrap_err();
+  let err = yuva422p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap_err();
   assert!(
     matches!(
       err,
@@ -720,5 +720,5 @@ fn centered_filter_bicublin_rejected_before_the_chroma_reserve() {
       .with_rgb(&mut rgb)
       .unwrap();
   let cf = Yuva422pFrame::try_new(&y, &u, &v, &a, 8, 8, 8, cw as u32, cw as u32, 8).unwrap();
-  let _ = yuva422p_to(&cf, FR, M, &mut consume);
+  let _ = yuva422p_to(&cf, FR, consume.set_kernel_matrix(M));
 }

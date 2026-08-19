@@ -2,7 +2,7 @@ use super::{super::*, packed_yuv411_buffer};
 
 // ---- Tier 5.25 packed YUV 4:1:1 AVX2 scalar-equivalence ------------
 
-fn check_uyyvyy411_rgb(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_uyyvyy411_rgb(width: usize, matrix: KernelMatrix, full_range: bool) {
   if !std::arch::is_x86_feature_detected!("avx2") {
     return;
   }
@@ -19,7 +19,7 @@ fn check_uyyvyy411_rgb(width: usize, matrix: ColorMatrix, full_range: bool) {
   );
 }
 
-fn check_uyyvyy411_rgba(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_uyyvyy411_rgba(width: usize, matrix: KernelMatrix, full_range: bool) {
   if !std::arch::is_x86_feature_detected!("avx2") {
     return;
   }
@@ -40,12 +40,12 @@ fn check_uyyvyy411_rgba(width: usize, matrix: ColorMatrix, full_range: bool) {
 #[cfg_attr(miri, ignore = "AVX2 SIMD intrinsics unsupported by Miri")]
 fn avx2_uyyvyy411_rgb_matches_scalar_all_matrices() {
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       check_uyyvyy411_rgb(32, m, full);
@@ -60,10 +60,10 @@ fn avx2_uyyvyy411_matches_scalar_widths() {
   // 4..28 → all-tail (below 32-px AVX2 block); 32 → exact; 36..60 →
   // tail remainder; 64, 96, 128 → multi-iter; 1920 → typical HD row.
   for w in [4usize, 8, 12, 16, 20, 28, 32, 36, 60, 64, 96, 128, 1920] {
-    check_uyyvyy411_rgb(w, ColorMatrix::Bt709, false);
-    check_uyyvyy411_rgba(w, ColorMatrix::Bt709, true);
-    check_uyyvyy411_rgb(w, ColorMatrix::Bt2020Ncl, true);
-    check_uyyvyy411_rgba(w, ColorMatrix::Bt2020Ncl, false);
+    check_uyyvyy411_rgb(w, KernelMatrix::Bt709, false);
+    check_uyyvyy411_rgba(w, KernelMatrix::Bt709, true);
+    check_uyyvyy411_rgb(w, KernelMatrix::Bt2020Ncl, true);
+    check_uyyvyy411_rgba(w, KernelMatrix::Bt2020Ncl, false);
   }
 }
 

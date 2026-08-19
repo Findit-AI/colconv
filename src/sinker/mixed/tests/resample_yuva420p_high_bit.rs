@@ -29,7 +29,7 @@
 //! shows up as a mismatch.
 
 use crate::{
-  ColorMatrix, PixelSink,
+  KernelMatrix, PixelSink,
   resample::{AreaResampler, ResampleError},
   sinker::{AlphaMode, MixedSinker, MixedSinkerError},
 };
@@ -38,7 +38,7 @@ const SRC: usize = 8;
 const OUT: usize = 4;
 const CW: usize = SRC / 2; // chroma width
 const CH: usize = SRC / 2; // chroma height (4:2:0)
-const M: ColorMatrix = ColorMatrix::Bt709;
+const M: KernelMatrix = KernelMatrix::Bt709;
 const FR: bool = true;
 const FR_LIMITED: bool = false;
 
@@ -219,7 +219,7 @@ macro_rules! yuva420p_high_bit_resample_suite {
         let mut sink = MixedSinker::<$marker>::new(SRC, SRC)
           .with_rgba(&mut rgba)
           .unwrap();
-        $walker(&frame(y, u, v, a), fr, M, &mut sink).unwrap();
+        $walker(&frame(y, u, v, a), fr, sink.set_kernel_matrix(M)).unwrap();
         rgba
       }
       fn direct_rgba_u16(y: &[u16], u: &[u16], v: &[u16], a: &[u16], fr: bool) -> Vec<u16> {
@@ -227,7 +227,7 @@ macro_rules! yuva420p_high_bit_resample_suite {
         let mut sink = MixedSinker::<$marker>::new(SRC, SRC)
           .with_rgba_u16(&mut rgba)
           .unwrap();
-        $walker(&frame(y, u, v, a), fr, M, &mut sink).unwrap();
+        $walker(&frame(y, u, v, a), fr, sink.set_kernel_matrix(M)).unwrap();
         rgba
       }
 
@@ -251,7 +251,7 @@ macro_rules! yuva420p_high_bit_resample_suite {
           .unwrap()
           .with_rgba_u16(&mut rgba_u16)
           .unwrap();
-          $walker(&frame(&y, &u, &v, &a), FR, M, &mut sink).unwrap();
+          $walker(&frame(&y, &u, &v, &a), FR, sink.set_kernel_matrix(M)).unwrap();
         }
         assert_eq!(
           rgba,
@@ -308,7 +308,7 @@ macro_rules! yuva420p_high_bit_resample_suite {
           .unwrap()
           .with_hsv(&mut hh, &mut ss, &mut vv)
           .unwrap();
-          $walker(&frame(&y, &u, &v, &a), FR, M, &mut sink).unwrap();
+          $walker(&frame(&y, &u, &v, &a), FR, sink.set_kernel_matrix(M)).unwrap();
         }
 
         let binned_u8 = block_mean_rgba_u8(&direct_rgba_u8(&y, &u, &v, &a, FR));
@@ -364,7 +364,7 @@ macro_rules! yuva420p_high_bit_resample_suite {
           .unwrap()
           .with_rgba_u16(&mut rgba_u16)
           .unwrap();
-          $walker(&frame(&y, &u, &v, &a), FR, M, &mut sink).unwrap();
+          $walker(&frame(&y, &u, &v, &a), FR, sink.set_kernel_matrix(M)).unwrap();
         }
         assert_eq!(
           rgba,
@@ -406,7 +406,7 @@ macro_rules! yuva420p_high_bit_resample_suite {
           .unwrap()
           .with_luma(&mut luma)
           .unwrap();
-          $walker(&frame(&y, &u, &v, &a), FR, M, &mut sink).unwrap();
+          $walker(&frame(&y, &u, &v, &a), FR, sink.set_kernel_matrix(M)).unwrap();
         }
 
         let mut pm8 = direct_rgba_u8(&y, &u, &v, &a, FR);
@@ -456,7 +456,7 @@ macro_rules! yuva420p_high_bit_resample_suite {
           .unwrap()
           .with_rgba_u16(&mut rgba_u16)
           .unwrap();
-          $walker(&frame(&y, &u, &v, &a), FR, M, &mut sink).unwrap();
+          $walker(&frame(&y, &u, &v, &a), FR, sink.set_kernel_matrix(M)).unwrap();
         }
         assert_eq!(
           &rgba[..4],
@@ -518,7 +518,7 @@ macro_rules! yuva420p_high_bit_resample_suite {
           .unwrap()
           .with_luma_u16(&mut lu16)
           .unwrap();
-          $walker(&frame(&y, &u, &v, &a), FR, M, &mut sink).unwrap();
+          $walker(&frame(&y, &u, &v, &a), FR, sink.set_kernel_matrix(M)).unwrap();
         }
         let y_binned = block_mean_u16(&y);
         let luma_ref: Vec<u8> = y_binned.iter().map(|&p| (p >> ($bits - 8)) as u8).collect();
@@ -556,7 +556,7 @@ macro_rules! yuva420p_high_bit_resample_suite {
           .unwrap()
           .with_luma_u16(&mut lu16)
           .unwrap();
-          $walker(&frame(&y, &u, &v, &a), fr, M, &mut sink).unwrap();
+          $walker(&frame(&y, &u, &v, &a), fr, sink.set_kernel_matrix(M)).unwrap();
           (luma, lu16)
         };
         let (luma_lim, lu16_lim) = render(FR_LIMITED);
@@ -599,7 +599,7 @@ macro_rules! yuva420p_high_bit_resample_suite {
           .with_alpha_mode(mode)
           .with_rgba(&mut rgba)
           .unwrap();
-          $walker(&frame(&y, &u, &v, &a), FR, M, &mut sink).unwrap();
+          $walker(&frame(&y, &u, &v, &a), FR, sink.set_kernel_matrix(M)).unwrap();
           rgba
         };
         assert_ne!(
@@ -635,7 +635,7 @@ macro_rules! yuva420p_high_bit_resample_suite {
           .unwrap()
           .with_rgba_u16(&mut rgba_u16)
           .unwrap();
-          $walker(&frame(&y, &u, &v, &a), FR, M, &mut sink).unwrap();
+          $walker(&frame(&y, &u, &v, &a), FR, sink.set_kernel_matrix(M)).unwrap();
         }
         assert_eq!(
           rgba,
@@ -675,7 +675,12 @@ macro_rules! yuva420p_high_bit_resample_suite {
           .unwrap()
           .with_luma(&mut le_luma)
           .unwrap();
-          $walker(&frame(&y_le, &u_le, &v_le, &a_le), FR, M, &mut sink).unwrap();
+          $walker(
+            &frame(&y_le, &u_le, &v_le, &a_le),
+            FR,
+            sink.set_kernel_matrix(M),
+          )
+          .unwrap();
         }
 
         let mut be_rgba = vec![0u8; OUT * OUT * 4];
@@ -694,7 +699,12 @@ macro_rules! yuva420p_high_bit_resample_suite {
           .unwrap()
           .with_luma(&mut be_luma)
           .unwrap();
-          $walker_be::<_, true>(&frame_be(&y_be, &u_be, &v_be, &a_be), FR, M, &mut sink).unwrap();
+          $walker_be::<_, true>(
+            &frame_be(&y_be, &u_be, &v_be, &a_be),
+            FR,
+            sink.set_kernel_matrix(M),
+          )
+          .unwrap();
         }
 
         assert_eq!(le_rgba, be_rgba, "rgba LE/BE diverge");
@@ -727,7 +737,7 @@ macro_rules! yuva420p_high_bit_resample_suite {
             .unwrap()
             .with_luma(&mut luma)
             .unwrap();
-            $walker(&frame(&y, &u, &v, &a), FR, M, &mut sink).unwrap();
+            $walker(&frame(&y, &u, &v, &a), FR, sink.set_kernel_matrix(M)).unwrap();
           }
           (rgba, rgba_u16, luma)
         };
@@ -761,9 +771,9 @@ macro_rules! yuva420p_high_bit_resample_suite {
           .unwrap()
           .with_rgba(&mut rgba)
           .unwrap();
-          $walker(&frame(&y, &u, &v, &a), FR, M, &mut sink).unwrap();
+          $walker(&frame(&y, &u, &v, &a), FR, sink.set_kernel_matrix(M)).unwrap();
           sink.set_alpha_mode(AlphaMode::Premultiplied);
-          $walker(&frame(&y, &u, &v, &a), FR, M, &mut sink)
+          $walker(&frame(&y, &u, &v, &a), FR, sink.set_kernel_matrix(M))
             .expect("a fresh frame must accept a different alpha mode");
         }
         let mut pm = direct_rgba_u8(&y, &u, &v, &a, FR);
@@ -793,7 +803,7 @@ macro_rules! yuva420p_high_bit_resample_suite {
         .unwrap();
         sink.begin_frame(SRC as u32, SRC as u32).unwrap();
         sink
-          .process($row::new(
+          .process($row::for_tests(
             &y[..SRC],
             &u[..CW],
             &v[..CW],
@@ -805,7 +815,7 @@ macro_rules! yuva420p_high_bit_resample_suite {
           .unwrap();
         sink.set_alpha_mode(AlphaMode::Premultiplied);
         let err = sink
-          .process($row::new(
+          .process($row::for_tests(
             &y[SRC..2 * SRC],
             &u[..CW],
             &v[..CW],
@@ -837,7 +847,7 @@ macro_rules! yuva420p_high_bit_resample_suite {
         let r = 2 * SRC;
         let cr = (2 / 2) * CW; // chroma row for luma row 2 is row 1
         let err = sink
-          .process($row::new(
+          .process($row::for_tests(
             &y[r..r + SRC],
             &u[cr..cr + CW],
             &v[cr..cr + CW],
@@ -866,7 +876,7 @@ macro_rules! yuva420p_high_bit_resample_suite {
           AreaResampler::to(OUT, OUT),
         )
         .unwrap();
-        $walker(&frame(&y, &u, &v, &a), FR, M, &mut sink).unwrap();
+        $walker(&frame(&y, &u, &v, &a), FR, sink.set_kernel_matrix(M)).unwrap();
       }
 
       #[test]
@@ -887,7 +897,7 @@ macro_rules! yuva420p_high_bit_resample_suite {
             .unwrap()
             .with_luma_u16(&mut lu16)
             .unwrap();
-          $walker(&frame(&y, &u, &v, &a), FR, M, &mut sink).unwrap();
+          $walker(&frame(&y, &u, &v, &a), FR, sink.set_kernel_matrix(M)).unwrap();
         }
         assert_eq!(lu16, y, "direct luma_u16 == native logical Y");
         let luma_ref: Vec<u8> = y.iter().map(|&p| (p >> ($bits - 8)) as u8).collect();
@@ -919,7 +929,7 @@ macro_rules! yuva420p_high_bit_resample_suite {
             .unwrap()
             .with_hsv(&mut hh, &mut ss, &mut vv)
             .unwrap();
-          $walker(&frame(&y, &u, &v, &a), FR, M, &mut sink).unwrap();
+          $walker(&frame(&y, &u, &v, &a), FR, sink.set_kernel_matrix(M)).unwrap();
           // White-box: the direct HSV path is RGB-free — the rgb scratch
           // is never grown.
           assert_eq!(
@@ -942,7 +952,7 @@ macro_rules! yuva420p_high_bit_resample_suite {
             .unwrap()
             .with_hsv(&mut oh, &mut os, &mut ov)
             .unwrap();
-          $walker(&frame(&y, &u, &v, &a), FR, M, &mut sink).unwrap();
+          $walker(&frame(&y, &u, &v, &a), FR, sink.set_kernel_matrix(M)).unwrap();
         }
         assert_eq!(hh, oh, "direct H == rgb-attached H");
         assert_eq!(ss, os, "direct S == rgb-attached S");
@@ -986,7 +996,7 @@ macro_rules! yuva420p_high_bit_resample_suite {
           sink.begin_frame(SRC as u32, SRC as u32).unwrap();
           super::super::super::arm_rgb_scratch_alloc_failure();
           sink
-            .process($row::new(
+            .process($row::for_tests(
               &y[..SRC],
               &u[..CW],
               &v[..CW],
@@ -1030,7 +1040,7 @@ macro_rules! yuva420p_high_bit_resample_suite {
             .unwrap();
           sink.begin_frame(SRC as u32, SRC as u32).unwrap();
           sink
-            .process($row::new(
+            .process($row::for_tests(
               &y[..SRC],
               &u[..CW],
               &v[..CW],

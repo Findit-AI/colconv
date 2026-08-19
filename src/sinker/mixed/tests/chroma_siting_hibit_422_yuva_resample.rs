@@ -35,14 +35,14 @@
 //! never a tolerance.
 
 use crate::{
-  ChromaLocation, ColorMatrix, PixelSink,
+  ChromaLocation, KernelMatrix, PixelSink,
   frame::*,
   resample::{AreaResampler, FilteredResampler, Triangle},
   sinker::{AlphaMode, MixedSinker, MixedSinkerError},
   source::*,
 };
 
-const M: ColorMatrix = ColorMatrix::Bt601;
+const M: KernelMatrix = KernelMatrix::Bt601;
 const FR: bool = true;
 
 /// Independent #302 centered horizontal upsample (`1/4`–`3/4`, edge clamp,
@@ -182,7 +182,7 @@ macro_rules! hibit_422_yuva_resample_siting {
             MixedSinker::<$M422, AreaResampler>::with_resampler(sw, sh, AreaResampler::to(ow, oh))
               .unwrap()
               .with_alpha_mode(AlphaMode::Straight)
-              .with_chroma_location(loc)
+              .with_chroma_location(loc.clone())
               .with_simd(simd)
               .with_rgb(&mut rgb)
               .unwrap()
@@ -202,7 +202,7 @@ macro_rules! hibit_422_yuva_resample_siting {
             y, u, v, a, sw as u32, sh as u32, sw as u32, cw as u32, cw as u32, sw as u32,
           )
           .unwrap();
-          $w422(&f, FR, M, &mut sink).unwrap();
+          $w422(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgba, rgb16, rgba16, (hh, ss, vv), luma, luma16)
       }
@@ -239,7 +239,7 @@ macro_rules! hibit_422_yuva_resample_siting {
           )
           .unwrap()
           .with_alpha_mode(AlphaMode::Straight)
-          .with_chroma_location(loc)
+          .with_chroma_location(loc.clone())
           .with_simd(simd)
           .with_rgb(&mut rgb)
           .unwrap()
@@ -259,7 +259,7 @@ macro_rules! hibit_422_yuva_resample_siting {
             y, u, v, a, sw as u32, sh as u32, sw as u32, cw as u32, cw as u32, sw as u32,
           )
           .unwrap();
-          $w422(&f, FR, M, &mut sink).unwrap();
+          $w422(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgba, rgb16, rgba16, (hh, ss, vv), luma, luma16)
       }
@@ -296,7 +296,7 @@ macro_rules! hibit_422_yuva_resample_siting {
           )
           .unwrap()
           .with_alpha_mode(AlphaMode::Straight)
-          .with_chroma_location(loc)
+          .with_chroma_location(loc.clone())
           .with_rgb(&mut rgb)
           .unwrap()
           .with_rgba(&mut rgba)
@@ -315,7 +315,7 @@ macro_rules! hibit_422_yuva_resample_siting {
             &yb, &ub, &vb, &ab, sw as u32, sh as u32, sw as u32, cw as u32, cw as u32, sw as u32,
           )
           .unwrap();
-          $w422be(&f, FR, M, &mut sink).unwrap();
+          $w422be(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgba, rgb16, rgba16, (hh, ss, vv), luma, luma16)
       }
@@ -365,7 +365,7 @@ macro_rules! hibit_422_yuva_resample_siting {
           .unwrap()
           .with_rgba_u16(&mut rgba16)
           .unwrap();
-          $w444(&f, FR, M, &mut sink).unwrap();
+          $w444(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         } else {
           let mut sink =
             MixedSinker::<$M444, AreaResampler>::with_resampler(sw, sh, AreaResampler::to(ow, oh))
@@ -376,7 +376,7 @@ macro_rules! hibit_422_yuva_resample_siting {
               .unwrap()
               .with_rgba_u16(&mut rgba16)
               .unwrap();
-          $w444(&f, FR, M, &mut sink).unwrap();
+          $w444(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgba, rgba16)
       }
@@ -407,7 +407,7 @@ macro_rules! hibit_422_yuva_resample_siting {
             MixedSinker::<$MYuv, AreaResampler>::with_resampler(sw, sh, AreaResampler::to(ow, oh))
               .unwrap()
               .with_native(false)
-              .with_chroma_location(loc)
+              .with_chroma_location(loc.clone())
               .with_simd(simd)
               .with_rgb(&mut rgb)
               .unwrap()
@@ -420,7 +420,7 @@ macro_rules! hibit_422_yuva_resample_siting {
           let f = $FYuv::new(
             y, u, v, sw as u32, sh as u32, sw as u32, cw as u32, cw as u32,
           );
-          $wYuv(&f, FR, M, &mut sink).unwrap();
+          $wYuv(&f, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         (rgb, rgb16, (hh, ss, vv), luma)
       }
@@ -448,10 +448,10 @@ macro_rules! hibit_422_yuva_resample_siting {
             ChromaLocation::Left,
             ChromaLocation::TopLeft,
             ChromaLocation::BottomLeft,
-            ChromaLocation::Unknown(7),
+            ChromaLocation::other("unassigned-7"),
           ] {
             assert_eq!(
-              run(&y, &u, &v, &a, sw, sh, ow, oh, loc, true),
+              run(&y, &u, &v, &a, sw, sh, ow, oh, loc.clone(), true),
               base,
               "co-sited {loc:?} area must keep the byte-identical decode \
                ({sw}x{sh}->{ow}x{oh})"
@@ -486,7 +486,7 @@ macro_rules! hibit_422_yuva_resample_siting {
           let (y, u, v, a) = ramp(sw, sh);
           let (want_rgba, want_rgba16) = rgba_oracle(&y, &u, &v, &a, sw, sh, ow, oh, true, false);
           for loc in [ChromaLocation::Center, ChromaLocation::Top] {
-            let got = run(&y, &u, &v, &a, sw, sh, ow, oh, loc, true);
+            let got = run(&y, &u, &v, &a, sw, sh, ow, oh, loc.clone(), true);
             assert_eq!(
               got.1, want_rgba,
               "centered area rgba {loc:?} ({sw}x{sh}->{ow}x{oh})"
@@ -529,8 +529,8 @@ macro_rules! hibit_422_yuva_resample_siting {
         for (sw, sh, ow, oh) in GEOMS {
           let (y, u, v, a) = ramp(sw, sh);
           for loc in [ChromaLocation::Center, ChromaLocation::Top] {
-            let ya = run(&y, &u, &v, &a, sw, sh, ow, oh, loc, true);
-            let yv = run_yuv(&y, &u, &v, sw, sh, ow, oh, loc, true);
+            let ya = run(&y, &u, &v, &a, sw, sh, ow, oh, loc.clone(), true);
+            let yv = run_yuv(&y, &u, &v, sw, sh, ow, oh, loc.clone(), true);
             assert_eq!(ya.0, yv.0, "rgb {loc:?} ({sw}x{sh}->{ow}x{oh})");
             assert_eq!(ya.2, yv.1, "rgb_u16 {loc:?} ({sw}x{sh}->{ow}x{oh})");
             assert_eq!(ya.4, yv.2, "hsv {loc:?} ({sw}x{sh}->{ow}x{oh})");
@@ -659,12 +659,12 @@ macro_rules! hibit_422_yuva_resample_siting {
         loc1: ChromaLocation,
         loc2: ChromaLocation,
       ) -> Result<(), MixedSinkerError> {
-        sink.set_chroma_location(loc1);
+        sink.set_chroma_location(loc1.clone());
         PixelSink::begin_frame(&mut sink, 8, 8).unwrap();
-        let row0 = $Row::new(&y[0..8], &u[0..4], &v[0..4], &a[0..8], 0, M, FR);
+        let row0 = $Row::for_tests(&y[0..8], &u[0..4], &v[0..4], &a[0..8], 0, M, FR);
         PixelSink::process(&mut sink, row0).unwrap();
-        sink.set_chroma_location(loc2);
-        let row1 = $Row::new(&y[8..16], &u[4..8], &v[4..8], &a[8..16], 1, M, FR);
+        sink.set_chroma_location(loc2.clone());
+        let row1 = $Row::for_tests(&y[8..16], &u[4..8], &v[4..8], &a[8..16], 1, M, FR);
         PixelSink::process(&mut sink, row1)
       }
 
@@ -684,7 +684,7 @@ macro_rules! hibit_422_yuva_resample_siting {
               .with_alpha_mode(AlphaMode::Straight)
               .with_rgba(&mut rgba)
               .unwrap();
-          let err = flip_row1(sink, &y, &u, &v, &a, loc1, loc2).unwrap_err();
+          let err = flip_row1(sink, &y, &u, &v, &a, loc1.clone(), loc2.clone()).unwrap_err();
           assert!(
             matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
             "area {loc1:?}->{loc2:?}: want ChromaSitingChanged, got {err:?}"
@@ -698,7 +698,7 @@ macro_rules! hibit_422_yuva_resample_siting {
               .with_alpha_mode(AlphaMode::Straight)
               .with_rgba_u16(&mut rgba16)
               .unwrap();
-          let err = flip_row1(sink, &y, &u, &v, &a, loc1, loc2).unwrap_err();
+          let err = flip_row1(sink, &y, &u, &v, &a, loc1.clone(), loc2.clone()).unwrap_err();
           assert!(
             matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
             "u16 area {loc1:?}->{loc2:?}: want ChromaSitingChanged, got {err:?}"
@@ -715,7 +715,7 @@ macro_rules! hibit_422_yuva_resample_siting {
           .with_alpha_mode(AlphaMode::Straight)
           .with_rgba(&mut rgba)
           .unwrap();
-          let err = flip_row1(sink, &y, &u, &v, &a, loc1, loc2).unwrap_err();
+          let err = flip_row1(sink, &y, &u, &v, &a, loc1.clone(), loc2.clone()).unwrap_err();
           assert!(
             matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
             "filter {loc1:?}->{loc2:?}: want ChromaSitingChanged, got {err:?}"

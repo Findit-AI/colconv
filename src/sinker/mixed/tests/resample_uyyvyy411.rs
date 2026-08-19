@@ -18,7 +18,7 @@
 //! convert-then-bin output.
 
 use crate::{
-  ColorMatrix, PixelSink,
+  KernelMatrix, PixelSink,
   resample::{AreaResampler, ResampleError},
   row::rgb_to_hsv_row,
   sinker::{MixedSinker, MixedSinkerError},
@@ -141,7 +141,7 @@ fn direct_rgb(packed: &[u8]) -> Vec<u8> {
     let mut sink = MixedSinker::<Uyyvyy411>::new(SRC_W, SRC_H)
       .with_rgb(&mut rgb)
       .unwrap();
-    uyyvyy411_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    uyyvyy411_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   }
   rgb
 }
@@ -167,7 +167,7 @@ fn uyyvyy411_resample_rgb_matches_binned_direct_conversion() {
     )
     .with_rgb(&mut rgb_a)
     .unwrap();
-    uyyvyy411_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    uyyvyy411_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   }
 
   let expected = block_mean_2x2_rgb(&direct_rgb(&packed));
@@ -201,7 +201,7 @@ fn uyyvyy411_resample_luma_is_area_downscaled_y_plane() {
     .unwrap()
     .with_luma_u16(&mut luma_u16)
     .unwrap();
-    uyyvyy411_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    uyyvyy411_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   }
   let y_ref = block_mean_2x2_plane(&deinterleave_y(&packed, SRC_W, SRC_H));
   assert_eq!(luma, y_ref, "luma must be the area-downscaled Y plane");
@@ -234,7 +234,7 @@ fn uyyvyy411_resample_luma_comes_from_y_not_rgb_under_saturated_chroma() {
     .unwrap()
     .with_luma(&mut luma)
     .unwrap();
-    uyyvyy411_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    uyyvyy411_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   }
   assert!(
     luma.iter().all(|&b| b == 16),
@@ -280,7 +280,7 @@ fn uyyvyy411_resample_all_outputs_combo() {
     .unwrap()
     .with_hsv(&mut hh, &mut ss, &mut vv)
     .unwrap();
-    uyyvyy411_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    uyyvyy411_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   }
 
   let expected_rgb = block_mean_2x2_rgb(&direct_rgb(&packed));
@@ -334,7 +334,7 @@ fn uyyvyy411_identity_plan_matches_new_sink() {
     .unwrap()
     .with_rgb(&mut via_area)
     .unwrap();
-    uyyvyy411_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    uyyvyy411_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   }
   assert_eq!(direct, via_area, "identity plan must match the direct sink");
 }
@@ -350,7 +350,7 @@ fn uyyvyy411_resample_no_outputs_is_a_no_op() {
   )
   .unwrap();
   // No outputs attached: a legal no-op, accepted without error.
-  uyyvyy411_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  uyyvyy411_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
 }
 
 #[test]
@@ -386,8 +386,8 @@ fn uyyvyy411_resample_reuses_streams_across_frames() {
     .unwrap();
     let f1 = Uyyvyy411Frame::new(&p1, SRC_W as u32, SRC_H as u32, (SRC_W * 3 / 2) as u32);
     let f2 = Uyyvyy411Frame::new(&p2, SRC_W as u32, SRC_H as u32, (SRC_W * 3 / 2) as u32);
-    uyyvyy411_to(&f1, true, ColorMatrix::Bt601, &mut sink).unwrap();
-    uyyvyy411_to(&f2, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    uyyvyy411_to(&f1, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
+    uyyvyy411_to(&f2, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   }
   let y2_ref = block_mean_2x2_plane(&deinterleave_y(&p2, SRC_W, SRC_H));
   assert_eq!(luma, y2_ref, "frame 2 luma must area-downscale frame 2's Y");
@@ -410,10 +410,10 @@ fn uyyvyy411_resample_rejects_out_of_sequence_rows() {
   sink.begin_frame(SRC_W as u32, SRC_H as u32).unwrap();
   // Feed row 2 first — the stream expects strict sequencing from 0.
   let row_bytes = SRC_W * 3 / 2;
-  let row2 = Uyyvyy411Row::new(
+  let row2 = Uyyvyy411Row::for_tests(
     &packed[row_bytes * 2..row_bytes * 3],
     2,
-    ColorMatrix::Bt601,
+    KernelMatrix::Bt601,
     true,
   );
   let err = sink.process(row2).unwrap_err();
@@ -447,10 +447,10 @@ fn uyyvyy411_resample_rejects_changed_output_set_midframe() {
   sink.begin_frame(SRC_W as u32, SRC_H as u32).unwrap();
   // Row 0 freezes the output set (RGB only).
   sink
-    .process(Uyyvyy411Row::new(
+    .process(Uyyvyy411Row::for_tests(
       &packed[0..row_bytes],
       0,
-      ColorMatrix::Bt601,
+      KernelMatrix::Bt601,
       true,
     ))
     .unwrap();
@@ -458,10 +458,10 @@ fn uyyvyy411_resample_rejects_changed_output_set_midframe() {
   // must differ and be rejected.
   sink.set_luma(&mut luma).unwrap();
   let err = sink
-    .process(Uyyvyy411Row::new(
+    .process(Uyyvyy411Row::for_tests(
       &packed[row_bytes..row_bytes * 2],
       1,
-      ColorMatrix::Bt601,
+      KernelMatrix::Bt601,
       true,
     ))
     .unwrap_err();
@@ -489,10 +489,10 @@ fn uyyvyy411_rejected_first_row_does_not_poison_output_retry() {
   .unwrap();
   sink.begin_frame(SRC_W as u32, SRC_H as u32).unwrap();
   let err = sink
-    .process(Uyyvyy411Row::new(
+    .process(Uyyvyy411Row::for_tests(
       &packed[row_bytes * 3..row_bytes * 4],
       3,
-      ColorMatrix::Bt601,
+      KernelMatrix::Bt601,
       true,
     ))
     .unwrap_err();
@@ -506,10 +506,10 @@ fn uyyvyy411_rejected_first_row_does_not_poison_output_retry() {
   let mut rgb = std::vec![0u8; OUT_W * OUT_H * 3];
   sink.set_rgb(&mut rgb).unwrap();
   sink
-    .process(Uyyvyy411Row::new(
+    .process(Uyyvyy411Row::for_tests(
       &packed[0..row_bytes],
       0,
-      ColorMatrix::Bt601,
+      KernelMatrix::Bt601,
       true,
     ))
     .expect("row 0 must succeed after a rejected out-of-sequence first row");

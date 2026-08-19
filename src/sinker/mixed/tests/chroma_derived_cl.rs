@@ -55,8 +55,14 @@ fn decode_rgb(
     let mut sink = MixedSinker::<crate::source::Yuv444p12>::new(w, h)
       .with_rgb(&mut rgb)
       .unwrap()
-      .with_color_spec(spec);
-    crate::source::yuv444p12_to(&src, full_range, matrix, &mut sink).unwrap();
+      .with_color_spec(&spec)
+      .unwrap();
+    crate::source::yuv444p12_to(
+      &src,
+      full_range,
+      sink.set_kernel_matrix(spec.kernel_matrix().unwrap()),
+    )
+    .unwrap();
   }
   rgb
 }
@@ -95,8 +101,14 @@ fn decode_rgb_u16(
     let mut sink = MixedSinker::<crate::source::Yuv444p12>::new(w, h)
       .with_rgb_u16(&mut rgb)
       .unwrap()
-      .with_color_spec(spec);
-    crate::source::yuv444p12_to(&src, full_range, matrix, &mut sink).unwrap();
+      .with_color_spec(&spec)
+      .unwrap();
+    crate::source::yuv444p12_to(
+      &src,
+      full_range,
+      sink.set_kernel_matrix(spec.kernel_matrix().unwrap()),
+    )
+    .unwrap();
   }
   rgb
 }
@@ -146,14 +158,26 @@ fn decode_rgba_u16(
       .unwrap()
       .with_rgb_u16(&mut rgb)
       .unwrap()
-      .with_color_spec(spec);
-    crate::source::yuv444p12_to(&src, full_range, ColorMatrix::ChromaDerivedCl, &mut sink).unwrap();
+      .with_color_spec(&spec)
+      .unwrap();
+    crate::source::yuv444p12_to(
+      &src,
+      full_range,
+      sink.set_kernel_matrix(spec.kernel_matrix().unwrap()),
+    )
+    .unwrap();
   } else {
     let mut sink = MixedSinker::<crate::source::Yuv444p12>::new(w, h)
       .with_rgba_u16(&mut rgba)
       .unwrap()
-      .with_color_spec(spec);
-    crate::source::yuv444p12_to(&src, full_range, ColorMatrix::ChromaDerivedCl, &mut sink).unwrap();
+      .with_color_spec(&spec)
+      .unwrap();
+    crate::source::yuv444p12_to(
+      &src,
+      full_range,
+      sink.set_kernel_matrix(spec.kernel_matrix().unwrap()),
+    )
+    .unwrap();
   }
   rgba
 }
@@ -476,8 +500,13 @@ fn resample_rgb(
   .unwrap()
   .with_rgb(&mut rgb)
   .unwrap()
-  .with_color_spec(spec);
-  crate::source::yuv444p12_to(&src, false, ColorMatrix::ChromaDerivedCl, &mut sink)
+  .with_color_spec(&spec)
+  .unwrap();
+  crate::source::yuv444p12_to(
+    &src,
+    false,
+    sink.set_kernel_matrix(spec.kernel_matrix().unwrap()),
+  )
 }
 
 /// A resolved CL frame (BT.2020 primaries) + a resize plan must return the

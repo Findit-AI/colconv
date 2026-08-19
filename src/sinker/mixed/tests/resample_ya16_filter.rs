@@ -33,7 +33,7 @@
 //! regression are feature-independent, so they also guard the `gray`-solo build.
 
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   frame::{Ya16BeFrame, Ya16Frame},
   resample::{
     CatmullRom, FilterKernel, FilterStream, FilteredResampler, Lanczos3, ResampleError, Resampler,
@@ -43,7 +43,7 @@ use crate::{
   source::{Ya16, ya16_to, ya16_to_endian},
 };
 
-const M: ColorMatrix = ColorMatrix::Bt709;
+const M: KernelMatrix = KernelMatrix::Bt709;
 const FR: bool = true;
 const FR_LIMITED: bool = false;
 
@@ -131,7 +131,7 @@ fn ya16_filter_outputs<K: FilterKernel + Copy>(
     .unwrap()
     .with_luma_u16(&mut luma_u16)
     .unwrap();
-    ya16_to(&src, full_range, M, &mut sink).unwrap();
+    ya16_to(&src, full_range, sink.set_kernel_matrix(M)).unwrap();
   }
   FilterOutputs {
     rgb,
@@ -350,7 +350,7 @@ fn le_be_filter_outputs_match() {
     .unwrap()
     .with_luma_u16(&mut luma_u16)
     .unwrap();
-    ya16_to_endian::<_, true>(&src, FR, M, &mut sink).unwrap();
+    ya16_to_endian::<_, true>(&src, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(le.rgba_u16, rgba_u16, "LE vs BE rgba_u16");
   assert_eq!(le.luma_u16, luma_u16, "LE vs BE luma_u16");
@@ -397,7 +397,7 @@ fn luma_filter_equals_gray16() {
               .unwrap()
               .with_luma_u16(&mut g_lu16)
               .unwrap();
-            gray16_to(&gsrc, FR, M, &mut sink).unwrap();
+            gray16_to(&gsrc, FR, sink.set_kernel_matrix(M)).unwrap();
           }};
         }
         match kernel_tag {
@@ -439,7 +439,7 @@ fn premultiplied_filter_is_unsupported() {
   .with_alpha_mode(AlphaMode::Premultiplied)
   .with_rgba_u16(&mut rgba_u16)
   .unwrap();
-  let err = ya16_to(&src, FR, M, &mut sink).unwrap_err();
+  let err = ya16_to(&src, FR, sink.set_kernel_matrix(M)).unwrap_err();
   assert!(
     matches!(
       err,
@@ -496,7 +496,7 @@ mod packed_rgba_equivalence {
       .unwrap()
       .with_rgba(&mut out)
       .unwrap();
-      rgba_to(&src, FR, M, &mut sink).unwrap();
+      rgba_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     }
     out
   }
@@ -522,7 +522,7 @@ mod packed_rgba_equivalence {
       .unwrap()
       .with_rgba_u16(&mut out)
       .unwrap();
-      rgba64_to(&src, FR, M, &mut sink).unwrap();
+      rgba64_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     }
     out
   }

@@ -48,12 +48,12 @@
 use core::ops::ControlFlow;
 
 use super::{HsvFrameMut, MixedSinkerError, frozen_outputs_check};
-// `ColorMatrix`, `PlanGeometry`, and `try_zeroed` back the `yuv-planar`-only
+// `KernelMatrix`, `PlanGeometry`, and `try_zeroed` back the `yuv-planar`-only
 // RGB-free HSV-only area join below; the rest serve the always-present
 // (`yuv-planar` / `yuv-semi-planar`) RGB-staged dual-resample helpers.
 #[cfg(feature = "yuv-planar")]
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   resample::{PlanGeometry, try_zeroed},
 };
 use crate::{
@@ -276,7 +276,7 @@ fn hsv_direct_feed_emit(
   y_row: &[u8],
   u_row: &[u8],
   v_row: &[u8],
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   plan: &ResamplePlan,
   idx: usize,
@@ -394,7 +394,7 @@ pub(super) fn hsv_direct_resample(
   y_row: &[u8],
   u_row: &[u8],
   v_row: &[u8],
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   chroma_vsub: usize,
   build_chroma_plan: impl FnOnce() -> Result<ResamplePlan, ResampleError>,

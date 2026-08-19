@@ -10,7 +10,7 @@ use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_m
 use std::hint::black_box;
 
 use pixon::{
-  ColorMatrix,
+  KernelMatrix,
   frame::Ya8Frame,
   sinker::MixedSinker,
   source::{Ya8, ya8_to},
@@ -28,7 +28,7 @@ fn fill_pseudo_random(buf: &mut [u8], seed: u32) {
 
 fn bench(c: &mut Criterion) {
   const WIDTHS: &[u32] = &[1280, 1920, 3840];
-  const MATRIX: ColorMatrix = ColorMatrix::Bt709;
+  const MATRIX: KernelMatrix = KernelMatrix::Bt709;
   const FULL_RANGE: bool = false;
 
   let mut group = c.benchmark_group("ya8_to_rgba");
@@ -52,7 +52,14 @@ fn bench(c: &mut Criterion) {
             .with_simd(use_simd)
             .with_rgba(&mut rgba)
             .unwrap();
-          ya8_to(&frame, FULL_RANGE, MATRIX, &mut sinker).unwrap();
+          ya8_to(
+            &frame,
+            FULL_RANGE,
+            sinker
+              .set_color_spec(&pixon::ColorSpec::of_matrix(MATRIX))
+              .unwrap(),
+          )
+          .unwrap();
           black_box(&rgba);
         });
       });

@@ -39,7 +39,7 @@ pub(crate) unsafe fn uyyvyy411_to_rgb_row(
   packed: &[u8],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // SAFETY: SSE4.1 availability is the caller's obligation.
@@ -59,7 +59,7 @@ pub(crate) unsafe fn uyyvyy411_to_rgba_row(
   packed: &[u8],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // SAFETY: SSE4.1 availability is the caller's obligation.
@@ -81,7 +81,7 @@ unsafe fn uyyvyy411_to_rgb_or_rgba_row<const ALPHA: bool>(
   packed: &[u8],
   out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert_eq!(
@@ -267,7 +267,7 @@ pub(crate) unsafe fn uyyvyy411_to_hsv_row(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert_eq!(

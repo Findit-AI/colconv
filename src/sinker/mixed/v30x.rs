@@ -155,6 +155,10 @@ impl<R> PixelSink for MixedSinker<'_, V30X, R> {
   type Input<'r> = V30XRow<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     check_dimensions_match(self.width, self.height, width, height)?;
     // New frame: restart the row-stage streams (lazily created in

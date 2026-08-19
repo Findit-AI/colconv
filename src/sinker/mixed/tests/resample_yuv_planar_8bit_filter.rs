@@ -26,7 +26,7 @@
 //! oracle does).
 
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   resample::{
     CatmullRom, FilterKernel, FilterStream, FilteredResampler, Lanczos3, Resampler, Triangle,
   },
@@ -38,7 +38,7 @@ use crate::{
 };
 use mediaframe::frame::{Yuv410pFrame, Yuv420pFrame, Yuv422pFrame, Yuv440pFrame, Yuv444pFrame};
 
-const M: ColorMatrix = ColorMatrix::Bt601;
+const M: KernelMatrix = KernelMatrix::Bt601;
 const FR: bool = true;
 
 /// Every resampled output a filter equivalence asserts on.
@@ -155,7 +155,7 @@ macro_rules! planar_format {
           .unwrap()
           .with_luma_u16(&mut luma_u16)
           .unwrap();
-          $walk(&src, FR, M, &mut sink).unwrap();
+          $walk(&src, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         FilterOutputs {
           rgb,
@@ -171,7 +171,7 @@ macro_rules! planar_format {
         let mut rgb = vec![0u8; w * h * 3];
         {
           let mut sink = MixedSinker::<$src>::new(w, h).with_rgb(&mut rgb).unwrap();
-          $walk(&src, FR, M, &mut sink).unwrap();
+          $walk(&src, FR, sink.set_kernel_matrix(M)).unwrap();
         }
         rgb
       }
@@ -364,8 +364,8 @@ fn yuv444p_filter_reuses_streams_across_frames() {
     .unwrap()
     .with_luma(&mut luma)
     .unwrap();
-    yuv444p_to(&frame1, FR, M, &mut sink).unwrap();
-    yuv444p_to(&frame2, FR, M, &mut sink).unwrap();
+    yuv444p_to(&frame1, FR, sink.set_kernel_matrix(M)).unwrap();
+    yuv444p_to(&frame2, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   let want = native_y_filter(Triangle, &y2, SW, SH, OW, OH);
   assert_eq!(
@@ -446,7 +446,7 @@ mod packed_rgb_equivalence {
       .unwrap()
       .with_rgb(&mut out)
       .unwrap();
-      rgb24_to(&src, FR, M, &mut sink).unwrap();
+      rgb24_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     }
     out
   }

@@ -11,7 +11,7 @@
 //! suite additionally pins LE/BE parity (scalar + SIMD).
 
 use crate::{
-  ColorMatrix, PixelSink,
+  KernelMatrix, PixelSink,
   frame::{Xv48BeFrame, Xv48Frame, Xv48LeFrame},
   resample::{AreaResampler, ResampleError},
   sinker::{MixedSinker, MixedSinkerError},
@@ -22,7 +22,7 @@ use super::{as_be_u16, as_le_u16, force_row_stage};
 
 const SRC: usize = 8;
 const OUT: usize = 4;
-const M: ColorMatrix = ColorMatrix::Bt709;
+const M: KernelMatrix = KernelMatrix::Bt709;
 const FR: bool = true;
 const SHIFT: u32 = 8; // 16-bit native → u8.
 
@@ -120,7 +120,7 @@ fn direct_full(packed: &[u16]) -> (Vec<u8>, Vec<u16>, Vec<u16>) {
       .unwrap()
       .with_luma_u16(&mut y_u16)
       .unwrap();
-    xv48_to(&src, FR, M, &mut sink).unwrap();
+    xv48_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   (rgb_u8, rgb_u16, y_u16)
 }
@@ -158,7 +158,7 @@ fn xv48_uniform_gray_downscale_leaves_colour_outputs_unchanged() {
     .unwrap()
     .with_hsv(&mut hh, &mut ss, &mut vv)
     .unwrap();
-    xv48_to(&xv48_frame(&packed), FR, M, &mut sink).unwrap();
+    xv48_to(&xv48_frame(&packed), FR, sink.set_kernel_matrix(M)).unwrap();
   }
 
   let gray_px = &full_rgb[..3];
@@ -218,7 +218,7 @@ fn xv48_downscale_rgb_u16_is_native_depth_block_mean() {
     )
     .with_rgb_u16(&mut rgb_u16)
     .unwrap();
-    xv48_to(&xv48_frame(&packed), FR, M, &mut sink).unwrap();
+    xv48_to(&xv48_frame(&packed), FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(
     rgb_u16,
@@ -248,7 +248,7 @@ fn xv48_downscale_luma_is_native_depth_block_mean_of_y() {
     .unwrap()
     .with_luma_u16(&mut luma_u16)
     .unwrap();
-    xv48_to(&xv48_frame(&packed), FR, M, &mut sink).unwrap();
+    xv48_to(&xv48_frame(&packed), FR, sink.set_kernel_matrix(M)).unwrap();
   }
   let y_binned = block_mean_u16(&full_y);
   assert_eq!(
@@ -302,7 +302,7 @@ fn xv48_all_outputs_match_their_own_native_depth_block_mean() {
     .unwrap()
     .with_hsv(&mut hh, &mut ss, &mut vv)
     .unwrap();
-    xv48_to(&xv48_frame(&packed), FR, M, &mut sink).unwrap();
+    xv48_to(&xv48_frame(&packed), FR, sink.set_kernel_matrix(M)).unwrap();
   }
 
   let rgb_ref = block_mean_rgb_u8(&full_rgb);
@@ -358,7 +358,7 @@ fn xv48_luma_taken_from_native_y_under_saturated_chroma() {
     )
     .with_luma_u16(&mut luma_u16)
     .unwrap();
-    xv48_to(&xv48_frame(&packed), FR, M, &mut sink).unwrap();
+    xv48_to(&xv48_frame(&packed), FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert!(
     luma_u16.iter().all(|&p| p == yc),
@@ -396,7 +396,7 @@ fn xv48_resample_le_be_parity() {
       .unwrap()
       .with_luma_u16(&mut le_luma_u16)
       .unwrap();
-      xv48_to(&frame, FR, M, &mut sink).unwrap();
+      xv48_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
     }
 
     let mut be_rgb = vec![0u8; OUT * OUT * 3];
@@ -419,7 +419,7 @@ fn xv48_resample_le_be_parity() {
       .unwrap()
       .with_luma_u16(&mut be_luma_u16)
       .unwrap();
-      xv48_to_endian(&frame, FR, M, &mut sink).unwrap();
+      xv48_to_endian(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
     }
 
     assert_eq!(
@@ -452,7 +452,7 @@ fn xv48_identity_plan_matches_new_sink() {
     let mut sink = MixedSinker::<Xv48>::new(SRC, SRC)
       .with_rgb_u16(&mut direct)
       .unwrap();
-    xv48_to(&xv48_frame(&packed), FR, M, &mut sink).unwrap();
+    xv48_to(&xv48_frame(&packed), FR, sink.set_kernel_matrix(M)).unwrap();
   }
   let mut via_area = vec![0u16; SRC * SRC * 3];
   {
@@ -462,7 +462,7 @@ fn xv48_identity_plan_matches_new_sink() {
     )
     .with_rgb_u16(&mut via_area)
     .unwrap();
-    xv48_to(&xv48_frame(&packed), FR, M, &mut sink).unwrap();
+    xv48_to(&xv48_frame(&packed), FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(direct, via_area, "identity plan must match the direct sink");
 }
@@ -474,7 +474,7 @@ fn xv48_no_outputs_is_a_no_op() {
   let mut sink =
     MixedSinker::<Xv48, AreaResampler>::with_resampler(SRC, SRC, AreaResampler::to(OUT, OUT))
       .unwrap();
-  xv48_to(&xv48_frame(&packed), FR, M, &mut sink).unwrap();
+  xv48_to(&xv48_frame(&packed), FR, sink.set_kernel_matrix(M)).unwrap();
   assert!(!sink.rgb_stream_allocated());
   assert!(!sink.rgb_stream_u16_allocated());
   assert!(!sink.luma_stream_u16_allocated());
@@ -504,8 +504,8 @@ fn xv48_resets_streams_across_frames() {
     .unwrap()
     .with_rgb_u16(&mut rgb_u16)
     .unwrap();
-    xv48_to(&xv48_frame(&p1), FR, M, &mut sink).unwrap();
-    xv48_to(&xv48_frame(&p2), FR, M, &mut sink).unwrap();
+    xv48_to(&xv48_frame(&p1), FR, sink.set_kernel_matrix(M)).unwrap();
+    xv48_to(&xv48_frame(&p2), FR, sink.set_kernel_matrix(M)).unwrap();
   }
   let (_r, _r16, full_y2) = direct_full(&p2);
   assert_eq!(
@@ -537,7 +537,9 @@ fn xv48_out_of_sequence_first_row_rejected_before_allocation() {
   .with_rgb_u16(&mut rgb_u16)
   .unwrap();
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
-  let err = sink.process(Xv48Row::new(row3, 3, M, FR)).unwrap_err();
+  let err = sink
+    .process(Xv48Row::for_tests(row3, 3, M, FR))
+    .unwrap_err();
   assert!(
     matches!(
       err,
@@ -589,11 +591,11 @@ fn xv48_rejects_mid_frame_output_change() {
   .unwrap();
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   sink
-    .process(Xv48Row::new(&packed[..stride], 0, M, FR))
+    .process(Xv48Row::for_tests(&packed[..stride], 0, M, FR))
     .unwrap();
   sink.set_luma_u16(&mut luma_u16).unwrap();
   let err = sink
-    .process(Xv48Row::new(&packed[stride..2 * stride], 1, M, FR))
+    .process(Xv48Row::for_tests(&packed[stride..2 * stride], 1, M, FR))
     .unwrap_err();
   assert!(
     matches!(err, MixedSinkerError::ResampleOutputsChanged(_)),

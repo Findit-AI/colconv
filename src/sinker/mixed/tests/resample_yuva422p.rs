@@ -12,7 +12,7 @@
 //! `Yuva422p` exposes no u16 colour outputs.
 
 use crate::{
-  ColorMatrix, PixelSink,
+  KernelMatrix, PixelSink,
   frame::Yuva422pFrame,
   resample::{AreaResampler, ResampleError},
   sinker::{AlphaMode, MixedSinker, MixedSinkerError},
@@ -23,7 +23,7 @@ const SRC: usize = 8;
 const OUT: usize = 4;
 const CW: usize = SRC / 2; // chroma width (half)
 const CH: usize = SRC; // chroma height (full, 4:2:2)
-const M: ColorMatrix = ColorMatrix::Bt709;
+const M: KernelMatrix = KernelMatrix::Bt709;
 const FR: bool = true;
 const FR_LIMITED: bool = false;
 
@@ -56,7 +56,7 @@ fn direct_rgba(y: &[u8], u: &[u8], v: &[u8], a: &[u8], full_range: bool) -> Vec<
     let mut sink = MixedSinker::<Yuva422p>::new(SRC, SRC)
       .with_rgba(&mut rgba)
       .unwrap();
-    yuva422p_to(&frame(y, u, v, a), full_range, M, &mut sink).unwrap();
+    yuva422p_to(&frame(y, u, v, a), full_range, sink.set_kernel_matrix(M)).unwrap();
   }
   rgba
 }
@@ -149,7 +149,7 @@ fn direct_luma_of_binned_y(binned_y: &[u8], full_range: bool) -> (Vec<u8>, Vec<u
       .unwrap()
       .with_luma_u16(&mut lu16)
       .unwrap();
-    yuva422p_to(&src, full_range, M, &mut sink).unwrap();
+    yuva422p_to(&src, full_range, sink.set_kernel_matrix(M)).unwrap();
   }
   (luma, lu16)
 }
@@ -168,7 +168,7 @@ fn yuva422p_straight_rgba_is_block_mean_of_direct() {
         .unwrap()
         .with_rgba(&mut rgba)
         .unwrap();
-    yuva422p_to(&frame(&y, &u, &v, &a), FR, M, &mut sink).unwrap();
+    yuva422p_to(&frame(&y, &u, &v, &a), FR, sink.set_kernel_matrix(M)).unwrap();
   }
   let oracle = block_mean_rgba(&direct_rgba(&y, &u, &v, &a, FR));
   assert_eq!(rgba, oracle, "straight rgba == block mean");
@@ -207,7 +207,7 @@ fn yuva422p_straight_all_outputs_derive_correctly() {
         .unwrap()
         .with_hsv(&mut h, &mut s, &mut v_hsv)
         .unwrap();
-    yuva422p_to(&frame(&y, &u, &v, &a), FR, M, &mut sink).unwrap();
+    yuva422p_to(&frame(&y, &u, &v, &a), FR, sink.set_kernel_matrix(M)).unwrap();
   }
 
   let binned = block_mean_rgba(&direct_rgba(&y, &u, &v, &a, FR));
@@ -259,7 +259,7 @@ fn yuva422p_premultiplied_matches_premult_bin_unpremult_oracle() {
         .unwrap()
         .with_luma_u16(&mut lu16)
         .unwrap();
-    yuva422p_to(&frame(&y, &u, &v, &a), FR, M, &mut sink).unwrap();
+    yuva422p_to(&frame(&y, &u, &v, &a), FR, sink.set_kernel_matrix(M)).unwrap();
   }
 
   let mut pm = direct_rgba(&y, &u, &v, &a, FR);
@@ -296,7 +296,7 @@ fn yuva422p_premultiplied_transparent_block_does_not_bleed() {
         .with_alpha_mode(AlphaMode::Premultiplied)
         .with_rgba(&mut rgba)
         .unwrap();
-    yuva422p_to(&frame(&y, &u, &v, &a), FR, M, &mut sink).unwrap();
+    yuva422p_to(&frame(&y, &u, &v, &a), FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(&rgba[..4], &[0, 0, 0, 0], "transparent block bled colour");
   let mut pm = direct_rgba(&y, &u, &v, &a, FR);
@@ -334,7 +334,7 @@ fn yuva422p_premultiplied_nonuniform_alpha_luma_is_native_y_not_colour() {
         .unwrap()
         .with_luma_u16(&mut lu16)
         .unwrap();
-    yuva422p_to(&frame(&y, &u, &v, &a), FR, M, &mut sink).unwrap();
+    yuva422p_to(&frame(&y, &u, &v, &a), FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert!(
     luma.iter().all(|&p| p == 128),
@@ -379,7 +379,7 @@ fn yuva422p_straight_and_premult_differ_under_varying_alpha() {
         .with_alpha_mode(mode)
         .with_rgba(&mut rgba)
         .unwrap();
-    yuva422p_to(&frame(&y, &u, &v, &a), FR, M, &mut sink).unwrap();
+    yuva422p_to(&frame(&y, &u, &v, &a), FR, sink.set_kernel_matrix(M)).unwrap();
     rgba
   };
   assert_ne!(
@@ -409,7 +409,7 @@ fn yuva422p_identity_plan_matches_direct() {
         .unwrap()
         .with_rgba(&mut rgba)
         .unwrap();
-    yuva422p_to(&frame(&y, &u, &v, &a), FR, M, &mut sink).unwrap();
+    yuva422p_to(&frame(&y, &u, &v, &a), FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(
     rgba,
@@ -454,7 +454,7 @@ fn yuva422p_fractional_ratio_rgba_matches_oracle() {
         .unwrap()
         .with_rgba(&mut rgba)
         .unwrap();
-    yuva422p_to(&src, FR, M, &mut sink).unwrap();
+    yuva422p_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
   }
 
   let mut full = std::vec![0u8; S * S * 4];
@@ -462,7 +462,7 @@ fn yuva422p_fractional_ratio_rgba_matches_oracle() {
     let mut sink = MixedSinker::<Yuva422p>::new(S, S)
       .with_rgba(&mut full)
       .unwrap();
-    yuva422p_to(&src, FR, M, &mut sink).unwrap();
+    yuva422p_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   let mut oracle = std::vec![0u8; O * O * 4];
   {
@@ -472,7 +472,7 @@ fn yuva422p_fractional_ratio_rgba_matches_oracle() {
         .unwrap()
         .with_rgba(&mut oracle)
         .unwrap();
-    rgba_to(&rgba_frame, FR, M, &mut sink).unwrap();
+    rgba_to(&rgba_frame, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(rgba, oracle, "fractional-ratio rgba == convert-then-bin");
 }
@@ -494,7 +494,12 @@ fn yuva422p_limited_range_luma_is_native_y() {
         .unwrap()
         .with_luma_u16(&mut lu16)
         .unwrap();
-    yuva422p_to(&frame(&y, &u, &v, &a), full_range, M, &mut sink).unwrap();
+    yuva422p_to(
+      &frame(&y, &u, &v, &a),
+      full_range,
+      sink.set_kernel_matrix(M),
+    )
+    .unwrap();
     (luma, lu16)
   };
   let (luma_lim, lu16_lim) = render(FR_LIMITED);
@@ -528,8 +533,8 @@ fn yuva422p_cross_frame_reset_reuses_streams() {
         .unwrap()
         .with_rgba(&mut rgba)
         .unwrap();
-    yuva422p_to(&frame(&y, &u, &v, &a), FR, M, &mut sink).unwrap();
-    yuva422p_to(&frame(&y, &u, &v, &a), FR, M, &mut sink).unwrap();
+    yuva422p_to(&frame(&y, &u, &v, &a), FR, sink.set_kernel_matrix(M)).unwrap();
+    yuva422p_to(&frame(&y, &u, &v, &a), FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(rgba, block_mean_rgba(&direct_rgba(&y, &u, &v, &a, FR)));
 }
@@ -548,9 +553,9 @@ fn yuva422p_accepts_alpha_mode_change_across_frames() {
         .unwrap()
         .with_rgba(&mut rgba)
         .unwrap();
-    yuva422p_to(&frame(&y, &u, &v, &a), FR, M, &mut sink).unwrap();
+    yuva422p_to(&frame(&y, &u, &v, &a), FR, sink.set_kernel_matrix(M)).unwrap();
     sink.set_alpha_mode(AlphaMode::Premultiplied);
-    yuva422p_to(&frame(&y, &u, &v, &a), FR, M, &mut sink)
+    yuva422p_to(&frame(&y, &u, &v, &a), FR, sink.set_kernel_matrix(M))
       .expect("a fresh frame must accept a different alpha mode");
   }
   let mut pm = direct_rgba(&y, &u, &v, &a, FR);
@@ -575,7 +580,7 @@ fn yuva422p_mid_frame_alpha_mode_flip_is_rejected() {
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   // 4:2:2 — every luma row has its own chroma row.
   sink
-    .process(Yuva422pRow::new(
+    .process(Yuva422pRow::for_tests(
       &y[..SRC],
       &u[..CW],
       &v[..CW],
@@ -587,7 +592,7 @@ fn yuva422p_mid_frame_alpha_mode_flip_is_rejected() {
     .unwrap();
   sink.set_alpha_mode(AlphaMode::Premultiplied);
   let err = sink
-    .process(Yuva422pRow::new(
+    .process(Yuva422pRow::for_tests(
       &y[SRC..2 * SRC],
       &u[CW..2 * CW],
       &v[CW..2 * CW],
@@ -614,7 +619,7 @@ fn yuva422p_out_of_sequence_first_row_is_rejected() {
       .unwrap();
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   let err = sink
-    .process(Yuva422pRow::new(
+    .process(Yuva422pRow::for_tests(
       &y[2 * SRC..3 * SRC],
       &u[2 * CW..3 * CW],
       &v[2 * CW..3 * CW],
@@ -640,7 +645,7 @@ fn yuva422p_no_output_sink_is_a_noop() {
   let mut sink =
     MixedSinker::<Yuva422p, AreaResampler>::with_resampler(SRC, SRC, AreaResampler::to(OUT, OUT))
       .unwrap();
-  yuva422p_to(&frame(&y, &u, &v, &a), FR, M, &mut sink).unwrap();
+  yuva422p_to(&frame(&y, &u, &v, &a), FR, sink.set_kernel_matrix(M)).unwrap();
 }
 
 #[test]
@@ -661,7 +666,7 @@ fn yuva422p_resample_simd_matches_scalar() {
         .unwrap()
         .with_luma(&mut luma)
         .unwrap();
-    yuva422p_to(&frame(&y, &u, &v, &a), FR, M, &mut sink).unwrap();
+    yuva422p_to(&frame(&y, &u, &v, &a), FR, sink.set_kernel_matrix(M)).unwrap();
     (rgba, luma)
   };
   assert_eq!(run(true), run(false), "Yuva422p resample SIMD != scalar");
@@ -695,7 +700,7 @@ fn yuva422p_direct_hsv_only_is_rgb_free_and_infallible() {
     sink.begin_frame(SRC as u32, SRC as u32).unwrap();
     super::super::arm_rgb_scratch_alloc_failure();
     sink
-      .process(Yuva422pRow::new(
+      .process(Yuva422pRow::for_tests(
         &y[..SRC],
         &u[..CW],
         &v[..CW],

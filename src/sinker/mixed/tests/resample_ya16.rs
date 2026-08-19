@@ -33,7 +33,7 @@
 //!   the publicly-constructible `Ya16Row`).
 
 use crate::{
-  ColorMatrix, PixelSink,
+  KernelMatrix, PixelSink,
   frame::{Ya16BeFrame, Ya16Frame},
   resample::{AreaResampler, ResampleError},
   sinker::{AlphaMode, MixedSinker, MixedSinkerError},
@@ -46,7 +46,7 @@ const FR: bool = true;
 /// Limited (studio) range — exercises the native-Y luma path against the
 /// range-dependent `rgb_to_luma*` it must NOT use.
 const FR_LIMITED: bool = false;
-const M: ColorMatrix = ColorMatrix::Bt709;
+const M: KernelMatrix = KernelMatrix::Bt709;
 
 /// Re-encode a host-native u16 slice as LE-encoded wire byte storage (the
 /// `ya16le` plane contract); recovered via `u16::from_le`.
@@ -189,7 +189,7 @@ fn direct_rgba_u16(host_packed: &[u16]) -> Vec<u16> {
   let mut sink = MixedSinker::<Ya16>::new(SRC, SRC)
     .with_rgba_u16(&mut rgba_u16)
     .unwrap();
-  ya16_to(&frame, FR, M, &mut sink).unwrap();
+  ya16_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   rgba_u16
 }
 
@@ -210,7 +210,7 @@ fn straight_rgba_u16_is_block_mean_of_direct() {
         .unwrap()
         .with_rgba_u16(&mut rgba_u16)
         .unwrap();
-    ya16_to(&frame, FR, M, &mut sink).unwrap();
+    ya16_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(rgba_u16, block_mean_rgba(&direct_rgba_u16(&packed)));
 }
@@ -235,7 +235,7 @@ fn straight_alpha_is_averaged_not_forced_opaque() {
         .unwrap()
         .with_rgba_u16(&mut rgba_u16)
         .unwrap();
-    ya16_to(&frame, FR, M, &mut sink).unwrap();
+    ya16_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(
     rgba_u16,
@@ -285,7 +285,7 @@ fn straight_all_outputs_derive_from_binned_color() {
         .unwrap()
         .with_hsv(&mut h, &mut s, &mut v)
         .unwrap();
-    ya16_to(&frame, FR, M, &mut sink).unwrap();
+    ya16_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   }
 
   let binned = block_mean_rgba(&direct_rgba_u16(&packed));
@@ -327,7 +327,7 @@ fn straight_all_outputs_derive_from_binned_color() {
       .unwrap()
       .with_hsv(&mut h_ref, &mut s_ref, &mut v_ref)
       .unwrap();
-    ya16_to(&binned_frame, FR, M, &mut sink).unwrap();
+    ya16_to(&binned_frame, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(luma, luma_ref, "luma (Y >> 8)");
   assert_eq!(lu16, lu16_ref, "luma_u16 (native Y pass-through)");
@@ -349,7 +349,7 @@ fn smpte240m_native_luma_is_y_not_matrix_derived() {
   // resampled luma_u16 must equal the binned-Y R channel — NOT the matrix
   // derivation. Pick a uniform-per-block Y near the worst-case so the
   // matrix path would visibly diverge.
-  const SM: ColorMatrix = ColorMatrix::Smpte240m;
+  const SM: KernelMatrix = KernelMatrix::Smpte240m;
   let mut packed = std::vec![0u16; SRC * SRC * 2];
   for (i, px) in packed.chunks_exact_mut(2).enumerate() {
     // Y constant within each 2x2 block so the block mean is exactly Y; the
@@ -368,7 +368,7 @@ fn smpte240m_native_luma_is_y_not_matrix_derived() {
         .unwrap()
         .with_luma_u16(&mut lu16)
         .unwrap();
-    ya16_to(&frame, FR, SM, &mut sink).unwrap();
+    ya16_to(&frame, FR, sink.set_kernel_matrix(SM)).unwrap();
   }
 
   // Native-Y reference: the area-mean of the native Y plane (exact,
@@ -423,7 +423,7 @@ fn premultiplied_matches_premult_bin_unpremult_oracle() {
         .unwrap()
         .with_luma_u16(&mut lu16)
         .unwrap();
-    ya16_to(&frame, FR, M, &mut sink).unwrap();
+    ya16_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   }
 
   let mut pm = direct_rgba_u16(&packed);
@@ -480,7 +480,7 @@ fn premultiplied_nonuniform_alpha_luma_is_native_y_bin_not_color() {
         .unwrap()
         .with_luma_u16(&mut lu16)
         .unwrap();
-    ya16_to(&frame, FR, M, &mut sink).unwrap();
+    ya16_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   }
 
   assert!(
@@ -539,7 +539,7 @@ fn premultiplied_transparent_block_does_not_bleed() {
         .with_alpha_mode(AlphaMode::Premultiplied)
         .with_rgba_u16(&mut rgba_u16)
         .unwrap();
-    ya16_to(&frame, FR, M, &mut sink).unwrap();
+    ya16_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(
     &rgba_u16[..4],
@@ -573,7 +573,7 @@ fn le_be_parity() {
         .unwrap()
         .with_rgba(&mut rgba)
         .unwrap();
-    ya16_to(&frame, FR, M, &mut sink).unwrap();
+    ya16_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
     (rgba_u16, rgba)
   };
   let render_be = || {
@@ -591,7 +591,7 @@ fn le_be_parity() {
     .unwrap()
     .with_rgba(&mut rgba)
     .unwrap();
-    ya16_to_endian::<_, true>(&frame, FR, M, &mut sink).unwrap();
+    ya16_to_endian::<_, true>(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
     (rgba_u16, rgba)
   };
   assert_eq!(render_le(), render_be(), "LE/BE outputs diverge");
@@ -621,7 +621,7 @@ fn identity_plan_matches_direct() {
         .unwrap()
         .with_rgba_u16(&mut rgba_u16)
         .unwrap();
-    ya16_to(&frame, FR, M, &mut sink).unwrap();
+    ya16_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(
     rgba_u16,
@@ -647,8 +647,8 @@ fn cross_frame_reset_reuses_streams() {
         .unwrap()
         .with_rgba_u16(&mut rgba_u16)
         .unwrap();
-    ya16_to(&frame, FR, M, &mut sink).unwrap();
-    ya16_to(&frame, FR, M, &mut sink).unwrap();
+    ya16_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
+    ya16_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(rgba_u16, block_mean_rgba(&direct_rgba_u16(&packed)));
 }
@@ -670,9 +670,10 @@ fn accepts_alpha_mode_change_across_frames() {
         .unwrap()
         .with_rgba_u16(&mut rgba_u16)
         .unwrap();
-    ya16_to(&frame, FR, M, &mut sink).unwrap();
+    ya16_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
     sink.set_alpha_mode(AlphaMode::Premultiplied);
-    ya16_to(&frame, FR, M, &mut sink).expect("a fresh frame must accept a different alpha mode");
+    ya16_to(&frame, FR, sink.set_kernel_matrix(M))
+      .expect("a fresh frame must accept a different alpha mode");
   }
   let mut pm = direct_rgba_u16(&packed);
   premultiply(&mut pm);
@@ -705,7 +706,7 @@ fn fractional_ratio_matches_direct_then_bin() {
         .unwrap()
         .with_rgba_u16(&mut rgba_u16)
         .unwrap();
-    ya16_to(&frame, FR, M, &mut sink).unwrap();
+    ya16_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   }
 
   let canonical = canonical_from_packed(&packed, SRC * SRC);
@@ -723,7 +724,7 @@ fn fractional_ratio_matches_direct_then_bin() {
     .unwrap()
     .with_rgba_u16(&mut rgba_u16_ref)
     .unwrap();
-    rgba64_to(&rsrc, FR, M, &mut sink).unwrap();
+    rgba64_to(&rsrc, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(
     rgba_u16, rgba_u16_ref,
@@ -750,11 +751,16 @@ fn mid_frame_alpha_mode_flip_is_rejected() {
       .unwrap();
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   sink
-    .process(Ya16Row::new(&wire[..row_elems], 0, M, FR))
+    .process(Ya16Row::for_tests(&wire[..row_elems], 0, M, FR))
     .unwrap();
   sink.set_alpha_mode(AlphaMode::Premultiplied);
   let err = sink
-    .process(Ya16Row::new(&wire[row_elems..2 * row_elems], 1, M, FR))
+    .process(Ya16Row::for_tests(
+      &wire[row_elems..2 * row_elems],
+      1,
+      M,
+      FR,
+    ))
     .unwrap_err();
   assert!(
     matches!(err, MixedSinkerError::ResampleOutputsChanged(_)),
@@ -779,7 +785,12 @@ fn out_of_sequence_first_row_is_rejected() {
       .unwrap();
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   let err = sink
-    .process(Ya16Row::new(&wire[row_elems..2 * row_elems], 1, M, FR))
+    .process(Ya16Row::for_tests(
+      &wire[row_elems..2 * row_elems],
+      1,
+      M,
+      FR,
+    ))
     .unwrap_err();
   assert!(
     matches!(
@@ -802,7 +813,7 @@ fn no_output_sink_is_a_noop() {
   let mut sink =
     MixedSinker::<Ya16, AreaResampler>::with_resampler(SRC, SRC, AreaResampler::to(OUT, OUT))
       .unwrap();
-  ya16_to(&frame, FR, M, &mut sink).unwrap();
+  ya16_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
 }
 
 // ---- limited-range (full_range = false) native-Y luma regression --------------
@@ -833,7 +844,7 @@ fn direct_luma_of_binned_y(binned_y: &[u16], full_range: bool) -> (Vec<u8>, Vec<
     .unwrap()
     .with_luma_u16(&mut lu16)
     .unwrap();
-  ya16_to(&frame, full_range, M, &mut sink).unwrap();
+  ya16_to(&frame, full_range, sink.set_kernel_matrix(M)).unwrap();
   (luma, lu16)
 }
 
@@ -857,7 +868,7 @@ fn limited_range_luma_is_native_y_not_rgb_derived() {
         .unwrap()
         .with_luma_u16(&mut lu16)
         .unwrap();
-    ya16_to(&frame, FR_LIMITED, M, &mut sink).unwrap();
+    ya16_to(&frame, FR_LIMITED, sink.set_kernel_matrix(M)).unwrap();
   }
 
   // Native-Y oracle: the area-mean of the native Y plane (alpha-independent
@@ -885,7 +896,7 @@ fn limited_range_luma_is_native_y_not_rgb_derived() {
         .unwrap()
         .with_luma_u16(&mut lu16_fr)
         .unwrap();
-    ya16_to(&frame, FR, M, &mut sink).unwrap();
+    ya16_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(luma, luma_fr, "native-Y luma must be range-independent");
   assert_eq!(lu16, lu16_fr, "native-Y luma_u16 must be range-independent");
@@ -921,7 +932,7 @@ fn limited_range_y16_luma_is_native_not_rgb_scaled() {
         .unwrap()
         .with_luma_u16(&mut lu16)
         .unwrap();
-    ya16_to(&frame, FR_LIMITED, M, &mut sink).unwrap();
+    ya16_to(&frame, FR_LIMITED, sink.set_kernel_matrix(M)).unwrap();
   }
   assert!(
     luma.iter().all(|&y| y == (Y >> 8) as u8),

@@ -52,7 +52,7 @@ pub(crate) fn yuv_420p_n_to_rgb_row<const BITS: u32, const BE: bool>(
   v_half: &[u16],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   yuv_420p_n_to_rgb_or_rgba_row::<BITS, false, false, BE>(
@@ -83,7 +83,7 @@ pub(crate) fn yuv_420p_n_to_rgba_row<const BITS: u32, const BE: bool>(
   v_half: &[u16],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   yuv_420p_n_to_rgb_or_rgba_row::<BITS, true, false, BE>(
@@ -123,7 +123,7 @@ pub(crate) fn yuv_420p_n_to_rgba_with_alpha_src_row<const BITS: u32, const BE: b
   a_src: &[u16],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   yuv_420p_n_to_rgb_or_rgba_row::<BITS, true, true, BE>(
@@ -173,7 +173,7 @@ pub(crate) fn yuv_420p_n_to_rgb_or_rgba_row<
   a_src: Option<&[u16]>,
   out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // Compile-time guard — fails monomorphization for any BITS outside
@@ -290,7 +290,7 @@ pub(crate) fn yuv_420p_n_to_rgb_u16_row<const BITS: u32, const BE: bool>(
   v_half: &[u16],
   rgb_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   yuv_420p_n_to_rgb_or_rgba_u16_row::<BITS, false, false, BE>(
@@ -321,7 +321,7 @@ pub(crate) fn yuv_420p_n_to_rgba_u16_row<const BITS: u32, const BE: bool>(
   v_half: &[u16],
   rgba_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   yuv_420p_n_to_rgb_or_rgba_u16_row::<BITS, true, false, BE>(
@@ -359,7 +359,7 @@ pub(crate) fn yuv_420p_n_to_rgba_u16_with_alpha_src_row<const BITS: u32, const B
   a_src: &[u16],
   rgba_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   yuv_420p_n_to_rgb_or_rgba_u16_row::<BITS, true, true, BE>(
@@ -403,7 +403,7 @@ pub(crate) fn yuv_420p_n_to_rgb_or_rgba_u16_row<
   a_src: Option<&[u16]>,
   out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // Compile-time guard — see note on `yuv_420p_n_to_rgb_or_rgba_row`.
@@ -499,7 +499,7 @@ pub(crate) fn yuv_444p_n_to_rgb_row<const BITS: u32, const BE: bool>(
   v: &[u16],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   yuv_444p_n_to_rgb_or_rgba_row::<BITS, false, false, BE, false>(
@@ -518,7 +518,7 @@ pub(crate) fn yuv_444p_n_msb_to_rgb_row<const BITS: u32, const BE: bool>(
   v: &[u16],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   yuv_444p_n_to_rgb_or_rgba_row::<BITS, false, false, BE, true>(
@@ -536,7 +536,7 @@ pub(crate) fn yuv_444p_n_msb_to_rgba_row<const BITS: u32, const BE: bool>(
   v: &[u16],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   yuv_444p_n_to_rgb_or_rgba_row::<BITS, true, false, BE, true>(
@@ -563,7 +563,7 @@ pub(crate) fn yuv_444p_n_to_rgba_row<const BITS: u32, const BE: bool>(
   v: &[u16],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   yuv_444p_n_to_rgb_or_rgba_row::<BITS, true, false, BE, false>(
@@ -596,7 +596,7 @@ pub(crate) fn yuv_444p_n_to_rgba_with_alpha_src_row<const BITS: u32, const BE: b
   a_src: &[u16],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   yuv_444p_n_to_rgb_or_rgba_row::<BITS, true, true, BE, false>(
@@ -645,7 +645,7 @@ pub(crate) fn yuv_444p_n_to_rgb_or_rgba_row<
   a_src: Option<&[u16]>,
   out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // Compile-time guard — fails monomorphization for any BITS outside
@@ -733,7 +733,7 @@ pub(crate) fn yuv_444p_n_to_rgb_u16_row<const BITS: u32, const BE: bool>(
   v: &[u16],
   rgb_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   yuv_444p_n_to_rgb_or_rgba_u16_row::<BITS, false, false, BE, false>(
@@ -751,7 +751,7 @@ pub(crate) fn yuv_444p_n_msb_to_rgb_u16_row<const BITS: u32, const BE: bool>(
   v: &[u16],
   rgb_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   yuv_444p_n_to_rgb_or_rgba_u16_row::<BITS, false, false, BE, true>(
@@ -769,7 +769,7 @@ pub(crate) fn yuv_444p_n_msb_to_rgba_u16_row<const BITS: u32, const BE: bool>(
   v: &[u16],
   rgba_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   yuv_444p_n_to_rgb_or_rgba_u16_row::<BITS, true, false, BE, true>(
@@ -797,7 +797,7 @@ pub(crate) fn yuv_444p_n_to_rgba_u16_row<const BITS: u32, const BE: bool>(
   v: &[u16],
   rgba_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   yuv_444p_n_to_rgb_or_rgba_u16_row::<BITS, true, false, BE, false>(
@@ -831,7 +831,7 @@ pub(crate) fn yuv_444p_n_to_rgba_u16_with_alpha_src_row<const BITS: u32, const B
   a_src: &[u16],
   rgba_out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   yuv_444p_n_to_rgb_or_rgba_u16_row::<BITS, true, true, BE, false>(
@@ -874,7 +874,7 @@ pub(crate) fn yuv_444p_n_to_rgb_or_rgba_u16_row<
   a_src: Option<&[u16]>,
   out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // Compile-time guard — see note on `yuv_444p_n_to_rgb_or_rgba_row`.
@@ -983,7 +983,7 @@ pub(crate) fn yuv_420p_n_to_hsv_row<const BITS: u32, const BE: bool>(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   // Same compile-time guard as `yuv_420p_n_to_rgb_or_rgba_row`: the i32
@@ -1065,7 +1065,7 @@ pub(crate) fn yuv_444p_n_to_hsv_row<const BITS: u32, const BE: bool>(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   const { assert!(BITS == 9 || BITS == 10 || BITS == 12 || BITS == 14) };
@@ -1120,7 +1120,7 @@ pub(crate) fn yuv_444p_n_msb_to_hsv_row<const BITS: u32, const BE: bool>(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   const { assert!(BITS == 9 || BITS == 10 || BITS == 12 || BITS == 14) };

@@ -70,7 +70,7 @@ fn v210_luma_only_extracts_y_bytes() {
   let src = V210Frame::new(&buf, 6, 8, 16);
   let mut luma = std::vec![0u8; 6 * 8];
   let mut sink = MixedSinker::<V210>::new(6, 8).with_luma(&mut luma).unwrap();
-  v210_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  v210_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   // 10-bit Y=200 → 8-bit (200 >> 2) = 50.
   assert!(luma.iter().all(|&y| y == 50), "luma {luma:?}");
 }
@@ -87,7 +87,7 @@ fn v210_luma_u16_only_extracts_y_native_depth() {
   let mut sink = MixedSinker::<V210>::new(6, 8)
     .with_luma_u16(&mut luma)
     .unwrap();
-  v210_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  v210_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   assert!(luma.iter().all(|&y| y == 200), "luma_u16 {:?}", &luma[..16]);
 }
 
@@ -101,7 +101,7 @@ fn v210_rgb_only_converts_gray_to_gray() {
   let src = V210Frame::new(&buf, 12, 4, 32);
   let mut rgb = std::vec![0u8; 12 * 4 * 3];
   let mut sink = MixedSinker::<V210>::new(12, 4).with_rgb(&mut rgb).unwrap();
-  v210_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  v210_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   for px in rgb.chunks(3) {
     assert!(px[0].abs_diff(128) <= 1);
     assert_eq!(px[0], px[1]);
@@ -121,7 +121,7 @@ fn v210_rgba_only_converts_gray_to_gray_with_opaque_alpha() {
   let mut sink = MixedSinker::<V210>::new(12, 4)
     .with_rgba(&mut rgba)
     .unwrap();
-  v210_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  v210_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   for px in rgba.chunks(4) {
     assert_eq!(px[3], 0xFF);
   }
@@ -139,7 +139,7 @@ fn v210_rgb_u16_only_converts_gray_to_gray_native_depth() {
   let mut sink = MixedSinker::<V210>::new(12, 4)
     .with_rgb_u16(&mut rgb)
     .unwrap();
-  v210_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  v210_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   for px in rgb.chunks(3) {
     assert!(px[0].abs_diff(512) <= 2, "expected ~512, got {}", px[0]);
   }
@@ -157,7 +157,7 @@ fn v210_rgba_u16_alpha_is_max() {
   let mut sink = MixedSinker::<V210>::new(12, 4)
     .with_rgba_u16(&mut rgba)
     .unwrap();
-  v210_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  v210_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   for px in rgba.chunks(4) {
     assert_eq!(px[3], 1023);
   }
@@ -185,7 +185,7 @@ fn v210_with_rgb_and_with_rgba_byte_identical_u8() {
     .unwrap()
     .with_rgba(&mut rgba)
     .unwrap();
-  v210_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  v210_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   for i in 0..(w * h) as usize {
     assert_eq!(rgba[i * 4], rgb[i * 3]);
     assert_eq!(rgba[i * 4 + 1], rgb[i * 3 + 1]);
@@ -213,7 +213,7 @@ fn v210_with_rgb_u16_and_with_rgba_u16_byte_identical() {
     .unwrap()
     .with_rgba_u16(&mut rgba)
     .unwrap();
-  v210_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  v210_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   for i in 0..(w * h) as usize {
     assert_eq!(rgba[i * 4], rgb[i * 3]);
     assert_eq!(rgba[i * 4 + 1], rgb[i * 3 + 1]);
@@ -259,8 +259,18 @@ fn v210_with_simd_false_matches_with_simd_true() {
       .with_rgb(&mut rgb_scalar)
       .unwrap()
       .with_simd(false);
-    v210_to(&src, false, ColorMatrix::Bt709, &mut sink_simd).unwrap();
-    v210_to(&src, false, ColorMatrix::Bt709, &mut sink_scalar).unwrap();
+    v210_to(
+      &src,
+      false,
+      sink_simd.set_kernel_matrix(KernelMatrix::Bt709),
+    )
+    .unwrap();
+    v210_to(
+      &src,
+      false,
+      sink_scalar.set_kernel_matrix(KernelMatrix::Bt709),
+    )
+    .unwrap();
     assert_eq!(rgb_simd, rgb_scalar, "V210 SIMD≠scalar at width {w}");
   }
 }
@@ -284,7 +294,7 @@ fn v210_partial_word_width_works_end_to_end() {
   let mut sink = MixedSinker::<V210>::new(1280, 1)
     .with_rgb(&mut rgb)
     .unwrap();
-  v210_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  v210_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   for px in rgb.chunks(3) {
     assert!(
       px[0].abs_diff(128) <= 1,
@@ -398,8 +408,18 @@ fn v210_reconstructed_from_yuv422p10_matches_yuv422p10_to_rgb() {
   let mut s_packed = MixedSinker::<V210>::new(w, h)
     .with_rgb(&mut rgb_packed)
     .unwrap();
-  yuv422p10_to(&planar, false, ColorMatrix::Bt709, &mut s_planar).unwrap();
-  v210_to(&v210, false, ColorMatrix::Bt709, &mut s_packed).unwrap();
+  yuv422p10_to(
+    &planar,
+    false,
+    s_planar.set_kernel_matrix(KernelMatrix::Bt709),
+  )
+  .unwrap();
+  v210_to(
+    &v210,
+    false,
+    s_packed.set_kernel_matrix(KernelMatrix::Bt709),
+  )
+  .unwrap();
 
   assert_eq!(rgb_planar, rgb_packed);
 }
@@ -451,7 +471,12 @@ fn v210_le_be_roundtrip_byte_identical() {
     .unwrap()
     .with_luma_u16(&mut out_le_luma_u16)
     .unwrap();
-  v210_to(&frame_le, true, ColorMatrix::Bt709, &mut sink_le).unwrap();
+  v210_to(
+    &frame_le,
+    true,
+    sink_le.set_kernel_matrix(KernelMatrix::Bt709),
+  )
+  .unwrap();
 
   let frame_be = V210BeFrame::try_new(&pix_be, 12, 4, stride).unwrap();
   let mut out_be_rgba = std::vec![0u8; 12 * 4 * 4];
@@ -462,7 +487,12 @@ fn v210_le_be_roundtrip_byte_identical() {
     .unwrap()
     .with_luma_u16(&mut out_be_luma_u16)
     .unwrap();
-  v210_to_endian(&frame_be, true, ColorMatrix::Bt709, &mut sink_be).unwrap();
+  v210_to_endian(
+    &frame_be,
+    true,
+    sink_be.set_kernel_matrix(KernelMatrix::Bt709),
+  )
+  .unwrap();
 
   assert_eq!(
     out_le_rgba, out_be_rgba,
@@ -498,9 +528,9 @@ fn v210_hsv_row_matches_rgb_then_hsv() {
     let mut buf = std::vec![0u8; w.div_ceil(6) * 16];
     pseudo_random_u8(&mut buf, 0x51A7_F00D);
     for &matrix in &[
-      ColorMatrix::Bt601,
-      ColorMatrix::Bt709,
-      ColorMatrix::Bt2020Ncl,
+      KernelMatrix::Bt601,
+      KernelMatrix::Bt709,
+      KernelMatrix::Bt2020Ncl,
     ] {
       for &full in &[true, false] {
         for &use_simd in &[false, true] {
@@ -552,7 +582,7 @@ fn v210_hsv_only_is_rgb_free_and_matches_reference() {
     let mut sink = MixedSinker::<V210>::new(w, h)
       .with_hsv(&mut hh, &mut ss, &mut vv)
       .unwrap();
-    v210_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    v210_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
     sink.rgb_scratch.len()
   };
   assert_eq!(
@@ -561,7 +591,14 @@ fn v210_hsv_only_is_rgb_free_and_matches_reference() {
   );
 
   let mut rgb0 = std::vec![0u8; w * 3];
-  v210_to_rgb_row(&buf[..stride], &mut rgb0, w, ColorMatrix::Bt709, true, true);
+  v210_to_rgb_row(
+    &buf[..stride],
+    &mut rgb0,
+    w,
+    KernelMatrix::Bt709,
+    true,
+    true,
+  );
   let mut rh = std::vec![0u8; w];
   let mut rs = std::vec![0u8; w];
   let mut rv = std::vec![0u8; w];
@@ -612,7 +649,7 @@ fn v210_rgb_scratch_alloc_failure_leaves_outputs_untouched() {
     .unwrap();
 
   super::super::arm_rgb_scratch_alloc_failure();
-  let err = v210_to(&src, false, ColorMatrix::Bt601, &mut sink).unwrap_err();
+  let err = v210_to(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap_err();
   drop(sink);
 
   assert!(

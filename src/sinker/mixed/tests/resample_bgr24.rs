@@ -5,7 +5,7 @@
 //! tests pin both the swap and the shared tail.
 
 use crate::{
-  ColorMatrix, PixelSink,
+  KernelMatrix, PixelSink,
   resample::{AreaResampler, FilteredResampler, ResampleError, Triangle},
   sinker::{MixedSinker, MixedSinkerError},
   source::{Bgr24, Bgr24Row, Rgb24, bgr24_to, rgb24_to},
@@ -62,7 +62,7 @@ fn bgr24_downscale_is_exact_area_mean_of_swapped_source() {
         .unwrap()
         .with_rgb(&mut rgb)
         .unwrap();
-    bgr24_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    bgr24_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   for oy in 0..OUT {
     for ox in 0..OUT {
@@ -102,7 +102,7 @@ fn bgr24_resample_matches_rgb24_of_swapped_frame() {
         .unwrap()
         .with_luma(&mut luma_a)
         .unwrap();
-    bgr24_to(&bgr_src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    bgr24_to(&bgr_src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
 
   let (mut rgb_b, mut rgba_b, mut luma_b) = (
@@ -120,7 +120,7 @@ fn bgr24_resample_matches_rgb24_of_swapped_frame() {
         .unwrap()
         .with_luma(&mut luma_b)
         .unwrap();
-    rgb24_to(&rgb_src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    rgb24_to(&rgb_src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
 
   assert_eq!(rgb_a, rgb_b, "rgb");
@@ -138,7 +138,7 @@ fn bgr24_identity_plan_matches_new_sink() {
     let mut sink = MixedSinker::<Bgr24>::new(SRC, SRC)
       .with_rgb(&mut direct)
       .unwrap();
-    bgr24_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    bgr24_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
 
   let mut via_area = vec![0u8; SRC * SRC * 3];
@@ -148,7 +148,7 @@ fn bgr24_identity_plan_matches_new_sink() {
         .unwrap()
         .with_rgb(&mut via_area)
         .unwrap();
-    bgr24_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    bgr24_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   assert_eq!(direct, via_area);
 }
@@ -168,7 +168,7 @@ fn bgr24_resample_no_outputs_is_a_no_op() {
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   let row2 = &buf[SRC * 3 * 2..SRC * 3 * 3];
   sink
-    .process(Bgr24Row::new(row2, 2, ColorMatrix::Bt709, true))
+    .process(Bgr24Row::for_tests(row2, 2, KernelMatrix::Bt709, true))
     .unwrap();
 }
 
@@ -190,7 +190,7 @@ fn bgr24_resample_rejects_out_of_sequence_before_staging() {
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   let row2 = &buf[SRC * 3 * 2..SRC * 3 * 3];
   let err = sink
-    .process(Bgr24Row::new(row2, 2, ColorMatrix::Bt709, true))
+    .process(Bgr24Row::for_tests(row2, 2, KernelMatrix::Bt709, true))
     .unwrap_err();
   assert!(
     matches!(
@@ -225,7 +225,7 @@ fn bgr24_filter_plan_rejected_with_typed_error() {
   .unwrap()
   .with_rgb(&mut rgb)
   .unwrap();
-  let err = bgr24_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap_err();
+  let err = bgr24_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap_err();
   assert!(
     matches!(
       err,
@@ -254,7 +254,7 @@ fn bgr24_resample_rejects_out_of_sequence_rows() {
   // Skip row 0 — the stream expects strict sequencing from row 0.
   let row1 = &buf[SRC * 3..SRC * 3 * 2];
   let err = sink
-    .process(Bgr24Row::new(row1, 1, ColorMatrix::Bt709, true))
+    .process(Bgr24Row::for_tests(row1, 1, KernelMatrix::Bt709, true))
     .unwrap_err();
   assert!(
     matches!(
@@ -296,7 +296,12 @@ fn bgr24_first_row_scratch_oom_leaves_stream_and_freeze_uncommitted_for_retry() 
     // atomic shape; the pre-fix ordering would have left the stream committed).
     crate::sinker::mixed::arm_source_rgb_scratch_failure();
     let err = sink
-      .process(Bgr24Row::new(&buf[..SRC * 3], 0, ColorMatrix::Bt709, true))
+      .process(Bgr24Row::for_tests(
+        &buf[..SRC * 3],
+        0,
+        KernelMatrix::Bt709,
+        true,
+      ))
       .unwrap_err();
     assert!(
       matches!(
@@ -319,10 +324,10 @@ fn bgr24_first_row_scratch_oom_leaves_stream_and_freeze_uncommitted_for_retry() 
     sink.set_luma(&mut luma).unwrap();
     for r in 0..SRC {
       sink
-        .process(Bgr24Row::new(
+        .process(Bgr24Row::for_tests(
           &buf[r * SRC * 3..(r + 1) * SRC * 3],
           r,
-          ColorMatrix::Bt709,
+          KernelMatrix::Bt709,
           true,
         ))
         .expect("frame replay after a first-row scratch OOM must succeed");

@@ -92,6 +92,10 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv444p9<BE>, R> {
   type Input<'r> = Yuv444p9Row<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     check_dimensions_match(self.width, self.height, width, height)?;
     reset_high_bit_yuv_streams(self);
@@ -567,6 +571,10 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv444p10<BE>, R> {
   type Input<'r> = Yuv444p10Row<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     check_dimensions_match(self.width, self.height, width, height)?;
     reset_high_bit_yuv_streams(self);
@@ -1040,6 +1048,10 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv444p12<BE>, R> {
   type Input<'r> = Yuv444p12Row<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     check_dimensions_match(self.width, self.height, width, height)?;
     reset_high_bit_yuv_streams(self);
@@ -1059,32 +1071,37 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv444p12<BE>, R> {
     // bit-depth from the transfer and gates on BT.2020 primaries; IPT-C2 gates
     // on a PQ transfer (its only defined variant). The defaults (`Unspecified`)
     // route a tagged source back to the affine fallback.
-    let transfer = self.transfer;
-    let primaries = self.primaries;
+    let transfer = self.transfer.clone();
+    let primaries = self.primaries.clone();
+    // The open descriptor tag. The four non-affine matrices have no
+    // `KernelMatrix` spelling — mediaframe tabulates no affine coefficients
+    // for them — so the row cannot carry the tag and the sink's signalled
+    // spec is where it lives.
+    let tag = self.matrix.clone();
     // Whether this row decodes as ICtCp (BT.2100, #303): the `Ictcp` matrix
     // with a resolvable PQ/HLG transfer.
-    let ictcp_active = matches!(row.matrix(), crate::ColorMatrix::Ictcp)
-      && crate::row::scalar::ictcp::IctcpTransfer::for_transfer(transfer).is_some();
+    let ictcp_active = matches!(tag, crate::ColorMatrix::Ictcp)
+      && crate::row::scalar::ictcp::IctcpTransfer::for_transfer(&transfer).is_some();
     // Whether this row decodes as constant-luminance `YcCbcCrc` (BT.2020 CL,
     // H.273 MatrixCoefficients = 13, #303): the `ChromaDerivedCl` matrix with
     // BT.2020 primaries. Mutually exclusive with `ictcp_active` (distinct
     // matrices). Both drive the non-affine HSV routing and the RGB-scratch
     // atomicity preflight below; `false` leaves every affine fast path
     // byte-identical.
-    let cl_active = matches!(row.matrix(), crate::ColorMatrix::ChromaDerivedCl)
-      && crate::row::scalar::cl::ClSystem::resolve(primaries, transfer).is_some();
+    let cl_active = matches!(tag, crate::ColorMatrix::ChromaDerivedCl)
+      && crate::row::scalar::cl::ClSystem::resolve(&primaries, &transfer).is_some();
     // Whether this row decodes as IPT-C2 (H.273 MatrixCoefficients = 15, the
     // Dolby Vision Profile 5 base colour space, #303): the `IptC2` matrix with
     // a resolvable PQ transfer. Mutually exclusive with `ictcp_active` /
     // `cl_active` (distinct matrices).
-    let iptc2_active = matches!(row.matrix(), crate::ColorMatrix::IptC2)
-      && crate::row::scalar::iptc2::IptC2Transfer::for_transfer(transfer).is_some();
+    let iptc2_active = matches!(tag, crate::ColorMatrix::IptC2)
+      && crate::row::scalar::iptc2::IptC2Transfer::for_transfer(&transfer).is_some();
     // Whether this row decodes as SMPTE ST 2085 (H.273 MatrixCoefficients = 11,
     // "Y'D'zD'x", the PQ-only non-affine X'Y'Z' colour-difference model, #303):
     // the `Smpte2085` matrix with a resolvable PQ transfer. Mutually exclusive
     // with `ictcp_active` / `cl_active` / `iptc2_active` (distinct matrices).
-    let smpte2085_active = matches!(row.matrix(), crate::ColorMatrix::Smpte2085)
-      && crate::row::scalar::smpte2085::Smpte2085Transfer::for_transfer(transfer).is_some();
+    let smpte2085_active = matches!(tag, crate::ColorMatrix::Smpte2085)
+      && crate::row::scalar::smpte2085::Smpte2085Transfer::for_transfer(&transfer).is_some();
     // Any of the non-affine decodes needs the convert-once-then-derive path
     // (its RGB cannot be reconstructed from a single Q15 matrix), so they share
     // the HSV-routing and atomicity-preflight predicates below.
@@ -1384,9 +1401,10 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv444p12<BE>, R> {
         rgba_u16_row,
         w,
         row.matrix(),
-        primaries,
+        &tag,
+        &primaries,
         row.full_range(),
-        transfer,
+        &transfer,
         use_simd,
         BE,
       );
@@ -1407,9 +1425,10 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv444p12<BE>, R> {
         rgb_u16_row,
         w,
         row.matrix(),
-        primaries,
+        &tag,
+        &primaries,
         row.full_range(),
-        transfer,
+        &transfer,
         use_simd,
         BE,
       );
@@ -1459,9 +1478,10 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv444p12<BE>, R> {
         rgba_row,
         w,
         row.matrix(),
-        primaries,
+        &tag,
+        &primaries,
         row.full_range(),
-        transfer,
+        &transfer,
         use_simd,
         BE,
       );
@@ -1488,9 +1508,10 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv444p12<BE>, R> {
       rgb_row,
       w,
       row.matrix(),
-      primaries,
+      &tag,
+      &primaries,
       row.full_range(),
-      transfer,
+      &transfer,
       use_simd,
       BE,
     );
@@ -1584,6 +1605,10 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv444p14<BE>, R> {
   type Input<'r> = Yuv444p14Row<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     check_dimensions_match(self.width, self.height, width, height)?;
     reset_high_bit_yuv_streams(self);
@@ -2056,6 +2081,10 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv444p16<BE>, R> {
   type Input<'r> = Yuv444p16Row<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     check_dimensions_match(self.width, self.height, width, height)?;
     reset_high_bit_yuv_streams(self);

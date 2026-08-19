@@ -10,7 +10,7 @@
 //! ([`super::packed_yuv_8bit`]):
 //!
 //! - `with_rgb` / `with_rgba` — packed YUV → RGB Q15 pipeline (full
-//!   `ColorMatrix` + range support inherited from the row); RGBA
+//!   `KernelMatrix` + range support inherited from the row); RGBA
 //!   alpha is forced to `0xFF` (the source has no alpha channel).
 //! - `with_luma` — extracts the Y bytes from the packed plane via
 //!   the dedicated luma kernel.
@@ -52,7 +52,7 @@ use super::{
 };
 #[cfg(all(feature = "yuv-packed", feature = "yuv-planar"))]
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   resample::{
     AveragingDomain, InsertionContext, InsertionPoint, PlanGeometry, ResampleError, ResamplePlan,
     select_insertion_point,
@@ -119,7 +119,7 @@ fn packed_yuv411_process_native(
   rgb_scratch: &mut std::vec::Vec<u8>,
   packed: &[u8],
   chroma_h_phase: f64,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   idx: usize,
   w: usize,
@@ -358,6 +358,10 @@ impl<R> PixelSink for MixedSinker<'_, Uyyvyy411, R> {
   type Input<'r> = Uyyvyy411Row<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     check_dimensions_match(self.width, self.height, width, height)?;
     if self.width & 3 != 0 {
@@ -439,7 +443,7 @@ impl<R> PixelSink for MixedSinker<'_, Uyyvyy411, R> {
     // (`chroma_411_center_sited_h` + the 4:4:4 kernels need `yuv-planar`); a
     // `yuv-packed`-only build keeps the default nearest decode.
     #[cfg(all(feature = "yuv-packed", feature = "yuv-planar"))]
-    let chroma_location = self.chroma_location;
+    let chroma_location = self.chroma_location.clone();
 
     let Self {
       rgb,
@@ -501,7 +505,7 @@ impl<R> PixelSink for MixedSinker<'_, Uyyvyy411, R> {
       // reconstruct full-width chroma (de-pack + `1→4` upsample) and decode 4:4:4.
       // The co-sited path keeps the fused `uyyvyy411_to_rgb_row` decode.
       #[cfg(all(feature = "yuv-packed", feature = "yuv-planar"))]
-      let center_sited = chroma_411_center_sited_h(chroma_location);
+      let center_sited = chroma_411_center_sited_h(&chroma_location);
       #[cfg(all(feature = "yuv-packed", feature = "yuv-planar"))]
       let chroma_h_phase = if center_sited {
         YUV41X_CENTERED_H_PHASE
@@ -894,7 +898,7 @@ impl<R> PixelSink for MixedSinker<'_, Uyyvyy411, R> {
     // path keeps the byte-identical nearest decode. Gated like its consumers
     // (`yuv-planar`); a `yuv-packed`-only build keeps co-sited.
     #[cfg(all(feature = "yuv-packed", feature = "yuv-planar"))]
-    let center_sited = chroma_411_center_sited_h(chroma_location);
+    let center_sited = chroma_411_center_sited_h(&chroma_location);
 
     // RFC #238 #302: mirror the resample branch's per-frame siting freeze on the
     // identity path. `chroma_location` is public and `Copy`, so a caller can flip

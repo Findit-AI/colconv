@@ -61,7 +61,7 @@ fn rgb565_simd_matches_scalar() {
     .unwrap()
     .with_luma(&mut luma_simd)
     .unwrap();
-  rgb565_to(&src, true, ColorMatrix::Bt709, &mut s).unwrap();
+  rgb565_to(&src, true, s.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   let mut s2 = MixedSinker::<Rgb565>::new(w, h)
     .with_rgb(&mut rgb_scalar)
@@ -75,7 +75,7 @@ fn rgb565_simd_matches_scalar() {
     .with_luma(&mut luma_scalar)
     .unwrap();
   s2.set_simd(false);
-  rgb565_to(&src, true, ColorMatrix::Bt709, &mut s2).unwrap();
+  rgb565_to(&src, true, s2.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   assert_eq!(rgb_simd, rgb_scalar, "RGB565 rgb output diverges");
   assert_eq!(rgba_simd, rgba_scalar, "RGB565 rgba output diverges");
@@ -115,7 +115,7 @@ fn bgr565_simd_matches_scalar() {
     .unwrap()
     .with_rgb_u16(&mut rgb_u16_simd)
     .unwrap();
-  bgr565_to(&src, true, ColorMatrix::Bt709, &mut s).unwrap();
+  bgr565_to(&src, true, s.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   let mut s2 = MixedSinker::<Bgr565>::new(w, h)
     .with_rgb(&mut rgb_scalar)
@@ -125,7 +125,7 @@ fn bgr565_simd_matches_scalar() {
     .with_rgb_u16(&mut rgb_u16_scalar)
     .unwrap();
   s2.set_simd(false);
-  bgr565_to(&src, true, ColorMatrix::Bt709, &mut s2).unwrap();
+  bgr565_to(&src, true, s2.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   assert_eq!(rgb_simd, rgb_scalar, "BGR565 rgb output diverges");
   assert_eq!(rgba_simd, rgba_scalar, "BGR565 rgba output diverges");
@@ -161,7 +161,7 @@ fn rgb555_simd_matches_scalar() {
     .unwrap()
     .with_rgb_u16(&mut rgb_u16_simd)
     .unwrap();
-  rgb555_to(&src, true, ColorMatrix::Bt709, &mut s).unwrap();
+  rgb555_to(&src, true, s.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   let mut s2 = MixedSinker::<Rgb555>::new(w, h)
     .with_rgb(&mut rgb_scalar)
@@ -171,7 +171,7 @@ fn rgb555_simd_matches_scalar() {
     .with_rgb_u16(&mut rgb_u16_scalar)
     .unwrap();
   s2.set_simd(false);
-  rgb555_to(&src, true, ColorMatrix::Bt709, &mut s2).unwrap();
+  rgb555_to(&src, true, s2.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   assert_eq!(rgb_simd, rgb_scalar, "RGB555 rgb output diverges");
   assert_eq!(rgba_simd, rgba_scalar, "RGB555 rgba output diverges");
@@ -202,7 +202,7 @@ fn bgr555_simd_matches_scalar() {
     .unwrap()
     .with_rgba(&mut rgba_simd)
     .unwrap();
-  bgr555_to(&src, true, ColorMatrix::Bt709, &mut s).unwrap();
+  bgr555_to(&src, true, s.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   let mut s2 = MixedSinker::<Bgr555>::new(w, h)
     .with_rgb(&mut rgb_scalar)
@@ -210,7 +210,7 @@ fn bgr555_simd_matches_scalar() {
     .with_rgba(&mut rgba_scalar)
     .unwrap();
   s2.set_simd(false);
-  bgr555_to(&src, true, ColorMatrix::Bt709, &mut s2).unwrap();
+  bgr555_to(&src, true, s2.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   assert_eq!(rgb_simd, rgb_scalar, "BGR555 rgb output diverges");
   assert_eq!(rgba_simd, rgba_scalar, "BGR555 rgba output diverges");
@@ -242,7 +242,7 @@ fn rgb444_simd_matches_scalar() {
     .unwrap()
     .with_rgb_u16(&mut rgb_u16_simd)
     .unwrap();
-  rgb444_to(&src, true, ColorMatrix::Bt709, &mut s).unwrap();
+  rgb444_to(&src, true, s.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   let mut s2 = MixedSinker::<Rgb444>::new(w, h)
     .with_rgb(&mut rgb_scalar)
@@ -252,7 +252,7 @@ fn rgb444_simd_matches_scalar() {
     .with_rgb_u16(&mut rgb_u16_scalar)
     .unwrap();
   s2.set_simd(false);
-  rgb444_to(&src, true, ColorMatrix::Bt709, &mut s2).unwrap();
+  rgb444_to(&src, true, s2.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   assert_eq!(rgb_simd, rgb_scalar, "RGB444 rgb output diverges");
   assert_eq!(rgba_simd, rgba_scalar, "RGB444 rgba output diverges");
@@ -283,7 +283,7 @@ fn bgr444_simd_matches_scalar() {
     .unwrap()
     .with_rgba(&mut rgba_simd)
     .unwrap();
-  bgr444_to(&src, true, ColorMatrix::Bt709, &mut s).unwrap();
+  bgr444_to(&src, true, s.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   let mut s2 = MixedSinker::<Bgr444>::new(w, h)
     .with_rgb(&mut rgb_scalar)
@@ -291,7 +291,7 @@ fn bgr444_simd_matches_scalar() {
     .with_rgba(&mut rgba_scalar)
     .unwrap();
   s2.set_simd(false);
-  bgr444_to(&src, true, ColorMatrix::Bt709, &mut s2).unwrap();
+  bgr444_to(&src, true, s2.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   assert_eq!(rgb_simd, rgb_scalar, "BGR444 rgb output diverges");
   assert_eq!(rgba_simd, rgba_scalar, "BGR444 rgba output diverges");
@@ -312,7 +312,7 @@ fn rgb565_rgba_forces_alpha_ff() {
   let mut sink = MixedSinker::<Rgb565>::new(8, 2)
     .with_rgba(&mut rgba_out)
     .unwrap();
-  rgb565_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  rgb565_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   for px in rgba_out.chunks(4) {
     assert_eq!(px[3], 0xFF, "RGB565 RGBA alpha not 0xFF");
   }
@@ -330,7 +330,7 @@ fn bgr565_rgba_forces_alpha_ff() {
   let mut sink = MixedSinker::<Bgr565>::new(8, 2)
     .with_rgba(&mut rgba_out)
     .unwrap();
-  bgr565_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  bgr565_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   for px in rgba_out.chunks(4) {
     assert_eq!(px[3], 0xFF, "BGR565 RGBA alpha not 0xFF");
   }
@@ -349,7 +349,7 @@ fn rgb555_rgba_forces_alpha_ff() {
   let mut sink = MixedSinker::<Rgb555>::new(8, 2)
     .with_rgba(&mut rgba_out)
     .unwrap();
-  rgb555_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  rgb555_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   for px in rgba_out.chunks(4) {
     assert_eq!(px[3], 0xFF, "RGB555 RGBA alpha not 0xFF");
   }
@@ -367,7 +367,7 @@ fn bgr555_rgba_forces_alpha_ff() {
   let mut sink = MixedSinker::<Bgr555>::new(8, 2)
     .with_rgba(&mut rgba_out)
     .unwrap();
-  bgr555_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  bgr555_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   for px in rgba_out.chunks(4) {
     assert_eq!(px[3], 0xFF, "BGR555 RGBA alpha not 0xFF");
   }
@@ -386,7 +386,7 @@ fn rgb444_rgba_forces_alpha_ff() {
   let mut sink = MixedSinker::<Rgb444>::new(8, 2)
     .with_rgba(&mut rgba_out)
     .unwrap();
-  rgb444_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  rgb444_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   for px in rgba_out.chunks(4) {
     assert_eq!(px[3], 0xFF, "RGB444 RGBA alpha not 0xFF");
   }
@@ -404,7 +404,7 @@ fn bgr444_rgba_forces_alpha_ff() {
   let mut sink = MixedSinker::<Bgr444>::new(8, 2)
     .with_rgba(&mut rgba_out)
     .unwrap();
-  bgr444_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  bgr444_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   for px in rgba_out.chunks(4) {
     assert_eq!(px[3], 0xFF, "BGR444 RGBA alpha not 0xFF");
   }
@@ -424,7 +424,7 @@ fn rgb565_rgba_u16_forces_alpha_ffff() {
   let mut sink = MixedSinker::<Rgb565>::new(8, 2)
     .with_rgba_u16(&mut rgba_u16_out)
     .unwrap();
-  rgb565_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  rgb565_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   for px in rgba_u16_out.chunks(4) {
     assert_eq!(px[3], 0xFFFF, "RGB565 RGBA u16 alpha not 0xFFFF");
   }
@@ -442,7 +442,7 @@ fn rgb555_rgba_u16_forces_alpha_ffff() {
   let mut sink = MixedSinker::<Rgb555>::new(8, 2)
     .with_rgba_u16(&mut rgba_u16_out)
     .unwrap();
-  rgb555_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  rgb555_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   for px in rgba_u16_out.chunks(4) {
     assert_eq!(px[3], 0xFFFF, "RGB555 RGBA u16 alpha not 0xFFFF");
   }
@@ -460,7 +460,7 @@ fn rgb444_rgba_u16_forces_alpha_ffff() {
   let mut sink = MixedSinker::<Rgb444>::new(8, 2)
     .with_rgba_u16(&mut rgba_u16_out)
     .unwrap();
-  rgb444_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  rgb444_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   for px in rgba_u16_out.chunks(4) {
     assert_eq!(px[3], 0xFFFF, "RGB444 RGBA u16 alpha not 0xFFFF");
   }
@@ -481,7 +481,7 @@ fn rgb565_u16_native_precision_max() {
   let mut sink = MixedSinker::<Rgb565>::new(16, 4)
     .with_rgb_u16(&mut rgb_u16_out)
     .unwrap();
-  rgb565_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  rgb565_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   for px in rgb_u16_out.chunks(3) {
     assert_eq!(px, [31, 63, 31], "RGB565 u16 max pixel wrong");
   }
@@ -500,7 +500,7 @@ fn rgb555_u16_native_precision_max() {
   let mut sink = MixedSinker::<Rgb555>::new(16, 4)
     .with_rgb_u16(&mut rgb_u16_out)
     .unwrap();
-  rgb555_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  rgb555_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   for px in rgb_u16_out.chunks(3) {
     assert_eq!(px, [31, 31, 31], "RGB555 u16 max pixel wrong");
   }
@@ -519,7 +519,7 @@ fn rgb444_u16_native_precision_max() {
   let mut sink = MixedSinker::<Rgb444>::new(16, 4)
     .with_rgb_u16(&mut rgb_u16_out)
     .unwrap();
-  rgb444_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  rgb444_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   for px in rgb_u16_out.chunks(3) {
     assert_eq!(px, [15, 15, 15], "RGB444 u16 max pixel wrong");
   }
@@ -540,7 +540,7 @@ fn rgb565_known_pixel_pure_green() {
   let mut sink = MixedSinker::<Rgb565>::new(16, 1)
     .with_rgb(&mut rgb_out)
     .unwrap();
-  rgb565_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  rgb565_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   for px in rgb_out.chunks(3) {
     assert_eq!(px, [0, 255, 0], "RGB565 pure green pixel wrong");
   }
@@ -559,7 +559,7 @@ fn rgb565_known_pixel_pure_red() {
   let mut sink = MixedSinker::<Rgb565>::new(16, 1)
     .with_rgb(&mut rgb_out)
     .unwrap();
-  rgb565_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  rgb565_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   for px in rgb_out.chunks(3) {
     assert_eq!(px, [255, 0, 0], "RGB565 pure red pixel wrong");
   }
@@ -577,7 +577,7 @@ fn rgb565_known_pixel_all_zeros() {
   let mut sink = MixedSinker::<Rgb565>::new(16, 1)
     .with_rgb(&mut rgb_out)
     .unwrap();
-  rgb565_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  rgb565_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   for px in rgb_out.chunks(3) {
     assert_eq!(px, [0, 0, 0], "RGB565 all-zeros pixel wrong");
   }
@@ -596,7 +596,7 @@ fn rgb565_known_pixel_all_ones_expands_to_255() {
   let mut sink = MixedSinker::<Rgb565>::new(16, 1)
     .with_rgb(&mut rgb_out)
     .unwrap();
-  rgb565_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  rgb565_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   for px in rgb_out.chunks(3) {
     assert_eq!(px, [255, 255, 255], "RGB565 all-ones pixel wrong");
   }
@@ -615,7 +615,7 @@ fn rgb555_known_pixel_all_ones_expands_to_255() {
   let mut sink = MixedSinker::<Rgb555>::new(16, 1)
     .with_rgb(&mut rgb_out)
     .unwrap();
-  rgb555_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  rgb555_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   for px in rgb_out.chunks(3) {
     assert_eq!(px, [255, 255, 255], "RGB555 all-ones pixel wrong");
   }
@@ -634,7 +634,7 @@ fn rgb444_known_pixel_all_ones_expands_to_255() {
   let mut sink = MixedSinker::<Rgb444>::new(16, 1)
     .with_rgb(&mut rgb_out)
     .unwrap();
-  rgb444_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  rgb444_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   for px in rgb_out.chunks(3) {
     assert_eq!(px, [255, 255, 255], "RGB444 all-ones pixel wrong");
   }
@@ -656,7 +656,7 @@ fn bgr565_channel_order_r_in_low_bits() {
   let mut sink = MixedSinker::<Bgr565>::new(16, 1)
     .with_rgb(&mut rgb_out)
     .unwrap();
-  bgr565_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  bgr565_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   for px in rgb_out.chunks(3) {
     assert_eq!(px, [255, 0, 0], "BGR565 R-channel order wrong");
   }
@@ -675,7 +675,7 @@ fn bgr555_channel_order_r_in_low_bits() {
   let mut sink = MixedSinker::<Bgr555>::new(16, 1)
     .with_rgb(&mut rgb_out)
     .unwrap();
-  bgr555_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  bgr555_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   for px in rgb_out.chunks(3) {
     assert_eq!(px, [255, 0, 0], "BGR555 R-channel order wrong");
   }
@@ -694,7 +694,7 @@ fn bgr444_channel_order_r_in_low_bits() {
   let mut sink = MixedSinker::<Bgr444>::new(16, 1)
     .with_rgb(&mut rgb_out)
     .unwrap();
-  bgr444_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  bgr444_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   for px in rgb_out.chunks(3) {
     assert_eq!(px, [255, 0, 0], "BGR444 R-channel order wrong");
   }
@@ -722,7 +722,7 @@ fn rgb565_luma_u16_matches_luma_u8_zero_extended() {
     .with_luma_u16(&mut luma_u16)
     .unwrap();
   s.set_simd(false);
-  rgb565_to(&src, true, ColorMatrix::Bt709, &mut s).unwrap();
+  rgb565_to(&src, true, s.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   // Every luma_u16 value must equal the corresponding u8 zero-extended.
   let expected: std::vec::Vec<u16> = luma_u8.iter().map(|&y| y as u16).collect();
@@ -752,7 +752,7 @@ fn bgr565_luma_u16_matches_luma_u8_zero_extended() {
     .with_luma_u16(&mut luma_u16)
     .unwrap();
   s.set_simd(false);
-  bgr565_to(&src, true, ColorMatrix::Bt709, &mut s).unwrap();
+  bgr565_to(&src, true, s.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   let expected: std::vec::Vec<u16> = luma_u8.iter().map(|&y| y as u16).collect();
   assert_eq!(
@@ -781,7 +781,7 @@ fn rgb444_luma_u16_matches_luma_u8_zero_extended() {
     .with_luma_u16(&mut luma_u16)
     .unwrap();
   s.set_simd(false);
-  rgb444_to(&src, true, ColorMatrix::Bt709, &mut s).unwrap();
+  rgb444_to(&src, true, s.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   let expected: std::vec::Vec<u16> = luma_u8.iter().map(|&y| y as u16).collect();
   assert_eq!(
@@ -808,7 +808,7 @@ fn rgb565_luma_u16_in_u8_range() {
     .with_luma_u16(&mut luma_u16)
     .unwrap();
   sink.set_simd(false);
-  rgb565_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  rgb565_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   assert!(
     luma_u16.iter().all(|&y| y <= 255),
@@ -832,7 +832,7 @@ fn rgb555_luma_u16_in_u8_range() {
     .with_luma_u16(&mut luma_u16)
     .unwrap();
   sink.set_simd(false);
-  rgb555_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  rgb555_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   assert!(
     luma_u16.iter().all(|&y| y <= 255),
@@ -857,7 +857,7 @@ fn rgb565_hsv_pure_red_hue_near_zero() {
   let mut sink = MixedSinker::<Rgb565>::new(16, 1)
     .with_hsv(&mut h, &mut s, &mut v)
     .unwrap();
-  rgb565_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  rgb565_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   // Red: H=0, S=255, V=255.
   for (&hh, (&ss, &vv)) in h.iter().zip(s.iter().zip(v.iter())) {
     assert_eq!(hh, 0, "RGB565 red hue not 0");
@@ -885,7 +885,7 @@ fn rgb555_hsv_pure_blue_hue() {
     .with_hsv(&mut hh, &mut ss, &mut vv)
     .unwrap();
   sink.set_simd(false);
-  rgb555_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  rgb555_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   // S=255, V=255 are unambiguous for pure blue; H is verified via simd=false
   // scalar reference (exact value depends on the crate's HSV formula).
   assert!(
@@ -918,7 +918,7 @@ fn rgb565_width_one_round_trip() {
     .unwrap()
     .with_rgba(&mut rgba_out)
     .unwrap();
-  rgb565_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  rgb565_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   assert_eq!(
     rgb_out.as_slice(),
     [0u8, 255, 0],
@@ -944,7 +944,7 @@ fn rgb444_width_one_round_trip() {
   let mut sink = MixedSinker::<Rgb444>::new(1, 1)
     .with_rgb(&mut rgb_out)
     .unwrap();
-  rgb444_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  rgb444_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   assert_eq!(
     rgb_out.as_slice(),
     [255u8, 0, 0],
@@ -1065,7 +1065,7 @@ macro_rules! assert_byte_format {
       .unwrap()
       .with_hsv(&mut hh, &mut ss, &mut vv)
       .unwrap();
-    $walker(&frame, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    $walker(&frame, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
     let exp_rgb: std::vec::Vec<u8> = $expect_rgb;
     let exp_rgb_u16: std::vec::Vec<u16> = $expect_rgb_u16;
@@ -1158,7 +1158,7 @@ fn rgb4_walker_two_pixels_per_byte() {
     .unwrap()
     .with_rgb_u16(&mut rgb_u16)
     .unwrap();
-  rgb4_to(&frame, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  rgb4_to(&frame, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   assert_eq!(rgb, std::vec![255, 255, 255, 0, 0, 0, 255, 0, 0, 0, 0, 255]);
   assert_eq!(rgb_u16, std::vec![1, 3, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
 }
@@ -1171,7 +1171,7 @@ fn bgr4_walker_two_pixels_per_byte_channel_order() {
   let frame = Bgr4Frame::try_new(&bytes, 4, 1, 2).unwrap();
   let mut rgba = std::vec![0u8; 16];
   let mut sink = MixedSinker::<Bgr4>::new(4, 1).with_rgba(&mut rgba).unwrap();
-  bgr4_to(&frame, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  bgr4_to(&frame, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   let expect = std::vec![
     255, 255, 255, 255, 0, 0, 0, 255, 255, 0, 0, 255, 0, 0, 255, 255,
   ];
@@ -1185,7 +1185,7 @@ fn rgb8_rgba_only_fast_path() {
   let frame = Rgb8Frame::try_new(&bytes, 2, 1, 2).unwrap();
   let mut rgba = std::vec![0u8; 8];
   let mut sink = MixedSinker::<Rgb8>::new(2, 1).with_rgba(&mut rgba).unwrap();
-  rgb8_to(&frame, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  rgb8_to(&frame, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   assert_eq!(rgba, std::vec![255, 0, 0, 0xFF, 0, 0, 255, 0xFF]);
 }
 
@@ -1208,7 +1208,7 @@ fn rgb4_row_shape_mismatch_returns_error() {
   let mut sink = MixedSinker::<Rgb4>::new(4, 1).with_rgb(&mut rgb).unwrap();
   PixelSink::begin_frame(&mut sink, 4, 1).unwrap();
   let bad = [0u8; 3];
-  let row = Rgb4Row::new(&bad, 0, ColorMatrix::Bt709, true);
+  let row = Rgb4Row::for_tests(&bad, 0, KernelMatrix::Bt709, true);
   let result = PixelSink::process(&mut sink, row);
   assert!(
     matches!(result, Err(MixedSinkerError::RowShapeMismatch(_))),

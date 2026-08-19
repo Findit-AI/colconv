@@ -10,6 +10,7 @@
 //! `R'G'B'`.
 
 use super::*;
+use crate::ColorMatrix;
 
 /// Re-encode a logical u16 as LE wire storage so a `BE = false` kernel recovers
 /// it via `u16::from_le` on both endiannesses (the smpte2085 kernels read wire
@@ -52,7 +53,7 @@ fn encode_xyz_prime_to_norm(xyz_prime: [f32; 3]) -> [f32; 3] {
 fn for_transfer_selects_pq_only() {
   use crate::Transfer;
   assert_eq!(
-    Smpte2085Transfer::for_transfer(Transfer::SmpteSt2084Pq),
+    Smpte2085Transfer::for_transfer(&Transfer::SmpteSt2084Pq),
     Some(Smpte2085Transfer::Pq)
   );
   for t in [
@@ -61,10 +62,10 @@ fn for_transfer_selects_pq_only() {
     Transfer::Bt2020_10Bit,
     Transfer::AribStdB67Hlg,
     Transfer::SmpteSt428,
-    Transfer::Unknown(99),
+    Transfer::other("unassigned-99"),
   ] {
     assert_eq!(
-      Smpte2085Transfer::for_transfer(t),
+      Smpte2085Transfer::for_transfer(&t),
       None,
       "{t:?} must not select the SMPTE 2085 transfer"
     );
@@ -319,7 +320,7 @@ fn big_endian_matches_swapped_little_endian() {
 #[test]
 #[should_panic(expected = "rgb_out row too short")]
 fn smpte2085_rgb_u8_short_output_panics_on_length_check() {
-  use crate::{ColorMatrix, Primaries, Transfer, row::yuv444p12_to_rgb_row_smpte2085_endian};
+  use crate::{KernelMatrix, Primaries, Transfer, row::yuv444p12_to_rgb_row_smpte2085_endian};
   let (y, u, v) = ([2048_u16; 2], [2048_u16; 2], [2048_u16; 2]);
   let mut rgb = [0_u8; 3]; // width 2 needs 6.
   yuv444p12_to_rgb_row_smpte2085_endian(
@@ -328,10 +329,11 @@ fn smpte2085_rgb_u8_short_output_panics_on_length_check() {
     &v,
     &mut rgb,
     2,
-    ColorMatrix::Smpte2085,
-    Primaries::Unspecified,
+    KernelMatrix::Bt709,
+    &ColorMatrix::Smpte2085,
+    &Primaries::Unspecified,
     true,
-    Transfer::SmpteSt2084Pq,
+    &Transfer::SmpteSt2084Pq,
     false,
     false,
   );
@@ -341,7 +343,7 @@ fn smpte2085_rgb_u8_short_output_panics_on_length_check() {
 #[test]
 #[should_panic(expected = "rgba_out row too short")]
 fn smpte2085_rgba_u8_short_output_panics_on_length_check() {
-  use crate::{ColorMatrix, Primaries, Transfer, row::yuv444p12_to_rgba_row_smpte2085_endian};
+  use crate::{KernelMatrix, Primaries, Transfer, row::yuv444p12_to_rgba_row_smpte2085_endian};
   let (y, u, v) = ([2048_u16; 2], [2048_u16; 2], [2048_u16; 2]);
   let mut rgba = [0_u8; 4]; // width 2 needs 8.
   yuv444p12_to_rgba_row_smpte2085_endian(
@@ -350,10 +352,11 @@ fn smpte2085_rgba_u8_short_output_panics_on_length_check() {
     &v,
     &mut rgba,
     2,
-    ColorMatrix::Smpte2085,
-    Primaries::Unspecified,
+    KernelMatrix::Bt709,
+    &ColorMatrix::Smpte2085,
+    &Primaries::Unspecified,
     true,
-    Transfer::SmpteSt2084Pq,
+    &Transfer::SmpteSt2084Pq,
     false,
     false,
   );
@@ -363,7 +366,7 @@ fn smpte2085_rgba_u8_short_output_panics_on_length_check() {
 #[test]
 #[should_panic(expected = "rgb_out row too short")]
 fn smpte2085_rgb_u16_short_output_panics_on_length_check() {
-  use crate::{ColorMatrix, Primaries, Transfer, row::yuv444p12_to_rgb_u16_row_smpte2085_endian};
+  use crate::{KernelMatrix, Primaries, Transfer, row::yuv444p12_to_rgb_u16_row_smpte2085_endian};
   let (y, u, v) = ([2048_u16; 2], [2048_u16; 2], [2048_u16; 2]);
   let mut rgb = [0_u16; 3]; // width 2 needs 6.
   yuv444p12_to_rgb_u16_row_smpte2085_endian(
@@ -372,10 +375,11 @@ fn smpte2085_rgb_u16_short_output_panics_on_length_check() {
     &v,
     &mut rgb,
     2,
-    ColorMatrix::Smpte2085,
-    Primaries::Unspecified,
+    KernelMatrix::Bt709,
+    &ColorMatrix::Smpte2085,
+    &Primaries::Unspecified,
     true,
-    Transfer::SmpteSt2084Pq,
+    &Transfer::SmpteSt2084Pq,
     false,
     false,
   );
@@ -385,7 +389,7 @@ fn smpte2085_rgb_u16_short_output_panics_on_length_check() {
 #[test]
 #[should_panic(expected = "rgba_out row too short")]
 fn smpte2085_rgba_u16_short_output_panics_on_length_check() {
-  use crate::{ColorMatrix, Primaries, Transfer, row::yuv444p12_to_rgba_u16_row_smpte2085_endian};
+  use crate::{KernelMatrix, Primaries, Transfer, row::yuv444p12_to_rgba_u16_row_smpte2085_endian};
   let (y, u, v) = ([2048_u16; 2], [2048_u16; 2], [2048_u16; 2]);
   let mut rgba = [0_u16; 4]; // width 2 needs 8.
   yuv444p12_to_rgba_u16_row_smpte2085_endian(
@@ -394,10 +398,11 @@ fn smpte2085_rgba_u16_short_output_panics_on_length_check() {
     &v,
     &mut rgba,
     2,
-    ColorMatrix::Smpte2085,
-    Primaries::Unspecified,
+    KernelMatrix::Bt709,
+    &ColorMatrix::Smpte2085,
+    &Primaries::Unspecified,
     true,
-    Transfer::SmpteSt2084Pq,
+    &Transfer::SmpteSt2084Pq,
     false,
     false,
   );

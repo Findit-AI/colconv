@@ -80,7 +80,7 @@ fn vuya_with_rgb_smoke() {
   let src = VuyaFrame::try_new(&buf, 4, 1, 16).unwrap();
   let mut rgb = std::vec![0u8; 4 * 3];
   let mut sink = MixedSinker::<Vuya>::new(4, 1).with_rgb(&mut rgb).unwrap();
-  vuya_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  vuya_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   for px in rgb.chunks(3) {
     assert!(
       px[0].abs_diff(128) <= 4,
@@ -118,7 +118,7 @@ fn vuya_with_rgba_passes_source_alpha() {
   let src = VuyaFrame::try_new(&buf, 4, 1, 16).unwrap();
   let mut rgba = std::vec![0u8; 4 * 4];
   let mut sink = MixedSinker::<Vuya>::new(4, 1).with_rgba(&mut rgba).unwrap();
-  vuya_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  vuya_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   for (i, &expected_a) in alphas.iter().enumerate() {
     assert_eq!(
       rgba[i * 4 + 3],
@@ -143,7 +143,7 @@ fn vuya_with_luma_extracts_y_byte() {
   let src = VuyaFrame::try_new(&buf, 8, 2, 32).unwrap();
   let mut luma = std::vec![0u8; 8 * 2];
   let mut sink = MixedSinker::<Vuya>::new(8, 2).with_luma(&mut luma).unwrap();
-  vuya_to(&src, false, ColorMatrix::Bt709, &mut sink).unwrap();
+  vuya_to(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   assert!(
     luma.iter().all(|&y| y == 0xC0),
     "luma expected 0xC0, got {:?}",
@@ -170,7 +170,7 @@ fn vuya_with_hsv_smoke() {
   let mut sink = MixedSinker::<Vuya>::new(6, 2)
     .with_hsv(&mut h, &mut s, &mut v)
     .unwrap();
-  vuya_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  vuya_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   for &sat in &s {
     assert_eq!(sat, 0, "gray must have S=0 in HSV");
   }
@@ -207,7 +207,7 @@ fn vuya_with_rgb_and_rgba_preserves_source_alpha() {
     .unwrap()
     .with_rgba(&mut rgba)
     .unwrap();
-  vuya_to(&frame, true, ColorMatrix::Bt709, &mut sinker).unwrap();
+  vuya_to(&frame, true, sinker.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   // Each pixel: RGB matches the YUV→RGB output for gray Y=128
   for n in 0..width {
@@ -254,13 +254,23 @@ fn vuya_simd_vs_scalar_parity_at_1922() {
   let mut sink_simd = MixedSinker::<Vuya>::new(w, h)
     .with_rgb(&mut rgb_simd)
     .unwrap();
-  vuya_to(&src, false, ColorMatrix::Bt709, &mut sink_simd).unwrap();
+  vuya_to(
+    &src,
+    false,
+    sink_simd.set_kernel_matrix(KernelMatrix::Bt709),
+  )
+  .unwrap();
 
   let mut sink_scalar = MixedSinker::<Vuya>::new(w, h)
     .with_rgb(&mut rgb_scalar)
     .unwrap()
     .with_simd(false);
-  vuya_to(&src, false, ColorMatrix::Bt709, &mut sink_scalar).unwrap();
+  vuya_to(
+    &src,
+    false,
+    sink_scalar.set_kernel_matrix(KernelMatrix::Bt709),
+  )
+  .unwrap();
 
   assert_eq!(rgb_simd, rgb_scalar, "VUYA SIMD ≠ scalar at width {w}");
 }
@@ -422,12 +432,22 @@ fn vuya_planar_parity_with_yuva444p() {
     let mut p_sink = MixedSinker::<Yuva444p>::new(width, height)
       .with_rgb(&mut p_rgb)
       .unwrap();
-    yuva444p_to(&planar, full_range, ColorMatrix::Bt709, &mut p_sink).unwrap();
+    yuva444p_to(
+      &planar,
+      full_range,
+      p_sink.set_kernel_matrix(KernelMatrix::Bt709),
+    )
+    .unwrap();
 
     let mut x_sink = MixedSinker::<Vuya>::new(width, height)
       .with_rgb(&mut x_rgb)
       .unwrap();
-    vuya_to(&packed_frame, full_range, ColorMatrix::Bt709, &mut x_sink).unwrap();
+    vuya_to(
+      &packed_frame,
+      full_range,
+      x_sink.set_kernel_matrix(KernelMatrix::Bt709),
+    )
+    .unwrap();
 
     assert_eq!(
       p_rgb, x_rgb,
@@ -445,12 +465,22 @@ fn vuya_planar_parity_with_yuva444p() {
     let mut p_sink2 = MixedSinker::<Yuva444p>::new(width, height)
       .with_rgba(&mut p_rgba)
       .unwrap();
-    yuva444p_to(&planar, full_range, ColorMatrix::Bt709, &mut p_sink2).unwrap();
+    yuva444p_to(
+      &planar,
+      full_range,
+      p_sink2.set_kernel_matrix(KernelMatrix::Bt709),
+    )
+    .unwrap();
 
     let mut x_sink2 = MixedSinker::<Vuya>::new(width, height)
       .with_rgba(&mut x_rgba)
       .unwrap();
-    vuya_to(&packed_frame, full_range, ColorMatrix::Bt709, &mut x_sink2).unwrap();
+    vuya_to(
+      &packed_frame,
+      full_range,
+      x_sink2.set_kernel_matrix(KernelMatrix::Bt709),
+    )
+    .unwrap();
 
     assert_eq!(
       p_rgba, x_rgba,
@@ -493,12 +523,12 @@ fn vuya_strategy_a_plus_matches_independent_kernel() {
 
   for full_range in [true, false] {
     for matrix in [
-      ColorMatrix::Bt601,
-      ColorMatrix::Bt709,
-      ColorMatrix::Bt2020Ncl,
-      ColorMatrix::Smpte240m,
-      ColorMatrix::Fcc,
-      ColorMatrix::YCgCo,
+      KernelMatrix::Bt601,
+      KernelMatrix::Bt709,
+      KernelMatrix::Bt2020Ncl,
+      KernelMatrix::Smpte240m,
+      KernelMatrix::Fcc,
+      KernelMatrix::YCgCo,
     ] {
       // Sinker path (uses A+).
       let mut sinker_rgb = std::vec![0u8; width * height * 3];
@@ -509,7 +539,7 @@ fn vuya_strategy_a_plus_matches_independent_kernel() {
           .unwrap()
           .with_rgba(&mut sinker_rgba)
           .unwrap();
-        vuya_to(&frame, full_range, matrix, &mut sink).unwrap();
+        vuya_to(&frame, full_range, sink.set_kernel_matrix(matrix)).unwrap();
       }
 
       // Reference: scalar inline-α kernel directly (per row).
@@ -569,7 +599,7 @@ fn vuya_with_luma_u16_extracts_y_zero_extended() {
   let mut sink = MixedSinker::<Vuya>::new(width, height)
     .with_luma_u16(&mut luma)
     .unwrap();
-  vuya_to(&frame, false, ColorMatrix::Bt709, &mut sink).unwrap();
+  vuya_to(&frame, false, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   // Reference: Y bytes at offset 2 of each 4-byte pixel quadruple.
   let expected: std::vec::Vec<u16> = (0..n).map(|i| packed[i * 4 + 2] as u16).collect();
@@ -628,7 +658,7 @@ fn vuya_strategy_a_plus_with_simd_false_uses_scalar_path() {
       .unwrap()
       .with_rgba(&mut simd_rgba)
       .unwrap();
-    vuya_to(&frame, false, ColorMatrix::Bt709, &mut sink).unwrap();
+    vuya_to(&frame, false, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
 
   // A+ with with_simd(false): scalar path through the α-extract dispatcher.
@@ -641,7 +671,7 @@ fn vuya_strategy_a_plus_with_simd_false_uses_scalar_path() {
       .with_rgba(&mut scalar_rgba)
       .unwrap()
       .with_simd(false);
-    vuya_to(&frame, false, ColorMatrix::Bt709, &mut sink).unwrap();
+    vuya_to(&frame, false, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
 
   assert_eq!(
@@ -694,7 +724,7 @@ fn vuya_rgb_scratch_alloc_failure_leaves_outputs_untouched() {
     .unwrap();
 
   super::super::arm_rgb_scratch_alloc_failure();
-  let err = vuya_to(&src, false, ColorMatrix::Bt601, &mut sink).unwrap_err();
+  let err = vuya_to(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap_err();
   drop(sink);
 
   assert!(

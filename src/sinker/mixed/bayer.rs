@@ -42,6 +42,10 @@ impl<R> PixelSink for MixedSinker<'_, Bayer, R> {
   type Input<'r> = BayerRow<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     // Bayer accepts odd dimensions — see `BayerFrame::try_new` for
     // the rationale (cropped Bayer is a real workflow).
@@ -120,8 +124,8 @@ impl<R> PixelSink for MixedSinker<'_, Bayer, R> {
     // identity path uses* — Q8-coefficient luma (`rgb_row_to_luma_row`) and the
     // OpenCV HSV kernel — so a resampled frame matches a direct demosaic of the
     // source followed by an area-bin of that RGB. Bayer carries no
-    // `ColorMatrix`/`full_range`, so it CANNOT share the packed-RGB tail's
-    // `ColorMatrix`-based emit; it keeps its BESPOKE emit inline below and shares
+    // `KernelMatrix`/`full_range`, so it CANNOT share the packed-RGB tail's
+    // `KernelMatrix`-based emit; it keeps its BESPOKE emit inline below and shares
     // only the transactional preflight/stream/scratch/freeze plumbing.
     if let Some(plan) = plan.as_ref() {
       // `rgba` and `luma_u16` are never attached on a Bayer sink (RGB-only
@@ -203,7 +207,7 @@ impl<R> PixelSink for MixedSinker<'_, Bayer, R> {
         idx,
       )?;
       // Demosaic the CFA row into the (grown) scratch and feed the BESPOKE emit
-      // (Q8 luma + OpenCV HSV, no `ColorMatrix`); this scratch grow re-runs as a
+      // (Q8 luma + OpenCV HSV, no `KernelMatrix`); this scratch grow re-runs as a
       // no-op after the pre-commit grow above.
       let stream = rgb_stream.as_mut().expect("created above");
       let scratch = source_rgb_scratch(rgb_scratch, w, plan)?;
@@ -363,6 +367,10 @@ impl<const BITS: u32, const BE: bool> PixelSink for MixedSinker<'_, Bayer16<BITS
   type Input<'r> = BayerRow16<'r, BITS>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     // Bayer accepts odd dimensions — see `BayerFrame::try_new` for
     // the rationale (cropped Bayer is a real workflow).

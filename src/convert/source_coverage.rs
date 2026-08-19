@@ -13,8 +13,8 @@
 //!   proof in [`super::tests`]).
 
 use crate::{
-  ChromaLocation, ColorInfo, ColorMatrix, ColorSpec, DynamicRange, PixelFormat, Primaries,
-  Transfer,
+  ChromaLocation, ColorInfo, ColorMatrix, ColorSpec, DynamicRange, KernelMatrix, PixelFormat,
+  Primaries, Transfer,
   convert::Convert,
   resample::NoopResampler,
   sinker::{MixedSinker, MixedSinkerError},
@@ -297,7 +297,7 @@ where
   W: Fn(
     &Fr,
     bool,
-    ColorMatrix,
+    KernelMatrix,
     &mut MixedSinker<'_, Fr::Marker, NoopResampler>,
   ) -> Result<(), MixedSinkerError>,
 {
@@ -305,7 +305,7 @@ where
 
   let mut convert_rgb = std::vec![0u8; w * h * 3];
   Convert::from(&make())
-    .spec(spec)
+    .spec(spec.clone())
     .rgb(&mut convert_rgb)
     .run()
     .unwrap();
@@ -318,14 +318,20 @@ where
     // `run` applies it only under `yuv-planar`; elsewhere the spec reaches the
     // walk solely through the derived `full_range` / `matrix` arguments.
     #[cfg(feature = "yuv-planar")]
-    sink.set_color_spec(spec);
-    walk(&make(), spec.full_range(), spec.matrix(), &mut sink).unwrap();
+    sink.set_color_spec(&spec).unwrap();
+    walk(
+      &make(),
+      spec.full_range(),
+      spec.kernel_matrix().unwrap(),
+      &mut sink,
+    )
+    .unwrap();
   }
   assert_eq!(convert_rgb, manual_rgb, "rgb");
 
   let mut convert_luma = std::vec![0u8; w * h];
   Convert::from(&make())
-    .spec(spec)
+    .spec(spec.clone())
     .luma(&mut convert_luma)
     .run()
     .unwrap();
@@ -336,8 +342,14 @@ where
       .unwrap();
     // Mirror `Convert::run` (see the rgb arm above).
     #[cfg(feature = "yuv-planar")]
-    sink.set_color_spec(spec);
-    walk(&make(), spec.full_range(), spec.matrix(), &mut sink).unwrap();
+    sink.set_color_spec(&spec).unwrap();
+    walk(
+      &make(),
+      spec.full_range(),
+      spec.kernel_matrix().unwrap(),
+      &mut sink,
+    )
+    .unwrap();
   }
   assert_eq!(convert_luma, manual_luma, "luma");
 }
@@ -353,7 +365,7 @@ fn rgb24_parity() {
     2,
     2,
     || crate::frame::Rgb24Frame::new(&px, 2, 2, 6),
-    |f, fr, m, s| crate::source::rgb24_to(f, fr, m, s),
+    |f, fr, m, s| crate::source::rgb24_to(f, fr, s.set_kernel_matrix(m)),
   );
 }
 
@@ -366,7 +378,7 @@ fn gray8_parity() {
     2,
     2,
     || crate::frame::Gray8Frame::new(&px, 2, 2, 2),
-    |f, fr, m, s| crate::source::gray8_to(f, fr, m, s),
+    |f, fr, m, s| crate::source::gray8_to(f, fr, s.set_kernel_matrix(m)),
   );
 }
 
@@ -381,7 +393,7 @@ fn yuyv422_parity() {
     4,
     2,
     || crate::frame::Yuyv422Frame::new(&px, 4, 2, 8),
-    |f, fr, m, s| crate::source::yuyv422_to(f, fr, m, s),
+    |f, fr, m, s| crate::source::yuyv422_to(f, fr, s.set_kernel_matrix(m)),
   );
 }
 
@@ -395,7 +407,7 @@ fn nv12_parity() {
     4,
     2,
     || crate::frame::Nv12Frame::new(&y, &uv, 4, 2, 4, 4),
-    |f, fr, m, s| crate::source::nv12_to(f, fr, m, s),
+    |f, fr, m, s| crate::source::nv12_to(f, fr, s.set_kernel_matrix(m)),
   );
 }
 
@@ -411,7 +423,7 @@ fn yuva420p_parity() {
     4,
     2,
     || crate::frame::Yuva420pFrame::new(&y, &u, &v, &a, 4, 2, 4, 2, 2, 4),
-    |f, fr, m, s| crate::source::yuva420p_to(f, fr, m, s),
+    |f, fr, m, s| crate::source::yuva420p_to(f, fr, s.set_kernel_matrix(m)),
   );
 }
 
@@ -428,7 +440,7 @@ fn yuva420p_rgba_parity() {
 
   let mut convert_rgba = std::vec![0u8; 4 * 2 * 4];
   Convert::from(&make())
-    .spec(spec)
+    .spec(spec.clone())
     .rgba(&mut convert_rgba)
     .run()
     .unwrap();
@@ -437,8 +449,14 @@ fn yuva420p_rgba_parity() {
     let mut sink = MixedSinker::<crate::source::Yuva420p>::new(4, 2)
       .with_rgba(&mut manual_rgba)
       .unwrap()
-      .with_color_spec(spec);
-    crate::source::yuva420p_to(&make(), spec.full_range(), spec.matrix(), &mut sink).unwrap();
+      .with_color_spec(&spec)
+      .unwrap();
+    crate::source::yuva420p_to(
+      &make(),
+      spec.full_range(),
+      sink.set_kernel_matrix(spec.kernel_matrix().unwrap()),
+    )
+    .unwrap();
   }
   assert_eq!(convert_rgba, manual_rgba, "yuva420p rgba");
 }
@@ -455,7 +473,7 @@ fn vuyx_parity() {
     2,
     2,
     || crate::frame::VuyxFrame::new(&px, 2, 2, 8),
-    |f, fr, m, s| crate::source::vuyx_to(f, fr, m, s),
+    |f, fr, m, s| crate::source::vuyx_to(f, fr, s.set_kernel_matrix(m)),
   );
 }
 
@@ -474,7 +492,7 @@ fn pal8_parity() {
 
   let mut convert_rgb = std::vec![0u8; 2 * 2 * 3];
   Convert::from(&make())
-    .spec(spec)
+    .spec(spec.clone())
     .rgb(&mut convert_rgb)
     .run()
     .unwrap();
@@ -483,10 +501,9 @@ fn pal8_parity() {
     let mut sink = MixedSinker::<crate::source::Pal8>::new(2, 2)
       .with_rgb(&mut manual_rgb)
       .unwrap();
-    // Mirror `Convert::run`: the sink-side spec applies only under
-    // `yuv-planar` (see `assert_rgb_luma_parity`).
-    #[cfg(feature = "yuv-planar")]
-    sink.set_color_spec(spec);
+    // Mirror `Convert::run`: it applies the spec to the sink whatever the
+    // source, since mediaframe 0.4 made the sink the matrix's one reader.
+    sink.set_color_spec(&spec).unwrap();
     crate::source::pal8_to(&make(), &mut sink).unwrap();
   }
   assert_eq!(convert_rgb, manual_rgb, "pal8 rgb");
@@ -505,7 +522,7 @@ fn rgb48_parity() {
     2,
     2,
     || crate::frame::Rgb48Frame::new(&px, 2, 2, 6),
-    |f, fr, m, s| crate::source::rgb48_to_endian::<_, false>(f, fr, m, s),
+    |f, fr, m, s| crate::source::rgb48_to_endian::<_, false>(f, fr, s.set_kernel_matrix(m)),
   );
 }
 
@@ -522,11 +539,11 @@ fn rgbaf32_parity() {
     2,
     2,
     || crate::frame::Rgbaf32Frame::new(&px, 2, 2, 8),
-    |f, fr, m, s| crate::source::rgbaf32_to_endian::<_, false>(f, fr, m, s),
+    |f, fr, m, s| crate::source::rgbaf32_to_endian::<_, false>(f, fr, s.set_kernel_matrix(m)),
   );
 }
 
-/// XYZ12 (`Xyz12Options`, `FromSpec` derives the default gamut) — the
+/// XYZ12 (knob-free `()` options; the gamut is the sink's) — the
 /// endian-const `@convert @const` arm.
 #[cfg(feature = "xyz")]
 #[test]
@@ -536,11 +553,12 @@ fn xyz12_parity() {
   ];
   let make = || crate::frame::Xyz12Frame::new(&px, 2, 2, 6);
   let spec = spec_601();
-  let gamut = crate::Xyz12Options::new().target_gamut();
+  // `Convert` names no gamut here, so both paths take the sink's default.
+  let gamut = crate::KernelGamut::DciP3;
 
   let mut convert_rgb = std::vec![0u8; 2 * 2 * 3];
   Convert::from(&make())
-    .spec(spec)
+    .spec(spec.clone())
     .rgb(&mut convert_rgb)
     .run()
     .unwrap();
@@ -549,11 +567,10 @@ fn xyz12_parity() {
     let mut sink = MixedSinker::<crate::source::Xyz12>::new(2, 2)
       .with_rgb(&mut manual_rgb)
       .unwrap();
-    // Mirror `Convert::run`: the sink-side spec applies only under
-    // `yuv-planar` (see `assert_rgb_luma_parity`).
-    #[cfg(feature = "yuv-planar")]
-    sink.set_color_spec(spec);
-    crate::source::xyz12_to::<false, _>(&make(), gamut, &mut sink).unwrap();
+    // Mirror `Convert::run`: it applies the spec to the sink whatever the
+    // source, since mediaframe 0.4 made the sink the matrix's one reader.
+    sink.set_color_spec(&spec).unwrap();
+    crate::source::xyz12_to::<false, _>(&make(), sink.set_kernel_gamut(gamut)).unwrap();
   }
   assert_eq!(convert_rgb, manual_rgb, "xyz12 rgb");
 }
@@ -571,6 +588,6 @@ fn yuv420p10_parity() {
     4,
     2,
     || crate::frame::Yuv420p10Frame::new(&y, &u, &v, 4, 2, 4, 2, 2),
-    |f, fr, m, s| crate::source::yuv420p10_to_endian::<_, false>(f, fr, m, s),
+    |f, fr, m, s| crate::source::yuv420p10_to_endian::<_, false>(f, fr, s.set_kernel_matrix(m)),
   );
 }

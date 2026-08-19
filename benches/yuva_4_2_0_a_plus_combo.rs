@@ -38,7 +38,7 @@ use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_m
 use std::hint::black_box;
 
 use pixon::{
-  ColorMatrix,
+  KernelMatrix,
   bench_internals::{
     yuv_420_to_rgb_row, yuv420p10_to_rgb_row, yuv420p10_to_rgb_u16_row, yuv420p16_to_rgb_row,
     yuv420p16_to_rgb_u16_row, yuva420p_to_rgba_row, yuva420p10_to_rgba_row,
@@ -83,7 +83,7 @@ fn fill_pseudo_random_u16_full(buf: &mut [u16], seed: u32) {
 
 fn bench_yuva420p(c: &mut Criterion) {
   const WIDTHS: &[u32] = &[1280, 1920, 3840];
-  const MATRIX: ColorMatrix = ColorMatrix::Bt709;
+  const MATRIX: KernelMatrix = KernelMatrix::Bt709;
   const FULL_RANGE: bool = false;
 
   let mut group = c.benchmark_group("yuva420p_a_plus_combo");
@@ -137,7 +137,14 @@ fn bench_yuva420p(c: &mut Criterion) {
               .unwrap()
               .with_rgba(&mut rgba)
               .unwrap();
-            yuva420p_to(&frame, FULL_RANGE, MATRIX, &mut sinker).unwrap();
+            yuva420p_to(
+              &frame,
+              FULL_RANGE,
+              sinker
+                .set_color_spec(&pixon::ColorSpec::of_matrix(MATRIX))
+                .unwrap(),
+            )
+            .unwrap();
             black_box((&rgb, &rgba));
           });
         },
@@ -197,7 +204,7 @@ fn bench_yuva420p(c: &mut Criterion) {
 
 fn bench_yuva420p10_u8(c: &mut Criterion) {
   const WIDTHS: &[u32] = &[1280, 1920, 3840];
-  const MATRIX: ColorMatrix = ColorMatrix::Bt709;
+  const MATRIX: KernelMatrix = KernelMatrix::Bt709;
   const FULL_RANGE: bool = false;
 
   let mut group = c.benchmark_group("yuva420p10_a_plus_combo_u8");
@@ -249,7 +256,14 @@ fn bench_yuva420p10_u8(c: &mut Criterion) {
               .unwrap()
               .with_rgba(&mut rgba)
               .unwrap();
-            yuva420p10_to(&frame, FULL_RANGE, MATRIX, &mut sinker).unwrap();
+            yuva420p10_to(
+              &frame,
+              FULL_RANGE,
+              sinker
+                .set_color_spec(&pixon::ColorSpec::of_matrix(MATRIX))
+                .unwrap(),
+            )
+            .unwrap();
             black_box((&rgb, &rgba));
           });
         },
@@ -305,7 +319,7 @@ fn bench_yuva420p10_u8(c: &mut Criterion) {
 
 fn bench_yuva420p10_u16(c: &mut Criterion) {
   const WIDTHS: &[u32] = &[1280, 1920, 3840];
-  const MATRIX: ColorMatrix = ColorMatrix::Bt709;
+  const MATRIX: KernelMatrix = KernelMatrix::Bt709;
   const FULL_RANGE: bool = false;
 
   let mut group = c.benchmark_group("yuva420p10_a_plus_combo_u16");
@@ -357,7 +371,14 @@ fn bench_yuva420p10_u16(c: &mut Criterion) {
               .unwrap()
               .with_rgba_u16(&mut rgba)
               .unwrap();
-            yuva420p10_to(&frame, FULL_RANGE, MATRIX, &mut sinker).unwrap();
+            yuva420p10_to(
+              &frame,
+              FULL_RANGE,
+              sinker
+                .set_color_spec(&pixon::ColorSpec::of_matrix(MATRIX))
+                .unwrap(),
+            )
+            .unwrap();
             black_box((&rgb, &rgba));
           });
         },
@@ -413,7 +434,7 @@ fn bench_yuva420p10_u16(c: &mut Criterion) {
 
 fn bench_yuva420p16_u8(c: &mut Criterion) {
   const WIDTHS: &[u32] = &[1280, 1920, 3840];
-  const MATRIX: ColorMatrix = ColorMatrix::Bt709;
+  const MATRIX: KernelMatrix = KernelMatrix::Bt709;
   const FULL_RANGE: bool = false;
 
   let mut group = c.benchmark_group("yuva420p16_a_plus_combo_u8");
@@ -465,7 +486,14 @@ fn bench_yuva420p16_u8(c: &mut Criterion) {
               .unwrap()
               .with_rgba(&mut rgba)
               .unwrap();
-            yuva420p16_to(&frame, FULL_RANGE, MATRIX, &mut sinker).unwrap();
+            yuva420p16_to(
+              &frame,
+              FULL_RANGE,
+              sinker
+                .set_color_spec(&pixon::ColorSpec::of_matrix(MATRIX))
+                .unwrap(),
+            )
+            .unwrap();
             black_box((&rgb, &rgba));
           });
         },
@@ -521,7 +549,7 @@ fn bench_yuva420p16_u8(c: &mut Criterion) {
 
 fn bench_yuva420p16_u16(c: &mut Criterion) {
   const WIDTHS: &[u32] = &[1280, 1920, 3840];
-  const MATRIX: ColorMatrix = ColorMatrix::Bt709;
+  const MATRIX: KernelMatrix = KernelMatrix::Bt709;
   const FULL_RANGE: bool = false;
 
   let mut group = c.benchmark_group("yuva420p16_a_plus_combo_u16");
@@ -573,7 +601,14 @@ fn bench_yuva420p16_u16(c: &mut Criterion) {
               .unwrap()
               .with_rgba_u16(&mut rgba)
               .unwrap();
-            yuva420p16_to(&frame, FULL_RANGE, MATRIX, &mut sinker).unwrap();
+            yuva420p16_to(
+              &frame,
+              FULL_RANGE,
+              sinker
+                .set_color_spec(&pixon::ColorSpec::of_matrix(MATRIX))
+                .unwrap(),
+            )
+            .unwrap();
             black_box((&rgb, &rgba));
           });
         },

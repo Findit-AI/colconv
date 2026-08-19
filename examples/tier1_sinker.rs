@@ -32,7 +32,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let frame = Yuv420pFrame::new(&y, &u, &v, w as u32, h as u32, 4, 2, 2);
     let mut sink = MixedSinker::<Yuv420p>::new(w, h)
       .with_rgb(&mut manual)?
-      .with_color_spec(spec);
+      .with_color_spec(&spec)?;
     println!(
       "sink geometry: {}x{} -> {}x{}, produces_rgb={} produces_luma={}",
       sink.width(),
@@ -42,7 +42,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
       sink.produces_rgb(),
       sink.produces_luma(),
     );
-    yuv420p_to(&frame, spec.full_range(), spec.matrix(), &mut sink)?;
+    yuv420p_to(&frame, spec.full_range(), &mut sink)?;
   }
   let mut golden = vec![0u8; w * h * 3];
   let frame = Yuv420pFrame::new(&y, &u, &v, w as u32, h as u32, 4, 2, 2);
@@ -76,10 +76,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
       let mut sink =
         MixedSinker::<Yuva420p, AreaResampler>::with_resampler(sw, sh, AreaResampler::to(ow, oh))?
-          .with_color_spec(aspec)
+          .with_color_spec(&aspec)?
           .with_alpha_mode(mode)
           .with_rgba(&mut rgba)?;
-      yuva420p_to(&aframe, aspec.full_range(), aspec.matrix(), &mut sink)?;
+      yuva420p_to(&aframe, aspec.full_range(), &mut sink)?;
     }
     println!(
       "Yuva420p {sw}x{sh} -> {ow}x{oh}, {mode:?}: first pixel rgba({}, {}, {}, {})",

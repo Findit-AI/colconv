@@ -11,7 +11,7 @@
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;
 
-use pixon::{ColorMatrix, bench_internals::uyyvyy411_to_rgb_row};
+use pixon::{KernelMatrix, bench_internals::uyyvyy411_to_rgb_row};
 
 fn fill_pseudo_random(buf: &mut [u8], seed: u32) {
   let mut state = seed;
@@ -24,7 +24,7 @@ fn fill_pseudo_random(buf: &mut [u8], seed: u32) {
 fn bench(c: &mut Criterion) {
   // 720p / 1080p / 4K row widths — all multiples of 4 (4:1:1 quad).
   const WIDTHS: &[usize] = &[1280, 1920, 3840];
-  const MATRIX: ColorMatrix = ColorMatrix::Bt709;
+  const MATRIX: KernelMatrix = KernelMatrix::Bt709;
   const FULL_RANGE: bool = false;
 
   let mut group = c.benchmark_group("uyyvyy411_to_rgb_row");

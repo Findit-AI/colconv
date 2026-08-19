@@ -42,7 +42,7 @@
 //!   default-on flag, and the native/row-stage route-freeze (#186) contracts.
 
 use crate::{
-  ColorMatrix, PixelSink,
+  KernelMatrix, PixelSink,
   resample::AreaResampler,
   sinker::{MixedSinker, MixedSinkerError},
   source::{Uyyvyy411, Uyyvyy411Row, Yuv444p, uyyvyy411_to, yuv444p_to},
@@ -56,7 +56,7 @@ use mediaframe::frame::{Uyyvyy411Frame, Yuv444pFrame};
 /// this bound only documents the row-stage semantic gap.
 const TOL_U8: u8 = 5;
 
-const M: ColorMatrix = ColorMatrix::Bt601;
+const M: KernelMatrix = KernelMatrix::Bt601;
 
 /// Byte stride of a `w`-wide UYYVYY411 row: `w * 3 / 2` (12 bpp, no padding).
 const fn stride(w: usize) -> u32 {
@@ -200,7 +200,7 @@ fn run(
   ow: usize,
   oh: usize,
   full_range: bool,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   native: bool,
 ) -> (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u16>) {
   let n = ow * oh;
@@ -222,7 +222,7 @@ fn run(
         .unwrap()
         .with_luma_u16(&mut luma_u16)
         .unwrap();
-    uyyvyy411_to(&frame, full_range, matrix, &mut sink).unwrap();
+    uyyvyy411_to(&frame, full_range, sink.set_kernel_matrix(matrix)).unwrap();
   }
   (rgb, rgba, luma, luma_u16)
 }
@@ -239,7 +239,7 @@ fn oracle(
   ow: usize,
   oh: usize,
   full_range: bool,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
 ) -> (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u16>) {
   let cw = w / 4;
   let yl = logical_y(packed, w, h);
@@ -259,7 +259,7 @@ fn oracle(
       .unwrap()
       .with_rgba(&mut rgba)
       .unwrap();
-    yuv444p_to(&f, full_range, matrix, &mut sink).unwrap();
+    yuv444p_to(&f, full_range, sink.set_kernel_matrix(matrix)).unwrap();
   }
   let luma_u16: Vec<u16> = yb.iter().map(|&by| by as u16).collect();
   (rgb, rgba, yb, luma_u16)
@@ -322,9 +322,9 @@ fn native_within_tolerance_of_row_stage() {
   for (ow, oh) in [(8, 5), (4, 4), (7, 6), (5, 3)] {
     for full_range in [false, true] {
       for matrix in [
-        ColorMatrix::Bt601,
-        ColorMatrix::Bt709,
-        ColorMatrix::Bt2020Ncl,
+        KernelMatrix::Bt601,
+        KernelMatrix::Bt709,
+        KernelMatrix::Bt2020Ncl,
       ] {
         let native = run(&packed, w, h, ow, oh, full_range, matrix, true);
         let row = run(&packed, w, h, ow, oh, full_range, matrix, false);
@@ -371,9 +371,9 @@ fn native_solid_frame_exact() {
     let mut sink = MixedSinker::<Uyyvyy411>::new(w, h)
       .with_rgb(&mut full_rgb)
       .unwrap();
-    uyyvyy411_to(&frame, false, ColorMatrix::Bt709, &mut sink).unwrap();
+    uyyvyy411_to(&frame, false, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
-  let out = run(&packed, w, h, 4, 4, false, ColorMatrix::Bt709, true);
+  let out = run(&packed, w, h, 4, 4, false, KernelMatrix::Bt709, true);
   for px in out.0.chunks_exact(3) {
     assert_eq!(
       (px[0], px[1], px[2]),
@@ -419,11 +419,11 @@ fn native_to_rowstage_route_flip_mid_frame_rejected() {
   sink.begin_frame(w as u32, h as u32).unwrap();
   // Row 0 freezes the route = native.
   sink
-    .process(Uyyvyy411Row::new(&packed[0..row_bytes], 0, M, true))
+    .process(Uyyvyy411Row::for_tests(&packed[0..row_bytes], 0, M, true))
     .expect("native row 0 freezes the route and succeeds");
   sink.set_native(false);
   let err = sink
-    .process(Uyyvyy411Row::new(
+    .process(Uyyvyy411Row::for_tests(
       &packed[row_bytes..row_bytes * 2],
       1,
       M,
@@ -458,11 +458,11 @@ fn native_reuses_join_and_resets_route_across_frames() {
       .unwrap();
   let frame = Uyyvyy411Frame::new(&packed, w as u32, h as u32, stride(w));
   // Frame 1: native, route constant across every row — no false reject.
-  uyyvyy411_to(&frame, true, M, &mut sink).unwrap();
+  uyyvyy411_to(&frame, true, sink.set_kernel_matrix(M)).unwrap();
   // Frame 2: flip to row-stage for the WHOLE frame; the per-frame reset (in
   // `begin_frame`) cleared the frozen route, so this is allowed.
   sink.set_native(false);
-  uyyvyy411_to(&frame, true, M, &mut sink)
+  uyyvyy411_to(&frame, true, sink.set_kernel_matrix(M))
     .expect("a new frame may pick the other tier; the route reset per frame");
 }
 
@@ -498,7 +498,8 @@ fn luma_only_packed_native_skips_chroma_planning() {
         .with_native(true)
         .with_luma(&mut luma)
         .unwrap();
-    uyyvyy411_to(&frame, true, M, &mut sink).expect("luma-only native must not plan chroma");
+    uyyvyy411_to(&frame, true, sink.set_kernel_matrix(M))
+      .expect("luma-only native must not plan chroma");
   }
   assert_eq!(luma, y_ref, "luma-only native == area-downscaled Y");
 
@@ -513,7 +514,7 @@ fn luma_only_packed_native_skips_chroma_planning() {
       .with_rgb(&mut rgb)
       .unwrap();
   assert!(
-    uyyvyy411_to(&frame, true, M, &mut sink).is_err(),
+    uyyvyy411_to(&frame, true, sink.set_kernel_matrix(M)).is_err(),
     "colour native must reach chroma planning (the armed failpoint fires)"
   );
 }

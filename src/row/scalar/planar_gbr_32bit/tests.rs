@@ -1,7 +1,7 @@
 //! Tests for `crate::row::scalar::planar_gbr_32bit`.
 
 use super::*;
-use crate::ColorMatrix;
+use crate::KernelMatrix;
 
 /// Re-encode a host-native u32 slice as LE-encoded byte storage. Kernels
 /// called with `BE = false` recover the intended logical values via
@@ -166,7 +166,7 @@ fn gbr32_luma_full_range_neutral_grey() {
   let mid = 0x8000_FFFFu32; // narrows >> 16 to 0x8000 = 32768
   let g = as_le_u32(&[mid; 4]);
   let mut out = [0u16; 4];
-  gbr32_to_luma_u16_row::<false>(&g, &g, &g, &mut out, 4, ColorMatrix::Bt709, true);
+  gbr32_to_luma_u16_row::<false>(&g, &g, &g, &mut out, 4, KernelMatrix::Bt709, true);
   for &y in &out {
     // R=G=B=32768 → Y' = 32768 (allow 1 LSB Q15 rounding slack).
     assert!((y as i32 - 32768).abs() <= 1, "neutral grey Y'={y}");
@@ -178,7 +178,7 @@ fn gbr32_luma_full_range_neutral_grey() {
 fn gbr32_luma_limited_range_black_floor() {
   let g = as_le_u32(&[0u32; 2]);
   let mut out = [0u16; 2];
-  gbr32_to_luma_u16_row::<false>(&g, &g, &g, &mut out, 2, ColorMatrix::Bt709, false);
+  gbr32_to_luma_u16_row::<false>(&g, &g, &g, &mut out, 2, KernelMatrix::Bt709, false);
   assert!(out.iter().all(|&y| y == 4096), "limited black = 16 << 8");
 }
 
@@ -187,7 +187,7 @@ fn gbr32_luma_limited_range_black_floor() {
 fn gbr32_luma_limited_range_white_ceiling() {
   let g = as_le_u32(&[0xFFFF_FFFFu32; 2]);
   let mut out = [0u16; 2];
-  gbr32_to_luma_u16_row::<false>(&g, &g, &g, &mut out, 2, ColorMatrix::Bt709, false);
+  gbr32_to_luma_u16_row::<false>(&g, &g, &g, &mut out, 2, KernelMatrix::Bt709, false);
   assert!(out.iter().all(|&y| y == 60160), "limited white = 235 << 8");
 }
 
@@ -200,7 +200,7 @@ fn gbr32_luma_matches_narrowed_high_bit_path() {
   let b_i: std::vec::Vec<u32> = (0..8).map(|i| (i as u32) * 0x0246_8ACE + 0x1234).collect();
   let r_i: std::vec::Vec<u32> = (0..8).map(|i| (i as u32) * 0x0FED_CBA9 + 0x5678).collect();
   for full_range in [false, true] {
-    for matrix in [ColorMatrix::Bt709, ColorMatrix::Bt601] {
+    for matrix in [KernelMatrix::Bt709, KernelMatrix::Bt601] {
       let mut out32 = std::vec![0u16; 8];
       gbr32_to_luma_u16_row::<false>(
         &as_le_u32(&g_i),

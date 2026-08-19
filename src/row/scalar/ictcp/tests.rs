@@ -86,11 +86,11 @@ fn decode_matrices_are_exact_inverses() {
 fn for_transfer_selects_pq_and_hlg_only() {
   use crate::Transfer;
   assert_eq!(
-    IctcpTransfer::for_transfer(Transfer::SmpteSt2084Pq),
+    IctcpTransfer::for_transfer(&Transfer::SmpteSt2084Pq),
     Some(IctcpTransfer::Pq)
   );
   assert_eq!(
-    IctcpTransfer::for_transfer(Transfer::AribStdB67Hlg),
+    IctcpTransfer::for_transfer(&Transfer::AribStdB67Hlg),
     Some(IctcpTransfer::Hlg)
   );
   for t in [
@@ -98,10 +98,10 @@ fn for_transfer_selects_pq_and_hlg_only() {
     Transfer::Bt709,
     Transfer::Bt2020_10Bit,
     Transfer::SmpteSt428,
-    Transfer::Unknown(99),
+    Transfer::other("unassigned-99"),
   ] {
     assert_eq!(
-      IctcpTransfer::for_transfer(t),
+      IctcpTransfer::for_transfer(&t),
       None,
       "{t:?} must not select an ICtCp transfer"
     );

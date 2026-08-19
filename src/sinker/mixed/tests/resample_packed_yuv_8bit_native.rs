@@ -29,7 +29,7 @@
 //!   default-on flag, and the native/row-stage route-freeze (#186) contracts.
 
 use crate::{
-  ColorMatrix, PixelSink,
+  KernelMatrix, PixelSink,
   resample::AreaResampler,
   sinker::{MixedSinker, MixedSinkerError},
   source::{
@@ -150,7 +150,7 @@ fn run_yuv422p(
   ow: usize,
   oh: usize,
   full_range: bool,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   native: bool,
 ) -> (Vec<u8>, Vec<u8>) {
   let n = ow * oh;
@@ -167,7 +167,7 @@ fn run_yuv422p(
         .unwrap()
         .with_luma(&mut luma)
         .unwrap();
-    yuv422p_to(&frame, full_range, matrix, &mut sink).unwrap();
+    yuv422p_to(&frame, full_range, sink.set_kernel_matrix(matrix)).unwrap();
   }
   (rgb, luma)
 }
@@ -192,7 +192,7 @@ macro_rules! packed_yuv_native_suite {
         ow: usize,
         oh: usize,
         full_range: bool,
-        matrix: ColorMatrix,
+        matrix: KernelMatrix,
         native: bool,
       ) -> Outs {
         let n = ow * oh;
@@ -217,7 +217,7 @@ macro_rules! packed_yuv_native_suite {
               .unwrap()
               .with_hsv(&mut hh, &mut ss, &mut vv)
               .unwrap();
-          $drv(&frame, full_range, matrix, &mut sink).unwrap();
+          $drv(&frame, full_range, sink.set_kernel_matrix(matrix)).unwrap();
         }
         (rgb, rgba, luma, luma_u16, hh, ss, vv)
       }
@@ -240,9 +240,9 @@ macro_rules! packed_yuv_native_suite {
           let (y, u, v) = yuv_ramp(w, h);
           let packed = $build(&y, &u, &v, w, h);
 
-          let nv = run(&packed, w, h, ow, oh, true, ColorMatrix::Bt601, true);
+          let nv = run(&packed, w, h, ow, oh, true, KernelMatrix::Bt601, true);
           let (p_rgb, p_luma) =
-            run_yuv422p(&y, &u, &v, w, h, ow, oh, true, ColorMatrix::Bt601, true);
+            run_yuv422p(&y, &u, &v, w, h, ow, oh, true, KernelMatrix::Bt601, true);
 
           assert_eq!(
             nv.0, p_rgb,
@@ -279,9 +279,9 @@ macro_rules! packed_yuv_native_suite {
         for (ow, oh) in [(6, 5), (4, 4), (7, 6), (5, 3)] {
           for full_range in [false, true] {
             for matrix in [
-              ColorMatrix::Bt601,
-              ColorMatrix::Bt709,
-              ColorMatrix::Bt2020Ncl,
+              KernelMatrix::Bt601,
+              KernelMatrix::Bt709,
+              KernelMatrix::Bt2020Ncl,
             ] {
               let native = run(&packed, w, h, ow, oh, full_range, matrix, true);
               let row = run(&packed, w, h, ow, oh, full_range, matrix, false);
@@ -328,9 +328,9 @@ macro_rules! packed_yuv_native_suite {
           let mut sink = MixedSinker::<$fmt>::new(w, h)
             .with_rgb(&mut full_rgb)
             .unwrap();
-          $drv(&frame, false, ColorMatrix::Bt709, &mut sink).unwrap();
+          $drv(&frame, false, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
         }
-        let out = run(&packed, w, h, 4, 4, false, ColorMatrix::Bt709, true);
+        let out = run(&packed, w, h, 4, 4, false, KernelMatrix::Bt709, true);
         for px in out.0.chunks_exact(3) {
           assert_eq!(
             (px[0], px[1], px[2]),
@@ -376,14 +376,19 @@ macro_rules! packed_yuv_native_suite {
         sink.begin_frame(w as u32, h as u32).unwrap();
         // Row 0 freezes the route = native.
         sink
-          .process($row::new(&packed[0..2 * w], 0, ColorMatrix::Bt601, true))
+          .process($row::for_tests(
+            &packed[0..2 * w],
+            0,
+            KernelMatrix::Bt601,
+            true,
+          ))
           .expect("native row 0 freezes the route and succeeds");
         sink.set_native(false);
         let err = sink
-          .process($row::new(
+          .process($row::for_tests(
             &packed[2 * w..4 * w],
             1,
-            ColorMatrix::Bt601,
+            KernelMatrix::Bt601,
             true,
           ))
           .unwrap_err();
@@ -415,11 +420,11 @@ macro_rules! packed_yuv_native_suite {
             .unwrap();
         let frame = $frame::new(&packed, w as u32, h as u32, (2 * w) as u32);
         // Frame 1: native, route constant across every row — no false reject.
-        $drv(&frame, true, ColorMatrix::Bt601, &mut sink).unwrap();
+        $drv(&frame, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
         // Frame 2: flip to row-stage for the WHOLE frame; the per-frame reset
         // (in `begin_frame`) cleared the frozen route, so this is allowed.
         sink.set_native(false);
-        $drv(&frame, true, ColorMatrix::Bt601, &mut sink)
+        $drv(&frame, true, sink.set_kernel_matrix(KernelMatrix::Bt601))
           .expect("a new frame may pick the other tier; the route reset per frame");
       }
     }
@@ -495,7 +500,7 @@ fn luma_only_packed_native_skips_chroma_planning() {
         .with_native(true)
         .with_luma(&mut luma)
         .unwrap();
-    yuyv422_to(&frame, true, ColorMatrix::Bt601, &mut sink)
+    yuyv422_to(&frame, true, sink.set_kernel_matrix(KernelMatrix::Bt601))
       .expect("luma-only native must not plan chroma");
   }
   assert_eq!(luma, y_ref, "luma-only native == area-downscaled Y");
@@ -511,7 +516,7 @@ fn luma_only_packed_native_skips_chroma_planning() {
       .with_rgb(&mut rgb)
       .unwrap();
   assert!(
-    yuyv422_to(&frame, true, ColorMatrix::Bt601, &mut sink).is_err(),
+    yuyv422_to(&frame, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).is_err(),
     "colour native must reach chroma planning (the armed failpoint fires)"
   );
 }

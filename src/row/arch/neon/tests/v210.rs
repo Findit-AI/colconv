@@ -1,5 +1,5 @@
 use super::super::*;
-use crate::{ColorMatrix, row::scalar};
+use crate::{KernelMatrix, row::scalar};
 
 /// Builds a deterministic pseudo‑random v210 buffer with `words` words
 /// (each word = 6 pixels = 16 bytes). Each 32-bit word holds three
@@ -22,7 +22,7 @@ fn pseudo_random_v210_words(words: usize, seed: usize) -> std::vec::Vec<u8> {
   out
 }
 
-fn check_rgb(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_rgb(width: usize, matrix: KernelMatrix, full_range: bool) {
   let p = pseudo_random_v210_words(width.div_ceil(6), 0xAA55);
   let mut s = std::vec![0u8; width * 3];
   let mut k = std::vec![0u8; width * 3];
@@ -36,7 +36,7 @@ fn check_rgb(width: usize, matrix: ColorMatrix, full_range: bool) {
   );
 }
 
-fn check_rgba(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_rgba(width: usize, matrix: KernelMatrix, full_range: bool) {
   let p = pseudo_random_v210_words(width.div_ceil(6), 0xAA55);
   let mut s = std::vec![0u8; width * 4];
   let mut k = std::vec![0u8; width * 4];
@@ -50,7 +50,7 @@ fn check_rgba(width: usize, matrix: ColorMatrix, full_range: bool) {
   );
 }
 
-fn check_rgb_u16(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_rgb_u16(width: usize, matrix: KernelMatrix, full_range: bool) {
   let p = pseudo_random_v210_words(width.div_ceil(6), 0xAA55);
   let mut s = std::vec![0u16; width * 3];
   let mut k = std::vec![0u16; width * 3];
@@ -64,7 +64,7 @@ fn check_rgb_u16(width: usize, matrix: ColorMatrix, full_range: bool) {
   );
 }
 
-fn check_rgba_u16(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_rgba_u16(width: usize, matrix: KernelMatrix, full_range: bool) {
   let p = pseudo_random_v210_words(width.div_ceil(6), 0xAA55);
   let mut s = std::vec![0u16; width * 4];
   let mut k = std::vec![0u16; width * 4];
@@ -104,12 +104,12 @@ fn check_luma_u16(width: usize) {
 #[cfg_attr(miri, ignore = "NEON SIMD intrinsics unsupported by Miri")]
 fn neon_v210_rgb_matches_scalar_all_matrices() {
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       check_rgb(6, m, full);
@@ -128,10 +128,10 @@ fn neon_v210_matches_scalar_widths() {
   for w in [
     2usize, 4, 6, 8, 10, 12, 14, 18, 24, 30, 1280, 1920, 1922, 1926,
   ] {
-    check_rgb(w, ColorMatrix::Bt709, false);
-    check_rgba(w, ColorMatrix::Bt709, true);
-    check_rgb_u16(w, ColorMatrix::Bt2020Ncl, true);
-    check_rgba_u16(w, ColorMatrix::Bt601, false);
+    check_rgb(w, KernelMatrix::Bt709, false);
+    check_rgba(w, KernelMatrix::Bt709, true);
+    check_rgb_u16(w, KernelMatrix::Bt2020Ncl, true);
+    check_rgba_u16(w, KernelMatrix::Bt601, false);
   }
 }
 
@@ -226,7 +226,7 @@ fn neon_v210_lane_order_per_pixel_y_and_u() {
       &packed,
       &mut simd_rgb,
       W,
-      crate::ColorMatrix::Bt709,
+      crate::KernelMatrix::Bt709,
       false,
     );
   }
@@ -234,7 +234,7 @@ fn neon_v210_lane_order_per_pixel_y_and_u() {
     &packed,
     &mut scalar_rgb,
     W,
-    crate::ColorMatrix::Bt709,
+    crate::KernelMatrix::Bt709,
     false,
   );
   assert_eq!(
@@ -286,8 +286,8 @@ fn neon_v210_be_le_simd_parity() {
     let mut le_rgb = std::vec![0u8; w * 3];
     let mut be_rgb = std::vec![0u8; w * 3];
     unsafe {
-      v210_to_rgb_or_rgba_row::<false, false>(&le, &mut le_rgb, w, ColorMatrix::Bt709, false);
-      v210_to_rgb_or_rgba_row::<false, true>(&be, &mut be_rgb, w, ColorMatrix::Bt709, false);
+      v210_to_rgb_or_rgba_row::<false, false>(&le, &mut le_rgb, w, KernelMatrix::Bt709, false);
+      v210_to_rgb_or_rgba_row::<false, true>(&be, &mut be_rgb, w, KernelMatrix::Bt709, false);
     }
     assert_eq!(le_rgb, be_rgb, "v210 NEON LE vs BE RGB parity (w={w})");
 
@@ -299,14 +299,14 @@ fn neon_v210_be_le_simd_parity() {
         &le,
         &mut le_u16,
         w,
-        ColorMatrix::Bt709,
+        KernelMatrix::Bt709,
         false,
       );
       v210_to_rgb_u16_or_rgba_u16_row::<false, true>(
         &be,
         &mut be_u16,
         w,
-        ColorMatrix::Bt709,
+        KernelMatrix::Bt709,
         false,
       );
     }

@@ -13,7 +13,7 @@ use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_m
 use std::hint::black_box;
 
 use pixon::{
-  ColorMatrix,
+  KernelMatrix,
   frame::MonoblackFrame,
   sinker::MixedSinker,
   source::{Monoblack, monoblack_to},
@@ -31,7 +31,7 @@ fn fill_pseudo_random(buf: &mut [u8], seed: u32) {
 
 fn bench(c: &mut Criterion) {
   const WIDTHS: &[u32] = &[1280, 1920, 3840];
-  const MATRIX: ColorMatrix = ColorMatrix::Bt709;
+  const MATRIX: KernelMatrix = KernelMatrix::Bt709;
   const FULL_RANGE: bool = false;
 
   let mut group = c.benchmark_group("monoblack_to_rgb");
@@ -59,7 +59,14 @@ fn bench(c: &mut Criterion) {
             .with_simd(use_simd)
             .with_rgb(&mut rgb)
             .unwrap();
-          monoblack_to(&frame, FULL_RANGE, MATRIX, &mut sinker).unwrap();
+          monoblack_to(
+            &frame,
+            FULL_RANGE,
+            sinker
+              .set_color_spec(&pixon::ColorSpec::of_matrix(MATRIX))
+              .unwrap(),
+          )
+          .unwrap();
           black_box(&rgb);
         });
       });

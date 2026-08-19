@@ -14,7 +14,7 @@
 
 use super::*;
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   resample::AreaResampler,
   sinker::{AlphaMode, MixedSinker},
   source::{Gbrap, gbrap_to},
@@ -132,7 +132,7 @@ fn direct_rgba(canonical: &[u8]) -> Vec<u8> {
   let mut sink = MixedSinker::<Gbrap>::new(SRC, SRC)
     .with_rgba(&mut rgba)
     .unwrap();
-  gbrap_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  gbrap_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   rgba
 }
 
@@ -153,7 +153,7 @@ fn straight_rgba_is_block_mean_of_direct_rgba() {
         .unwrap()
         .with_rgba(&mut rgba)
         .unwrap();
-    gbrap_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    gbrap_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   assert_eq!(rgba, block_mean_rgba(&direct_rgba(&canonical)));
 }
@@ -180,7 +180,7 @@ fn straight_alpha_is_averaged_not_forced_opaque() {
         .unwrap()
         .with_rgba(&mut rgba)
         .unwrap();
-    gbrap_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    gbrap_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   let oracle = block_mean_rgba(&direct_rgba(&canonical));
   assert_eq!(rgba, oracle, "straight rgba == block mean");
@@ -237,7 +237,7 @@ fn straight_rgb_luma_hsv_derive_from_binned_color() {
         .unwrap()
         .with_hsv(&mut h, &mut s, &mut v)
         .unwrap();
-    gbrap_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    gbrap_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
 
   let binned = block_mean_rgba(&direct_rgba(&canonical));
@@ -274,7 +274,12 @@ fn straight_rgb_luma_hsv_derive_from_binned_color() {
       .unwrap()
       .with_hsv(&mut h_ref, &mut s_ref, &mut v_ref)
       .unwrap();
-    gbrap_to(&binned_src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    gbrap_to(
+      &binned_src,
+      true,
+      sink.set_kernel_matrix(KernelMatrix::Bt709),
+    )
+    .unwrap();
   }
   assert_eq!(luma, luma_ref, "luma");
   assert_eq!(h, h_ref, "hsv H");
@@ -303,7 +308,7 @@ fn premultiplied_rgba_matches_premult_bin_unpremult_oracle() {
         .unwrap()
         .with_rgb(&mut rgb)
         .unwrap();
-    gbrap_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    gbrap_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
 
   let mut pm = direct_rgba(&canonical);
@@ -341,7 +346,7 @@ fn premultiplied_transparent_block_does_not_bleed() {
         .with_alpha_mode(AlphaMode::Premultiplied)
         .with_rgba(&mut rgba)
         .unwrap();
-    gbrap_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    gbrap_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   assert_eq!(&rgba[..4], &[0, 0, 0, 0], "transparent block bled color");
 
@@ -373,7 +378,7 @@ fn straight_and_premult_differ_under_varying_alpha() {
         .with_alpha_mode(mode)
         .with_rgba(&mut rgba)
         .unwrap();
-    gbrap_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    gbrap_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
     rgba
   };
   assert_ne!(
@@ -407,7 +412,7 @@ fn identity_plan_matches_direct_rgba() {
         .unwrap()
         .with_rgba(&mut rgba)
         .unwrap();
-    gbrap_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    gbrap_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   assert_eq!(rgba, direct_rgba(&canonical), "identity plan == direct");
 }
@@ -426,7 +431,7 @@ fn no_output_sink_is_a_noop() {
   let mut sink =
     MixedSinker::<Gbrap, AreaResampler>::with_resampler(SRC, SRC, AreaResampler::to(OUT, OUT))
       .unwrap();
-  gbrap_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  gbrap_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 }
 
 #[test]
@@ -448,8 +453,8 @@ fn cross_frame_reset_reuses_streams() {
         .unwrap()
         .with_rgba(&mut rgba)
         .unwrap();
-    gbrap_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
-    gbrap_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    gbrap_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
+    gbrap_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   assert_eq!(rgba, block_mean_rgba(&direct_rgba(&canonical)));
 }
@@ -476,10 +481,10 @@ fn accepts_alpha_mode_change_across_frames() {
         .with_rgba(&mut rgba)
         .unwrap();
     // Frame 1 under the default Straight.
-    gbrap_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    gbrap_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
     // Frame 2 under Premultiplied must be accepted (the freeze re-arms).
     sink.set_alpha_mode(AlphaMode::Premultiplied);
-    gbrap_to(&src, true, ColorMatrix::Bt709, &mut sink)
+    gbrap_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709))
       .expect("a fresh frame must accept a different alpha mode");
   }
   // Frame 2's output is the premultiplied oracle.
@@ -499,7 +504,8 @@ fn accepts_alpha_mode_change_across_frames() {
 // (`check_frozen_alpha_mode`, `packed_rgba_resample`,
 // `packed_rgba_u16_resample`, `packed_rgb_resample_*`). A `GbrapRow` can
 // only be constructed by `mediaframe`'s in-order `gbrap_to` walker
-// (`GbrapRow::new` is `pub(crate)`), so a pixon test cannot inject an
+// (`GbrapRow::new` is `pub(crate)` and the 8-bit GBR rows carry no
+// `for_tests` door), so a pixon test cannot inject an
 // out-of-sequence row or a mid-frame mutation here. The cross-frame
 // re-arm above is the part observable through the walker; the mid-frame
 // rejections are covered by the shared-tail packed-RGBA suites (mirroring
@@ -563,7 +569,12 @@ where
     .unwrap()
     .with_luma_u16(&mut luma_u16_a)
     .unwrap();
-    gbrap_to(&gbrap_src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    gbrap_to(
+      &gbrap_src,
+      true,
+      sink.set_kernel_matrix(KernelMatrix::Bt709),
+    )
+    .unwrap();
   }
 
   let (mut rgba_b, mut rgb_b, mut luma_b) = (
@@ -584,7 +595,7 @@ where
     .unwrap()
     .with_luma(&mut luma_b)
     .unwrap();
-    rgba_to(&rgba_src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    rgba_to(&rgba_src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
 
   assert_eq!(rgba_a, rgba_b, "{label}: rgba (real alpha filtered)");
@@ -652,7 +663,7 @@ fn gbrap_filter_plan_is_accepted() {
   .unwrap()
   .with_rgba(&mut rgba)
   .unwrap();
-  gbrap_to(&src, true, ColorMatrix::Bt709, &mut sink)
+  gbrap_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709))
     .expect("Gbrap filter plan must be accepted (routed)");
   assert!(
     rgba.iter().any(|&px| px != 0xAB),

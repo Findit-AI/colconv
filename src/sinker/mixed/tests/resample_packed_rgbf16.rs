@@ -26,7 +26,7 @@
 //! regression (no `UnsupportedFilter`).
 
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   frame::Rgbf16LeFrame,
   resample::{
     CatmullRom, FilterKernel, FilterStream, FilteredResampler, Lanczos3, Resampler, Triangle,
@@ -136,7 +136,7 @@ fn rgbf16_filter_rgb_f32<K: FilterKernel + Copy>(
     .unwrap()
     .with_rgb_f32(&mut rgb_f32)
     .unwrap();
-    rgbf16_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    rgbf16_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   rgb_f32
 }
@@ -234,7 +234,7 @@ fn rgbf16_filter_plan_is_accepted() {
     .unwrap()
     .with_rgb_f32(&mut rgb_f32)
     .unwrap();
-    rgbf16_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    rgbf16_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   assert!(
     rgb_f32.iter().all(|&v| v.to_bits() != sentinel.to_bits()),

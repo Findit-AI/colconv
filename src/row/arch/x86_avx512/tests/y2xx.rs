@@ -1,5 +1,5 @@
 use super::super::*;
-use crate::{ColorMatrix, row::scalar};
+use crate::{KernelMatrix, row::scalar};
 
 /// Verify multi-channel Y+U lane order for Y2xx (BITS-generic Y210/Y212).
 ///
@@ -49,7 +49,7 @@ fn check_y2xx_lane_order_per_pixel_y_and_u<const BITS: u32>() {
       &packed,
       &mut simd_rgb,
       W,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       false,
     );
   }
@@ -57,7 +57,7 @@ fn check_y2xx_lane_order_per_pixel_y_and_u<const BITS: u32>() {
     &packed,
     &mut scalar_rgb,
     W,
-    ColorMatrix::Bt709,
+    KernelMatrix::Bt709,
     false,
   );
   assert_eq!(
@@ -107,7 +107,7 @@ fn pseudo_random_y210(width: usize, seed: usize) -> std::vec::Vec<u16> {
     .collect()
 }
 
-fn check_rgb<const BITS: u32>(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_rgb<const BITS: u32>(width: usize, matrix: KernelMatrix, full_range: bool) {
   let p = pseudo_random_y210(width, 0xAA55);
   let mut s = std::vec![0u8; width * 3];
   let mut k = std::vec![0u8; width * 3];
@@ -121,7 +121,7 @@ fn check_rgb<const BITS: u32>(width: usize, matrix: ColorMatrix, full_range: boo
   );
 }
 
-fn check_rgba<const BITS: u32>(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_rgba<const BITS: u32>(width: usize, matrix: KernelMatrix, full_range: bool) {
   let p = pseudo_random_y210(width, 0xAA55);
   let mut s = std::vec![0u8; width * 4];
   let mut k = std::vec![0u8; width * 4];
@@ -135,7 +135,7 @@ fn check_rgba<const BITS: u32>(width: usize, matrix: ColorMatrix, full_range: bo
   );
 }
 
-fn check_rgb_u16<const BITS: u32>(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_rgb_u16<const BITS: u32>(width: usize, matrix: KernelMatrix, full_range: bool) {
   let p = pseudo_random_y210(width, 0xAA55);
   let mut s = std::vec![0u16; width * 3];
   let mut k = std::vec![0u16; width * 3];
@@ -151,7 +151,7 @@ fn check_rgb_u16<const BITS: u32>(width: usize, matrix: ColorMatrix, full_range:
   );
 }
 
-fn check_rgba_u16<const BITS: u32>(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_rgba_u16<const BITS: u32>(width: usize, matrix: KernelMatrix, full_range: bool) {
   let p = pseudo_random_y210(width, 0xAA55);
   let mut s = std::vec![0u16; width * 4];
   let mut k = std::vec![0u16; width * 4];
@@ -204,12 +204,12 @@ fn avx512_y210_rgb_matches_scalar_all_matrices() {
     return;
   }
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       // Width 32 = one main-loop iteration (no tail).
@@ -234,10 +234,10 @@ fn avx512_y210_matches_scalar_widths() {
   }
   // 32 = AVX-512 natural block; 1952 = 32 × 61 covers tail.
   for w in [32usize, 34, 62, 64, 66, 128, 1920, 1952] {
-    check_rgb::<10>(w, ColorMatrix::Bt709, false);
-    check_rgba::<10>(w, ColorMatrix::Bt709, true);
-    check_rgb_u16::<10>(w, ColorMatrix::Bt2020Ncl, true);
-    check_rgba_u16::<10>(w, ColorMatrix::Bt601, false);
+    check_rgb::<10>(w, KernelMatrix::Bt709, false);
+    check_rgba::<10>(w, KernelMatrix::Bt709, true);
+    check_rgb_u16::<10>(w, KernelMatrix::Bt2020Ncl, true);
+    check_rgba_u16::<10>(w, KernelMatrix::Bt601, false);
   }
 }
 
@@ -282,9 +282,15 @@ fn avx512_y212_matches_scalar_widths() {
     let p = pseudo_random_y212(w, 0xAA55);
     let mut s = std::vec![0u8; w * 3];
     let mut k = std::vec![0u8; w * 3];
-    scalar::y2xx_n_to_rgb_or_rgba_row::<12, false, false>(&p, &mut s, w, ColorMatrix::Bt709, false);
+    scalar::y2xx_n_to_rgb_or_rgba_row::<12, false, false>(
+      &p,
+      &mut s,
+      w,
+      KernelMatrix::Bt709,
+      false,
+    );
     unsafe {
-      y2xx_n_to_rgb_or_rgba_row::<12, false, false>(&p, &mut k, w, ColorMatrix::Bt709, false);
+      y2xx_n_to_rgb_or_rgba_row::<12, false, false>(&p, &mut k, w, KernelMatrix::Bt709, false);
     }
     assert_eq!(s, k, "AVX-512 y2xx<12>→RGB diverges (width={w})");
 
@@ -294,7 +300,7 @@ fn avx512_y212_matches_scalar_widths() {
       &p,
       &mut s_u16,
       w,
-      ColorMatrix::Bt2020Ncl,
+      KernelMatrix::Bt2020Ncl,
       true,
     );
     unsafe {
@@ -302,7 +308,7 @@ fn avx512_y212_matches_scalar_widths() {
         &p,
         &mut k_u16,
         w,
-        ColorMatrix::Bt2020Ncl,
+        KernelMatrix::Bt2020Ncl,
         true,
       );
     }

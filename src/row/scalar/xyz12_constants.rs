@@ -1,4 +1,4 @@
-//! XYZ → RGB matrices for the three [`crate::DcpTargetGamut`]
+//! XYZ → RGB matrices for the three [`crate::KernelGamut`]
 //! variants used by the Tier 12 (DCP / Xyz12) pipeline.
 //!
 //! Each matrix is `[[f32; 3]; 3]` — applied as
@@ -56,7 +56,7 @@
 //! preview should select `Rec709` (or request an explicit `DisplayP3D65`
 //! variant).
 
-use crate::DcpTargetGamut;
+use crate::KernelGamut;
 
 /// XYZ → RGB matrix for **Rec.709 / sRGB** (D65 output white).
 ///
@@ -88,7 +88,7 @@ pub(crate) const M_XYZ_TO_RGB_REC709: [[f32; 3]; 3] = [
 /// Why DCI white and not D65: SMPTE ST 428-1 D-Cinema masters and the
 /// DCI-P3 RGB target both reference DCI white; Display-P3 (Apple/web,
 /// `display-p3` in ICC / CSS) is a different target that re-uses the
-/// P3 primaries with D65 white. The `DcpTargetGamut::DciP3` variant
+/// P3 primaries with D65 white. The `KernelGamut::DciP3` variant
 /// here decodes XYZ12 to the **theatrical** DCP target — callers who
 /// want desktop preview should select `Rec709` (sRGB / Display-P3
 /// approximation) or pre-adapt the XYZ themselves before decoding.
@@ -140,16 +140,17 @@ pub(crate) const M_XYZ_TO_RGB_REC2020: [[f32; 3]; 3] = [
 ///
 /// `inline(always)` so the lookup compiles into a register-resident
 /// 3x3 constant at the call site for monomorphised dispatch
-/// (`DcpTargetGamut` is small + Copy).
+/// (`KernelGamut` is small + Copy).
 #[cfg_attr(not(tarpaulin), inline(always))]
-pub(crate) const fn xyz_to_rgb_matrix(g: DcpTargetGamut) -> [[f32; 3]; 3] {
+pub(crate) const fn xyz_to_rgb_matrix(g: KernelGamut) -> [[f32; 3]; 3] {
   match g {
-    DcpTargetGamut::DciP3 => M_XYZ_TO_RGB_DCI_P3,
-    DcpTargetGamut::Rec709 => M_XYZ_TO_RGB_REC709,
-    DcpTargetGamut::Rec2020 => M_XYZ_TO_RGB_REC2020,
-    // DcpTargetGamut is #[non_exhaustive] in mediaframe; fall back to DciP3
-    // for any future variants added there before pixon is updated.
-    _ => M_XYZ_TO_RGB_DCI_P3,
+    KernelGamut::DciP3 => M_XYZ_TO_RGB_DCI_P3,
+    KernelGamut::Rec709 => M_XYZ_TO_RGB_REC709,
+    KernelGamut::Rec2020 => M_XYZ_TO_RGB_REC2020,
+    // No `_` arm: `KernelGamut` is a closed vocabulary, so this match is
+    // exhaustiveness-checked and a gamut added upstream becomes a compile
+    // error here rather than a silent DCI-P3 picture. A gamut this build does
+    // not name is refused earlier, at `MixedSinker::set_target_gamut`.
   }
 }
 

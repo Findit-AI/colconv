@@ -26,7 +26,7 @@ pub(crate) fn v410_to_rgb_or_rgba_row<const ALPHA: bool, const BE: bool>(
   packed: &[u32],
   out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert!(packed.len() >= width, "packed row too short");
@@ -84,7 +84,7 @@ pub(crate) fn v410_to_hsv_row<const BE: bool>(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert!(packed.len() >= width, "packed row too short");
@@ -128,7 +128,7 @@ pub(crate) fn v410_to_rgb_u16_or_rgba_u16_row<const ALPHA: bool, const BE: bool>
   packed: &[u32],
   out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert!(packed.len() >= width, "packed row too short");
@@ -202,7 +202,7 @@ pub(crate) fn v410_to_luma_u16_row<const BE: bool>(packed: &[u32], out: &mut [u1
 #[cfg(all(test, feature = "std"))]
 mod tests {
   use super::*;
-  use crate::ColorMatrix;
+  use crate::KernelMatrix;
 
   /// Pack one V410 word (host-native u32) from explicit U / Y / V samples.
   fn pack_v410(u: u32, y: u32, v: u32) -> u32 {
@@ -234,7 +234,7 @@ mod tests {
       pack_v410(512, 940, 512),
     ]);
     let mut out = vec![0u8; 4 * 3];
-    v410_to_rgb_or_rgba_row::<false, false>(&p, &mut out, 4, ColorMatrix::Bt709, false);
+    v410_to_rgb_or_rgba_row::<false, false>(&p, &mut out, 4, KernelMatrix::Bt709, false);
     // Two black pixels followed by two white pixels.
     assert_eq!(&out[0..3], &[0u8, 0, 0]);
     assert_eq!(&out[3..6], &[0u8, 0, 0]);
@@ -246,7 +246,7 @@ mod tests {
   fn v410_known_pattern_rgba_alpha_max() {
     let p = as_le_u32(&[pack_v410(512, 940, 512)]);
     let mut out = vec![0u8; 4];
-    v410_to_rgb_or_rgba_row::<true, false>(&p, &mut out, 1, ColorMatrix::Bt709, false);
+    v410_to_rgb_or_rgba_row::<true, false>(&p, &mut out, 1, KernelMatrix::Bt709, false);
     assert_eq!(out[3], 0xFF);
   }
 
@@ -274,7 +274,7 @@ mod tests {
   fn v410_known_pattern_rgba_u16_alpha_max() {
     let p = as_le_u32(&[pack_v410(512, 940, 512)]);
     let mut out = vec![0u16; 4];
-    v410_to_rgb_u16_or_rgba_u16_row::<true, false>(&p, &mut out, 1, ColorMatrix::Bt709, false);
+    v410_to_rgb_u16_or_rgba_u16_row::<true, false>(&p, &mut out, 1, KernelMatrix::Bt709, false);
     // 10-bit alpha max is 0x3FF (low-bit-packed).
     assert_eq!(out[3], 0x3FF);
   }
@@ -301,8 +301,8 @@ mod tests {
       .collect();
     let mut out_le = vec![0u8; 3];
     let mut out_be = vec![0u8; 3];
-    v410_to_rgb_or_rgba_row::<false, false>(&le_buf, &mut out_le, 1, ColorMatrix::Bt709, false);
-    v410_to_rgb_or_rgba_row::<false, true>(&be_buf, &mut out_be, 1, ColorMatrix::Bt709, false);
+    v410_to_rgb_or_rgba_row::<false, false>(&le_buf, &mut out_le, 1, KernelMatrix::Bt709, false);
+    v410_to_rgb_or_rgba_row::<false, true>(&be_buf, &mut out_be, 1, KernelMatrix::Bt709, false);
     assert_eq!(out_le, out_be, "V410 BE scalar must match byte-swapped LE");
   }
 }

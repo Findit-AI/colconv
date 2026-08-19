@@ -56,7 +56,7 @@ use crate::{
   SourceFormat,
   resample::{AreaResampler, FilterKernel, FilteredResampler, NoopResampler, Resampler},
   sinker::{MixedSinker, MixedSinkerError},
-  walker::{ColorSpec, Xyz12Options, YuvOptions},
+  walker::{ColorSpec, YuvOptions},
 };
 
 // `ChromaLocation` and `St428Interpretation` feed only the `yuv-planar`
@@ -81,50 +81,53 @@ pub(crate) mod sealed {
 /// colorimetric truth of a [`ColorSpec`].
 ///
 /// This is what lets [`Convert::spec`] seed the per-format knobs from the same
-/// spec that configures the sink, so the matrix and range are never passed
-/// twice. The [`Default`] supertrait supplies the no-spec fallback (the
+/// spec that configures the sink, so the range is never passed twice. The
+/// [`Default`] supertrait supplies the no-spec fallback (the
 /// unspecified-colorimetry defaults each `Options` type already defines).
+///
+/// Since mediaframe 0.4 the colour *selector* is not among these knobs — the
+/// walkers ask the sink for it — so what a spec seeds here is the quantisation
+/// range and nothing else.
 ///
 /// Not every `Options` type can implement this: a value that is *frame
 /// intrinsic* rather than colorimetric — the Bayer mosaic pattern of
 /// [`BayerOptions`](crate::walker::BayerOptions), which has no [`Default`]
 /// because it cannot be guessed — is excluded by construction.
 ///
-/// Sealed: only the crate's own walk-option types
-/// ([`YuvOptions`], [`Xyz12Options`], and the knob-free `()`) implement it, so
-/// the set of spec-derivable options is not user-extensible.
+/// Sealed: only the crate's own walk-option types ([`YuvOptions`] and the
+/// knob-free `()`) implement it, so the set of spec-derivable options is not
+/// user-extensible.
 pub trait FromSpec: Default + sealed::SealedOptions {
   /// Builds the walk options carried by `spec`, defaulting any knob the spec
   /// does not describe.
-  fn from_spec(spec: &ColorSpec) -> Self;
+  ///
+  /// # Errors
+  ///
+  /// Returns [`UnsupportedKernelMatrixError`](crate::UnsupportedKernelMatrixError)
+  /// when the spec names a colour matrix the implementor has no decode for —
+  /// see [`ColorSpec::kernel_matrix`](crate::ColorSpec::kernel_matrix).
+  fn from_spec(spec: &ColorSpec) -> Result<Self, crate::UnsupportedKernelMatrixError>;
 }
 
 impl sealed::SealedOptions for YuvOptions {}
 impl FromSpec for YuvOptions {
-  /// The spec's resolved range + matrix become the YUV walk options; the rest
-  /// of the spec is sink-consumed, not walker-consumed.
+  /// The spec's resolved range becomes the YUV walk options; everything
+  /// colorimetric — the matrix included, since mediaframe 0.4 — is
+  /// sink-consumed, not walker-consumed.
   #[inline]
-  fn from_spec(spec: &ColorSpec) -> Self {
-    Self::from_color_spec(*spec)
-  }
-}
-
-impl sealed::SealedOptions for Xyz12Options {}
-impl FromSpec for Xyz12Options {
-  /// A [`ColorSpec`] carries no target RGB gamut, so the XYZ decode keeps its
-  /// default target; the spec's other fields are not consumed by the XYZ path.
-  #[inline]
-  fn from_spec(_spec: &ColorSpec) -> Self {
-    Self::new()
+  fn from_spec(spec: &ColorSpec) -> Result<Self, crate::UnsupportedKernelMatrixError> {
+    Ok(Self::from_color_spec(spec))
   }
 }
 
 impl sealed::SealedOptions for () {}
 impl FromSpec for () {
-  /// The knob-free sources (a frame-intrinsic palette / conversion) have no
-  /// spec-derived state.
+  /// The knob-free sources (XYZ12, a frame-intrinsic palette / conversion)
+  /// have no spec-derived state.
   #[inline]
-  fn from_spec(_spec: &ColorSpec) -> Self {}
+  fn from_spec(_spec: &ColorSpec) -> Result<Self, crate::UnsupportedKernelMatrixError> {
+    Ok(())
+  }
 }
 
 /// A validated source-frame borrow that [`Convert`] can decode.
@@ -234,6 +237,12 @@ pub struct Convert<'a, Fr: Source, R = NoopResampler> {
   st428: Option<St428Interpretation>,
   #[cfg(any(feature = "yuv-planar", feature = "yuv-semi-planar"))]
   native: Option<bool>,
+  /// The XYZ12 output gamut, set by [`Convert::target_gamut`] — which only
+  /// exists on an XYZ12 builder, so this is always `None` for every other
+  /// source. Applied to the sink in [`Convert::run`], where the open
+  /// descriptor is exchanged for the closed selector.
+  #[cfg(feature = "xyz")]
+  target_gamut: Option<crate::DcpTargetGamut>,
 }
 
 impl<'a, Fr: Source> From<&'a Fr> for Convert<'a, Fr, NoopResampler> {
@@ -257,6 +266,8 @@ impl<'a, Fr: Source> From<&'a Fr> for Convert<'a, Fr, NoopResampler> {
       st428: None,
       #[cfg(any(feature = "yuv-planar", feature = "yuv-semi-planar"))]
       native: None,
+      #[cfg(feature = "xyz")]
+      target_gamut: None,
     }
   }
 }
@@ -284,13 +295,16 @@ impl<'a, Fr: Source, R> Convert<'a, Fr, R> {
       st428: self.st428,
       #[cfg(any(feature = "yuv-planar", feature = "yuv-semi-planar"))]
       native: self.native,
+      #[cfg(feature = "xyz")]
+      target_gamut: self.target_gamut,
     }
   }
 
-  /// Sets the single colorimetric truth. Seeds the walk
-  /// [`Options`](Source::Options) via [`FromSpec`] (unless overridden by
-  /// [`format_options`](Self::format_options)) and configures the sink's
-  /// siting-aware decode.
+  /// Sets the single colorimetric truth. Configures the whole decode — the
+  /// matrix the rows are stamped with, the siting, the primaries, the
+  /// transfer and the non-affine tag all go to the sink — and seeds the
+  /// walk [`Options`](Source::Options)' quantisation range via [`FromSpec`]
+  /// (unless overridden by [`format_options`](Self::format_options)).
   #[must_use]
   #[inline]
   pub fn spec(mut self, spec: ColorSpec) -> Self {
@@ -300,6 +314,11 @@ impl<'a, Fr: Source, R> Convert<'a, Fr, R> {
 
   /// Overrides the per-format walk options that [`spec`](Self::spec) would
   /// otherwise derive — the rare case where a knob is known out of band.
+  ///
+  /// Since mediaframe 0.4 the options carry no colour value at all (the
+  /// walkers ask the sink), so this can no longer put a different matrix in
+  /// front of each reader: what it overrides is the quantisation range and
+  /// the frame-intrinsic knobs. The single-source rule is total here.
   #[must_use]
   #[inline]
   pub fn format_options(mut self, options: Fr::Options) -> Self {
@@ -385,6 +404,32 @@ impl<'a, Fr: Source, R> Convert<'a, Fr, R> {
   }
 }
 
+/// The XYZ12 output-gamut door, which exists only on an XYZ12 builder.
+///
+/// A target gamut is meaningless for every other source, so it is not a
+/// setter on the generic builder — a knob that silently does nothing is the
+/// failure mode this whole seam exists to remove. Through mediaframe 0.3 the
+/// gamut rode `Xyz12Options` and reached the walker; 0.4 asks the sink for
+/// it, and this is how [`Convert`] routes it there.
+#[cfg(all(feature = "xyz", any(feature = "std", feature = "alloc")))]
+impl<const BE: bool, R> Convert<'_, crate::frame::Xyz12Frame<'_, BE>, R> {
+  /// Names the RGB gamut the XYZ12 decode converts into.
+  ///
+  /// The open [`DcpTargetGamut`](crate::DcpTargetGamut) descriptor is
+  /// exchanged for the closed selector in [`run`](Self::run), so a gamut this
+  /// build has no luma basis for fails the whole convert before a row is
+  /// read. Default: [`DcpTargetGamut`]'s own — DCI-P3, the SMPTE ST 428-1
+  /// D-Cinema decode target.
+  ///
+  /// [`DcpTargetGamut`]: crate::DcpTargetGamut
+  #[must_use]
+  #[inline]
+  pub fn target_gamut(mut self, gamut: crate::DcpTargetGamut) -> Self {
+    self.target_gamut = Some(gamut);
+    self
+  }
+}
+
 impl<'a, Fr: Source> Convert<'a, Fr, NoopResampler> {
   /// Area (box-coverage) downscale to `out_width * out_height` — the
   /// `cv2.INTER_AREA` convention. [`run`](Convert::run) errors on upscale,
@@ -441,13 +486,22 @@ impl<Fr: Source, R: Resampler> Convert<'_, Fr, R> {
     }
 
     sink.set_simd(self.simd);
+    // The spec's matrix is exchanged for the closed kernel vocabulary here,
+    // at the door: a matrix pixon has no decode for fails the whole convert
+    // before a row is read, rather than decoding as BT.709. Since
+    // mediaframe 0.4 the sink is also what the walk reads the matrix *from*,
+    // so this one call configures both halves.
+    if let Some(spec) = self.spec.as_ref() {
+      sink.set_color_spec(spec)?;
+    }
+    #[cfg(feature = "xyz")]
+    if let Some(gamut) = self.target_gamut.as_ref() {
+      sink.set_target_gamut(gamut)?;
+    }
     #[cfg(feature = "yuv-planar")]
     {
-      if let Some(spec) = self.spec {
-        sink.set_color_spec(spec);
-      }
       if let Some(loc) = self.chroma_location {
-        sink.set_chroma_location(loc);
+        sink.set_chroma_location(loc.clone());
       }
       if let Some(interp) = self.st428 {
         sink.set_st428_interpretation(interp);
@@ -458,10 +512,13 @@ impl<Fr: Source, R: Resampler> Convert<'_, Fr, R> {
       sink.set_native(native);
     }
 
-    let options = self
-      .format_options
-      .or_else(|| self.spec.map(|spec| Fr::Options::from_spec(&spec)))
-      .unwrap_or_default();
+    let options = match self.format_options {
+      Some(options) => options,
+      None => match self.spec.as_ref() {
+        Some(spec) => Fr::Options::from_spec(spec)?,
+        None => Fr::Options::default(),
+      },
+    };
     self.frame.walk_mixed(&options, &mut sink)
   }
 }

@@ -7,7 +7,7 @@
 //! at `u32` and narrowing only after is **0-ULP** for both ranges (issue #289).
 
 use crate::{
-  ColorMatrix, PixelSink,
+  KernelMatrix, PixelSink,
   resample::{AreaResampler, FilteredResampler, ResampleError, Resampler, Triangle},
   sinker::{AlphaMode, MixedSinker, MixedSinkerError},
   source::{Rgb48, Rgb96, Rgb96Row, Rgba128, Rgba128Row, rgb48_to, rgb96_to, rgba128_to},
@@ -142,7 +142,7 @@ fn rgb96_downscale_rgb_u16_is_exact_u32_area_mean() {
         .unwrap()
         .with_rgb_u16(&mut rgb_u16)
         .unwrap();
-    rgb96_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    rgb96_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   for oy in 0..OUT {
     for ox in 0..OUT {
@@ -195,7 +195,7 @@ fn rgb96_derived_outputs_come_from_binned_rgb() {
         .unwrap()
         .with_hsv(&mut h, &mut s_, &mut v_)
         .unwrap();
-    rgb96_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    rgb96_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
 
   // Reference: the full-res Rgb48 sink over the (exact) binned u16 RGB.
@@ -223,7 +223,7 @@ fn rgb96_derived_outputs_come_from_binned_rgb() {
       .unwrap()
       .with_hsv(&mut ref_h, &mut ref_s, &mut ref_v)
       .unwrap();
-    rgb48_to(&binned, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    rgb48_to(&binned, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   assert_eq!(rgb, ref_rgb, "rgb");
   assert_eq!(rgba, ref_rgba, "rgba");
@@ -246,7 +246,7 @@ fn rgb96_identity_plan_matches_new_sink() {
     let mut sink = MixedSinker::<Rgb96>::new(SRC, SRC)
       .with_rgb_u16(&mut direct)
       .unwrap();
-    rgb96_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    rgb96_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   let mut via_area = vec![0u16; SRC * SRC * 3];
   {
@@ -255,7 +255,7 @@ fn rgb96_identity_plan_matches_new_sink() {
         .unwrap()
         .with_rgb_u16(&mut via_area)
         .unwrap();
-    rgb96_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    rgb96_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   assert_eq!(direct, via_area);
 }
@@ -289,7 +289,7 @@ fn rgba128_downscale_rgba_u16_is_exact_u32_area_mean_incl_alpha() {
         .unwrap()
         .with_rgba_u16(&mut rgba_u16)
         .unwrap();
-    rgba128_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    rgba128_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   for oy in 0..OUT {
     for ox in 0..OUT {
@@ -314,7 +314,7 @@ fn rgba128_identity_plan_matches_new_sink() {
     let mut sink = MixedSinker::<Rgba128>::new(SRC, SRC)
       .with_rgba_u16(&mut direct)
       .unwrap();
-    rgba128_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    rgba128_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   let mut via_area = vec![0u16; SRC * SRC * 4];
   {
@@ -323,7 +323,7 @@ fn rgba128_identity_plan_matches_new_sink() {
         .unwrap()
         .with_rgba_u16(&mut via_area)
         .unwrap();
-    rgba128_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    rgba128_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   assert_eq!(direct, via_area);
 }
@@ -353,7 +353,12 @@ fn rgb96_first_row_scratch_oom_leaves_stream_and_freeze_uncommitted_for_retry() 
     // shape; the pre-fix ordering would have left the stream committed).
     crate::sinker::mixed::arm_source_rgb_u32_scratch_failure();
     let err = sink
-      .process(Rgb96Row::new(&wire[..SRC * 3], 0, ColorMatrix::Bt709, true))
+      .process(Rgb96Row::for_tests(
+        &wire[..SRC * 3],
+        0,
+        KernelMatrix::Bt709,
+        true,
+      ))
       .unwrap_err();
     assert!(
       matches!(
@@ -377,10 +382,10 @@ fn rgb96_first_row_scratch_oom_leaves_stream_and_freeze_uncommitted_for_retry() 
     sink.set_luma(&mut luma).unwrap();
     for r in 0..SRC {
       sink
-        .process(Rgb96Row::new(
+        .process(Rgb96Row::for_tests(
           &wire[r * SRC * 3..(r + 1) * SRC * 3],
           r,
-          ColorMatrix::Bt709,
+          KernelMatrix::Bt709,
           true,
         ))
         .expect("frame replay after a first-row scratch OOM must succeed");
@@ -420,10 +425,10 @@ fn rgba128_first_row_scratch_oom_leaves_stream_and_freeze_uncommitted_for_retry(
     // scratch-after-stream ordering boundary a box failure cannot pin.
     crate::sinker::mixed::arm_source_rgba_u32_scratch_failure();
     let err = sink
-      .process(Rgba128Row::new(
+      .process(Rgba128Row::for_tests(
         &host[..SRC * 4],
         0,
-        ColorMatrix::Bt709,
+        KernelMatrix::Bt709,
         true,
       ))
       .unwrap_err();
@@ -449,10 +454,10 @@ fn rgba128_first_row_scratch_oom_leaves_stream_and_freeze_uncommitted_for_retry(
     sink.set_luma(&mut luma).unwrap();
     for r in 0..SRC {
       sink
-        .process(Rgba128Row::new(
+        .process(Rgba128Row::for_tests(
           &host[r * SRC * 4..(r + 1) * SRC * 4],
           r,
-          ColorMatrix::Bt709,
+          KernelMatrix::Bt709,
           true,
         ))
         .expect("frame replay after a first-row scratch OOM must succeed");
@@ -523,7 +528,7 @@ fn rgb96_fr_false_area_rgb_u16_is_u32_domain_mean() {
         .unwrap()
         .with_rgb_u16(&mut out_le)
         .unwrap();
-    rgb96_to(&src, false, ColorMatrix::Bt709, &mut sink).unwrap();
+    rgb96_to(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   // BE arm
   let be = as_be_u32(&intended);
@@ -538,7 +543,12 @@ fn rgb96_fr_false_area_rgb_u16_is_u32_domain_mean() {
     .unwrap()
     .with_rgb_u16(&mut out_be)
     .unwrap();
-    crate::source::rgb96_to_endian::<_, true>(&src, false, ColorMatrix::Bt709, &mut sink).unwrap();
+    crate::source::rgb96_to_endian::<_, true>(
+      &src,
+      false,
+      sink.set_kernel_matrix(KernelMatrix::Bt709),
+    )
+    .unwrap();
   }
   assert_eq!(out_le, expected, "Rgb96 FR=false area rgb_u16 LE (0-ULP)");
   assert_eq!(out_be, expected, "Rgb96 FR=false area rgb_u16 BE (0-ULP)");
@@ -564,7 +574,7 @@ fn rgba128_fr_false_area_rgba_u16_is_u32_domain_mean() {
         .unwrap()
         .with_rgba_u16(&mut out_le)
         .unwrap();
-    rgba128_to(&src, false, ColorMatrix::Bt709, &mut sink).unwrap();
+    rgba128_to(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   let be = as_be_u32(&intended);
   let mut out_be = vec![0u16; FRO * FRO * 4];
@@ -578,8 +588,12 @@ fn rgba128_fr_false_area_rgba_u16_is_u32_domain_mean() {
     .unwrap()
     .with_rgba_u16(&mut out_be)
     .unwrap();
-    crate::source::rgba128_to_endian::<_, true>(&src, false, ColorMatrix::Bt709, &mut sink)
-      .unwrap();
+    crate::source::rgba128_to_endian::<_, true>(
+      &src,
+      false,
+      sink.set_kernel_matrix(KernelMatrix::Bt709),
+    )
+    .unwrap();
   }
   assert_eq!(
     out_le, expected,
@@ -626,8 +640,12 @@ fn rgb96_fr_false_filter_all_outputs_is_u32_domain() {
       .unwrap()
       .with_hsv(&mut h, &mut s_, &mut v_)
       .unwrap();
-      crate::source::rgb96_to_endian::<_, true>(&src, false, ColorMatrix::Bt709, &mut sink)
-        .unwrap();
+      crate::source::rgb96_to_endian::<_, true>(
+        &src,
+        false,
+        sink.set_kernel_matrix(KernelMatrix::Bt709),
+      )
+      .unwrap();
     } else {
       let wire = as_le_u32(&intended);
       let src = Rgb96Frame::new(&wire, FRP as u32, FRP as u32, (FRP * 3) as u32);
@@ -647,7 +665,7 @@ fn rgb96_fr_false_filter_all_outputs_is_u32_domain() {
       .unwrap()
       .with_hsv(&mut h, &mut s_, &mut v_)
       .unwrap();
-      rgb96_to(&src, false, ColorMatrix::Bt709, &mut sink).unwrap();
+      rgb96_to(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
     }
     let tag = if be { "BE" } else { "LE" };
     assert_eq!(rgb_u16, oracle_rgb, "Rgb96 filter rgb_u16 {tag} (0-ULP)");
@@ -704,8 +722,12 @@ fn rgba128_fr_false_filter_straight_4ch_all_outputs() {
       .unwrap()
       .with_hsv(&mut h, &mut s_, &mut v_)
       .unwrap();
-      crate::source::rgba128_to_endian::<_, true>(&src, false, ColorMatrix::Bt709, &mut sink)
-        .unwrap();
+      crate::source::rgba128_to_endian::<_, true>(
+        &src,
+        false,
+        sink.set_kernel_matrix(KernelMatrix::Bt709),
+      )
+      .unwrap();
     } else {
       let wire = as_le_u32(&intended);
       let src = Rgba128Frame::new(&wire, FRP as u32, FRP as u32, (FRP * 4) as u32);
@@ -729,7 +751,7 @@ fn rgba128_fr_false_filter_straight_4ch_all_outputs() {
       .unwrap()
       .with_hsv(&mut h, &mut s_, &mut v_)
       .unwrap();
-      rgba128_to(&src, false, ColorMatrix::Bt709, &mut sink).unwrap();
+      rgba128_to(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
     }
     let tag = if be { "BE" } else { "LE" };
     assert_eq!(
@@ -847,7 +869,7 @@ fn rgba128_premult_area_matches_u32_premult_oracle() {
       .unwrap()
       .with_hsv(&mut ref_h, &mut ref_s, &mut ref_v)
       .unwrap();
-    rgb48_to(&binned, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    rgb48_to(&binned, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
 
   for be in [false, true] {
@@ -881,8 +903,12 @@ fn rgba128_premult_area_matches_u32_premult_oracle() {
       .unwrap()
       .with_hsv(&mut h, &mut s_, &mut v_)
       .unwrap();
-      crate::source::rgba128_to_endian::<_, true>(&src, true, ColorMatrix::Bt709, &mut sink)
-        .unwrap();
+      crate::source::rgba128_to_endian::<_, true>(
+        &src,
+        true,
+        sink.set_kernel_matrix(KernelMatrix::Bt709),
+      )
+      .unwrap();
     } else {
       let wire = as_le_u32(&host);
       let src = Rgba128Frame::new(&wire, FRP as u32, FRP as u32, (FRP * 4) as u32);
@@ -905,7 +931,7 @@ fn rgba128_premult_area_matches_u32_premult_oracle() {
       .unwrap()
       .with_hsv(&mut h, &mut s_, &mut v_)
       .unwrap();
-      rgba128_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+      rgba128_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
     }
     let tag = if be { "BE" } else { "LE" };
     // Core premult/unpremult chain.
@@ -961,7 +987,12 @@ fn rgb48_derive_ref(rgb_u16: &[u16], n: usize, full_range: bool) -> Rgb48Derives
       .unwrap()
       .with_hsv(&mut h, &mut s, &mut v)
       .unwrap();
-    rgb48_to(&src, full_range, ColorMatrix::Bt709, &mut sink).unwrap();
+    rgb48_to(
+      &src,
+      full_range,
+      sink.set_kernel_matrix(KernelMatrix::Bt709),
+    )
+    .unwrap();
   }
   (rgb, luma, luma_u16, h, s, v)
 }
@@ -1017,8 +1048,12 @@ fn rgba128_drop_alpha_area_route_is_u32_domain() {
       .unwrap()
       .with_hsv(&mut h, &mut s_, &mut v_)
       .unwrap();
-      crate::source::rgba128_to_endian::<_, true>(&src, true, ColorMatrix::Bt709, &mut sink)
-        .unwrap();
+      crate::source::rgba128_to_endian::<_, true>(
+        &src,
+        true,
+        sink.set_kernel_matrix(KernelMatrix::Bt709),
+      )
+      .unwrap();
     } else {
       let wire = as_le_u32(&host);
       let src = Rgba128Frame::new(&wire, FRP as u32, FRP as u32, (FRP * 4) as u32);
@@ -1038,7 +1073,7 @@ fn rgba128_drop_alpha_area_route_is_u32_domain() {
       .unwrap()
       .with_hsv(&mut h, &mut s_, &mut v_)
       .unwrap();
-      rgba128_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+      rgba128_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
     }
     let tag = if be { "BE" } else { "LE" };
     assert_eq!(rgb_u16, oracle_rgb_u16, "Rgba128 drop-α area rgb_u16 {tag}");
@@ -1086,8 +1121,12 @@ fn rgba128_drop_alpha_filter_route_is_u32_domain() {
       .unwrap()
       .with_hsv(&mut h, &mut s_, &mut v_)
       .unwrap();
-      crate::source::rgba128_to_endian::<_, true>(&src, true, ColorMatrix::Bt709, &mut sink)
-        .unwrap();
+      crate::source::rgba128_to_endian::<_, true>(
+        &src,
+        true,
+        sink.set_kernel_matrix(KernelMatrix::Bt709),
+      )
+      .unwrap();
     } else {
       let wire = as_le_u32(&host);
       let src = Rgba128Frame::new(&wire, FRP as u32, FRP as u32, (FRP * 4) as u32);
@@ -1107,7 +1146,7 @@ fn rgba128_drop_alpha_filter_route_is_u32_domain() {
       .unwrap()
       .with_hsv(&mut h, &mut s_, &mut v_)
       .unwrap();
-      rgba128_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+      rgba128_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
     }
     let tag = if be { "BE" } else { "LE" };
     assert_eq!(
@@ -1141,7 +1180,7 @@ fn rgba128_premult_filter_rejects() {
   .with_alpha_mode(AlphaMode::Premultiplied)
   .with_rgba_u16(&mut rgba_u16)
   .unwrap();
-  let err = rgba128_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap_err();
+  let err = rgba128_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap_err();
   assert!(
     matches!(
       err,

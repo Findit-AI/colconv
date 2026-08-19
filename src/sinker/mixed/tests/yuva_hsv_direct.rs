@@ -22,10 +22,10 @@
 use super::*;
 use crate::row::{rgb_to_hsv_row, yuv_420_to_rgb_row, yuv_444_to_rgb_row};
 
-const MATRICES: [ColorMatrix; 3] = [
-  ColorMatrix::Bt601,
-  ColorMatrix::Bt709,
-  ColorMatrix::Bt2020Ncl,
+const MATRICES: [KernelMatrix; 3] = [
+  KernelMatrix::Bt601,
+  KernelMatrix::Bt709,
+  KernelMatrix::Bt2020Ncl,
 ];
 
 /// A non-trivial, non-gray pseudo-random byte so the HSV hue /
@@ -111,7 +111,7 @@ fn yuva420p_sink_hsv_only_matches_rgb_then_hsv() {
               .with_simd(use_simd)
               .with_rgb(&mut rgb)
               .unwrap();
-            yuva420p_to(&src, full_range, matrix, &mut s).unwrap();
+            yuva420p_to(&src, full_range, s.set_kernel_matrix(matrix)).unwrap();
           }
           let want = ref_hsv_from_rgb_frame(&rgb, w, h, use_simd);
 
@@ -124,7 +124,7 @@ fn yuva420p_sink_hsv_only_matches_rgb_then_hsv() {
               .with_simd(use_simd)
               .with_hsv(&mut hh, &mut ss, &mut vv)
               .unwrap();
-            yuva420p_to(&src, full_range, matrix, &mut s).unwrap();
+            yuva420p_to(&src, full_range, s.set_kernel_matrix(matrix)).unwrap();
           }
           assert_hsv_eq!(
             (hh, ss, vv),
@@ -171,7 +171,7 @@ fn yuva422p_sink_hsv_only_matches_rgb_then_hsv() {
               .with_simd(use_simd)
               .with_rgb(&mut rgb)
               .unwrap();
-            yuva422p_to(&src, full_range, matrix, &mut s).unwrap();
+            yuva422p_to(&src, full_range, s.set_kernel_matrix(matrix)).unwrap();
           }
           let want = ref_hsv_from_rgb_frame(&rgb, w, h, use_simd);
 
@@ -183,7 +183,7 @@ fn yuva422p_sink_hsv_only_matches_rgb_then_hsv() {
               .with_simd(use_simd)
               .with_hsv(&mut hh, &mut ss, &mut vv)
               .unwrap();
-            yuva422p_to(&src, full_range, matrix, &mut s).unwrap();
+            yuva422p_to(&src, full_range, s.set_kernel_matrix(matrix)).unwrap();
           }
           assert_hsv_eq!(
             (hh, ss, vv),
@@ -221,7 +221,7 @@ fn yuva444p_sink_hsv_only_matches_rgb_then_hsv() {
               .with_simd(use_simd)
               .with_rgb(&mut rgb)
               .unwrap();
-            yuva444p_to(&src, full_range, matrix, &mut s).unwrap();
+            yuva444p_to(&src, full_range, s.set_kernel_matrix(matrix)).unwrap();
           }
           let want = ref_hsv_from_rgb_frame(&rgb, w, h, use_simd);
 
@@ -233,7 +233,7 @@ fn yuva444p_sink_hsv_only_matches_rgb_then_hsv() {
               .with_simd(use_simd)
               .with_hsv(&mut hh, &mut ss, &mut vv)
               .unwrap();
-            yuva444p_to(&src, full_range, matrix, &mut s).unwrap();
+            yuva444p_to(&src, full_range, s.set_kernel_matrix(matrix)).unwrap();
           }
           assert_hsv_eq!(
             (hh, ss, vv),
@@ -291,7 +291,7 @@ fn yuva420p10_sink_hsv_only_matches_rgb_then_hsv() {
               .with_simd(use_simd)
               .with_rgb(&mut rgb)
               .unwrap();
-            yuva420p10_to(&src, full_range, matrix, &mut s).unwrap();
+            yuva420p10_to(&src, full_range, s.set_kernel_matrix(matrix)).unwrap();
           }
           let want = ref_hsv_from_rgb_frame(&rgb, w, h, use_simd);
 
@@ -303,7 +303,7 @@ fn yuva420p10_sink_hsv_only_matches_rgb_then_hsv() {
               .with_simd(use_simd)
               .with_hsv(&mut hh, &mut ss, &mut vv)
               .unwrap();
-            yuva420p10_to(&src, full_range, matrix, &mut s).unwrap();
+            yuva420p10_to(&src, full_range, s.set_kernel_matrix(matrix)).unwrap();
           }
           assert_hsv_eq!(
             (hh, ss, vv),
@@ -350,7 +350,7 @@ fn yuva422p12_sink_hsv_only_matches_rgb_then_hsv() {
               .with_simd(use_simd)
               .with_rgb(&mut rgb)
               .unwrap();
-            yuva422p12_to(&src, full_range, matrix, &mut s).unwrap();
+            yuva422p12_to(&src, full_range, s.set_kernel_matrix(matrix)).unwrap();
           }
           let want = ref_hsv_from_rgb_frame(&rgb, w, h, use_simd);
 
@@ -362,7 +362,7 @@ fn yuva422p12_sink_hsv_only_matches_rgb_then_hsv() {
               .with_simd(use_simd)
               .with_hsv(&mut hh, &mut ss, &mut vv)
               .unwrap();
-            yuva422p12_to(&src, full_range, matrix, &mut s).unwrap();
+            yuva422p12_to(&src, full_range, s.set_kernel_matrix(matrix)).unwrap();
           }
           assert_hsv_eq!(
             (hh, ss, vv),
@@ -400,7 +400,7 @@ fn yuva444p14_sink_hsv_only_matches_rgb_then_hsv() {
               .with_simd(use_simd)
               .with_rgb(&mut rgb)
               .unwrap();
-            yuva444p14_to(&src, full_range, matrix, &mut s).unwrap();
+            yuva444p14_to(&src, full_range, s.set_kernel_matrix(matrix)).unwrap();
           }
           let want = ref_hsv_from_rgb_frame(&rgb, w, h, use_simd);
 
@@ -412,7 +412,7 @@ fn yuva444p14_sink_hsv_only_matches_rgb_then_hsv() {
               .with_simd(use_simd)
               .with_hsv(&mut hh, &mut ss, &mut vv)
               .unwrap();
-            yuva444p14_to(&src, full_range, matrix, &mut s).unwrap();
+            yuva444p14_to(&src, full_range, s.set_kernel_matrix(matrix)).unwrap();
           }
           assert_hsv_eq!(
             (hh, ss, vv),
@@ -467,7 +467,7 @@ fn yuva420p_hsv_only_is_independent_of_alpha() {
     let mut s = MixedSinker::<Yuva420p>::new(w, h)
       .with_hsv(hh, ss, vv)
       .unwrap();
-    yuva420p_to(&src, true, ColorMatrix::Bt709, &mut s).unwrap();
+    yuva420p_to(&src, true, s.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   assert_eq!(got[0].0, got[1].0, "H must ignore alpha");
   assert_eq!(got[0].1, got[1].1, "S must ignore alpha");
@@ -510,7 +510,7 @@ fn yuva_sink_hsv_only_grows_no_rgb_scratch_all_families() {
       let mut s = MixedSinker::<Yuva420p>::new(w, h)
         .with_hsv(&mut hh, &mut ss, &mut vv)
         .unwrap();
-      yuva420p_to(&src, true, ColorMatrix::Bt601, &mut s).unwrap();
+      yuva420p_to(&src, true, s.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
       s.rgb_scratch.len()
     };
     assert_eq!(scratch_len, 0, "Yuva420p HSV-only RGB-free");
@@ -540,7 +540,7 @@ fn yuva_sink_hsv_only_grows_no_rgb_scratch_all_families() {
       let mut s = MixedSinker::<Yuva422p>::new(w, h)
         .with_hsv(&mut hh, &mut ss, &mut vv)
         .unwrap();
-      yuva422p_to(&src, true, ColorMatrix::Bt601, &mut s).unwrap();
+      yuva422p_to(&src, true, s.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
       s.rgb_scratch.len()
     };
     assert_eq!(scratch_len, 0, "Yuva422p HSV-only RGB-free");
@@ -561,7 +561,7 @@ fn yuva_sink_hsv_only_grows_no_rgb_scratch_all_families() {
       let mut s = MixedSinker::<Yuva444p>::new(w, h)
         .with_hsv(&mut hh, &mut ss, &mut vv)
         .unwrap();
-      yuva444p_to(&src, true, ColorMatrix::Bt601, &mut s).unwrap();
+      yuva444p_to(&src, true, s.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
       s.rgb_scratch.len()
     };
     assert_eq!(scratch_len, 0, "Yuva444p HSV-only RGB-free");
@@ -584,7 +584,7 @@ fn yuva_sink_hsv_only_grows_no_rgb_scratch_all_families() {
       let mut s = MixedSinker::<Yuva444p14>::new(w, h)
         .with_hsv(&mut hh, &mut ss, &mut vv)
         .unwrap();
-      yuva444p14_to(&src, true, ColorMatrix::Bt601, &mut s).unwrap();
+      yuva444p14_to(&src, true, s.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
       s.rgb_scratch.len()
     };
     assert_eq!(scratch_len, 0, "Yuva444p14 HSV-only RGB-free");
@@ -628,7 +628,7 @@ fn yuva420p_luma_plus_hsv_only_is_correct_and_rgb_free() {
       .unwrap()
       .with_hsv(&mut hh, &mut ss, &mut vv)
       .unwrap();
-    yuva420p_to(&src, true, ColorMatrix::Bt709, &mut s).unwrap();
+    yuva420p_to(&src, true, s.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
     s.rgb_scratch.len()
   };
 
@@ -646,7 +646,7 @@ fn yuva420p_luma_plus_hsv_only_is_correct_and_rgb_free() {
     &vp[..w / 2],
     &mut rgb0,
     w,
-    ColorMatrix::Bt709,
+    KernelMatrix::Bt709,
     true,
     true,
   );
@@ -675,7 +675,7 @@ fn yuva420p_luma_plus_hsv_only_is_correct_and_rgb_free() {
     let mut s = MixedSinker::<Yuva444p>::new(w, h)
       .with_hsv(&mut hh4, &mut ss4, &mut vv4)
       .unwrap();
-    yuva444p_to(&src4, true, ColorMatrix::Bt709, &mut s).unwrap();
+    yuva444p_to(&src4, true, s.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   let mut rgb04 = std::vec![0u8; w * 3];
   yuv_444_to_rgb_row(
@@ -684,7 +684,7 @@ fn yuva420p_luma_plus_hsv_only_is_correct_and_rgb_free() {
     &vp4[..w],
     &mut rgb04,
     w,
-    ColorMatrix::Bt709,
+    KernelMatrix::Bt709,
     true,
     true,
   );

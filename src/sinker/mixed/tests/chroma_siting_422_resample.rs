@@ -21,7 +21,7 @@
 //! IS the RGB-domain reconstruct-then-bin and is pinned against that.
 
 use crate::{
-  ChromaLocation, ColorInfo, ColorMatrix, ColorSpec, DynamicRange, PixelFormat, PixelSink,
+  ChromaLocation, ColorInfo, ColorSpec, DynamicRange, KernelMatrix, PixelFormat, PixelSink,
   Primaries, Transfer,
   resample::{AreaResampler, AveragingDomain, LinearMode},
   sinker::MixedSinker,
@@ -29,7 +29,7 @@ use crate::{
 };
 use mediaframe::frame::{Yuv422pFrame, Yuv444pFrame};
 
-const M: ColorMatrix = ColorMatrix::Bt601;
+const M: KernelMatrix = KernelMatrix::Bt601;
 const FR: bool = true;
 
 /// Round `a / d` half-up (ties toward `+∞`) — the production
@@ -218,7 +218,7 @@ fn run(
       MixedSinker::<Yuv422p, AreaResampler>::with_resampler(sw, sh, AreaResampler::to(ow, oh))
         .unwrap()
         .with_native(native)
-        .with_chroma_location(loc)
+        .with_chroma_location(loc.clone())
         .with_simd(simd)
         .with_rgb(&mut rgb)
         .unwrap()
@@ -233,7 +233,7 @@ fn run(
     let f = Yuv422pFrame::new(
       y, u, v, sw as u32, sh as u32, sw as u32, cw as u32, cw as u32,
     );
-    yuv422p_to(&f, FR, M, &mut sink).unwrap();
+    yuv422p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   (rgb, rgba, (hh, ss, vv), luma, luma_u16)
 }
@@ -278,7 +278,7 @@ fn native_oracle(
     let f = Yuv444pFrame::new(
       &yb, &ub, &vb, ow as u32, oh as u32, ow as u32, ow as u32, ow as u32,
     );
-    yuv444p_to(&f, FR, M, &mut sink).unwrap();
+    yuv444p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   (rgb, rgba, (hh, ss, vv), luma, luma_u16)
 }
@@ -317,7 +317,7 @@ fn encoded_oracle_rgb(
     let f = Yuv444pFrame::new(
       y, &uf, &vf, sw as u32, sh as u32, sw as u32, sw as u32, sw as u32,
     );
-    yuv444p_to(&f, FR, M, &mut sink).unwrap();
+    yuv444p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   rgb
 }
@@ -351,9 +351,9 @@ fn cosited_group_is_byte_identical_across_tiers() {
       ChromaLocation::Left,
       ChromaLocation::TopLeft,
       ChromaLocation::BottomLeft,
-      ChromaLocation::Unknown(7),
+      ChromaLocation::other("unassigned-7"),
     ] {
-      let got = run(&y, &u, &v, 8, 8, 4, 4, loc, native, true);
+      let got = run(&y, &u, &v, 8, 8, 4, 4, loc.clone(), native, true);
       assert_eq!(got.0, base.0, "rgb {loc:?} native={native}");
       assert_eq!(got.1, base.1, "rgba {loc:?} native={native}");
       assert_eq!(got.2, base.2, "hsv {loc:?} native={native}");
@@ -380,7 +380,7 @@ fn centered_native_equals_code_domain_oracle() {
       ChromaLocation::Top,
       ChromaLocation::Bottom,
     ] {
-      let n = run(&y, &u, &v, sw, sh, ow, oh, loc, true, true);
+      let n = run(&y, &u, &v, sw, sh, ow, oh, loc.clone(), true, true);
       assert_eq!(n.0, o.0, "rgb {loc:?} {sw}x{sh}->{ow}x{oh}");
       assert_eq!(n.1, o.1, "rgba {loc:?} {sw}x{sh}->{ow}x{oh}");
       assert_eq!(n.2, o.2, "hsv {loc:?} {sw}x{sh}->{ow}x{oh}");
@@ -421,7 +421,7 @@ fn centered_encoded_output_equals_rgb_reconstruct_then_bin() {
       ChromaLocation::Top,
       ChromaLocation::Bottom,
     ] {
-      let got = run(&y, &u, &v, sw, sh, ow, oh, loc, false, true);
+      let got = run(&y, &u, &v, sw, sh, ow, oh, loc.clone(), false, true);
       assert_eq!(got.0, oracle, "rgb {loc:?} {sw}x{sh}->{ow}x{oh}");
     }
   }
@@ -567,10 +567,10 @@ fn run_reuse_native(
     let f = Yuv422pFrame::new(
       y, u, v, sw as u32, sh as u32, sw as u32, cw as u32, cw as u32,
     );
-    sink.set_chroma_location(loc1);
-    yuv422p_to(&f, FR, M, &mut sink).unwrap();
-    sink.set_chroma_location(loc2);
-    yuv422p_to(&f, FR, M, &mut sink).unwrap();
+    sink.set_chroma_location(loc1.clone());
+    yuv422p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
+    sink.set_chroma_location(loc2.clone());
+    yuv422p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   (rgb, rgba, (hh, ss, vv), luma, luma_u16)
 }
@@ -595,14 +595,14 @@ fn run_hsv_only(
       MixedSinker::<Yuv422p, AreaResampler>::with_resampler(sw, sh, AreaResampler::to(ow, oh))
         .unwrap()
         .with_native(false)
-        .with_chroma_location(loc)
+        .with_chroma_location(loc.clone())
         .with_simd(simd)
         .with_hsv(&mut hh, &mut ss, &mut vv)
         .unwrap();
     let f = Yuv422pFrame::new(
       y, u, v, sw as u32, sh as u32, sw as u32, cw as u32, cw as u32,
     );
-    yuv422p_to(&f, FR, M, &mut sink).unwrap();
+    yuv422p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   (hh, ss, vv)
 }
@@ -634,10 +634,10 @@ fn run_reuse_hsv_only(
     let f = Yuv422pFrame::new(
       y, u, v, sw as u32, sh as u32, sw as u32, cw as u32, cw as u32,
     );
-    sink.set_chroma_location(loc1);
-    yuv422p_to(&f, FR, M, &mut sink).unwrap();
-    sink.set_chroma_location(loc2);
-    yuv422p_to(&f, FR, M, &mut sink).unwrap();
+    sink.set_chroma_location(loc1.clone());
+    yuv422p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
+    sink.set_chroma_location(loc2.clone());
+    yuv422p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   (hh, ss, vv)
 }
@@ -655,8 +655,8 @@ fn native_join_rebuilds_on_siting_change_across_frames() {
     (ChromaLocation::Left, ChromaLocation::Center),
     (ChromaLocation::Center, ChromaLocation::Left),
   ] {
-    let reused = run_reuse_native(&y, &u, &v, 8, 8, 4, 4, a, b, true);
-    let fresh = run(&y, &u, &v, 8, 8, 4, 4, b, true, true);
+    let reused = run_reuse_native(&y, &u, &v, 8, 8, 4, 4, a.clone(), b.clone(), true);
+    let fresh = run(&y, &u, &v, 8, 8, 4, 4, b.clone(), true, true);
     assert_eq!(
       reused.0, fresh.0,
       "native rgb {a:?}->{b:?} stale-phase carryover"
@@ -665,7 +665,7 @@ fn native_join_rebuilds_on_siting_change_across_frames() {
     assert_eq!(reused.2, fresh.2, "native hsv {a:?}->{b:?}");
     // Non-vacuous: the two sitings genuinely differ on this ramp, so matching
     // frame 2's siting (not frame 1's) is a real distinction.
-    let stale = run(&y, &u, &v, 8, 8, 4, 4, a, true, true);
+    let stale = run(&y, &u, &v, 8, 8, 4, 4, a.clone(), true, true);
     assert_ne!(
       fresh.0, stale.0,
       "sitings {a:?} vs {b:?} must differ (non-vacuous)"
@@ -686,10 +686,10 @@ fn hsv_only_join_rebuilds_on_siting_change_across_frames() {
     (ChromaLocation::Left, ChromaLocation::Center),
     (ChromaLocation::Center, ChromaLocation::Left),
   ] {
-    let reused = run_reuse_hsv_only(&y, &u, &v, 8, 8, 4, 4, a, b, true);
-    let fresh = run_hsv_only(&y, &u, &v, 8, 8, 4, 4, b, true);
+    let reused = run_reuse_hsv_only(&y, &u, &v, 8, 8, 4, 4, a.clone(), b.clone(), true);
+    let fresh = run_hsv_only(&y, &u, &v, 8, 8, 4, 4, b.clone(), true);
     assert_eq!(reused, fresh, "hsv-only {a:?}->{b:?} stale-phase carryover");
-    let stale = run_hsv_only(&y, &u, &v, 8, 8, 4, 4, a, true);
+    let stale = run_hsv_only(&y, &u, &v, 8, 8, 4, 4, a.clone(), true);
     assert_ne!(
       fresh, stale,
       "sitings {a:?} vs {b:?} must differ (non-vacuous)"
@@ -717,14 +717,14 @@ fn apply_siting<R>(
       ColorInfo::new(
         Primaries::Unspecified,
         Transfer::Unspecified,
-        M,
+        crate::ColorMatrix::from(M),
         DynamicRange::Limited,
         loc,
       ),
     );
-    sink.set_color_spec(spec);
+    sink.set_color_spec(&spec).unwrap();
   } else {
-    sink.set_chroma_location(loc);
+    sink.set_chroma_location(loc.clone());
   }
 }
 
@@ -770,12 +770,12 @@ fn run_reuse_native_setter_after(
     let f = Yuv422pFrame::new(
       y, u, v, sw as u32, sh as u32, sw as u32, cw as u32, cw as u32,
     );
-    sink.set_chroma_location(loc1);
-    yuv422p_to(&f, FR, M, &mut sink).unwrap();
+    sink.set_chroma_location(loc1.clone());
+    yuv422p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
     PixelSink::begin_frame(&mut sink, sw as u32, sh as u32).unwrap();
     apply_siting(&mut sink, loc2, via_color_spec); // AFTER begin_frame, before row 0
     for r in 0..sh {
-      let row = Yuv422pRow::new(
+      let row = Yuv422pRow::for_tests(
         &y[r * sw..r * sw + sw],
         &u[r * cw..r * cw + cw],
         &v[r * cw..r * cw + cw],
@@ -818,12 +818,12 @@ fn run_reuse_hsv_setter_after(
     let f = Yuv422pFrame::new(
       y, u, v, sw as u32, sh as u32, sw as u32, cw as u32, cw as u32,
     );
-    sink.set_chroma_location(loc1);
-    yuv422p_to(&f, FR, M, &mut sink).unwrap();
+    sink.set_chroma_location(loc1.clone());
+    yuv422p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
     PixelSink::begin_frame(&mut sink, sw as u32, sh as u32).unwrap();
     apply_siting(&mut sink, loc2, via_color_spec);
     for r in 0..sh {
-      let row = Yuv422pRow::new(
+      let row = Yuv422pRow::for_tests(
         &y[r * sw..r * sw + sw],
         &u[r * cw..r * cw + cw],
         &v[r * cw..r * cw + cw],
@@ -851,9 +851,20 @@ fn native_join_rebuilds_on_siting_change_after_begin_frame() {
       (ChromaLocation::Left, ChromaLocation::Center),
       (ChromaLocation::Center, ChromaLocation::Left),
     ] {
-      let reused =
-        run_reuse_native_setter_after(&y, &u, &v, 8, 8, 4, 4, a, b, via_color_spec, true);
-      let fresh = run(&y, &u, &v, 8, 8, 4, 4, b, true, true);
+      let reused = run_reuse_native_setter_after(
+        &y,
+        &u,
+        &v,
+        8,
+        8,
+        4,
+        4,
+        a.clone(),
+        b.clone(),
+        via_color_spec,
+        true,
+      );
+      let fresh = run(&y, &u, &v, 8, 8, 4, 4, b.clone(), true, true);
       assert_eq!(
         reused.0, fresh.0,
         "native rgb {a:?}->{b:?} color_spec={via_color_spec}: stale after begin_frame"
@@ -880,8 +891,20 @@ fn hsv_only_join_rebuilds_on_siting_change_after_begin_frame() {
       (ChromaLocation::Left, ChromaLocation::Center),
       (ChromaLocation::Center, ChromaLocation::Left),
     ] {
-      let reused = run_reuse_hsv_setter_after(&y, &u, &v, 8, 8, 4, 4, a, b, via_color_spec, true);
-      let fresh = run_hsv_only(&y, &u, &v, 8, 8, 4, 4, b, true);
+      let reused = run_reuse_hsv_setter_after(
+        &y,
+        &u,
+        &v,
+        8,
+        8,
+        4,
+        4,
+        a.clone(),
+        b.clone(),
+        via_color_spec,
+        true,
+      );
+      let fresh = run_hsv_only(&y, &u, &v, 8, 8, 4, 4, b.clone(), true);
       assert_eq!(
         reused, fresh,
         "hsv-only {a:?}->{b:?} color_spec={via_color_spec}: stale after begin_frame"
@@ -919,7 +942,7 @@ fn out_of_sequence_centered_first_row_is_rejected_before_the_chroma_reserve() {
   PixelSink::begin_frame(&mut sink, 8, 8).unwrap();
   super::super::arm_chroma_full_alloc_failure();
   // First process call is row 5 — the stream expects row 0.
-  let bad = Yuv422pRow::new(
+  let bad = Yuv422pRow::for_tests(
     &y[5 * 8..6 * 8],
     &u[5 * 4..6 * 4],
     &v[5 * 4..6 * 4],
@@ -943,7 +966,7 @@ fn out_of_sequence_centered_first_row_is_rejected_before_the_chroma_reserve() {
   // Non-vacuous: the failpoint is still armed, so a VALID first row now REACHES
   // the reserve (proving the guard is ordering, not a disabled reserve) — the
   // primed refusal surfaces as a recoverable AllocationFailed.
-  let good = Yuv422pRow::new(&y[0..8], &u[0..4], &v[0..4], 0, M, FR);
+  let good = Yuv422pRow::for_tests(&y[0..8], &u[0..4], &v[0..4], 0, M, FR);
   let err0 = PixelSink::process(&mut sink, good).unwrap_err();
   assert!(
     matches!(
@@ -970,7 +993,7 @@ fn assert_chroma_failpoint_armed_then_consume(y: &[u8], u: &[u8], v: &[u8]) {
       .with_rgb(&mut rgb)
       .unwrap();
   let f = Yuv422pFrame::new(y, u, v, 8, 8, 8, 4, 4);
-  let err = yuv422p_to(&f, FR, M, &mut sink).unwrap_err();
+  let err = yuv422p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap_err();
   assert!(
     matches!(
       err,
@@ -1002,7 +1025,7 @@ fn centered_filter_bicublin_rejected_before_the_chroma_reserve() {
       .unwrap();
     PixelSink::begin_frame(&mut sink, 8, 8).unwrap();
     super::super::arm_chroma_full_alloc_failure();
-    let row = Yuv422pRow::new(&y[0..8], &u[0..4], &v[0..4], 0, M, FR);
+    let row = Yuv422pRow::for_tests(&y[0..8], &u[0..4], &v[0..4], 0, M, FR);
     let err = PixelSink::process(&mut sink, row).unwrap_err();
     assert!(
       matches!(
@@ -1044,7 +1067,7 @@ fn luma_only_centered_area_does_not_reserve_chroma() {
     PixelSink::begin_frame(&mut sink, 8, 8).unwrap();
     super::super::arm_chroma_full_alloc_failure();
     for r in 0..8 {
-      let row = Yuv422pRow::new(
+      let row = Yuv422pRow::for_tests(
         &y[r * 8..r * 8 + 8],
         &u[r * 4..r * 4 + 4],
         &v[r * 4..r * 4 + 4],
@@ -1085,14 +1108,14 @@ fn run_linear_422(
         .with_averaging_domain(AveragingDomain::Linear)
         .with_native(false)
         .with_linear_mode(mode)
-        .with_chroma_location(loc)
+        .with_chroma_location(loc.clone())
         .with_simd(simd)
         .with_rgb(&mut rgb)
         .unwrap();
     let f = Yuv422pFrame::new(
       y, u, v, sw as u32, sh as u32, sw as u32, cw as u32, cw as u32,
     );
-    yuv422p_to(&f, FR, M, &mut sink).unwrap();
+    yuv422p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   rgb
 }
@@ -1130,7 +1153,7 @@ fn oracle_linear_reconstruct(
     let f = Yuv444pFrame::new(
       y, &uf, &vf, sw as u32, sh as u32, sw as u32, sw as u32, sw as u32,
     );
-    yuv444p_to(&f, FR, M, &mut sink).unwrap();
+    yuv444p_to(&f, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   rgb
 }
@@ -1186,7 +1209,7 @@ fn native_mid_frame_phase_change_rejection_keeps_the_stream_retryable() {
       .unwrap();
   PixelSink::begin_frame(&mut sink, 8, 8).unwrap();
   for r in 0..2 {
-    let row = Yuv422pRow::new(
+    let row = Yuv422pRow::for_tests(
       &y[r * 8..r * 8 + 8],
       &u[r * cw..r * cw + cw],
       &v[r * cw..r * cw + cw],
@@ -1197,7 +1220,7 @@ fn native_mid_frame_phase_change_rejection_keeps_the_stream_retryable() {
     PixelSink::process(&mut sink, row).unwrap();
   }
   sink.set_chroma_location(ChromaLocation::Left);
-  let bad = Yuv422pRow::new(
+  let bad = Yuv422pRow::for_tests(
     &y[5 * 8..6 * 8],
     &u[5 * cw..6 * cw],
     &v[5 * cw..6 * cw],
@@ -1214,7 +1237,7 @@ fn native_mid_frame_phase_change_rejection_keeps_the_stream_retryable() {
   // a fresh frame at the new siting processes without error.
   PixelSink::begin_frame(&mut sink, 8, 8).unwrap();
   for r in 0..8 {
-    let row = Yuv422pRow::new(
+    let row = Yuv422pRow::for_tests(
       &y[r * 8..r * 8 + 8],
       &u[r * cw..r * cw + cw],
       &v[r * cw..r * cw + cw],
@@ -1247,7 +1270,7 @@ fn hsv_mid_frame_phase_change_rejection_keeps_the_stream_retryable() {
       .unwrap();
   PixelSink::begin_frame(&mut sink, 8, 8).unwrap();
   for r in 0..2 {
-    let row = Yuv422pRow::new(
+    let row = Yuv422pRow::for_tests(
       &y[r * 8..r * 8 + 8],
       &u[r * cw..r * cw + cw],
       &v[r * cw..r * cw + cw],
@@ -1258,7 +1281,7 @@ fn hsv_mid_frame_phase_change_rejection_keeps_the_stream_retryable() {
     PixelSink::process(&mut sink, row).unwrap();
   }
   sink.set_chroma_location(ChromaLocation::Left);
-  let bad = Yuv422pRow::new(
+  let bad = Yuv422pRow::for_tests(
     &y[5 * 8..6 * 8],
     &u[5 * cw..6 * cw],
     &v[5 * cw..6 * cw],
@@ -1273,7 +1296,7 @@ fn hsv_mid_frame_phase_change_rejection_keeps_the_stream_retryable() {
   );
   PixelSink::begin_frame(&mut sink, 8, 8).unwrap();
   for r in 0..8 {
-    let row = Yuv422pRow::new(
+    let row = Yuv422pRow::for_tests(
       &y[r * 8..r * 8 + 8],
       &u[r * cw..r * cw + cw],
       &v[r * cw..r * cw + cw],
@@ -1306,12 +1329,12 @@ fn in_sequence_flip_row1<R>(
   loc2: ChromaLocation,
 ) -> Result<(), super::super::MixedSinkerError> {
   let cw = 4usize;
-  sink.set_chroma_location(loc1);
+  sink.set_chroma_location(loc1.clone());
   PixelSink::begin_frame(&mut sink, 8, 8).unwrap();
-  let row0 = Yuv422pRow::new(&y[0..8], &u[0..cw], &v[0..cw], 0, M, FR);
+  let row0 = Yuv422pRow::for_tests(&y[0..8], &u[0..cw], &v[0..cw], 0, M, FR);
   PixelSink::process(&mut sink, row0).unwrap();
-  sink.set_chroma_location(loc2);
-  let row1 = Yuv422pRow::new(&y[8..16], &u[cw..2 * cw], &v[cw..2 * cw], 1, M, FR);
+  sink.set_chroma_location(loc2.clone());
+  let row1 = Yuv422pRow::for_tests(&y[8..16], &u[cw..2 * cw], &v[cw..2 * cw], 1, M, FR);
   PixelSink::process(&mut sink, row1)
 }
 
@@ -1336,7 +1359,7 @@ fn in_sequence_mid_frame_phase_change_rejected_across_tiers() {
       .with_native(true)
       .with_rgb(&mut rgb)
       .unwrap();
-    let err = in_sequence_flip_row1(sink, &y, &u, &v, loc1, loc2).unwrap_err();
+    let err = in_sequence_flip_row1(sink, &y, &u, &v, loc1.clone(), loc2.clone()).unwrap_err();
     assert!(
       matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
       "native {loc1:?}->{loc2:?}: want ChromaSitingChanged, got {err:?}"
@@ -1349,7 +1372,7 @@ fn in_sequence_mid_frame_phase_change_rejected_across_tiers() {
       .with_native(false)
       .with_rgb(&mut rgb)
       .unwrap();
-    let err = in_sequence_flip_row1(sink, &y, &u, &v, loc1, loc2).unwrap_err();
+    let err = in_sequence_flip_row1(sink, &y, &u, &v, loc1.clone(), loc2.clone()).unwrap_err();
     assert!(
       matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
       "encoded-rgb {loc1:?}->{loc2:?}: want ChromaSitingChanged, got {err:?}"
@@ -1362,7 +1385,7 @@ fn in_sequence_mid_frame_phase_change_rejected_across_tiers() {
       .with_native(false)
       .with_hsv(&mut hh, &mut ss, &mut vv)
       .unwrap();
-    let err = in_sequence_flip_row1(sink, &y, &u, &v, loc1, loc2).unwrap_err();
+    let err = in_sequence_flip_row1(sink, &y, &u, &v, loc1.clone(), loc2.clone()).unwrap_err();
     assert!(
       matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
       "hsv {loc1:?}->{loc2:?}: want ChromaSitingChanged, got {err:?}"
@@ -1376,7 +1399,7 @@ fn in_sequence_mid_frame_phase_change_rejected_across_tiers() {
       .with_native(false)
       .with_rgb(&mut rgb)
       .unwrap();
-    let err = in_sequence_flip_row1(sink, &y, &u, &v, loc1, loc2).unwrap_err();
+    let err = in_sequence_flip_row1(sink, &y, &u, &v, loc1.clone(), loc2.clone()).unwrap_err();
     assert!(
       matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
       "linear {loc1:?}->{loc2:?}: want ChromaSitingChanged, got {err:?}"
@@ -1393,7 +1416,7 @@ fn in_sequence_mid_frame_phase_change_rejected_across_tiers() {
       .unwrap()
       .with_rgb(&mut rgb)
       .unwrap();
-    let err = in_sequence_flip_row1(sink, &y, &u, &v, loc1, loc2).unwrap_err();
+    let err = in_sequence_flip_row1(sink, &y, &u, &v, loc1.clone(), loc2.clone()).unwrap_err();
     assert!(
       matches!(err, MixedSinkerError::ChromaSitingChanged(_)),
       "filter {loc1:?}->{loc2:?}: want ChromaSitingChanged, got {err:?}"
@@ -1431,11 +1454,11 @@ fn centered_linear_output_set_change_rejects_before_the_chroma_reserve() {
         .with_luma(&mut luma)
         .unwrap();
     PixelSink::begin_frame(&mut sink, 8, 8).unwrap();
-    let row0 = Yuv422pRow::new(&y[0..8], &u[0..cw], &v[0..cw], 0, M, FR);
+    let row0 = Yuv422pRow::for_tests(&y[0..8], &u[0..cw], &v[0..cw], 0, M, FR);
     PixelSink::process(&mut sink, row0).unwrap(); // luma-only: reserves no chroma
     super::super::arm_chroma_full_alloc_failure();
     sink.set_rgb(&mut rgb).unwrap(); // attach RGB mid-frame → want_color true
-    let row1 = Yuv422pRow::new(&y[8..16], &u[cw..2 * cw], &v[cw..2 * cw], 1, M, FR);
+    let row1 = Yuv422pRow::for_tests(&y[8..16], &u[cw..2 * cw], &v[cw..2 * cw], 1, M, FR);
     let err = PixelSink::process(&mut sink, row1).unwrap_err();
     assert!(
       matches!(err, MixedSinkerError::ResampleOutputsChanged(_)),
@@ -1478,7 +1501,7 @@ fn centered_rowstage_reserve_oom_leaves_outputs_unfrozen_for_retry() {
       .unwrap();
   PixelSink::begin_frame(&mut sink, 8, 8).unwrap();
   super::super::arm_chroma_full_alloc_failure();
-  let row0 = Yuv422pRow::new(&y[0..8], &u[0..cw], &v[0..cw], 0, M, FR);
+  let row0 = Yuv422pRow::for_tests(&y[0..8], &u[0..cw], &v[0..cw], 0, M, FR);
   let err = PixelSink::process(&mut sink, row0).unwrap_err();
   assert!(
     matches!(
@@ -1491,7 +1514,7 @@ fn centered_rowstage_reserve_oom_leaves_outputs_unfrozen_for_retry() {
   // consumed, so the reserve now succeeds; because the OOM row never froze the
   // output set, row 0 is accepted with the new attachment.
   sink.set_luma(&mut luma).unwrap();
-  let row0b = Yuv422pRow::new(&y[0..8], &u[0..cw], &v[0..cw], 0, M, FR);
+  let row0b = Yuv422pRow::for_tests(&y[0..8], &u[0..cw], &v[0..cw], 0, M, FR);
   PixelSink::process(&mut sink, row0b).unwrap();
 }
 
@@ -1521,10 +1544,10 @@ fn centered_rowstage_later_output_attach_is_resample_outputs_changed() {
       .with_rgb(&mut rgb)
       .unwrap();
   PixelSink::begin_frame(&mut sink, 8, 8).unwrap();
-  let row0 = Yuv422pRow::new(&y[0..8], &u[0..cw], &v[0..cw], 0, M, FR);
+  let row0 = Yuv422pRow::for_tests(&y[0..8], &u[0..cw], &v[0..cw], 0, M, FR);
   PixelSink::process(&mut sink, row0).unwrap(); // RGB-only, freezes {rgb}
   sink.set_luma(&mut luma).unwrap(); // attach luma → output set changed
-  let row1 = Yuv422pRow::new(&y[8..16], &u[cw..2 * cw], &v[cw..2 * cw], 1, M, FR);
+  let row1 = Yuv422pRow::for_tests(&y[8..16], &u[cw..2 * cw], &v[cw..2 * cw], 1, M, FR);
   let err = PixelSink::process(&mut sink, row1).unwrap_err();
   assert!(
     matches!(err, MixedSinkerError::ResampleOutputsChanged(_)),
@@ -1556,10 +1579,10 @@ fn centered_filter_later_output_attach_is_resample_outputs_changed() {
   .with_rgb(&mut rgb)
   .unwrap();
   PixelSink::begin_frame(&mut sink, 8, 8).unwrap();
-  let row0 = Yuv422pRow::new(&y[0..8], &u[0..cw], &v[0..cw], 0, M, FR);
+  let row0 = Yuv422pRow::for_tests(&y[0..8], &u[0..cw], &v[0..cw], 0, M, FR);
   PixelSink::process(&mut sink, row0).unwrap(); // RGB-only, freezes {rgb}
   sink.set_luma(&mut luma).unwrap(); // attach luma → output set changed
-  let row1 = Yuv422pRow::new(&y[8..16], &u[cw..2 * cw], &v[cw..2 * cw], 1, M, FR);
+  let row1 = Yuv422pRow::for_tests(&y[8..16], &u[cw..2 * cw], &v[cw..2 * cw], 1, M, FR);
   let err = PixelSink::process(&mut sink, row1).unwrap_err();
   assert!(
     matches!(err, MixedSinkerError::ResampleOutputsChanged(_)),
@@ -1595,7 +1618,7 @@ fn native_out_of_sequence_first_row_does_not_drop_the_cached_join() {
   // Frame 1 at Left builds the native join.
   PixelSink::begin_frame(&mut sink, 8, 8).unwrap();
   for r in 0..8 {
-    let row = Yuv422pRow::new(
+    let row = Yuv422pRow::for_tests(
       &y[r * 8..r * 8 + 8],
       &u[r * cw..r * cw + cw],
       &v[r * cw..r * cw + cw],
@@ -1612,7 +1635,7 @@ fn native_out_of_sequence_first_row_does_not_drop_the_cached_join() {
   // Frame 2: change siting to Center, then feed an OUT-OF-SEQUENCE first row.
   PixelSink::begin_frame(&mut sink, 8, 8).unwrap();
   sink.set_chroma_location(ChromaLocation::Center);
-  let bad = Yuv422pRow::new(
+  let bad = Yuv422pRow::for_tests(
     &y[3 * 8..4 * 8],
     &u[3 * cw..4 * cw],
     &v[3 * cw..4 * cw],
@@ -1635,7 +1658,7 @@ fn native_out_of_sequence_first_row_does_not_drop_the_cached_join() {
   );
   // The corrected retry (row 0, now rebuilding for Center) succeeds.
   for r in 0..8 {
-    let row = Yuv422pRow::new(
+    let row = Yuv422pRow::for_tests(
       &y[r * 8..r * 8 + 8],
       &u[r * cw..r * cw + cw],
       &v[r * cw..r * cw + cw],
@@ -1667,7 +1690,7 @@ fn hsv_out_of_sequence_first_row_does_not_drop_the_cached_join() {
       .unwrap();
   PixelSink::begin_frame(&mut sink, 8, 8).unwrap();
   for r in 0..8 {
-    let row = Yuv422pRow::new(
+    let row = Yuv422pRow::for_tests(
       &y[r * 8..r * 8 + 8],
       &u[r * cw..r * cw + cw],
       &v[r * cw..r * cw + cw],
@@ -1683,7 +1706,7 @@ fn hsv_out_of_sequence_first_row_does_not_drop_the_cached_join() {
   );
   PixelSink::begin_frame(&mut sink, 8, 8).unwrap();
   sink.set_chroma_location(ChromaLocation::Center);
-  let bad = Yuv422pRow::new(
+  let bad = Yuv422pRow::for_tests(
     &y[3 * 8..4 * 8],
     &u[3 * cw..4 * cw],
     &v[3 * cw..4 * cw],
@@ -1704,7 +1727,7 @@ fn hsv_out_of_sequence_first_row_does_not_drop_the_cached_join() {
     "an out-of-sequence first row must NOT drop the cached HSV join"
   );
   for r in 0..8 {
-    let row = Yuv422pRow::new(
+    let row = Yuv422pRow::for_tests(
       &y[r * 8..r * 8 + 8],
       &u[r * cw..r * cw + cw],
       &v[r * cw..r * cw + cw],
@@ -1750,7 +1773,7 @@ fn native_row0_siting_change_rebuild_oom_restores_the_old_join() {
   // Frame 1 at Left builds the native join.
   PixelSink::begin_frame(&mut sink, 8, 8).unwrap();
   for r in 0..8 {
-    let row = Yuv422pRow::new(
+    let row = Yuv422pRow::for_tests(
       &y[r * 8..r * 8 + 8],
       &u[r * cw..r * cw + cw],
       &v[r * cw..r * cw + cw],
@@ -1766,7 +1789,7 @@ fn native_row0_siting_change_rebuild_oom_restores_the_old_join() {
   PixelSink::begin_frame(&mut sink, 8, 8).unwrap();
   sink.set_chroma_location(ChromaLocation::Center);
   crate::sinker::mixed::arm_planar_native_chroma_failure();
-  let row0 = Yuv422pRow::new(&y[0..8], &u[0..cw], &v[0..cw], 0, M, FR);
+  let row0 = Yuv422pRow::for_tests(&y[0..8], &u[0..cw], &v[0..cw], 0, M, FR);
   let err = PixelSink::process(&mut sink, row0).unwrap_err();
   assert!(
     matches!(
@@ -1786,7 +1809,7 @@ fn native_row0_siting_change_rebuild_oom_restores_the_old_join() {
   // after its build succeeds) — a retry of row 0 with a CHANGED output attachment
   // (luma added) is accepted, not mis-rejected as ResampleOutputsChanged.
   sink.set_luma(&mut luma).unwrap();
-  let row0b = Yuv422pRow::new(&y[0..8], &u[0..cw], &v[0..cw], 0, M, FR);
+  let row0b = Yuv422pRow::for_tests(&y[0..8], &u[0..cw], &v[0..cw], 0, M, FR);
   PixelSink::process(&mut sink, row0b).unwrap();
 }
 
@@ -1821,7 +1844,7 @@ fn native_row0_rebuild_scratch_oom_is_state_atomic() {
   // Frame 1: native HSV-only join at Left (reserves no RGB scratch).
   PixelSink::begin_frame(&mut sink, 8, 8).unwrap();
   for r in 0..8 {
-    let row = Yuv422pRow::new(
+    let row = Yuv422pRow::for_tests(
       &y[r * 8..r * 8 + 8],
       &u[r * cw..r * cw + cw],
       &v[r * cw..r * cw + cw],
@@ -1838,7 +1861,7 @@ fn native_row0_rebuild_scratch_oom_is_state_atomic() {
   sink.set_chroma_location(ChromaLocation::Center);
   sink.set_rgb(&mut rgb).unwrap();
   crate::sinker::mixed::arm_native_rgb_scratch_failure();
-  let row0 = Yuv422pRow::new(&y[0..8], &u[0..cw], &v[0..cw], 0, M, FR);
+  let row0 = Yuv422pRow::for_tests(&y[0..8], &u[0..cw], &v[0..cw], 0, M, FR);
   let err = PixelSink::process(&mut sink, row0).unwrap_err();
   assert!(
     matches!(
@@ -1858,7 +1881,7 @@ fn native_row0_rebuild_scratch_oom_is_state_atomic() {
   // the scratch grows), so a retry of row 0 with a CHANGED output set (luma
   // added) is ACCEPTED, not mis-rejected as ResampleOutputsChanged.
   sink.set_luma(&mut luma).unwrap();
-  let row0b = Yuv422pRow::new(&y[0..8], &u[0..cw], &v[0..cw], 0, M, FR);
+  let row0b = Yuv422pRow::for_tests(&y[0..8], &u[0..cw], &v[0..cw], 0, M, FR);
   PixelSink::process(&mut sink, row0b).unwrap();
 }
 
@@ -1890,7 +1913,7 @@ fn native_first_build_scratch_oom_leaves_freeze_unfrozen_for_retry() {
       .unwrap();
   PixelSink::begin_frame(&mut sink, 8, 8).unwrap();
   crate::sinker::mixed::arm_native_rgb_scratch_failure();
-  let row0 = Yuv422pRow::new(&y[0..8], &u[0..cw], &v[0..cw], 0, M, FR);
+  let row0 = Yuv422pRow::for_tests(&y[0..8], &u[0..cw], &v[0..cw], 0, M, FR);
   let err = PixelSink::process(&mut sink, row0).unwrap_err();
   assert!(
     matches!(
@@ -1902,7 +1925,7 @@ fn native_first_build_scratch_oom_leaves_freeze_unfrozen_for_retry() {
   // The freeze was never committed on the failed build — a retry of row 0 with
   // luma added (changed output set) is ACCEPTED, not ResampleOutputsChanged.
   sink.set_luma(&mut luma).unwrap();
-  let row0b = Yuv422pRow::new(&y[0..8], &u[0..cw], &v[0..cw], 0, M, FR);
+  let row0b = Yuv422pRow::for_tests(&y[0..8], &u[0..cw], &v[0..cw], 0, M, FR);
   PixelSink::process(&mut sink, row0b).unwrap();
 }
 
@@ -1938,7 +1961,7 @@ fn native_colour_capability_rebuild_scratch_oom_leaves_freeze_unfrozen_for_retry
   // Frame 1: a luma-only native join (chroma absent, reserves no RGB scratch).
   PixelSink::begin_frame(&mut sink, 8, 8).unwrap();
   for r in 0..8 {
-    let row = Yuv422pRow::new(
+    let row = Yuv422pRow::for_tests(
       &y[r * 8..r * 8 + 8],
       &u[r * cw..r * cw + cw],
       &v[r * cw..r * cw + cw],
@@ -1957,7 +1980,7 @@ fn native_colour_capability_rebuild_scratch_oom_leaves_freeze_unfrozen_for_retry
   PixelSink::begin_frame(&mut sink, 8, 8).unwrap();
   sink.set_rgb(&mut rgb).unwrap();
   crate::sinker::mixed::arm_native_rgb_scratch_failure();
-  let row0 = Yuv422pRow::new(&y[0..8], &u[0..cw], &v[0..cw], 0, M, FR);
+  let row0 = Yuv422pRow::for_tests(&y[0..8], &u[0..cw], &v[0..cw], 0, M, FR);
   let err = PixelSink::process(&mut sink, row0).unwrap_err();
   assert!(
     matches!(
@@ -1976,6 +1999,6 @@ fn native_colour_capability_rebuild_scratch_oom_leaves_freeze_unfrozen_for_retry
   // the scratch grows), so a row-0 retry with ANOTHER output attached (add HSV)
   // is ACCEPTED, not mis-rejected as ResampleOutputsChanged.
   sink.set_hsv(&mut hh, &mut ss, &mut vv).unwrap();
-  let row0b = Yuv422pRow::new(&y[0..8], &u[0..cw], &v[0..cw], 0, M, FR);
+  let row0b = Yuv422pRow::for_tests(&y[0..8], &u[0..cw], &v[0..cw], 0, M, FR);
   PixelSink::process(&mut sink, row0b).unwrap();
 }

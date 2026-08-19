@@ -17,12 +17,12 @@ use pixon::{
 fn downscale<K: FilterKernel>(
   label: &str,
   frame: &Yuv420pFrame<'_>,
-  spec: ColorSpec,
+  spec: &ColorSpec,
   kernel: K,
 ) -> Result<(), pixon::Error> {
   let mut rgb = vec![0u8; 3 * 3 * 3];
   Convert::from(frame)
-    .spec(spec)
+    .spec(spec.clone())
     .resize_with(kernel, 3, 3)
     .rgb(&mut rgb)
     .run()?;
@@ -45,10 +45,10 @@ fn main() -> Result<(), pixon::Error> {
   // Downscale 8x8 -> 3x3 under different kernels: sharper kernels ring,
   // softer kernels blur — the choice is visible in the bytes.
   println!("8x8 -> 3x3 first pixel per kernel:");
-  downscale("Triangle", &frame, spec, Triangle)?;
-  downscale("CatmullRom", &frame, spec, CatmullRom)?;
-  downscale("Mitchell", &frame, spec, Mitchell)?;
-  downscale("Lanczos3", &frame, spec, Lanczos3)?;
+  downscale("Triangle", &frame, &spec, Triangle)?;
+  downscale("CatmullRom", &frame, &spec, CatmullRom)?;
+  downscale("Mitchell", &frame, &spec, Mitchell)?;
+  downscale("Lanczos3", &frame, &spec, Lanczos3)?;
 
   // Upscale is a first-class filtered resample (area `.resize` would reject
   // it): 8x8 -> 12x12 under Lanczos3.

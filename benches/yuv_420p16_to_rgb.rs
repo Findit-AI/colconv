@@ -11,7 +11,7 @@ use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_m
 use std::hint::black_box;
 
 use pixon::{
-  ColorMatrix,
+  KernelMatrix,
   bench_internals::{yuv420p16_to_rgb_row, yuv420p16_to_rgb_u16_row},
 };
 
@@ -27,7 +27,7 @@ fn fill_pseudo_random_u16(buf: &mut [u16], seed: u32) {
 
 fn bench(c: &mut Criterion) {
   const WIDTHS: &[usize] = &[1280, 1920, 3840];
-  const MATRIX: ColorMatrix = ColorMatrix::Bt2020Ncl;
+  const MATRIX: KernelMatrix = KernelMatrix::Bt2020Ncl;
   const FULL_RANGE: bool = false;
 
   let mut group_u8 = c.benchmark_group("yuv420p16_to_rgb_row");

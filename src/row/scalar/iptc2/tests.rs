@@ -72,7 +72,7 @@ fn decode_matrices_are_exact_inverses() {
 fn for_transfer_selects_pq_only() {
   use crate::Transfer;
   assert_eq!(
-    IptC2Transfer::for_transfer(Transfer::SmpteSt2084Pq),
+    IptC2Transfer::for_transfer(&Transfer::SmpteSt2084Pq),
     Some(IptC2Transfer::Pq)
   );
   for t in [
@@ -81,10 +81,10 @@ fn for_transfer_selects_pq_only() {
     Transfer::Bt2020_10Bit,
     Transfer::AribStdB67Hlg,
     Transfer::SmpteSt428,
-    Transfer::Unknown(99),
+    Transfer::other("unassigned-99"),
   ] {
     assert_eq!(
-      IptC2Transfer::for_transfer(t),
+      IptC2Transfer::for_transfer(&t),
       None,
       "{t:?} must not select the IPT-C2 transfer"
     );

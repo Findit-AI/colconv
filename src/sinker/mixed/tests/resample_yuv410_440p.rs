@@ -12,7 +12,7 @@
 //! only the chroma-subsampling convert kernel differs.
 
 use crate::{
-  ColorMatrix, PixelSink,
+  KernelMatrix, PixelSink,
   resample::{AreaResampler, ResampleError},
   sinker::{MixedSinker, MixedSinkerError},
   source::{Rgb24, Yuv410p, Yuv410pRow, Yuv440p, Yuv440pRow, rgb24_to, yuv410p_to, yuv440p_to},
@@ -51,7 +51,7 @@ fn rgb24_rgb_reference(converted: &[u8]) -> Vec<u8> {
         .unwrap()
         .with_rgb(&mut rgb)
         .unwrap();
-    rgb24_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+    rgb24_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   }
   rgb
 }
@@ -96,8 +96,7 @@ fn yuv410p_resample_rgb_matches_rgb24_of_converted_frame() {
     yuv410p_to(
       &yuv410p_frame(&y, &u, &v),
       true,
-      ColorMatrix::Bt601,
-      &mut sink,
+      sink.set_kernel_matrix(KernelMatrix::Bt601),
     )
     .unwrap();
   }
@@ -111,8 +110,7 @@ fn yuv410p_resample_rgb_matches_rgb24_of_converted_frame() {
     yuv410p_to(
       &yuv410p_frame(&y, &u, &v),
       true,
-      ColorMatrix::Bt601,
-      &mut sink,
+      sink.set_kernel_matrix(KernelMatrix::Bt601),
     )
     .unwrap();
   }
@@ -142,8 +140,7 @@ fn yuv410p_resample_luma_is_area_downscaled_y_plane() {
     yuv410p_to(
       &yuv410p_frame(&y, &u, &v),
       true,
-      ColorMatrix::Bt601,
-      &mut sink,
+      sink.set_kernel_matrix(KernelMatrix::Bt601),
     )
     .unwrap();
   }
@@ -177,8 +174,7 @@ fn yuv410p_resample_luma_from_y_not_rgb_under_saturated_chroma() {
     yuv410p_to(
       &yuv410p_frame(&y, &u, &v),
       true,
-      ColorMatrix::Bt601,
-      &mut sink,
+      sink.set_kernel_matrix(KernelMatrix::Bt601),
     )
     .unwrap();
   }
@@ -228,8 +224,7 @@ fn yuv440p_resample_rgb_matches_rgb24_of_converted_frame() {
     yuv440p_to(
       &yuv440p_frame(&y, &u, &v),
       true,
-      ColorMatrix::Bt601,
-      &mut sink,
+      sink.set_kernel_matrix(KernelMatrix::Bt601),
     )
     .unwrap();
   }
@@ -247,8 +242,7 @@ fn yuv440p_resample_rgb_matches_rgb24_of_converted_frame() {
     yuv440p_to(
       &yuv440p_frame(&y, &u, &v),
       true,
-      ColorMatrix::Bt601,
-      &mut sink,
+      sink.set_kernel_matrix(KernelMatrix::Bt601),
     )
     .unwrap();
   }
@@ -278,8 +272,7 @@ fn yuv440p_resample_luma_is_area_downscaled_y_plane() {
     yuv440p_to(
       &yuv440p_frame(&y, &u, &v),
       true,
-      ColorMatrix::Bt601,
-      &mut sink,
+      sink.set_kernel_matrix(KernelMatrix::Bt601),
     )
     .unwrap();
   }
@@ -312,8 +305,7 @@ fn yuv440p_resample_luma_from_y_not_rgb_under_saturated_chroma() {
     yuv440p_to(
       &yuv440p_frame(&y, &u, &v),
       true,
-      ColorMatrix::Bt601,
-      &mut sink,
+      sink.set_kernel_matrix(KernelMatrix::Bt601),
     )
     .unwrap();
   }
@@ -348,15 +340,13 @@ fn yuv410p_resample_reuses_luma_stream_across_frames() {
     yuv410p_to(
       &yuv410p_frame(&y1, &u, &v),
       true,
-      ColorMatrix::Bt601,
-      &mut sink,
+      sink.set_kernel_matrix(KernelMatrix::Bt601),
     )
     .unwrap();
     yuv410p_to(
       &yuv410p_frame(&y2, &u, &v),
       true,
-      ColorMatrix::Bt601,
-      &mut sink,
+      sink.set_kernel_matrix(KernelMatrix::Bt601),
     )
     .unwrap();
   }
@@ -388,15 +378,13 @@ fn yuv440p_resample_reuses_luma_stream_across_frames() {
     yuv440p_to(
       &yuv440p_frame(&y1, &u, &v),
       true,
-      ColorMatrix::Bt601,
-      &mut sink,
+      sink.set_kernel_matrix(KernelMatrix::Bt601),
     )
     .unwrap();
     yuv440p_to(
       &yuv440p_frame(&y2, &u, &v),
       true,
-      ColorMatrix::Bt601,
-      &mut sink,
+      sink.set_kernel_matrix(KernelMatrix::Bt601),
     )
     .unwrap();
   }
@@ -422,8 +410,7 @@ fn yuv410p_identity_plan_matches_new_sink() {
     yuv410p_to(
       &yuv410p_frame(&y, &u, &v),
       true,
-      ColorMatrix::Bt601,
-      &mut sink,
+      sink.set_kernel_matrix(KernelMatrix::Bt601),
     )
     .unwrap();
   }
@@ -437,8 +424,7 @@ fn yuv410p_identity_plan_matches_new_sink() {
     yuv410p_to(
       &yuv410p_frame(&y, &u, &v),
       true,
-      ColorMatrix::Bt601,
-      &mut sink,
+      sink.set_kernel_matrix(KernelMatrix::Bt601),
     )
     .unwrap();
   }
@@ -460,8 +446,7 @@ fn yuv440p_identity_plan_matches_new_sink() {
     yuv440p_to(
       &yuv440p_frame(&y, &u, &v),
       true,
-      ColorMatrix::Bt601,
-      &mut sink,
+      sink.set_kernel_matrix(KernelMatrix::Bt601),
     )
     .unwrap();
   }
@@ -475,8 +460,7 @@ fn yuv440p_identity_plan_matches_new_sink() {
     yuv440p_to(
       &yuv440p_frame(&y, &u, &v),
       true,
-      ColorMatrix::Bt601,
-      &mut sink,
+      sink.set_kernel_matrix(KernelMatrix::Bt601),
     )
     .unwrap();
   }
@@ -493,8 +477,7 @@ fn yuv410p_resample_no_outputs_is_a_no_op() {
   yuv410p_to(
     &yuv410p_frame(&y, &u, &v),
     true,
-    ColorMatrix::Bt601,
-    &mut sink,
+    sink.set_kernel_matrix(KernelMatrix::Bt601),
   )
   .unwrap();
 }
@@ -508,8 +491,7 @@ fn yuv440p_resample_no_outputs_is_a_no_op() {
   yuv440p_to(
     &yuv440p_frame(&y, &u, &v),
     true,
-    ColorMatrix::Bt601,
-    &mut sink,
+    sink.set_kernel_matrix(KernelMatrix::Bt601),
   )
   .unwrap();
 }
@@ -527,12 +509,12 @@ fn yuv410p_resample_rejects_out_of_sequence_rows() {
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   // Feed row 2 first — the stream expects strict sequencing from 0. In
   // 4:1:0 the chroma row index is `row / 4`, so row 2 reads chroma 0.
-  let row2 = Yuv410pRow::new(
+  let row2 = Yuv410pRow::for_tests(
     &y[SRC * 2..SRC * 3],
     &u[0..cw],
     &v[0..cw],
     2,
-    ColorMatrix::Bt601,
+    KernelMatrix::Bt601,
     true,
   );
   let err = sink.process(row2).unwrap_err();
@@ -557,12 +539,12 @@ fn yuv440p_resample_rejects_out_of_sequence_rows() {
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   // Feed row 2 first — the stream expects strict sequencing from 0. In
   // 4:4:0 the chroma row index is `row / 2`, so row 2 reads chroma 1.
-  let row2 = Yuv440pRow::new(
+  let row2 = Yuv440pRow::for_tests(
     &y[SRC * 2..SRC * 3],
     &u[SRC..SRC * 2],
     &v[SRC..SRC * 2],
     2,
-    ColorMatrix::Bt601,
+    KernelMatrix::Bt601,
     true,
   );
   let err = sink.process(row2).unwrap_err();

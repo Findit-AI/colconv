@@ -5,14 +5,177 @@ history starts at 0.1.0. The 0.1.0–0.2.1 entries below it were published
 under the crate's former name, `colconv`, and are kept for provenance —
 they record APIs that shipped as `colconv` and keep the paths they shipped
 with. Note the two series are independent: `pixon` 0.1.0 is the code
-`colconv` 0.2.1 shipped, and a future `pixon` 0.2.0 has no relation to
-`colconv` 0.2.x.
+`colconv` 0.2.1 shipped, and `pixon` 0.2.0 has no relation to `colconv`
+0.2.x.
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [SemVer](https://semver.org/spec/v2.0.0.html); pre-1.0
 breaking changes bump the `x` in `0.x.y`.
 
-## 0.1.0 — unreleased
+## 0.2.0 — unreleased
+
+**Breaking**, on one count with a wide blast radius: the public dependency
+`mediaframe` crosses 0.1 → 0.4, and with it the colour vocabularies pixon
+re-exports *and* the shape of every `{fmt}_to` walker. Everything below follows
+from that crossing. Two headlines: a correctness fix — **a colour matrix pixon
+cannot decode is now refused instead of silently decoded as BT.709** — and a
+seam move — **the walkers no longer take a matrix or a gamut beside the sink;
+they ask the sink**.
+
+### Added
+
+- **`ColorSpec::kernel_matrix`** — the one door where the open colour-matrix
+  descriptor is exchanged for the closed coefficient selector, and the one
+  place an unconvertible matrix is refused. The table is exhaustive and
+  documented on the method:
+
+  | `ColorMatrix` | result |
+  | --- | --- |
+  | `Bt601` `Bt709` `Unspecified` `Fcc` `Bt470Bg` `Smpte170M` `Smpte240m` `YCgCo` `Bt2020Ncl` `ChromaDerivedNcl` | the matching `KernelMatrix` |
+  | `Ictcp` `ChromaDerivedCl` `IptC2` `Smpte2085` | `KernelMatrix::Bt709` — pixon decodes all four **non-affinely** from the signalled transfer / primaries; the affine selector is reached only where that tag is underdetermined (an ICtCp source naming neither PQ nor HLG), and resolving underdetermined colorimetry to BT.709 is the same prerogative exercised for `Unspecified` |
+  | `Rgb` | `KernelMatrix::Bt709` — the GBR identity names no YCbCr basis; the luma derivation is pinned to BT.709 regardless |
+  | `Bt2020Cl` `YCgCoRe` `YCgCoRo` `Other(_)` | **`UnsupportedKernelMatrixError`** |
+
+- **`ColorSpec::of_matrix(KernelMatrix)`** — the casual affine path. Colour
+  intent has exactly one carrier in pixon (`ColorSpec`), so a caller who knows
+  only "these are BT.601 samples" still says so with a spec instead of reaching
+  for a second door into `YuvOptions`. Everything unnamed stays at the
+  unspecified posture — `PixelFormat::None` (so **no** format-pinned range: use
+  `resolve` / `from_info` for a `yuvj*` source), limited range, `Unspecified`
+  primaries / transfer / siting. It takes the *closed* selector, so it can only
+  describe an affine source and `kernel_matrix` on the result never fails; the
+  four non-affine decodes need a transfer and primaries and so still build a
+  full spec.
+- `pixon::KernelMatrix`, `pixon::KernelGamut`, `pixon::UnsupportedKernelMatrixError`
+  and `pixon::UnsupportedKernelGamutError`, re-exported from mediaframe.
+- **`MixedSinker::with_target_gamut(&DcpTargetGamut)` / `set_target_gamut`** —
+  the same exchange for the XYZ12 output gamut, refusing a gamut with no
+  tabulated XYZ → RGB matrix. It lives on the sink because a gamut describes
+  the *output* and the sink **is** the output; `xyz12_to` reads it from there.
+- **`MixedSinker::kernel_matrix()` / `target_gamut()`** — what the walkers ask
+  for, once per walk. Both are set only from a description (`ColorSpec`,
+  `DcpTargetGamut`); neither has a setter that names a closed selector.
+- **`Convert::target_gamut(DcpTargetGamut)`** — the Tier-0 XYZ12 gamut door.
+  It exists only on an XYZ12 builder (a type-constrained `impl`), so it cannot
+  be set on a source that would ignore it.
+- `MixedSinkerError::UnsupportedColorMatrix` and
+  `MixedSinkerError::UnsupportedTargetGamut` — how the two refusals surface out
+  of the `Convert` tier, raised before a single row is read.
+
+### Changed
+
+- **Breaking: a refused matrix is an error, not BT.709 pixels.** Through 0.1
+  the coefficient tables (`Coefficients::for_matrix`, `luma_coefficients_q15`)
+  and the XYZ gamut table ended in a `_ => BT.709` / `_ => DCI-P3` wildcard, so
+  a `Bt2020Cl`, `YCgCoRe`, `YCgCoRo` or unrecognised matrix decoded as BT.709
+  and returned a wrong picture with no diagnostic. Those three wildcard arms
+  are **deleted**: the tables now match exhaustively over the closed
+  `KernelMatrix` / `KernelGamut` vocabularies, so a coefficient set added
+  upstream is a compile error here rather than a silent BT.709 frame, and the
+  matrices with no pixon decode are refused at `ColorSpec::kernel_matrix`.
+  The two arms that *do* resolve to BT.709 — `Unspecified` (the vocabulary's
+  own default) and `ChromaDerivedNcl` at the primaries-blind entry point — are
+  now spelled out with their rationale instead of riding a fallback.
+
+- **Breaking: the kernels take `KernelMatrix`, not `ColorMatrix`.** A walker
+  row now carries the closed selector, and every kernel, row and sinker
+  signature takes `KernelMatrix` (`KernelGamut` for XYZ12). `ColorSpec` keeps
+  the **open** `ColorMatrix` descriptor — it describes a stream, and the four
+  non-affine decodes read their tag from it.
+
+- **Breaking: the walkers ask the sink for the selector.** mediaframe 0.4
+  removed the matrix from every `{fmt}_to` signature and the gamut from
+  `xyz12_to`, and reads them off `PixelSink::kernel_matrix` /
+  `Xyz12Sink::target_gamut` once per walk — two doors onto one fact being a bug
+  generator. pixon consumes that shape: `MixedSinker` answers both from the
+  description it was configured with, `YuvOptions` carries only `full_range`,
+  and `Xyz12Options` is **removed** (its one field was the gamut, so the XYZ12
+  walk options are now the unit `()`). Migration:
+
+  ```rust
+  - yuv420p_to(&frame, spec.full_range(), spec.kernel_matrix()?, &mut sink)?;
+  + let mut sink = sink.with_color_spec(&spec)?;   // the sink already knew
+  + yuv420p_to(&frame, spec.full_range(), &mut sink)?;
+
+  - xyz12_to(&frame, KernelGamut::Rec709, &mut sink)?;
+  + let mut sink = sink.with_target_gamut(&DcpTargetGamut::Rec709)?;
+  + xyz12_to(&frame, &mut sink)?;
+  ```
+
+  A sink that names no matrix decodes limited-range BT.709 — the posture the
+  walker argument defaulted to. **A caller who passed a non-BT.709 matrix
+  positionally and never gave the sink a description must now give it one**:
+  that is the one shape where the crossing changes a picture, and it changes it
+  from "whatever the caller passed" to "whatever the sink was built with",
+  which is the only answer that cannot disagree with itself.
+
+- **Breaking: `*Row::new` is `pub(crate)` upstream.** An out-of-tree
+  kernel-parity suite that drove a single row without a frame uses mediaframe's
+  `#[doc(hidden)] *Row::for_tests` door instead; it takes the identical
+  parameter list and carries no stability promise.
+
+- **Breaking: the closed selectors are not settable — colour intent has one
+  source.** `YuvOptions::with_matrix(KernelMatrix)` is **removed** and no
+  replacement names a `KernelMatrix` directly. A `KernelMatrix` enters a walk
+  only out of `ColorSpec::kernel_matrix`, through
+  `MixedSinker::with_color_spec`; a `KernelGamut` only out of
+  `MixedSinker::with_target_gamut(&DcpTargetGamut)`. Each closed vocabulary
+  therefore has exactly one exchange point with the open descriptor that was
+  supposed to select it, and neither can be conjured alongside — or in
+  contradiction of — the description the sink is decoding against. Migration:
+
+  ```rust
+  - let opts = YuvOptions::new().with_matrix(KernelMatrix::Bt601);
+  + let sink = sink.with_color_spec(&ColorSpec::of_matrix(KernelMatrix::Bt601))?;
+  // …or, when a fuller description is at hand, straight from it:
+  + let sink = sink.with_color_spec(&spec)?;
+  ```
+
+  `full_range` is a quantisation fact about the frame rather than colour intent
+  the sink owns, so it stays a walker parameter and keeps its own setters.
+
+- **Breaking: `MixedSinker::with_color_spec` / `set_color_spec` are fallible**,
+  take `&ColorSpec`, and are no longer gated to `yuv-planar`. One call now
+  configures the whole decode — the row's `KernelMatrix`, the siting, the
+  primaries, the transfer and the open matrix descriptor the non-affine gate
+  reads — and refuses a matrix pixon cannot decode right there, before a row is
+  read. `YuvOptions::from_color_spec` carries only the range and is infallible;
+  `FromSpec::from_spec` keeps its `Result` shape.
+
+- **Breaking: `Convert::format_options` overrides quantisation, not colour.**
+  It could previously carry a `YuvOptions` derived from a *different* spec and
+  put a different matrix in front of each reader — the one place the
+  single-source rule was deliberately set aside. The options carry no colour
+  value any more, so the exception is gone and `Convert::spec` is the only
+  matrix door.
+
+- **Breaking: `ColorSpec` is no longer `Copy`** (`Clone` only), and neither are
+  the re-exported `ColorMatrix`, `Primaries`, `Transfer`, `ChromaLocation`,
+  `DynamicRange`, `ColorInfo` and `PixelFormat` — mediaframe 0.3 gave each an
+  owned `Other(..)` escape. `ColorSpec::resolve` / `from_info` and the
+  accessors that return these types are no longer `const`, and
+  `TransferFunction::for_matrix` takes `&ColorMatrix`.
+
+- **Breaking: the numeric `Unknown(u32)` escape is gone** from every re-exported
+  colour vocabulary; mediaframe 0.3 replaced it with `Other(slug)`. Code
+  spelling `ColorMatrix::Unknown(9)` becomes `ColorMatrix::other("...")`, and
+  `from_u32` now returns `Option<Self>`.
+
+- Public dependency `mediaframe` 0.1 → 0.4. The retirement of
+  `VideoCodec::{V308,V408,V410}` in mediaframe 0.4 (FFmpeg n9.0 dropped them)
+  does not reach pixon: this crate is pixel-domain and names no codec
+  vocabulary at all.
+
+### Fixed
+
+- `Bt2020Cl`, `YCgCoRe`, `YCgCoRo` and unnamed matrices no longer decode as
+  BT.709. pixon implements none of them; a constant-luminance or
+  reversible-YCgCo source decoded through the BT.709 affine matrix is a wrong,
+  silently-wrong picture. (`ChromaDerivedCl` — H.273 code 13 — *is* pixon's
+  constant-luminance decode and is unaffected; `Bt2020Cl` is code 10, which
+  pixon never implemented.)
+
+## 0.1.0 — 2026-07-26
 
 ### Changed
 

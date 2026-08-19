@@ -17,7 +17,7 @@
 use core::arch::wasm32::*;
 
 use super::{endian::load_endian_u32x4, *};
-use crate::{ColorMatrix, row::scalar};
+use crate::{KernelMatrix, row::scalar};
 
 /// Unpacks one 16-byte v210 word into three `v128` vectors holding
 /// 10-bit samples in their low bits (each lane an i16):
@@ -150,7 +150,7 @@ pub(crate) unsafe fn v210_to_rgb_or_rgba_row<const ALPHA: bool, const BE: bool>(
   packed: &[u8],
   out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert!(width.is_multiple_of(2), "v210 requires even width");
@@ -368,7 +368,7 @@ pub(crate) unsafe fn v210_to_hsv_row<const BE: bool>(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert!(width.is_multiple_of(2), "v210 requires even width");
@@ -410,7 +410,7 @@ pub(crate) unsafe fn v210_to_rgb_u16_or_rgba_u16_row<const ALPHA: bool, const BE
   packed: &[u8],
   out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   debug_assert!(width.is_multiple_of(2), "v210 requires even width");

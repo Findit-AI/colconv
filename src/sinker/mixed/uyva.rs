@@ -94,6 +94,10 @@ impl<R> PixelSink for MixedSinker<'_, Uyva, R> {
   type Input<'r> = UyvaRow<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     check_dimensions_match(self.width, self.height, width, height)?;
     // New frame: restart the 4-channel u8 RGBA colour stream and the

@@ -1393,7 +1393,7 @@ pub(super) unsafe fn rgb_to_hsv_16_pixels(
 
 // ---- RGB → luma (Y') support --------------------------------------------
 //
-// Q15 weighted sum across all 5 ColorMatrix variants. Coefficients are
+// Q15 weighted sum across all 5 KernelMatrix variants. Coefficients are
 // hoisted by the caller into pre‑broadcast i32x4 vectors; the per‑pixel
 // math is `(k_r·R + k_g·G + k_b·B + RND) >> 15`. Limited‑range output
 // applies a second Q15 multiply (`28142 / 32768`) plus the +16 offset.

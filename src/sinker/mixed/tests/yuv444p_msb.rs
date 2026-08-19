@@ -9,9 +9,9 @@
 //! and SIMD-vs-scalar parity are checked directly. (Yuv444p exposes no
 //! `luma_u16` output, so it is absent here.)
 
-use crate::{ColorMatrix, sinker::MixedSinker};
+use crate::{KernelMatrix, sinker::MixedSinker};
 
-const MATRIX: ColorMatrix = ColorMatrix::Bt709;
+const MATRIX: KernelMatrix = KernelMatrix::Bt709;
 
 /// Deterministic native-depth samples masked to `BITS` (legal native codes).
 fn samples<const BITS: u32>(seed: u64, n: usize) -> std::vec::Vec<u16> {
@@ -99,7 +99,7 @@ macro_rules! msb_parity_suite {
               .with_rgba_u16(&mut o_msb.rgba_u16).unwrap()
               .with_luma(&mut o_msb.luma).unwrap()
               .with_hsv(&mut o_msb.h, &mut o_msb.s, &mut o_msb.v).unwrap();
-            crate::source::$msb_walker(&src, full_range, MATRIX, &mut sink).unwrap();
+            crate::source::$msb_walker(&src, full_range, sink.set_kernel_matrix(MATRIX)).unwrap();
           }
 
           // Low-bit oracle.
@@ -115,7 +115,7 @@ macro_rules! msb_parity_suite {
               .with_rgba_u16(&mut o_lo.rgba_u16).unwrap()
               .with_luma(&mut o_lo.luma).unwrap()
               .with_hsv(&mut o_lo.h, &mut o_lo.s, &mut o_lo.v).unwrap();
-            crate::source::$lo_walker(&src, full_range, MATRIX, &mut sink).unwrap();
+            crate::source::$lo_walker(&src, full_range, sink.set_kernel_matrix(MATRIX)).unwrap();
           }
 
           assert_eq!(o_msb.rgb, o_lo.rgb, "rgb full_range={full_range}");
@@ -149,7 +149,7 @@ macro_rules! msb_parity_suite {
           );
           let mut sink = MixedSinker::<crate::source::$msb_marker>::new(w, h)
             .with_hsv(&mut hm, &mut sm, &mut vm_out).unwrap();
-          crate::source::$msb_walker(&src, true, MATRIX, &mut sink).unwrap();
+          crate::source::$msb_walker(&src, true, sink.set_kernel_matrix(MATRIX)).unwrap();
         }
         let (mut hl, mut sl, mut vl) = (std::vec![0u8; n], std::vec![0u8; n], std::vec![0u8; n]);
         {
@@ -158,7 +158,7 @@ macro_rules! msb_parity_suite {
           );
           let mut sink = MixedSinker::<crate::source::$lo_marker>::new(w, h)
             .with_hsv(&mut hl, &mut sl, &mut vl).unwrap();
-          crate::source::$lo_walker(&src, true, MATRIX, &mut sink).unwrap();
+          crate::source::$lo_walker(&src, true, sink.set_kernel_matrix(MATRIX)).unwrap();
         }
         assert_eq!(hm, hl, "hsv-only h");
         assert_eq!(sm, sl, "hsv-only s");
@@ -185,7 +185,7 @@ macro_rules! msb_parity_suite {
           );
           let mut sink = MixedSinker::<crate::source::$msb_marker<false>>::new(w, h)
             .with_rgb_u16(&mut le).unwrap();
-          crate::source::$msb_walker(&src, true, MATRIX, &mut sink).unwrap();
+          crate::source::$msb_walker(&src, true, sink.set_kernel_matrix(MATRIX)).unwrap();
         }
         let mut be = std::vec![0u16; n * 3];
         {
@@ -194,7 +194,7 @@ macro_rules! msb_parity_suite {
           );
           let mut sink = MixedSinker::<crate::source::$msb_marker<true>>::new(w, h)
             .with_rgb_u16(&mut be).unwrap();
-          crate::source::$msb_endian::<_, true>(&src, true, MATRIX, &mut sink).unwrap();
+          crate::source::$msb_endian::<_, true>(&src, true, sink.set_kernel_matrix(MATRIX)).unwrap();
         }
         assert_eq!(le, be, "BE storage must recover the same logical RGB as LE");
       }
@@ -224,7 +224,7 @@ macro_rules! msb_parity_suite {
               .with_rgba(&mut o.rgba).unwrap()
               .with_rgba_u16(&mut o.rgba_u16).unwrap()
               .with_luma(&mut o.luma).unwrap();
-            crate::source::$msb_walker(&src, true, MATRIX, &mut sink).unwrap();
+            crate::source::$msb_walker(&src, true, sink.set_kernel_matrix(MATRIX)).unwrap();
           }
           // HSV is intentionally omitted: the SIMD HSV path
           // (`rgb_to_hsv_row`) and the scalar path (`rgb_to_hsv_pixel`) are
@@ -277,7 +277,7 @@ macro_rules! msb_parity_suite {
             .with_rgba_u16(&mut o_msb.rgba_u16).unwrap()
             .with_luma(&mut o_msb.luma).unwrap()
             .with_hsv(&mut o_msb.h, &mut o_msb.s, &mut o_msb.v).unwrap();
-            crate::source::$msb_walker(&src, true, MATRIX, &mut sink).unwrap();
+            crate::source::$msb_walker(&src, true, sink.set_kernel_matrix(MATRIX)).unwrap();
           }
 
           let mut o_lo = AllOutputs::alloc(out_w * out_h);
@@ -296,7 +296,7 @@ macro_rules! msb_parity_suite {
             .with_rgba_u16(&mut o_lo.rgba_u16).unwrap()
             .with_luma(&mut o_lo.luma).unwrap()
             .with_hsv(&mut o_lo.h, &mut o_lo.s, &mut o_lo.v).unwrap();
-            crate::source::$lo_walker(&src, true, MATRIX, &mut sink).unwrap();
+            crate::source::$lo_walker(&src, true, sink.set_kernel_matrix(MATRIX)).unwrap();
           }
 
           assert_eq!(o_msb.rgb, o_lo.rgb, "resampled rgb native={native}");
@@ -375,7 +375,8 @@ fn yuv444p10_msb_rgb_scratch_alloc_failure_leaves_outputs_untouched() {
     .unwrap();
 
   super::super::arm_rgb_scratch_alloc_failure();
-  let err = crate::source::yuv444p10_msb_to(&src, false, MATRIX, &mut sink).unwrap_err();
+  let err =
+    crate::source::yuv444p10_msb_to(&src, false, sink.set_kernel_matrix(MATRIX)).unwrap_err();
   drop(sink);
 
   assert!(
@@ -422,7 +423,8 @@ fn yuv444p12_msb_rgb_scratch_alloc_failure_leaves_outputs_untouched() {
     .unwrap();
 
   super::super::arm_rgb_scratch_alloc_failure();
-  let err = crate::source::yuv444p12_msb_to(&src, false, MATRIX, &mut sink).unwrap_err();
+  let err =
+    crate::source::yuv444p12_msb_to(&src, false, sink.set_kernel_matrix(MATRIX)).unwrap_err();
   drop(sink);
 
   assert!(

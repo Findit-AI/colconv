@@ -236,7 +236,7 @@ fn yuv440p_top_reconstruct_area<const BITS: u32, const BE: bool>(
   chroma_full_u16: &mut std::vec::Vec<u16>,
   chroma_prev_u16: &mut std::vec::Vec<u16>,
   chroma_prev_row: &mut Option<usize>,
-  chroma_top_pending: &mut Option<(usize, crate::ColorMatrix, bool)>,
+  chroma_top_pending: &mut Option<(usize, crate::KernelMatrix, bool)>,
   chroma_top_y_u16: &mut std::vec::Vec<u16>,
   y_row: &[u16],
   u: &[u16],
@@ -246,7 +246,7 @@ fn yuv440p_top_reconstruct_area<const BITS: u32, const BE: bool>(
   plan: &ResamplePlan,
   idx: usize,
   use_simd: bool,
-  matrix: crate::ColorMatrix,
+  matrix: crate::KernelMatrix,
   full_range: bool,
 ) -> Result<core::ops::ControlFlow<()>, MixedSinkerError> {
   // The stream cursor lags the source by the buffered (unfed) held odd row, so
@@ -448,7 +448,7 @@ fn yuv440p_top_reconstruct_filter<const BITS: u32, const BE: bool>(
   chroma_full_u16: &mut std::vec::Vec<u16>,
   chroma_prev_u16: &mut std::vec::Vec<u16>,
   chroma_prev_row: &mut Option<usize>,
-  chroma_top_pending: &mut Option<(usize, crate::ColorMatrix, bool)>,
+  chroma_top_pending: &mut Option<(usize, crate::KernelMatrix, bool)>,
   chroma_top_y_u16: &mut std::vec::Vec<u16>,
   y_row: &[u16],
   u: &[u16],
@@ -458,7 +458,7 @@ fn yuv440p_top_reconstruct_filter<const BITS: u32, const BE: bool>(
   plan: &ResamplePlan,
   idx: usize,
   use_simd: bool,
-  matrix: crate::ColorMatrix,
+  matrix: crate::KernelMatrix,
   full_range: bool,
 ) -> Result<core::ops::ControlFlow<()>, MixedSinkerError> {
   let cursor = if luma.is_some() {
@@ -694,6 +694,10 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv440p10<BE>, R> {
   type Input<'r> = Yuv440p10Row<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     check_dimensions_match(self.width, self.height, width, height)?;
     reset_high_bit_yuv_streams(self);
@@ -709,7 +713,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv440p10<BE>, R> {
     // Chroma siting (RFC #238 S8c): 4:4:0 carries only a VERTICAL phase
     // (full-width chroma → no horizontal siting). `Copy`, so read it out before
     // the field split-borrow below.
-    let chroma_location = self.chroma_location;
+    let chroma_location = self.chroma_location.clone();
 
     if row.y().len() != w {
       return Err(MixedSinkerError::RowShapeMismatch(RowShapeMismatch::new(
@@ -807,7 +811,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv440p10<BE>, R> {
       // `chroma_prev_u16` lookback and decode 4:4:4. Those reconstruction arms
       // reserve chroma AFTER the resample preflight, so a rejected / out-of-sequence
       // row is caught first (the #180 reserve-after-preflight invariant).
-      let bottom_v = chroma_440_bottom_sited_v(chroma_location);
+      let bottom_v = chroma_440_bottom_sited_v(&chroma_location);
       let chroma_v_phase = if bottom_v { 1.0 } else { 0.0 };
       // RFC #238 Top (`v = 0`, FORWARD fold) — `Top` / `TopLeft`. 4:4:0 has no
       // horizontal phase, so both share the identical full-width vertical box
@@ -815,7 +819,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv440p10<BE>, R> {
       // `area_chroma_440`'s vertical weights via `top_v`; the reconstruction tiers
       // reconstruct each row's chroma through a FORWARD one-row delay (mirror of
       // `Bottom`'s backward `chroma_prev_u16` lookback).
-      let top_v = chroma_440_top_sited_v(chroma_location);
+      let top_v = chroma_440_top_sited_v(&chroma_location);
       // Whether this row produces any colour output (and so runs the bottom-sited
       // chroma reconstruction). A luma-only row bins native Y unchanged (siting is a
       // chroma-only property).
@@ -1347,13 +1351,13 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv440p10<BE>, R> {
     // Top sitings keep the byte-identical co-sited decode (their odd output row
     // needs the *next* chroma row, deferred). 4:4:0 has full-width chroma, so there
     // is no horizontal phase.
-    let bottom_v = chroma_440_bottom_sited_v(chroma_location);
+    let bottom_v = chroma_440_bottom_sited_v(&chroma_location);
     // RFC #238 Top (`v = 0`, FORWARD one-row delay) — `Top` / `TopLeft`. An ODD
     // output row needs the NEXT chroma row (unavailable when it arrives), so its
     // colour output is HELD (`chroma_top_pending` / `chroma_top_y_u16`) and emitted
     // at the following even row; handled in its own branch below. Disjoint from
     // `bottom_v`. Luma is siting-independent and written in order.
-    let top_v = chroma_440_top_sited_v(chroma_location);
+    let top_v = chroma_440_top_sited_v(&chroma_location);
 
     // RFC #238 S8c: freeze the vertical chroma siting on the direct (identity) path
     // too. The resample branch above rejects a mid-frame vertical-phase flip via
@@ -1776,6 +1780,10 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv440p12<BE>, R> {
   type Input<'r> = Yuv440p12Row<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     check_dimensions_match(self.width, self.height, width, height)?;
     reset_high_bit_yuv_streams(self);
@@ -1791,7 +1799,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv440p12<BE>, R> {
     // Chroma siting (RFC #238 S8c): 4:4:0 carries only a VERTICAL phase
     // (full-width chroma → no horizontal siting). `Copy`, so read it out before
     // the field split-borrow below.
-    let chroma_location = self.chroma_location;
+    let chroma_location = self.chroma_location.clone();
 
     if row.y().len() != w {
       return Err(MixedSinkerError::RowShapeMismatch(RowShapeMismatch::new(
@@ -1887,7 +1895,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv440p12<BE>, R> {
       // `chroma_prev_u16` lookback and decode 4:4:4. Those reconstruction arms
       // reserve chroma AFTER the resample preflight, so a rejected / out-of-sequence
       // row is caught first (the #180 reserve-after-preflight invariant).
-      let bottom_v = chroma_440_bottom_sited_v(chroma_location);
+      let bottom_v = chroma_440_bottom_sited_v(&chroma_location);
       let chroma_v_phase = if bottom_v { 1.0 } else { 0.0 };
       // RFC #238 Top (`v = 0`, FORWARD fold) — `Top` / `TopLeft`. 4:4:0 has no
       // horizontal phase, so both share the identical full-width vertical box
@@ -1895,7 +1903,7 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv440p12<BE>, R> {
       // `area_chroma_440`'s vertical weights via `top_v`; the reconstruction tiers
       // reconstruct each row's chroma through a FORWARD one-row delay (mirror of
       // `Bottom`'s backward `chroma_prev_u16` lookback).
-      let top_v = chroma_440_top_sited_v(chroma_location);
+      let top_v = chroma_440_top_sited_v(&chroma_location);
       // Whether this row produces any colour output (and so runs the bottom-sited
       // chroma reconstruction). A luma-only row bins native Y unchanged (siting is a
       // chroma-only property).
@@ -2427,13 +2435,13 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv440p12<BE>, R> {
     // Top sitings keep the byte-identical co-sited decode (their odd output row
     // needs the *next* chroma row, deferred). 4:4:0 has full-width chroma, so there
     // is no horizontal phase.
-    let bottom_v = chroma_440_bottom_sited_v(chroma_location);
+    let bottom_v = chroma_440_bottom_sited_v(&chroma_location);
     // RFC #238 Top (`v = 0`, FORWARD one-row delay) — `Top` / `TopLeft`. An ODD
     // output row needs the NEXT chroma row (unavailable when it arrives), so its
     // colour output is HELD (`chroma_top_pending` / `chroma_top_y_u16`) and emitted
     // at the following even row; handled in its own branch below. Disjoint from
     // `bottom_v`. Luma is siting-independent and written in order.
-    let top_v = chroma_440_top_sited_v(chroma_location);
+    let top_v = chroma_440_top_sited_v(&chroma_location);
 
     // RFC #238 S8c: freeze the vertical chroma siting on the direct (identity) path
     // too. The resample branch above rejects a mid-frame vertical-phase flip via

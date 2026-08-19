@@ -26,7 +26,7 @@
 //! the routing exists but no packed-RGB oracle does).
 
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   resample::{
     CatmullRom, FilterKernel, FilterStream, FilteredResampler, Lanczos3, Resampler, Triangle,
   },
@@ -36,7 +36,7 @@ use crate::{
   },
 };
 
-const M: ColorMatrix = ColorMatrix::Bt601;
+const M: KernelMatrix = KernelMatrix::Bt601;
 const FR: bool = true;
 
 /// A per-pixel `(Y, U, V)` ramp varying per pixel so every filter window
@@ -173,7 +173,7 @@ impl PackedYuv8Filter for Yuyv {
       .unwrap()
       .with_luma_u16(&mut luma_u16)
       .unwrap();
-      yuyv422_to(&src, FR, M, &mut sink).unwrap();
+      yuyv422_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     }
     FilterOutputs {
       rgb,
@@ -190,7 +190,7 @@ impl PackedYuv8Filter for Yuyv {
       let mut sink = MixedSinker::<Yuyv422>::new(w, h)
         .with_rgb(&mut rgb)
         .unwrap();
-      yuyv422_to(&src, FR, M, &mut sink).unwrap();
+      yuyv422_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     }
     rgb
   }
@@ -200,7 +200,7 @@ impl PackedYuv8Filter for Yuyv {
     let mut y = vec![0u8; w * h];
     {
       let mut sink = MixedSinker::<Yuyv422>::new(w, h).with_luma(&mut y).unwrap();
-      yuyv422_to(&src, FR, M, &mut sink).unwrap();
+      yuyv422_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     }
     y
   }
@@ -219,7 +219,7 @@ impl PackedYuv8Filter for Yuyv {
       FilteredResampler::new(ow, oh, Triangle),
     )
     .unwrap();
-    yuyv422_to(&src, FR, M, &mut sink).unwrap();
+    yuyv422_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     (
       sink.luma_filter_stream_allocated(),
       sink.rgb_filter_stream_allocated(),
@@ -274,7 +274,7 @@ impl PackedYuv8Filter for Uyvy {
       .unwrap()
       .with_luma_u16(&mut luma_u16)
       .unwrap();
-      uyvy422_to(&src, FR, M, &mut sink).unwrap();
+      uyvy422_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     }
     FilterOutputs {
       rgb,
@@ -291,7 +291,7 @@ impl PackedYuv8Filter for Uyvy {
       let mut sink = MixedSinker::<Uyvy422>::new(w, h)
         .with_rgb(&mut rgb)
         .unwrap();
-      uyvy422_to(&src, FR, M, &mut sink).unwrap();
+      uyvy422_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     }
     rgb
   }
@@ -301,7 +301,7 @@ impl PackedYuv8Filter for Uyvy {
     let mut y = vec![0u8; w * h];
     {
       let mut sink = MixedSinker::<Uyvy422>::new(w, h).with_luma(&mut y).unwrap();
-      uyvy422_to(&src, FR, M, &mut sink).unwrap();
+      uyvy422_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     }
     y
   }
@@ -320,7 +320,7 @@ impl PackedYuv8Filter for Uyvy {
       FilteredResampler::new(ow, oh, Triangle),
     )
     .unwrap();
-    uyvy422_to(&src, FR, M, &mut sink).unwrap();
+    uyvy422_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     (
       sink.luma_filter_stream_allocated(),
       sink.rgb_filter_stream_allocated(),
@@ -375,7 +375,7 @@ impl PackedYuv8Filter for Yvyu {
       .unwrap()
       .with_luma_u16(&mut luma_u16)
       .unwrap();
-      yvyu422_to(&src, FR, M, &mut sink).unwrap();
+      yvyu422_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     }
     FilterOutputs {
       rgb,
@@ -392,7 +392,7 @@ impl PackedYuv8Filter for Yvyu {
       let mut sink = MixedSinker::<Yvyu422>::new(w, h)
         .with_rgb(&mut rgb)
         .unwrap();
-      yvyu422_to(&src, FR, M, &mut sink).unwrap();
+      yvyu422_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     }
     rgb
   }
@@ -402,7 +402,7 @@ impl PackedYuv8Filter for Yvyu {
     let mut y = vec![0u8; w * h];
     {
       let mut sink = MixedSinker::<Yvyu422>::new(w, h).with_luma(&mut y).unwrap();
-      yvyu422_to(&src, FR, M, &mut sink).unwrap();
+      yvyu422_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     }
     y
   }
@@ -421,7 +421,7 @@ impl PackedYuv8Filter for Yvyu {
       FilteredResampler::new(ow, oh, Triangle),
     )
     .unwrap();
-    yvyu422_to(&src, FR, M, &mut sink).unwrap();
+    yvyu422_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     (
       sink.luma_filter_stream_allocated(),
       sink.rgb_filter_stream_allocated(),
@@ -478,7 +478,7 @@ impl PackedYuv8Filter for Uyyvyy {
       .unwrap()
       .with_luma_u16(&mut luma_u16)
       .unwrap();
-      uyyvyy411_to(&src, FR, M, &mut sink).unwrap();
+      uyyvyy411_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     }
     FilterOutputs {
       rgb,
@@ -495,7 +495,7 @@ impl PackedYuv8Filter for Uyyvyy {
       let mut sink = MixedSinker::<Uyyvyy411>::new(w, h)
         .with_rgb(&mut rgb)
         .unwrap();
-      uyyvyy411_to(&src, FR, M, &mut sink).unwrap();
+      uyyvyy411_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     }
     rgb
   }
@@ -507,7 +507,7 @@ impl PackedYuv8Filter for Uyyvyy {
       let mut sink = MixedSinker::<Uyyvyy411>::new(w, h)
         .with_luma(&mut y)
         .unwrap();
-      uyyvyy411_to(&src, FR, M, &mut sink).unwrap();
+      uyyvyy411_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     }
     y
   }
@@ -526,7 +526,7 @@ impl PackedYuv8Filter for Uyyvyy {
       FilteredResampler::new(ow, oh, Triangle),
     )
     .unwrap();
-    uyyvyy411_to(&src, FR, M, &mut sink).unwrap();
+    uyyvyy411_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     (
       sink.luma_filter_stream_allocated(),
       sink.rgb_filter_stream_allocated(),
@@ -770,7 +770,7 @@ mod packed_rgb_equivalence {
       .unwrap()
       .with_rgb(&mut out)
       .unwrap();
-      rgb24_to(&src, FR, M, &mut sink).unwrap();
+      rgb24_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     }
     out
   }

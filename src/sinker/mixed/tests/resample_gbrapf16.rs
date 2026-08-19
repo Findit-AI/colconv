@@ -17,7 +17,8 @@
 //! un-premultiplies (R = mean(R*A)/mean(A), A == 0 -> RGB = 0) before the
 //! per-output round-to-f16, the f16 twin of the integer premult oracle.
 //!
-//! `Gbrapf16Row::new` is `pub(crate)` in `mediaframe`, so a row only reaches
+//! `Gbrapf16Row::new` is `pub(crate)` in `mediaframe` and the float-GBR rows carry
+//! no `for_tests` door, so a row only reaches
 //! `process` through the in-order walker; the mid-frame alpha-mode-freeze /
 //! out-of-sequence rejections are covered by the shared-tail
 //! `resample_packed_rgba_8bit` suite against the same `check_frozen_alpha_mode`

@@ -58,6 +58,7 @@
 use crate::{Transfer, resample::pq_hlg};
 
 use super::bits_mask;
+use crate::ColorMatrix;
 
 /// Which transfer system an [`IptC2`](self) source is encoded in. IPT-C2 is
 /// defined **only** for the SMPTE ST 2084 PQ transfer (unlike
@@ -95,7 +96,7 @@ impl IptC2Transfer {
   /// `ColorMatrix::IptC2` with no PQ transfer is malformed; the affine
   /// fallback is the defined, non-panicking policy.
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub(crate) const fn for_transfer(transfer: Transfer) -> Option<Self> {
+  pub(crate) const fn for_transfer(transfer: &Transfer) -> Option<Self> {
     match transfer {
       Transfer::SmpteSt2084Pq => Some(Self::Pq),
       _ => None,

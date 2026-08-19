@@ -900,7 +900,7 @@ mod overflow_tests {
       feature = "y2xx"
     )
   ))]
-  use crate::ColorMatrix;
+  use crate::KernelMatrix;
 
   /// The smallest even width greater than `usize::MAX / 3`, so
   /// `width * 3` overflows 32-bit `usize` without tripping the
@@ -929,7 +929,7 @@ mod overflow_tests {
       &v,
       &mut rgb,
       OVERFLOW_WIDTH,
-      ColorMatrix::Bt601,
+      KernelMatrix::Bt601,
       true,
       false,
     );
@@ -949,7 +949,7 @@ mod overflow_tests {
       &v,
       &mut rgb,
       OVERFLOW_WIDTH,
-      ColorMatrix::Bt601,
+      KernelMatrix::Bt601,
       true,
       false,
     );
@@ -967,7 +967,7 @@ mod overflow_tests {
       &uv,
       &mut rgb,
       OVERFLOW_WIDTH,
-      ColorMatrix::Bt601,
+      KernelMatrix::Bt601,
       true,
       false,
     );
@@ -1229,7 +1229,7 @@ mod overflow_tests {
       &v,
       &mut rgb,
       OVERFLOW_WIDTH,
-      ColorMatrix::Bt601,
+      KernelMatrix::Bt601,
       true,
       false,
     );
@@ -1249,7 +1249,7 @@ mod overflow_tests {
       &v,
       &mut rgb,
       OVERFLOW_WIDTH,
-      ColorMatrix::Bt601,
+      KernelMatrix::Bt601,
       true,
       false,
     );
@@ -1290,7 +1290,7 @@ mod overflow_tests {
       &p,
       &mut rgb,
       OVERFLOW_WIDTH_TIMES_2,
-      ColorMatrix::Bt601,
+      KernelMatrix::Bt601,
       true,
       false,
     );
@@ -1306,7 +1306,7 @@ mod overflow_tests {
       &p,
       &mut rgba,
       OVERFLOW_WIDTH_TIMES_2,
-      ColorMatrix::Bt601,
+      KernelMatrix::Bt601,
       true,
       false,
     );
@@ -1322,7 +1322,7 @@ mod overflow_tests {
       &p,
       &mut rgb,
       OVERFLOW_WIDTH_TIMES_2,
-      ColorMatrix::Bt601,
+      KernelMatrix::Bt601,
       true,
       false,
     );
@@ -1370,7 +1370,7 @@ mod overflow_tests {
     let candidate = ((usize::MAX / 16) + 1) * 6;
     let p: [u8; 0] = [];
     let mut rgb: [u8; 0] = [];
-    v210_to_rgb_row(&p, &mut rgb, candidate, ColorMatrix::Bt601, true, false);
+    v210_to_rgb_row(&p, &mut rgb, candidate, KernelMatrix::Bt601, true, false);
   }
 
   // ---- Y2xx dispatcher — `width x 2` overflow ----
@@ -1397,7 +1397,7 @@ mod overflow_tests {
       &p,
       &mut rgb,
       OVERFLOW_WIDTH_TIMES_2,
-      ColorMatrix::Bt601,
+      KernelMatrix::Bt601,
       true,
       false,
     );

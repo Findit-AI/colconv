@@ -53,34 +53,44 @@ pub(crate) fn copy_alpha_packed_u8x4_at_3(
     target_arch = "aarch64" => {
       if neon_available() {
         // SAFETY: NEON is baseline on aarch64 and verified at runtime.
-        unsafe { arch::neon::copy_alpha_packed_u8x4_at_3(packed, rgba_out, width); }
+        unsafe {
+          arch::neon::copy_alpha_packed_u8x4_at_3(packed, rgba_out, width);
+        }
         return;
       }
-    },
+    }
     target_arch = "x86_64" => {
       if avx512_available() {
         // SAFETY: AVX-512BW verified at runtime.
-        unsafe { arch::x86_avx512::copy_alpha_packed_u8x4_at_3(packed, rgba_out, width); }
+        unsafe {
+          arch::x86_avx512::copy_alpha_packed_u8x4_at_3(packed, rgba_out, width);
+        }
         return;
       }
       if avx2_available() {
         // SAFETY: AVX2 verified at runtime.
-        unsafe { arch::x86_avx2::copy_alpha_packed_u8x4_at_3(packed, rgba_out, width); }
+        unsafe {
+          arch::x86_avx2::copy_alpha_packed_u8x4_at_3(packed, rgba_out, width);
+        }
         return;
       }
       if sse41_available() {
         // SAFETY: SSE4.1 verified at runtime.
-        unsafe { arch::x86_sse41::copy_alpha_packed_u8x4_at_3(packed, rgba_out, width); }
+        unsafe {
+          arch::x86_sse41::copy_alpha_packed_u8x4_at_3(packed, rgba_out, width);
+        }
         return;
       }
-    },
+    }
     target_arch = "wasm32" => {
       if simd128_available() {
         // SAFETY: simd128 enabled at compile time.
-        unsafe { arch::wasm_simd128::copy_alpha_packed_u8x4_at_3(packed, rgba_out, width); }
+        unsafe {
+          arch::wasm_simd128::copy_alpha_packed_u8x4_at_3(packed, rgba_out, width);
+        }
         return;
       }
-    },
+    }
     _ => {}
   }
   scalar::copy_alpha_packed_u8x4_at_3(packed, rgba_out, width);
@@ -116,34 +126,44 @@ pub(crate) fn copy_alpha_packed_u16x4_to_u8_at_0<const BE: bool>(
     target_arch = "aarch64" => {
       if neon_available() {
         // SAFETY: NEON verified at runtime.
-        unsafe { arch::neon::copy_alpha_packed_u16x4_to_u8_at_0(packed, rgba_out, width); }
+        unsafe {
+          arch::neon::copy_alpha_packed_u16x4_to_u8_at_0(packed, rgba_out, width);
+        }
         return;
       }
-    },
+    }
     target_arch = "x86_64" => {
       if avx512_available() {
         // SAFETY: AVX-512BW verified at runtime.
-        unsafe { arch::x86_avx512::copy_alpha_packed_u16x4_to_u8_at_0(packed, rgba_out, width); }
+        unsafe {
+          arch::x86_avx512::copy_alpha_packed_u16x4_to_u8_at_0(packed, rgba_out, width);
+        }
         return;
       }
       if avx2_available() {
         // SAFETY: AVX2 verified at runtime.
-        unsafe { arch::x86_avx2::copy_alpha_packed_u16x4_to_u8_at_0(packed, rgba_out, width); }
+        unsafe {
+          arch::x86_avx2::copy_alpha_packed_u16x4_to_u8_at_0(packed, rgba_out, width);
+        }
         return;
       }
       if sse41_available() {
         // SAFETY: SSE4.1 verified at runtime.
-        unsafe { arch::x86_sse41::copy_alpha_packed_u16x4_to_u8_at_0(packed, rgba_out, width); }
+        unsafe {
+          arch::x86_sse41::copy_alpha_packed_u16x4_to_u8_at_0(packed, rgba_out, width);
+        }
         return;
       }
-    },
+    }
     target_arch = "wasm32" => {
       if simd128_available() {
         // SAFETY: simd128 enabled at compile time.
-        unsafe { arch::wasm_simd128::copy_alpha_packed_u16x4_to_u8_at_0(packed, rgba_out, width); }
+        unsafe {
+          arch::wasm_simd128::copy_alpha_packed_u16x4_to_u8_at_0(packed, rgba_out, width);
+        }
         return;
       }
-    },
+    }
     _ => {}
   }
   scalar::copy_alpha_packed_u16x4_to_u8_at_0::<BE>(packed, rgba_out, width);
@@ -173,34 +193,44 @@ pub(crate) fn copy_alpha_packed_u16x4_at_0<const BE: bool>(
     target_arch = "aarch64" => {
       if neon_available() {
         // SAFETY: NEON verified at runtime.
-        unsafe { arch::neon::copy_alpha_packed_u16x4_at_0(packed, rgba_out, width); }
+        unsafe {
+          arch::neon::copy_alpha_packed_u16x4_at_0(packed, rgba_out, width);
+        }
         return;
       }
-    },
+    }
     target_arch = "x86_64" => {
       if avx512_available() {
         // SAFETY: AVX-512BW verified at runtime.
-        unsafe { arch::x86_avx512::copy_alpha_packed_u16x4_at_0(packed, rgba_out, width); }
+        unsafe {
+          arch::x86_avx512::copy_alpha_packed_u16x4_at_0(packed, rgba_out, width);
+        }
         return;
       }
       if avx2_available() {
         // SAFETY: AVX2 verified at runtime.
-        unsafe { arch::x86_avx2::copy_alpha_packed_u16x4_at_0(packed, rgba_out, width); }
+        unsafe {
+          arch::x86_avx2::copy_alpha_packed_u16x4_at_0(packed, rgba_out, width);
+        }
         return;
       }
       if sse41_available() {
         // SAFETY: SSE4.1 verified at runtime.
-        unsafe { arch::x86_sse41::copy_alpha_packed_u16x4_at_0(packed, rgba_out, width); }
+        unsafe {
+          arch::x86_sse41::copy_alpha_packed_u16x4_at_0(packed, rgba_out, width);
+        }
         return;
       }
-    },
+    }
     target_arch = "wasm32" => {
       if simd128_available() {
         // SAFETY: simd128 enabled at compile time.
-        unsafe { arch::wasm_simd128::copy_alpha_packed_u16x4_at_0(packed, rgba_out, width); }
+        unsafe {
+          arch::wasm_simd128::copy_alpha_packed_u16x4_at_0(packed, rgba_out, width);
+        }
         return;
       }
-    },
+    }
     _ => {}
   }
   scalar::copy_alpha_packed_u16x4_at_0::<BE>(packed, rgba_out, width);
@@ -222,34 +252,44 @@ pub(crate) fn copy_alpha_plane_u8(alpha: &[u8], rgba_out: &mut [u8], width: usiz
     target_arch = "aarch64" => {
       if neon_available() {
         // SAFETY: NEON verified at runtime.
-        unsafe { arch::neon::copy_alpha_plane_u8(alpha, rgba_out, width); }
+        unsafe {
+          arch::neon::copy_alpha_plane_u8(alpha, rgba_out, width);
+        }
         return;
       }
-    },
+    }
     target_arch = "x86_64" => {
       if avx512_available() {
         // SAFETY: AVX-512BW verified at runtime.
-        unsafe { arch::x86_avx512::copy_alpha_plane_u8(alpha, rgba_out, width); }
+        unsafe {
+          arch::x86_avx512::copy_alpha_plane_u8(alpha, rgba_out, width);
+        }
         return;
       }
       if avx2_available() {
         // SAFETY: AVX2 verified at runtime.
-        unsafe { arch::x86_avx2::copy_alpha_plane_u8(alpha, rgba_out, width); }
+        unsafe {
+          arch::x86_avx2::copy_alpha_plane_u8(alpha, rgba_out, width);
+        }
         return;
       }
       if sse41_available() {
         // SAFETY: SSE4.1 verified at runtime.
-        unsafe { arch::x86_sse41::copy_alpha_plane_u8(alpha, rgba_out, width); }
+        unsafe {
+          arch::x86_sse41::copy_alpha_plane_u8(alpha, rgba_out, width);
+        }
         return;
       }
-    },
+    }
     target_arch = "wasm32" => {
       if simd128_available() {
         // SAFETY: simd128 enabled at compile time.
-        unsafe { arch::wasm_simd128::copy_alpha_plane_u8(alpha, rgba_out, width); }
+        unsafe {
+          arch::wasm_simd128::copy_alpha_plane_u8(alpha, rgba_out, width);
+        }
         return;
       }
-    },
+    }
     _ => {}
   }
   scalar::copy_alpha_plane_u8(alpha, rgba_out, width);
@@ -305,34 +345,44 @@ pub(crate) fn copy_alpha_plane_u16_to_u8<const BITS: u32, const BE: bool>(
     target_arch = "aarch64" => {
       if neon_available() {
         // SAFETY: NEON verified at runtime.
-        unsafe { arch::neon::copy_alpha_plane_u16_to_u8::<BITS>(alpha, rgba_out, width); }
+        unsafe {
+          arch::neon::copy_alpha_plane_u16_to_u8::<BITS>(alpha, rgba_out, width);
+        }
         return;
       }
-    },
+    }
     target_arch = "x86_64" => {
       if avx512_available() {
         // SAFETY: AVX-512BW verified at runtime.
-        unsafe { arch::x86_avx512::copy_alpha_plane_u16_to_u8::<BITS>(alpha, rgba_out, width); }
+        unsafe {
+          arch::x86_avx512::copy_alpha_plane_u16_to_u8::<BITS>(alpha, rgba_out, width);
+        }
         return;
       }
       if avx2_available() {
         // SAFETY: AVX2 verified at runtime.
-        unsafe { arch::x86_avx2::copy_alpha_plane_u16_to_u8::<BITS>(alpha, rgba_out, width); }
+        unsafe {
+          arch::x86_avx2::copy_alpha_plane_u16_to_u8::<BITS>(alpha, rgba_out, width);
+        }
         return;
       }
       if sse41_available() {
         // SAFETY: SSE4.1 verified at runtime.
-        unsafe { arch::x86_sse41::copy_alpha_plane_u16_to_u8::<BITS>(alpha, rgba_out, width); }
+        unsafe {
+          arch::x86_sse41::copy_alpha_plane_u16_to_u8::<BITS>(alpha, rgba_out, width);
+        }
         return;
       }
-    },
+    }
     target_arch = "wasm32" => {
       if simd128_available() {
         // SAFETY: simd128 enabled at compile time.
-        unsafe { arch::wasm_simd128::copy_alpha_plane_u16_to_u8::<BITS>(alpha, rgba_out, width); }
+        unsafe {
+          arch::wasm_simd128::copy_alpha_plane_u16_to_u8::<BITS>(alpha, rgba_out, width);
+        }
         return;
       }
-    },
+    }
     _ => {}
   }
   scalar::copy_alpha_plane_u16_to_u8::<BITS, BE>(alpha, rgba_out, width);
@@ -373,34 +423,44 @@ pub(crate) fn copy_alpha_plane_u16<const BITS: u32, const BE: bool>(
     target_arch = "aarch64" => {
       if neon_available() {
         // SAFETY: NEON verified at runtime.
-        unsafe { arch::neon::copy_alpha_plane_u16::<BITS>(alpha, rgba_out, width); }
+        unsafe {
+          arch::neon::copy_alpha_plane_u16::<BITS>(alpha, rgba_out, width);
+        }
         return;
       }
-    },
+    }
     target_arch = "x86_64" => {
       if avx512_available() {
         // SAFETY: AVX-512BW verified at runtime.
-        unsafe { arch::x86_avx512::copy_alpha_plane_u16::<BITS>(alpha, rgba_out, width); }
+        unsafe {
+          arch::x86_avx512::copy_alpha_plane_u16::<BITS>(alpha, rgba_out, width);
+        }
         return;
       }
       if avx2_available() {
         // SAFETY: AVX2 verified at runtime.
-        unsafe { arch::x86_avx2::copy_alpha_plane_u16::<BITS>(alpha, rgba_out, width); }
+        unsafe {
+          arch::x86_avx2::copy_alpha_plane_u16::<BITS>(alpha, rgba_out, width);
+        }
         return;
       }
       if sse41_available() {
         // SAFETY: SSE4.1 verified at runtime.
-        unsafe { arch::x86_sse41::copy_alpha_plane_u16::<BITS>(alpha, rgba_out, width); }
+        unsafe {
+          arch::x86_sse41::copy_alpha_plane_u16::<BITS>(alpha, rgba_out, width);
+        }
         return;
       }
-    },
+    }
     target_arch = "wasm32" => {
       if simd128_available() {
         // SAFETY: simd128 enabled at compile time.
-        unsafe { arch::wasm_simd128::copy_alpha_plane_u16::<BITS>(alpha, rgba_out, width); }
+        unsafe {
+          arch::wasm_simd128::copy_alpha_plane_u16::<BITS>(alpha, rgba_out, width);
+        }
         return;
       }
-    },
+    }
     _ => {}
   }
   scalar::copy_alpha_plane_u16::<BITS, BE>(alpha, rgba_out, width);

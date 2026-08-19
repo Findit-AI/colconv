@@ -57,7 +57,7 @@ fn sse41_hsv_matches_scalar() {
 
 // ---- rgb_to_luma_row equivalence -------------------------------------
 
-fn check_luma_equivalence(rgb: &[u8], width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_luma_equivalence(rgb: &[u8], width: usize, matrix: KernelMatrix, full_range: bool) {
   let mut y_s = std::vec![0u8; width];
   let mut y_k = std::vec![0u8; width];
   scalar::rgb_to_luma_row(rgb, &mut y_s, width, matrix, full_range);
@@ -80,12 +80,12 @@ fn sse41_rgb_to_luma_row_matches_scalar_widths() {
     .map(|i| ((i * 37 + 11) & 0xFF) as u8)
     .collect();
   for &matrix in &[
-    ColorMatrix::Bt601,
-    ColorMatrix::Fcc,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Fcc,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::YCgCo,
   ] {
     for full_range in [true, false] {
       for &w in &[1usize, 7, 8, 15, 16, 17, 31, 32, 33, 47, 64, 128, 130] {
@@ -105,7 +105,7 @@ fn p10_plane(n: usize, seed: usize) -> std::vec::Vec<u16> {
 }
 
 #[cfg(feature = "yuv-planar")]
-fn check_p10_u8_sse41_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_p10_u8_sse41_equivalence(width: usize, matrix: KernelMatrix, full_range: bool) {
   if !std::arch::is_x86_feature_detected!("sse4.1") {
     return;
   }
@@ -142,7 +142,7 @@ fn check_p10_u8_sse41_equivalence(width: usize, matrix: ColorMatrix, full_range:
 }
 
 #[cfg(feature = "yuv-planar")]
-fn check_p10_u16_sse41_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_p10_u16_sse41_equivalence(width: usize, matrix: KernelMatrix, full_range: bool) {
   if !std::arch::is_x86_feature_detected!("sse4.1") {
     return;
   }
@@ -182,12 +182,12 @@ fn check_p10_u16_sse41_equivalence(width: usize, matrix: ColorMatrix, full_range
 #[test]
 fn sse41_p10_u8_matches_scalar_all_matrices() {
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       check_p10_u8_sse41_equivalence(16, m, full);
@@ -199,12 +199,12 @@ fn sse41_p10_u8_matches_scalar_all_matrices() {
 #[test]
 fn sse41_p10_u16_matches_scalar_all_matrices() {
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       check_p10_u16_sse41_equivalence(16, m, full);
@@ -216,16 +216,16 @@ fn sse41_p10_u16_matches_scalar_all_matrices() {
 #[test]
 fn sse41_p10_matches_scalar_odd_tail_widths() {
   for w in [18usize, 30, 34, 1922] {
-    check_p10_u8_sse41_equivalence(w, ColorMatrix::Bt601, false);
-    check_p10_u16_sse41_equivalence(w, ColorMatrix::Bt709, true);
+    check_p10_u8_sse41_equivalence(w, KernelMatrix::Bt601, false);
+    check_p10_u16_sse41_equivalence(w, KernelMatrix::Bt709, true);
   }
 }
 
 #[cfg(feature = "yuv-planar")]
 #[test]
 fn sse41_p10_matches_scalar_1920() {
-  check_p10_u8_sse41_equivalence(1920, ColorMatrix::Bt709, false);
-  check_p10_u16_sse41_equivalence(1920, ColorMatrix::Bt2020Ncl, false);
+  check_p10_u8_sse41_equivalence(1920, KernelMatrix::Bt709, false);
+  check_p10_u16_sse41_equivalence(1920, KernelMatrix::Bt2020Ncl, false);
 }
 
 // ---- yuv420p_n<BITS> SSE4.1 scalar-equivalence (BITS=9 coverage) -----
@@ -241,7 +241,7 @@ fn p_n_plane_sse41<const BITS: u32>(n: usize, seed: usize) -> std::vec::Vec<u16>
 #[cfg(feature = "yuv-planar")]
 fn check_p_n_u8_sse41_equivalence<const BITS: u32>(
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   if !std::arch::is_x86_feature_detected!("sse4.1") {
@@ -273,7 +273,7 @@ fn check_p_n_u8_sse41_equivalence<const BITS: u32>(
 #[cfg(feature = "yuv-planar")]
 fn check_p_n_u16_sse41_equivalence<const BITS: u32>(
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   if !std::arch::is_x86_feature_detected!("sse4.1") {
@@ -306,12 +306,12 @@ fn check_p_n_u16_sse41_equivalence<const BITS: u32>(
 #[test]
 fn sse41_yuv420p9_matches_scalar_all_matrices_and_ranges() {
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       check_p_n_u8_sse41_equivalence::<9>(16, m, full);
@@ -324,11 +324,11 @@ fn sse41_yuv420p9_matches_scalar_all_matrices_and_ranges() {
 #[test]
 fn sse41_yuv420p9_matches_scalar_tail_and_large_widths() {
   for w in [18usize, 30, 34, 1922] {
-    check_p_n_u8_sse41_equivalence::<9>(w, ColorMatrix::Bt601, false);
-    check_p_n_u16_sse41_equivalence::<9>(w, ColorMatrix::Bt709, true);
+    check_p_n_u8_sse41_equivalence::<9>(w, KernelMatrix::Bt601, false);
+    check_p_n_u16_sse41_equivalence::<9>(w, KernelMatrix::Bt709, true);
   }
-  check_p_n_u8_sse41_equivalence::<9>(1920, ColorMatrix::Bt709, false);
-  check_p_n_u16_sse41_equivalence::<9>(1920, ColorMatrix::Bt2020Ncl, false);
+  check_p_n_u8_sse41_equivalence::<9>(1920, KernelMatrix::Bt709, false);
+  check_p_n_u16_sse41_equivalence::<9>(1920, KernelMatrix::Bt2020Ncl, false);
 }
 
 // ---- P010 SSE4.1 scalar-equivalence ----------------------------------
@@ -341,7 +341,7 @@ fn p010_plane(n: usize, seed: usize) -> std::vec::Vec<u16> {
 }
 
 #[cfg(feature = "yuv-semi-planar")]
-fn check_p010_u8_sse41_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_p010_u8_sse41_equivalence(width: usize, matrix: KernelMatrix, full_range: bool) {
   if !std::arch::is_x86_feature_detected!("sse4.1") {
     return;
   }
@@ -359,7 +359,7 @@ fn check_p010_u8_sse41_equivalence(width: usize, matrix: ColorMatrix, full_range
 }
 
 #[cfg(feature = "yuv-semi-planar")]
-fn check_p010_u16_sse41_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_p010_u16_sse41_equivalence(width: usize, matrix: KernelMatrix, full_range: bool) {
   if !std::arch::is_x86_feature_detected!("sse4.1") {
     return;
   }
@@ -380,12 +380,12 @@ fn check_p010_u16_sse41_equivalence(width: usize, matrix: ColorMatrix, full_rang
 #[test]
 fn sse41_p010_u8_matches_scalar_all_matrices() {
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       check_p010_u8_sse41_equivalence(16, m, full);
@@ -397,12 +397,12 @@ fn sse41_p010_u8_matches_scalar_all_matrices() {
 #[test]
 fn sse41_p010_u16_matches_scalar_all_matrices() {
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       check_p010_u16_sse41_equivalence(16, m, full);
@@ -414,16 +414,16 @@ fn sse41_p010_u16_matches_scalar_all_matrices() {
 #[test]
 fn sse41_p010_matches_scalar_odd_tail_widths() {
   for w in [18usize, 30, 34, 1922] {
-    check_p010_u8_sse41_equivalence(w, ColorMatrix::Bt601, false);
-    check_p010_u16_sse41_equivalence(w, ColorMatrix::Bt709, true);
+    check_p010_u8_sse41_equivalence(w, KernelMatrix::Bt601, false);
+    check_p010_u16_sse41_equivalence(w, KernelMatrix::Bt709, true);
   }
 }
 
 #[cfg(feature = "yuv-semi-planar")]
 #[test]
 fn sse41_p010_matches_scalar_1920() {
-  check_p010_u8_sse41_equivalence(1920, ColorMatrix::Bt709, false);
-  check_p010_u16_sse41_equivalence(1920, ColorMatrix::Bt2020Ncl, false);
+  check_p010_u8_sse41_equivalence(1920, KernelMatrix::Bt709, false);
+  check_p010_u16_sse41_equivalence(1920, KernelMatrix::Bt2020Ncl, false);
 }
 
 // ---- Generic BITS equivalence (12/14-bit coverage) ------------------
@@ -438,7 +438,7 @@ fn sse41_p010_matches_scalar_1920() {
 #[cfg(feature = "yuv-planar")]
 fn check_planar_u8_sse41_equivalence_n<const BITS: u32>(
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   if !std::arch::is_x86_feature_detected!("sse4.1") {
@@ -471,7 +471,7 @@ fn check_planar_u8_sse41_equivalence_n<const BITS: u32>(
 #[cfg(feature = "yuv-planar")]
 fn check_planar_u16_sse41_equivalence_n<const BITS: u32>(
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   if !std::arch::is_x86_feature_detected!("sse4.1") {
@@ -504,7 +504,7 @@ fn check_planar_u16_sse41_equivalence_n<const BITS: u32>(
 #[cfg(feature = "yuv-semi-planar")]
 fn check_pn_u8_sse41_equivalence_n<const BITS: u32>(
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   if !std::arch::is_x86_feature_detected!("sse4.1") {
@@ -526,7 +526,7 @@ fn check_pn_u8_sse41_equivalence_n<const BITS: u32>(
 #[cfg(feature = "yuv-semi-planar")]
 fn check_pn_u16_sse41_equivalence_n<const BITS: u32>(
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   if !std::arch::is_x86_feature_detected!("sse4.1") {
@@ -548,12 +548,12 @@ fn check_pn_u16_sse41_equivalence_n<const BITS: u32>(
 #[test]
 fn sse41_p12_matches_scalar_all_matrices() {
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       #[cfg(feature = "yuv-planar")]
@@ -572,12 +572,12 @@ fn sse41_p12_matches_scalar_all_matrices() {
 #[test]
 fn sse41_p14_matches_scalar_all_matrices() {
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       check_planar_u8_sse41_equivalence_n::<14>(16, m, full);
@@ -590,13 +590,13 @@ fn sse41_p14_matches_scalar_all_matrices() {
 fn sse41_p12_matches_scalar_tail_widths() {
   for w in [18usize, 30, 34, 1922] {
     #[cfg(feature = "yuv-planar")]
-    check_planar_u8_sse41_equivalence_n::<12>(w, ColorMatrix::Bt601, false);
+    check_planar_u8_sse41_equivalence_n::<12>(w, KernelMatrix::Bt601, false);
     #[cfg(feature = "yuv-planar")]
-    check_planar_u16_sse41_equivalence_n::<12>(w, ColorMatrix::Bt709, true);
+    check_planar_u16_sse41_equivalence_n::<12>(w, KernelMatrix::Bt709, true);
     #[cfg(feature = "yuv-semi-planar")]
-    check_pn_u8_sse41_equivalence_n::<12>(w, ColorMatrix::Bt601, false);
+    check_pn_u8_sse41_equivalence_n::<12>(w, KernelMatrix::Bt601, false);
     #[cfg(feature = "yuv-semi-planar")]
-    check_pn_u16_sse41_equivalence_n::<12>(w, ColorMatrix::Bt2020Ncl, false);
+    check_pn_u16_sse41_equivalence_n::<12>(w, KernelMatrix::Bt2020Ncl, false);
   }
 }
 
@@ -604,15 +604,15 @@ fn sse41_p12_matches_scalar_tail_widths() {
 #[test]
 fn sse41_p14_matches_scalar_tail_widths() {
   for w in [18usize, 30, 34, 1922] {
-    check_planar_u8_sse41_equivalence_n::<14>(w, ColorMatrix::Bt601, false);
-    check_planar_u16_sse41_equivalence_n::<14>(w, ColorMatrix::Bt709, true);
+    check_planar_u8_sse41_equivalence_n::<14>(w, KernelMatrix::Bt601, false);
+    check_planar_u16_sse41_equivalence_n::<14>(w, KernelMatrix::Bt709, true);
   }
 }
 
 // ---- 16-bit (full-range u16 samples) SSE4.1 equivalence -------------
 
 #[cfg(feature = "yuv-planar")]
-fn check_yuv420p16_u8_sse41_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_yuv420p16_u8_sse41_equivalence(width: usize, matrix: KernelMatrix, full_range: bool) {
   if !std::arch::is_x86_feature_detected!("sse4.1") {
     return;
   }
@@ -632,7 +632,7 @@ fn check_yuv420p16_u8_sse41_equivalence(width: usize, matrix: ColorMatrix, full_
 }
 
 #[cfg(feature = "yuv-planar")]
-fn check_yuv420p16_u16_sse41_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_yuv420p16_u16_sse41_equivalence(width: usize, matrix: KernelMatrix, full_range: bool) {
   if !std::arch::is_x86_feature_detected!("sse4.1") {
     return;
   }
@@ -660,7 +660,7 @@ fn check_yuv420p16_u16_sse41_equivalence(width: usize, matrix: ColorMatrix, full
 }
 
 #[cfg(feature = "yuv-semi-planar")]
-fn check_p16_u8_sse41_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_p16_u8_sse41_equivalence(width: usize, matrix: KernelMatrix, full_range: bool) {
   if !std::arch::is_x86_feature_detected!("sse4.1") {
     return;
   }
@@ -681,7 +681,7 @@ fn check_p16_u8_sse41_equivalence(width: usize, matrix: ColorMatrix, full_range:
 }
 
 #[cfg(feature = "yuv-semi-planar")]
-fn check_p16_u16_sse41_equivalence(width: usize, matrix: ColorMatrix, full_range: bool) {
+fn check_p16_u16_sse41_equivalence(width: usize, matrix: KernelMatrix, full_range: bool) {
   if !std::arch::is_x86_feature_detected!("sse4.1") {
     return;
   }
@@ -704,12 +704,12 @@ fn check_p16_u16_sse41_equivalence(width: usize, matrix: ColorMatrix, full_range
 #[test]
 fn sse41_p16_matches_scalar_all_matrices() {
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       #[cfg(feature = "yuv-planar")]
@@ -728,24 +728,24 @@ fn sse41_p16_matches_scalar_all_matrices() {
 fn sse41_p16_matches_scalar_tail_widths() {
   for w in [18usize, 30, 34, 1922] {
     #[cfg(feature = "yuv-planar")]
-    check_yuv420p16_u8_sse41_equivalence(w, ColorMatrix::Bt601, false);
+    check_yuv420p16_u8_sse41_equivalence(w, KernelMatrix::Bt601, false);
     #[cfg(feature = "yuv-planar")]
-    check_yuv420p16_u16_sse41_equivalence(w, ColorMatrix::Bt709, true);
+    check_yuv420p16_u16_sse41_equivalence(w, KernelMatrix::Bt709, true);
     #[cfg(feature = "yuv-semi-planar")]
-    check_p16_u8_sse41_equivalence(w, ColorMatrix::Bt601, false);
+    check_p16_u8_sse41_equivalence(w, KernelMatrix::Bt601, false);
     #[cfg(feature = "yuv-semi-planar")]
-    check_p16_u16_sse41_equivalence(w, ColorMatrix::Bt2020Ncl, false);
+    check_p16_u16_sse41_equivalence(w, KernelMatrix::Bt2020Ncl, false);
   }
 }
 
 #[test]
 fn sse41_p16_matches_scalar_1920() {
   #[cfg(feature = "yuv-planar")]
-  check_yuv420p16_u8_sse41_equivalence(1920, ColorMatrix::Bt709, false);
+  check_yuv420p16_u8_sse41_equivalence(1920, KernelMatrix::Bt709, false);
   #[cfg(feature = "yuv-planar")]
-  check_yuv420p16_u16_sse41_equivalence(1920, ColorMatrix::Bt2020Ncl, false);
+  check_yuv420p16_u16_sse41_equivalence(1920, KernelMatrix::Bt2020Ncl, false);
   #[cfg(feature = "yuv-semi-planar")]
-  check_p16_u8_sse41_equivalence(1920, ColorMatrix::Bt709, false);
+  check_p16_u8_sse41_equivalence(1920, KernelMatrix::Bt709, false);
   #[cfg(feature = "yuv-semi-planar")]
-  check_p16_u16_sse41_equivalence(1920, ColorMatrix::Bt2020Ncl, false);
+  check_p16_u16_sse41_equivalence(1920, KernelMatrix::Bt2020Ncl, false);
 }

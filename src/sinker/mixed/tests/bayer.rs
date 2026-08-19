@@ -266,7 +266,7 @@ fn bayer_mixed_sinker_returns_row_shape_mismatch_on_bad_above() {
   let below = std::vec![0u8; 8];
   let bad_above = std::vec![0u8; 7]; // wrong length
   let m = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
-  let row = BayerRow::new(
+  let row = BayerRow::for_tests(
     &bad_above,
     &mid,
     &below,
@@ -295,7 +295,7 @@ fn bayer16_mixed_sinker_returns_row_shape_mismatch_on_bad_mid() {
   let bad_mid = std::vec![0u16; 7]; // wrong length
   let below = std::vec![0u16; 8];
   let m = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
-  let row = BayerRow16::<12>::new(
+  let row = BayerRow16::<12>::for_tests(
     &above,
     &bad_mid,
     &below,

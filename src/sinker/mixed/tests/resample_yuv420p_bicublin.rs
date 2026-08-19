@@ -30,14 +30,14 @@
 //!   unmutated and the row retryable (the filter-path atomicity contract).
 
 use crate::{
-  ColorMatrix, PixelSink,
+  KernelMatrix, PixelSink,
   resample::{AreaResampler, Bicublin, FilterStream, ResampleError, SwscaleBicubic, Triangle},
   sinker::{MixedSinker, MixedSinkerError},
   source::{Yuv420p, Yuv420pRow, Yuv422p, yuv420p_to, yuv422p_to},
 };
 use mediaframe::frame::{Yuv420pFrame, Yuv422pFrame};
 
-const M: ColorMatrix = ColorMatrix::Bt601;
+const M: KernelMatrix = KernelMatrix::Bt601;
 const FR: bool = true;
 
 /// Per-channel ramps so every filter window sees distinct neighbours (a
@@ -97,7 +97,7 @@ fn bicublin_outputs(
       .unwrap()
       .with_luma_u16(&mut luma_u16)
       .unwrap();
-    yuv420p_to(&src, FR, M, &mut sink).unwrap();
+    yuv420p_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   Outputs {
     rgb,
@@ -281,7 +281,7 @@ fn bicublin_luma_chroma_kernels_differ_from_single_kernel() {
 
 // ---- Atomicity (mirrors the single-kernel filter-path atomicity) ------
 //
-// Rows are constructed directly via `Yuv420pRow::new(&y, &u, &v, idx, …)`
+// Rows are constructed directly via `Yuv420pRow::for_tests(&y, &u, &v, idx, …)`
 // (the `u` / `v` slices are the half-width chroma row for that Y row's pair,
 // read only on even rows), so a single `process` call can be replayed and a
 // mid-stream output swap exercised — the same pattern the geometry tests use.
@@ -318,7 +318,7 @@ fn bicublin_mid_frame_output_change_is_rejected() {
   // Feed row 0, then swap the luma buffer and feed row 1 — the frozen-output
   // contract must reject the changed output set.
   sink
-    .process(Yuv420pRow::new(
+    .process(Yuv420pRow::for_tests(
       yr(0),
       chroma_row(&u, cw, 0),
       chroma_row(&v, cw, 0),
@@ -329,7 +329,7 @@ fn bicublin_mid_frame_output_change_is_rejected() {
     .unwrap();
   sink.set_luma(&mut luma_b).unwrap();
   let err = sink
-    .process(Yuv420pRow::new(
+    .process(Yuv420pRow::for_tests(
       yr(1),
       chroma_row(&u, cw, 1),
       chroma_row(&v, cw, 1),
@@ -369,7 +369,7 @@ fn bicublin_out_of_sequence_row_is_rejected() {
     sink.begin_frame(SW as u32, SH as u32).unwrap();
     // Skip row 0, feed row 1 first: rejected out of sequence, mutating nothing.
     let err = sink
-      .process(Yuv420pRow::new(
+      .process(Yuv420pRow::for_tests(
         yr(1),
         chroma_row(&u, cw, 1),
         chroma_row(&v, cw, 1),
@@ -389,7 +389,7 @@ fn bicublin_out_of_sequence_row_is_rejected() {
     // produces the correct cubic native-Y result below.
     for i in 0..SH {
       sink
-        .process(Yuv420pRow::new(
+        .process(Yuv420pRow::for_tests(
           yr(i),
           chroma_row(&u, cw, i),
           chroma_row(&v, cw, i),
@@ -454,7 +454,7 @@ fn bicublin_same_size_still_filters_all_planes() {
       let mut sink = MixedSinker::<Yuv420p>::new(sw, sh)
         .with_rgb(&mut identity_rgb)
         .unwrap();
-      yuv420p_to(&src, FR, M, &mut sink).unwrap();
+      yuv420p_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     }
     assert_ne!(
       got.rgb, identity_rgb,
@@ -498,7 +498,7 @@ fn bicublin_plan_rejected_by_non_yuv420p_filter_sink() {
     .expect("plan builds (the format only matters at process time)")
     .with_rgb(&mut rgb)
     .unwrap();
-  let err = yuv422p_to(&src, FR, M, &mut sink).unwrap_err();
+  let err = yuv422p_to(&src, FR, sink.set_kernel_matrix(M)).unwrap_err();
   assert!(
     matches!(
       err,
@@ -547,7 +547,7 @@ fn bicublin_box_alloc_failure_is_recoverable() {
     sink.begin_frame(SW as u32, SH as u32).unwrap();
     crate::resample::arm_box_failure();
     let err = sink
-      .process(Yuv420pRow::new(
+      .process(Yuv420pRow::for_tests(
         yr(0),
         chroma_row(&u, cw, 0),
         chroma_row(&v, cw, 0),
@@ -581,7 +581,7 @@ fn bicublin_box_alloc_failure_is_recoverable() {
       .unwrap()
       .with_rgb(&mut rgb2)
       .unwrap();
-    yuv420p_to(&src, FR, M, &mut sink)
+    yuv420p_to(&src, FR, sink.set_kernel_matrix(M))
       .expect("a fresh frame after the consumed failpoint resamples cleanly");
   }
   let (want_rgb, _) = per_plane_oracle(&y, &u, &v, SW, SH, OW, OH);
@@ -621,7 +621,7 @@ fn bicublin_first_build_scratch_oom_leaves_freeze_unfrozen_for_retry() {
   sink.begin_frame(SW as u32, SH as u32).unwrap();
   crate::sinker::mixed::arm_native_rgb_scratch_failure();
   let err = sink
-    .process(Yuv420pRow::new(
+    .process(Yuv420pRow::for_tests(
       yr(0),
       chroma_row(&u, cw, 0),
       chroma_row(&v, cw, 0),
@@ -641,7 +641,7 @@ fn bicublin_first_build_scratch_oom_leaves_freeze_unfrozen_for_retry() {
   // luma added (changed output set) is ACCEPTED, not ResampleOutputsChanged.
   sink.set_luma(&mut luma).unwrap();
   sink
-    .process(Yuv420pRow::new(
+    .process(Yuv420pRow::for_tests(
       yr(0),
       chroma_row(&u, cw, 0),
       chroma_row(&v, cw, 0),
@@ -685,7 +685,7 @@ fn bicublin_colour_capability_rebuild_scratch_oom_leaves_freeze_unfrozen_for_ret
   sink.begin_frame(SW as u32, SH as u32).unwrap();
   for i in 0..SH {
     sink
-      .process(Yuv420pRow::new(
+      .process(Yuv420pRow::for_tests(
         yr(i),
         chroma_row(&u, cw, i),
         chroma_row(&v, cw, i),
@@ -701,7 +701,7 @@ fn bicublin_colour_capability_rebuild_scratch_oom_leaves_freeze_unfrozen_for_ret
   sink.set_rgb(&mut rgb).unwrap();
   crate::sinker::mixed::arm_native_rgb_scratch_failure();
   let err = sink
-    .process(Yuv420pRow::new(
+    .process(Yuv420pRow::for_tests(
       yr(0),
       chroma_row(&u, cw, 0),
       chroma_row(&v, cw, 0),
@@ -723,7 +723,7 @@ fn bicublin_colour_capability_rebuild_scratch_oom_leaves_freeze_unfrozen_for_ret
   // would have frozen {luma, rgb} and rejected this as ResampleOutputsChanged).
   sink.set_hsv(&mut hh, &mut ss, &mut vv).unwrap();
   sink
-    .process(Yuv420pRow::new(
+    .process(Yuv420pRow::for_tests(
       yr(0),
       chroma_row(&u, cw, 0),
       chroma_row(&v, cw, 0),
@@ -770,7 +770,7 @@ fn area_stream_box_alloc_failure_is_recoverable() {
     sink.begin_frame(SW as u32, SH as u32).unwrap();
     crate::resample::arm_box_failure();
     let err = sink
-      .process(Yuv420pRow::new(
+      .process(Yuv420pRow::for_tests(
         yr(0),
         chroma_row(&u, cw, 0),
         chroma_row(&v, cw, 0),
@@ -805,7 +805,7 @@ fn area_stream_box_alloc_failure_is_recoverable() {
         .with_native(false)
         .with_rgb(&mut rgb2)
         .unwrap();
-    yuv420p_to(&src, FR, M, &mut sink)
+    yuv420p_to(&src, FR, sink.set_kernel_matrix(M))
       .expect("a fresh frame after the consumed failpoint resamples cleanly");
   }
   assert!(

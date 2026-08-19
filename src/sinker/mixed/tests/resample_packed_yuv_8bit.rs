@@ -20,7 +20,7 @@
 //!   RGB-derived luma would diverge.
 
 use crate::{
-  ColorMatrix, PixelSink,
+  KernelMatrix, PixelSink,
   frame::{Uyvy422Frame, Yuyv422Frame, Yvyu422Frame},
   resample::{AreaResampler, ResampleError},
   sinker::{MixedSinker, MixedSinkerError},
@@ -34,7 +34,7 @@ use super::force_row_stage;
 
 const SRC: usize = 8;
 const OUT: usize = 4;
-const M: ColorMatrix = ColorMatrix::Bt601;
+const M: KernelMatrix = KernelMatrix::Bt601;
 const FR: bool = true;
 
 /// Exact 2x2-block area mean (round-half-up) of an `SRC`-grid plane to
@@ -207,7 +207,7 @@ macro_rules! packed_yuv_resample_suite {
         let mut sink = MixedSinker::<$fmt>::new(SRC, SRC)
           .with_rgb(&mut full_rgb)
           .unwrap();
-        $drv(&$mk_frame(&packed), FR, M, &mut sink).unwrap();
+        $drv(&$mk_frame(&packed), FR, sink.set_kernel_matrix(M)).unwrap();
       }
       // Resampled RGB (pinned to the row-stage tier — see `force_row_stage`).
       let mut rgb = vec![0u8; OUT * OUT * 3];
@@ -218,7 +218,7 @@ macro_rules! packed_yuv_resample_suite {
         )
         .with_rgb(&mut rgb)
         .unwrap();
-        $drv(&$mk_frame(&packed), FR, M, &mut sink).unwrap();
+        $drv(&$mk_frame(&packed), FR, sink.set_kernel_matrix(M)).unwrap();
       }
       assert_eq!(
         rgb,
@@ -244,7 +244,7 @@ macro_rules! packed_yuv_resample_suite {
             .unwrap()
             .with_luma_u16(&mut luma_u16)
             .unwrap();
-        $drv(&$mk_frame(&packed), FR, M, &mut sink).unwrap();
+        $drv(&$mk_frame(&packed), FR, sink.set_kernel_matrix(M)).unwrap();
       }
       let y_ref = block_mean_2x2(&y);
       assert_eq!(luma, y_ref, "luma must be the area-downscaled Y plane");
@@ -272,7 +272,7 @@ macro_rules! packed_yuv_resample_suite {
             .unwrap()
             .with_luma(&mut luma)
             .unwrap();
-        $drv(&$mk_frame(&packed), FR, M, &mut sink).unwrap();
+        $drv(&$mk_frame(&packed), FR, sink.set_kernel_matrix(M)).unwrap();
       }
       assert!(
         luma.iter().all(|&b| b == 16),
@@ -295,7 +295,7 @@ macro_rules! packed_yuv_resample_suite {
         let mut sink = MixedSinker::<$fmt>::new(SRC, SRC)
           .with_rgb(&mut full_rgb)
           .unwrap();
-        $drv(&$mk_frame(&packed), FR, M, &mut sink).unwrap();
+        $drv(&$mk_frame(&packed), FR, sink.set_kernel_matrix(M)).unwrap();
       }
       let rgb_ref = block_mean_2x2_rgb(&full_rgb);
 
@@ -321,7 +321,7 @@ macro_rules! packed_yuv_resample_suite {
         .unwrap()
         .with_hsv(&mut hh, &mut ss, &mut vv)
         .unwrap();
-        $drv(&$mk_frame(&packed), FR, M, &mut sink).unwrap();
+        $drv(&$mk_frame(&packed), FR, sink.set_kernel_matrix(M)).unwrap();
       }
       assert_eq!(rgb, rgb_ref, "all-outputs rgb");
       // RGBA is the RGB row with a 0xFF alpha pad.
@@ -366,7 +366,7 @@ macro_rules! packed_yuv_resample_suite {
         let mut sink = MixedSinker::<$fmt>::new(SRC, SRC)
           .with_rgb(&mut direct)
           .unwrap();
-        $drv(&$mk_frame(&packed), FR, M, &mut sink).unwrap();
+        $drv(&$mk_frame(&packed), FR, sink.set_kernel_matrix(M)).unwrap();
       }
       let mut via_area = vec![0u8; SRC * SRC * 3];
       {
@@ -376,7 +376,7 @@ macro_rules! packed_yuv_resample_suite {
         )
         .with_rgb(&mut via_area)
         .unwrap();
-        $drv(&$mk_frame(&packed), FR, M, &mut sink).unwrap();
+        $drv(&$mk_frame(&packed), FR, sink.set_kernel_matrix(M)).unwrap();
       }
       assert_eq!(direct, via_area, "identity plan must match the direct sink");
     }
@@ -389,7 +389,7 @@ macro_rules! packed_yuv_resample_suite {
       let mut sink =
         MixedSinker::<$fmt, AreaResampler>::with_resampler(SRC, SRC, AreaResampler::to(OUT, OUT))
           .unwrap();
-      $drv(&$mk_frame(&packed), FR, M, &mut sink).unwrap();
+      $drv(&$mk_frame(&packed), FR, sink.set_kernel_matrix(M)).unwrap();
       assert!(
         !sink.luma_stream_allocated(),
         "no-output sink allocated a luma stream"
@@ -425,8 +425,8 @@ macro_rules! packed_yuv_resample_suite {
             .unwrap()
             .with_rgb(&mut rgb)
             .unwrap();
-        $drv(&$mk_frame(&p1), FR, M, &mut sink).unwrap();
-        $drv(&$mk_frame(&p2), FR, M, &mut sink).unwrap();
+        $drv(&$mk_frame(&p1), FR, sink.set_kernel_matrix(M)).unwrap();
+        $drv(&$mk_frame(&p2), FR, sink.set_kernel_matrix(M)).unwrap();
       }
       assert_eq!(
         luma,
@@ -451,7 +451,7 @@ macro_rules! packed_yuv_resample_suite {
           .with_rgb(&mut rgb)
           .unwrap();
       sink.begin_frame(SRC as u32, SRC as u32).unwrap();
-      let err = sink.process($row::new(row3, 3, M, FR)).unwrap_err();
+      let err = sink.process($row::for_tests(row3, 3, M, FR)).unwrap_err();
       assert!(
         matches!(
           err,
@@ -492,10 +492,10 @@ macro_rules! packed_yuv_resample_suite {
           .unwrap();
       sink.begin_frame(SRC as u32, SRC as u32).unwrap();
       sink
-        .process($row::new(&packed[..2 * SRC], 0, M, FR))
+        .process($row::for_tests(&packed[..2 * SRC], 0, M, FR))
         .unwrap();
       let err = sink
-        .process($row::new(&packed[2 * 2 * SRC..3 * 2 * SRC], 2, M, FR))
+        .process($row::for_tests(&packed[2 * 2 * SRC..3 * 2 * SRC], 2, M, FR))
         .unwrap_err();
       assert!(
         matches!(
@@ -524,11 +524,11 @@ macro_rules! packed_yuv_resample_suite {
           .unwrap();
       sink.begin_frame(SRC as u32, SRC as u32).unwrap();
       sink
-        .process($row::new(&packed[..2 * SRC], 0, M, FR))
+        .process($row::for_tests(&packed[..2 * SRC], 0, M, FR))
         .unwrap();
       sink.set_luma(&mut luma).unwrap();
       let err = sink
-        .process($row::new(&packed[2 * SRC..2 * 2 * SRC], 1, M, FR))
+        .process($row::for_tests(&packed[2 * SRC..2 * 2 * SRC], 1, M, FR))
         .unwrap_err();
       assert!(
         matches!(err, MixedSinkerError::ResampleOutputsChanged(_)),
@@ -559,7 +559,7 @@ macro_rules! packed_yuv_resample_suite {
           .unwrap();
       sink.begin_frame(SRC as u32, SRC as u32).unwrap();
       let err = sink
-        .process($row::new(&packed[3 * 2 * SRC..4 * 2 * SRC], 3, M, FR))
+        .process($row::for_tests(&packed[3 * 2 * SRC..4 * 2 * SRC], 3, M, FR))
         .unwrap_err();
       assert!(
         matches!(
@@ -571,7 +571,7 @@ macro_rules! packed_yuv_resample_suite {
       let mut rgb = vec![0u8; OUT * OUT * 3];
       sink.set_rgb(&mut rgb).unwrap();
       sink
-        .process($row::new(&packed[..2 * SRC], 0, M, FR))
+        .process($row::for_tests(&packed[..2 * SRC], 0, M, FR))
         .expect("row 0 must succeed after a rejected out-of-sequence first row");
     }
   };

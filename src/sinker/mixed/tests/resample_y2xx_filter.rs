@@ -35,7 +35,7 @@
 //! over-native-max overshoot to clip.
 
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   frame::Y2xxFrame,
   resample::{
     CatmullRom, FilterKernel, FilterStream, FilteredResampler, Lanczos3, Resampler, Triangle,
@@ -43,7 +43,7 @@ use crate::{
   sinker::MixedSinker,
 };
 
-const M: ColorMatrix = ColorMatrix::Bt709;
+const M: KernelMatrix = KernelMatrix::Bt709;
 const FR: bool = true;
 
 /// Re-encode a host-native u16 slice as LE-wire byte storage so an
@@ -190,7 +190,7 @@ macro_rules! y2xx_filter_suite {
           .unwrap()
           .with_luma_u16(&mut luma_u16)
           .unwrap();
-          $walker(&frame(packed, sw, sh), FR, M, &mut sink).unwrap();
+          $walker(&frame(packed, sw, sh), FR, sink.set_kernel_matrix(M)).unwrap();
         }
         FilterOutputs {
           rgb,
@@ -208,7 +208,7 @@ macro_rules! y2xx_filter_suite {
           let mut sink = MixedSinker::<$marker>::new(w, h)
             .with_luma_u16(&mut y)
             .unwrap();
-          $walker(&frame(packed, w, h), FR, M, &mut sink).unwrap();
+          $walker(&frame(packed, w, h), FR, sink.set_kernel_matrix(M)).unwrap();
         }
         y
       }
@@ -400,7 +400,7 @@ macro_rules! y2xx_overshoot_suite {
           .unwrap()
           .with_luma_u16(&mut luma_u16)
           .unwrap();
-          $walker(&frame(packed, sw, sh), FR, M, &mut sink).unwrap();
+          $walker(&frame(packed, sw, sh), FR, sink.set_kernel_matrix(M)).unwrap();
         }
         FilterOutputs {
           rgb,
@@ -556,7 +556,7 @@ mod packed_rgb_equivalence {
       .unwrap()
       .with_rgb_u16(&mut out)
       .unwrap();
-      rgb48_to(&src, FR, M, &mut sink).unwrap();
+      rgb48_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     }
     out
   }
@@ -582,7 +582,7 @@ mod packed_rgb_equivalence {
       .unwrap()
       .with_rgb(&mut out)
       .unwrap();
-      rgb24_to(&src, FR, M, &mut sink).unwrap();
+      rgb24_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     }
     out
   }
@@ -660,7 +660,7 @@ mod packed_rgb_equivalence {
             .unwrap()
             .with_luma_u16(&mut luma_u16)
             .unwrap();
-            $walker(&frame(packed, sw, sh), FR, M, &mut sink).unwrap();
+            $walker(&frame(packed, sw, sh), FR, sink.set_kernel_matrix(M)).unwrap();
           }
           FilterOutputs {
             rgb,
@@ -676,7 +676,7 @@ mod packed_rgb_equivalence {
             let mut sink = MixedSinker::<$marker>::new(w, h)
               .with_rgb_u16(&mut rgb)
               .unwrap();
-            $walker(&frame(packed, w, h), FR, M, &mut sink).unwrap();
+            $walker(&frame(packed, w, h), FR, sink.set_kernel_matrix(M)).unwrap();
           }
           rgb
         }
@@ -686,7 +686,7 @@ mod packed_rgb_equivalence {
             let mut sink = MixedSinker::<$marker>::new(w, h)
               .with_rgb(&mut rgb)
               .unwrap();
-            $walker(&frame(packed, w, h), FR, M, &mut sink).unwrap();
+            $walker(&frame(packed, w, h), FR, sink.set_kernel_matrix(M)).unwrap();
           }
           rgb
         }
@@ -831,7 +831,7 @@ mod packed_rgb_equivalence {
             .unwrap()
             .with_rgb_u16(&mut rgb_u16)
             .unwrap();
-            $walker(&frame(packed, sw, sh), FR, M, &mut sink).unwrap();
+            $walker(&frame(packed, sw, sh), FR, sink.set_kernel_matrix(M)).unwrap();
           }
           rgb_u16
         }
@@ -841,7 +841,7 @@ mod packed_rgb_equivalence {
             let mut sink = MixedSinker::<$marker>::new(w, h)
               .with_rgb_u16(&mut rgb)
               .unwrap();
-            $walker(&frame(packed, w, h), FR, M, &mut sink).unwrap();
+            $walker(&frame(packed, w, h), FR, sink.set_kernel_matrix(M)).unwrap();
           }
           rgb
         }

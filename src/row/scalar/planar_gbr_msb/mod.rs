@@ -251,7 +251,7 @@ pub(crate) fn gbr_to_luma_u16_msb_row<const BITS: u32, const BE: bool>(
   r: &[u16],
   luma_out: &mut [u16],
   width: usize,
-  matrix: crate::ColorMatrix,
+  matrix: crate::KernelMatrix,
   full_range: bool,
 ) {
   const { assert!(matches!(BITS, 10 | 12), "BITS must be 10 or 12") };

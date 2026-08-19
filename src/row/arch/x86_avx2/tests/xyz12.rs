@@ -6,7 +6,7 @@
 
 use super::super::*;
 use crate::{
-  DcpTargetGamut,
+  KernelGamut,
   row::arch::x86_avx2::xyz12::{
     xyz12_to_rgb_f16_row, xyz12_to_rgb_f32_row, xyz12_to_rgb_row, xyz12_to_rgb_u16_row,
     xyz12_to_rgba_f16_row, xyz12_to_rgba_row, xyz12_to_rgba_u16_row, xyz12_to_xyz_f32_row,
@@ -56,9 +56,9 @@ fn avx2_xyz12_to_rgb_matches_scalar() {
   }
   for &w in WIDTHS {
     for gamut in [
-      DcpTargetGamut::DciP3,
-      DcpTargetGamut::Rec709,
-      DcpTargetGamut::Rec2020,
+      KernelGamut::DciP3,
+      KernelGamut::Rec709,
+      KernelGamut::Rec2020,
     ] {
       let xyz = xyz12_plane(w, 0xC0FE_BABE);
       let mut out_scalar = std::vec![0u8; w * 3];
@@ -85,9 +85,9 @@ fn avx2_xyz12_to_rgb_dirty_input_matches_scalar() {
     let xyz = xyz12_plane_dirty(w, 0xDEAD_F00D);
     let mut out_scalar = std::vec![0u8; w * 3];
     let mut out_avx = std::vec![0u8; w * 3];
-    scalar::xyz12::xyz12_to_rgb_row::<false>(&xyz, &mut out_scalar, w, DcpTargetGamut::DciP3);
+    scalar::xyz12::xyz12_to_rgb_row::<false>(&xyz, &mut out_scalar, w, KernelGamut::DciP3);
     unsafe {
-      xyz12_to_rgb_row::<false>(&xyz, &mut out_avx, w, DcpTargetGamut::DciP3);
+      xyz12_to_rgb_row::<false>(&xyz, &mut out_avx, w, KernelGamut::DciP3);
     }
     assert_eq!(
       out_scalar, out_avx,
@@ -108,8 +108,8 @@ fn avx2_xyz12_to_rgb_be_matches_le() {
     let mut out_le = std::vec![0u8; w * 3];
     let mut out_be = std::vec![0u8; w * 3];
     unsafe {
-      xyz12_to_rgb_row::<false>(&xyz_le, &mut out_le, w, DcpTargetGamut::Rec709);
-      xyz12_to_rgb_row::<true>(&xyz_be, &mut out_be, w, DcpTargetGamut::Rec709);
+      xyz12_to_rgb_row::<false>(&xyz_le, &mut out_le, w, KernelGamut::Rec709);
+      xyz12_to_rgb_row::<true>(&xyz_be, &mut out_be, w, KernelGamut::Rec709);
     }
     assert_eq!(out_le, out_be, "AVX2 xyz12_to_rgb BE/LE mismatch (w={w})");
   }
@@ -127,9 +127,9 @@ fn avx2_xyz12_to_rgba_matches_scalar() {
     let xyz = xyz12_plane(w, 0xAFAF_AFAF);
     let mut out_scalar = std::vec![0u8; w * 4];
     let mut out_avx = std::vec![0u8; w * 4];
-    scalar::xyz12::xyz12_to_rgba_row::<false>(&xyz, &mut out_scalar, w, DcpTargetGamut::Rec2020);
+    scalar::xyz12::xyz12_to_rgba_row::<false>(&xyz, &mut out_scalar, w, KernelGamut::Rec2020);
     unsafe {
-      xyz12_to_rgba_row::<false>(&xyz, &mut out_avx, w, DcpTargetGamut::Rec2020);
+      xyz12_to_rgba_row::<false>(&xyz, &mut out_avx, w, KernelGamut::Rec2020);
     }
     assert_eq!(out_scalar, out_avx, "AVX2 xyz12_to_rgba diverges (w={w})");
   }
@@ -151,9 +151,9 @@ fn avx2_xyz12_to_rgb_in_register_store_parity() {
   }
   for &w in &[16usize, 32] {
     for gamut in [
-      DcpTargetGamut::DciP3,
-      DcpTargetGamut::Rec709,
-      DcpTargetGamut::Rec2020,
+      KernelGamut::DciP3,
+      KernelGamut::Rec709,
+      KernelGamut::Rec2020,
     ] {
       let xyz = xyz12_plane(w, 0x5101_5101);
       let mut out_scalar = std::vec![0u8; w * 3];
@@ -178,9 +178,9 @@ fn avx2_xyz12_to_rgba_in_register_store_parity() {
   }
   for &w in &[16usize, 32] {
     for gamut in [
-      DcpTargetGamut::DciP3,
-      DcpTargetGamut::Rec709,
-      DcpTargetGamut::Rec2020,
+      KernelGamut::DciP3,
+      KernelGamut::Rec709,
+      KernelGamut::Rec2020,
     ] {
       let xyz = xyz12_plane(w, 0x5202_5202);
       let mut out_scalar = std::vec![0u8; w * 4];
@@ -209,9 +209,9 @@ fn avx2_xyz12_to_rgb_u16_matches_scalar() {
     let xyz = xyz12_plane(w, 0xFEED_FACE);
     let mut out_scalar = std::vec![0u16; w * 3];
     let mut out_avx = std::vec![0u16; w * 3];
-    scalar::xyz12::xyz12_to_rgb_u16_row::<false>(&xyz, &mut out_scalar, w, DcpTargetGamut::DciP3);
+    scalar::xyz12::xyz12_to_rgb_u16_row::<false>(&xyz, &mut out_scalar, w, KernelGamut::DciP3);
     unsafe {
-      xyz12_to_rgb_u16_row::<false>(&xyz, &mut out_avx, w, DcpTargetGamut::DciP3);
+      xyz12_to_rgb_u16_row::<false>(&xyz, &mut out_avx, w, KernelGamut::DciP3);
     }
     assert_eq!(
       out_scalar, out_avx,
@@ -230,9 +230,9 @@ fn avx2_xyz12_to_rgba_u16_matches_scalar() {
     let xyz = xyz12_plane(w, 0xCAFE_F00D);
     let mut out_scalar = std::vec![0u16; w * 4];
     let mut out_avx = std::vec![0u16; w * 4];
-    scalar::xyz12::xyz12_to_rgba_u16_row::<false>(&xyz, &mut out_scalar, w, DcpTargetGamut::Rec709);
+    scalar::xyz12::xyz12_to_rgba_u16_row::<false>(&xyz, &mut out_scalar, w, KernelGamut::Rec709);
     unsafe {
-      xyz12_to_rgba_u16_row::<false>(&xyz, &mut out_avx, w, DcpTargetGamut::Rec709);
+      xyz12_to_rgba_u16_row::<false>(&xyz, &mut out_avx, w, KernelGamut::Rec709);
     }
     assert_eq!(
       out_scalar, out_avx,
@@ -253,9 +253,9 @@ fn avx2_xyz12_to_rgb_f32_matches_scalar() {
     let xyz = xyz12_plane(w, 0x600D_C0DE);
     let mut out_scalar = std::vec![0.0_f32; w * 3];
     let mut out_avx = std::vec![0.0_f32; w * 3];
-    scalar::xyz12::xyz12_to_rgb_f32_row::<false>(&xyz, &mut out_scalar, w, DcpTargetGamut::Rec2020);
+    scalar::xyz12::xyz12_to_rgb_f32_row::<false>(&xyz, &mut out_scalar, w, KernelGamut::Rec2020);
     unsafe {
-      xyz12_to_rgb_f32_row::<false>(&xyz, &mut out_avx, w, DcpTargetGamut::Rec2020);
+      xyz12_to_rgb_f32_row::<false>(&xyz, &mut out_avx, w, KernelGamut::Rec2020);
     }
     assert_eq!(
       out_scalar, out_avx,
@@ -298,9 +298,9 @@ fn avx2_xyz12_to_rgb_f16_matches_scalar() {
     let zero_f16 = half::f16::from_f32(0.0);
     let mut out_scalar = std::vec![zero_f16; w * 3];
     let mut out_avx = std::vec![zero_f16; w * 3];
-    scalar::xyz12::xyz12_to_rgb_f16_row::<false>(&xyz, &mut out_scalar, w, DcpTargetGamut::DciP3);
+    scalar::xyz12::xyz12_to_rgb_f16_row::<false>(&xyz, &mut out_scalar, w, KernelGamut::DciP3);
     unsafe {
-      xyz12_to_rgb_f16_row::<false>(&xyz, &mut out_avx, w, DcpTargetGamut::DciP3);
+      xyz12_to_rgb_f16_row::<false>(&xyz, &mut out_avx, w, KernelGamut::DciP3);
     }
     assert_eq!(
       out_scalar, out_avx,
@@ -320,9 +320,9 @@ fn avx2_xyz12_to_rgba_f16_matches_scalar() {
     let zero_f16 = half::f16::from_f32(0.0);
     let mut out_scalar = std::vec![zero_f16; w * 4];
     let mut out_avx = std::vec![zero_f16; w * 4];
-    scalar::xyz12::xyz12_to_rgba_f16_row::<false>(&xyz, &mut out_scalar, w, DcpTargetGamut::Rec709);
+    scalar::xyz12::xyz12_to_rgba_f16_row::<false>(&xyz, &mut out_scalar, w, KernelGamut::Rec709);
     unsafe {
-      xyz12_to_rgba_f16_row::<false>(&xyz, &mut out_avx, w, DcpTargetGamut::Rec709);
+      xyz12_to_rgba_f16_row::<false>(&xyz, &mut out_avx, w, KernelGamut::Rec709);
     }
     assert_eq!(
       out_scalar, out_avx,

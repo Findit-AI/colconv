@@ -92,6 +92,10 @@ impl<R> PixelSink for MixedSinker<'_, Yuva444p, R> {
   type Input<'r> = Yuva444pRow<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     check_dimensions_match(self.width, self.height, width, height)?;
     // New frame: restart the 4-channel u8 RGBA colour stream and the
@@ -554,6 +558,10 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuva444p9<BE>, R> {
   type Input<'r> = Yuva444p9Row<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     check_dimensions_match(self.width, self.height, width, height)?;
     reset_high_bit_yuva_streams(self);
@@ -698,6 +706,10 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuva444p10<BE>, R> {
   type Input<'r> = Yuva444p10Row<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     check_dimensions_match(self.width, self.height, width, height)?;
     reset_high_bit_yuva_streams(self);
@@ -842,6 +854,10 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuva444p12<BE>, R> {
   type Input<'r> = Yuva444p12Row<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     check_dimensions_match(self.width, self.height, width, height)?;
     reset_high_bit_yuva_streams(self);
@@ -986,6 +1002,10 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuva444p14<BE>, R> {
   type Input<'r> = Yuva444p14Row<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     check_dimensions_match(self.width, self.height, width, height)?;
     reset_high_bit_yuva_streams(self);
@@ -1130,6 +1150,10 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuva444p16<BE>, R> {
   type Input<'r> = Yuva444p16Row<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     check_dimensions_match(self.width, self.height, width, height)?;
     reset_high_bit_yuva_streams(self);
@@ -1195,9 +1219,9 @@ fn yuva444p_high_bit_process<
   const BE: bool,
   F: crate::SourceFormat,
   R,
-  RgbRowFn: Fn(&[u16], &[u16], &[u16], &mut [u8], usize, crate::ColorMatrix, bool, bool, bool),
-  RgbU16RowFn: Fn(&[u16], &[u16], &[u16], &mut [u16], usize, crate::ColorMatrix, bool, bool, bool),
-  RgbaRowFn: Fn(&[u16], &[u16], &[u16], &[u16], &mut [u8], usize, crate::ColorMatrix, bool, bool, bool),
+  RgbRowFn: Fn(&[u16], &[u16], &[u16], &mut [u8], usize, crate::KernelMatrix, bool, bool, bool),
+  RgbU16RowFn: Fn(&[u16], &[u16], &[u16], &mut [u16], usize, crate::KernelMatrix, bool, bool, bool),
+  RgbaRowFn: Fn(&[u16], &[u16], &[u16], &[u16], &mut [u8], usize, crate::KernelMatrix, bool, bool, bool),
   // The matching alpha-drop YUV→HSV `_endian` kernel — same Y/U/V inputs
   // as `rgb_dispatch`, three `&mut [u8]` H/S/V outputs.
   HsvRowFn: Fn(
@@ -1208,7 +1232,7 @@ fn yuva444p_high_bit_process<
     &mut [u8],
     &mut [u8],
     usize,
-    crate::ColorMatrix,
+    crate::KernelMatrix,
     bool,
     bool,
     bool,
@@ -1220,7 +1244,7 @@ fn yuva444p_high_bit_process<
   u_row: &[u16],
   v_row: &[u16],
   a_row: &[u16],
-  matrix: crate::ColorMatrix,
+  matrix: crate::KernelMatrix,
   full_range: bool,
   y_slice: RowSlice,
   u_slice: RowSlice,
@@ -1237,7 +1261,7 @@ fn yuva444p_high_bit_process<
     &[u16],
     &mut [u16],
     usize,
-    crate::ColorMatrix,
+    crate::KernelMatrix,
     bool,
     bool,
     bool,
@@ -1504,7 +1528,7 @@ fn yuva444p_high_bit_resample<const BITS: u32, const BE: bool>(
   u_row: &[u16],
   v_row: &[u16],
   a_row: &[u16],
-  matrix: crate::ColorMatrix,
+  matrix: crate::KernelMatrix,
   full_range: bool,
   y_slice: RowSlice,
   u_slice: RowSlice,
@@ -1517,7 +1541,7 @@ fn yuva444p_high_bit_resample<const BITS: u32, const BE: bool>(
     &[u16],
     &mut [u8],
     usize,
-    crate::ColorMatrix,
+    crate::KernelMatrix,
     bool,
     bool,
     bool,
@@ -1529,7 +1553,7 @@ fn yuva444p_high_bit_resample<const BITS: u32, const BE: bool>(
     &[u16],
     &mut [u16],
     usize,
-    crate::ColorMatrix,
+    crate::KernelMatrix,
     bool,
     bool,
     bool,

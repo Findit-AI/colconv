@@ -166,7 +166,7 @@ macro_rules! legacy_resample_tests {
           .unwrap()
           .with_rgb_u16(&mut rgb_u16)
           .unwrap();
-          $walker(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+          $walker(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
         }
 
         let binned = binned_frame_2x2(&words, SRC, OUT, OUT, $layout);
@@ -222,7 +222,7 @@ macro_rules! legacy_resample_tests {
           .unwrap()
           .with_hsv(&mut hh, &mut ss, &mut vv)
           .unwrap();
-          $walker(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+          $walker(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
         }
 
         // Oracle: the direct sink over the native-binned source frame.
@@ -255,7 +255,7 @@ macro_rules! legacy_resample_tests {
             .unwrap()
             .with_hsv(&mut r_h, &mut r_s, &mut r_v)
             .unwrap();
-          $walker(&bsrc, true, ColorMatrix::Bt709, &mut sink).unwrap();
+          $walker(&bsrc, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
         }
 
         assert_eq!(rgb, r_rgb, "rgb");
@@ -282,7 +282,7 @@ macro_rules! legacy_resample_tests {
           let mut sink = MixedSinker::<$marker>::new(SRC, SRC)
             .with_rgb_u16(&mut direct)
             .unwrap();
-          $walker(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+          $walker(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
         }
         let mut via_area = std::vec![0u16; SRC * SRC * 3];
         {
@@ -294,7 +294,7 @@ macro_rules! legacy_resample_tests {
           .unwrap()
           .with_rgb_u16(&mut via_area)
           .unwrap();
-          $walker(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+          $walker(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
         }
         assert_eq!(direct, via_area);
       }
@@ -313,7 +313,7 @@ macro_rules! legacy_resample_tests {
           AreaResampler::to(OUT, OUT),
         )
         .unwrap();
-        $walker(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+        $walker(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
         assert!(!sink.rgb_stream_allocated(), "stream allocated for no-op");
         assert_eq!(sink.legacy_rgb_native_scratch_capacity(), 0);
         assert_eq!(sink.legacy_rgb_packed_scratch_capacity(), 0);
@@ -338,7 +338,7 @@ macro_rules! legacy_resample_tests {
         .unwrap()
         .with_rgb_u16(&mut rgb_u16)
         .unwrap();
-        $walker(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+        $walker(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
         assert_eq!(
           sink.rgb_scratch_capacity(),
           0,
@@ -357,7 +357,7 @@ macro_rules! legacy_resample_tests {
         .unwrap()
         .with_luma(&mut luma)
         .unwrap();
-        $walker(&src, true, ColorMatrix::Bt709, &mut sink2).unwrap();
+        $walker(&src, true, sink2.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
         assert!(
           sink2.rgb_scratch_capacity() >= 3 * OUT,
           "luma sink did not size the u8 RGB stage"
@@ -385,8 +385,8 @@ macro_rules! legacy_resample_tests {
           .unwrap()
           .with_rgb_u16(&mut reused)
           .unwrap();
-          $walker(&fa, true, ColorMatrix::Bt709, &mut sink).unwrap();
-          $walker(&fb, true, ColorMatrix::Bt709, &mut sink).unwrap();
+          $walker(&fa, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
+          $walker(&fb, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
         }
         let mut fresh = std::vec![0u16; OUT * OUT * 3];
         {
@@ -398,7 +398,7 @@ macro_rules! legacy_resample_tests {
           .unwrap()
           .with_rgb_u16(&mut fresh)
           .unwrap();
-          $walker(&fb, true, ColorMatrix::Bt709, &mut sink).unwrap();
+          $walker(&fb, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
         }
         assert_eq!(reused, fresh, "second frame must match a fresh sink");
       }
@@ -422,7 +422,7 @@ macro_rules! legacy_resample_tests {
         .unwrap();
         sink.begin_frame(SRC as u32, SRC as u32).unwrap();
         let err = sink
-          .process($row_ty::new(row3, 3, ColorMatrix::Bt709, true))
+          .process($row_ty::for_tests(row3, 3, KernelMatrix::Bt709, true))
           .unwrap_err();
         assert!(
           matches!(
@@ -463,14 +463,14 @@ macro_rules! legacy_resample_tests {
           .unwrap();
           sink.begin_frame(SRC as u32, SRC as u32).unwrap();
           sink
-            .process($row_ty::new(&wire[..SRC * 2], 0, ColorMatrix::Bt709, true))
+            .process($row_ty::for_tests(&wire[..SRC * 2], 0, KernelMatrix::Bt709, true))
             .unwrap();
           sink.set_luma(&mut luma).unwrap();
           let err = sink
-            .process($row_ty::new(
+            .process($row_ty::for_tests(
               &wire[SRC * 2..SRC * 4],
               1,
-              ColorMatrix::Bt709,
+              KernelMatrix::Bt709,
               true,
             ))
             .unwrap_err();
@@ -572,7 +572,7 @@ fn rgb565_non_integer_ratio_all_outputs_match_direct_of_binned() {
         .unwrap()
         .with_hsv(&mut hh, &mut ss, &mut vv)
         .unwrap();
-    rgb565_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    rgb565_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
 
   // The binned source frame == the native channels the fused `rgb_u16`
@@ -606,7 +606,7 @@ fn rgb565_non_integer_ratio_all_outputs_match_direct_of_binned() {
       .unwrap()
       .with_hsv(&mut r_h, &mut r_s, &mut r_v)
       .unwrap();
-    rgb565_to(&bsrc, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    rgb565_to(&bsrc, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   assert_eq!(rgb, r_rgb, "rgb");
   assert_eq!(rgba, r_rgba, "rgba");
@@ -640,7 +640,7 @@ fn counterexample_rgb565_r_low_bit_survives() {
         .unwrap()
         .with_rgb_u16(&mut rgb_u16)
         .unwrap();
-    rgb565_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    rgb565_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   assert_eq!(
     rgb_u16[0], 1,
@@ -657,7 +657,7 @@ fn counterexample_rgb565_r_low_bit_survives() {
         .unwrap()
         .with_rgb(&mut rgb)
         .unwrap();
-    rgb565_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    rgb565_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   // `rgb565_to_rgb_row` expands R5=1 via `(1 << 3) | (1 >> 2)` = 8;
   // binning in expanded space would have produced the mean 4 instead.
@@ -682,7 +682,7 @@ fn counterexample_rgb444_r_low_bit_survives() {
         .unwrap()
         .with_rgb_u16(&mut rgb_u16)
         .unwrap();
-    rgb444_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    rgb444_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   assert_eq!(rgb_u16[0], 1, "native-depth 4-bit area mean must survive");
 }
@@ -849,7 +849,7 @@ macro_rules! lowbit_resample_tests {
               .unwrap()
               .with_rgb_u16(&mut rgb_u16)
               .unwrap();
-          $walker(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+          $walker(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
         }
 
         let binned = binned_lowbit_2x2(layout, &plane, SRC, OUT, OUT);
@@ -907,7 +907,7 @@ macro_rules! lowbit_resample_tests {
             .with_luma(&mut r_l).unwrap()
             .with_luma_u16(&mut r_lu).unwrap()
             .with_hsv(&mut r_h, &mut r_s, &mut r_v).unwrap();
-          $walker(&binned_src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+          $walker(&binned_src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
         }
 
         // Actual: fused area-resample of the full-res frame.
@@ -926,7 +926,7 @@ macro_rules! lowbit_resample_tests {
               .with_luma(&mut a_l).unwrap()
               .with_luma_u16(&mut a_lu).unwrap()
               .with_hsv(&mut a_h, &mut a_s, &mut a_v).unwrap();
-          $walker(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+          $walker(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
         }
 
         assert_eq!(a_rgb, r_rgb, "rgb");
@@ -957,11 +957,11 @@ macro_rules! lowbit_resample_tests {
               .unwrap()
               .with_rgb_u16(&mut via_plan)
               .unwrap();
-          $walker(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+          $walker(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
         }
         {
           let mut sink = MixedSinker::<$marker>::new(SRC, SRC).with_rgb_u16(&mut via_new).unwrap();
-          $walker(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+          $walker(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
         }
         assert_eq!(via_plan, via_new, "identity plan diverges from new()");
       }
@@ -976,7 +976,7 @@ macro_rules! lowbit_resample_tests {
         let src = $frame::try_new(&plane, SRC as u32, SRC as u32, stride).unwrap();
         let mut sink =
           MixedSinker::<$marker, AreaResampler>::with_resampler(SRC, SRC, AreaResampler::to(OUT, OUT)).unwrap();
-        $walker(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+        $walker(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
       }
     }
   };
@@ -1030,7 +1030,7 @@ fn rgb565_first_row_native_scratch_oom_leaves_stream_and_freeze_uncommitted_for_
     // grow — before the field insert + freeze — refuses, surfacing AllocationFailed
     // with BOTH the stream field `None` and the freeze uncommitted.
     crate::sinker::mixed::arm_source_rgb_scratch_failure();
-    let err = rgb565_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap_err();
+    let err = rgb565_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap_err();
     assert!(
       matches!(
         err,
@@ -1054,7 +1054,7 @@ fn rgb565_first_row_native_scratch_oom_leaves_stream_and_freeze_uncommitted_for_
     );
     // Recoverability: attaching rgb (a CHANGED output set) and re-walking is ACCEPTED.
     sink.set_rgb(&mut rgb).unwrap();
-    rgb565_to(&src, true, ColorMatrix::Bt709, &mut sink)
+    rgb565_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709))
       .expect("frame replay after a first-row native scratch OOM must succeed");
   }
   assert!(
@@ -1085,7 +1085,7 @@ fn rgb565_first_row_emit_stage_scratch_oom_leaves_stream_and_freeze_uncommitted_
         .with_luma(&mut luma)
         .unwrap();
     crate::sinker::mixed::arm_source_rgb_scratch_failure();
-    let err = rgb565_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap_err();
+    let err = rgb565_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap_err();
     assert!(
       matches!(
         err,
@@ -1102,7 +1102,7 @@ fn rgb565_first_row_emit_stage_scratch_oom_leaves_stream_and_freeze_uncommitted_
       "a first-row scratch OOM must leave resample_outputs uncommitted (no partial commit)"
     );
     sink.set_rgb(&mut rgb).unwrap();
-    rgb565_to(&src, true, ColorMatrix::Bt709, &mut sink)
+    rgb565_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709))
       .expect("frame replay after a first-row emit-stage scratch OOM must succeed");
   }
   assert!(
@@ -1131,7 +1131,7 @@ fn rgb8_first_row_native_scratch_oom_leaves_stream_and_freeze_uncommitted_for_re
         .with_rgb_u16(&mut rgb_u16)
         .unwrap();
     crate::sinker::mixed::arm_source_rgb_scratch_failure();
-    let err = rgb8_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap_err();
+    let err = rgb8_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap_err();
     assert!(
       matches!(
         err,
@@ -1148,7 +1148,7 @@ fn rgb8_first_row_native_scratch_oom_leaves_stream_and_freeze_uncommitted_for_re
       "a first-row scratch OOM must leave resample_outputs uncommitted (no partial commit)"
     );
     sink.set_rgb(&mut rgb).unwrap();
-    rgb8_to(&src, true, ColorMatrix::Bt709, &mut sink)
+    rgb8_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709))
       .expect("frame replay after a first-row native scratch OOM must succeed");
   }
   assert!(
@@ -1177,7 +1177,7 @@ fn rgb8_first_row_emit_stage_scratch_oom_leaves_stream_and_freeze_uncommitted_fo
         .with_luma(&mut luma)
         .unwrap();
     crate::sinker::mixed::arm_source_rgb_scratch_failure();
-    let err = rgb8_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap_err();
+    let err = rgb8_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap_err();
     assert!(
       matches!(
         err,
@@ -1194,7 +1194,7 @@ fn rgb8_first_row_emit_stage_scratch_oom_leaves_stream_and_freeze_uncommitted_fo
       "a first-row scratch OOM must leave resample_outputs uncommitted (no partial commit)"
     );
     sink.set_rgb(&mut rgb).unwrap();
-    rgb8_to(&src, true, ColorMatrix::Bt709, &mut sink)
+    rgb8_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709))
       .expect("frame replay after a first-row emit-stage scratch OOM must succeed");
   }
   assert!(

@@ -182,7 +182,7 @@ fn yuva444p_high_bit_top_identity_color_row<const BITS: u32, const BE: bool>(
   one_plane_end: usize,
   w: usize,
   h: usize,
-  matrix: crate::ColorMatrix,
+  matrix: crate::KernelMatrix,
   full_range: bool,
   use_simd: bool,
   rgb_444_dispatch: fn(
@@ -191,7 +191,7 @@ fn yuva444p_high_bit_top_identity_color_row<const BITS: u32, const BE: bool>(
     &[u16],
     &mut [u8],
     usize,
-    crate::ColorMatrix,
+    crate::KernelMatrix,
     bool,
     bool,
     bool,
@@ -202,7 +202,7 @@ fn yuva444p_high_bit_top_identity_color_row<const BITS: u32, const BE: bool>(
     &[u16],
     &mut [u16],
     usize,
-    crate::ColorMatrix,
+    crate::KernelMatrix,
     bool,
     bool,
     bool,
@@ -214,7 +214,7 @@ fn yuva444p_high_bit_top_identity_color_row<const BITS: u32, const BE: bool>(
     &[u16],
     &mut [u8],
     usize,
-    crate::ColorMatrix,
+    crate::KernelMatrix,
     bool,
     bool,
     bool,
@@ -227,7 +227,7 @@ fn yuva444p_high_bit_top_identity_color_row<const BITS: u32, const BE: bool>(
     &mut [u8],
     &mut [u8],
     usize,
-    crate::ColorMatrix,
+    crate::KernelMatrix,
     bool,
     bool,
     bool,
@@ -239,7 +239,7 @@ fn yuva444p_high_bit_top_identity_color_row<const BITS: u32, const BE: bool>(
     &[u16],
     &mut [u16],
     usize,
-    crate::ColorMatrix,
+    crate::KernelMatrix,
     bool,
     bool,
     bool,
@@ -385,7 +385,7 @@ fn yuva444_top_identity_color_row(
   one_plane_end: usize,
   w: usize,
   h: usize,
-  matrix: crate::ColorMatrix,
+  matrix: crate::KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) -> Result<(), MixedSinkerError> {
@@ -508,6 +508,10 @@ impl<R> PixelSink for MixedSinker<'_, Yuva420p, R> {
   type Input<'r> = Yuva420pRow<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     if self.width & 1 != 0 {
       return Err(MixedSinkerError::WidthAlignment(WidthAlignment::odd(
@@ -581,7 +585,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuva420p, R> {
     // siting-independent (it is never subsampled), so it passes through
     // unchanged on every path. `Copy`, so read it out before the field
     // split-borrow below.
-    let chroma_location = self.chroma_location;
+    let chroma_location = self.chroma_location.clone();
 
     if w & 1 != 0 {
       return Err(MixedSinkerError::WidthAlignment(WidthAlignment::odd(w)));
@@ -712,8 +716,8 @@ impl<R> PixelSink for MixedSinker<'_, Yuva420p, R> {
       // `area_chroma_420`'s `top_v`, and the RGB-domain tiers hold the odd row a
       // FORWARD one-row delay (see below). `Center` keeps `v_phase = 0` (co-sited
       // vertical, byte-identical to S3c). α is untouched on every path.
-      let center_sited = chroma_420_center_sited_h(chroma_location);
-      let bottom_v = chroma_420_bottom_sited_v(chroma_location);
+      let center_sited = chroma_420_center_sited_h(&chroma_location);
+      let bottom_v = chroma_420_bottom_sited_v(&chroma_location);
       // RFC #238 Top (`v = 0`, FORWARD fold): `Top` shares `Center`'s centered
       // horizontal phase, `TopLeft` the co-sited one; both fold the DISJOINT
       // forward vertical triangle. The native binning tier folds it into
@@ -721,7 +725,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuva420p, R> {
       // window absorbs the forward reach); the RGB-domain reconstruction tiers
       // (row-stage / filter) reconstruct each row's chroma through a FORWARD
       // one-row delay (the mirror of `Bottom`'s backward `chroma_prev` lookback).
-      let top_v = chroma_420_top_sited_v(chroma_location);
+      let top_v = chroma_420_top_sited_v(&chroma_location);
       let chroma_h_phase = if center_sited {
         YUV422P_CENTERED_H_PHASE
       } else {
@@ -1677,15 +1681,15 @@ impl<R> PixelSink for MixedSinker<'_, Yuva420p, R> {
     // the default / co-sited path keeps the byte-identical fused 4:2:0 decode.
     // RFC #238 S4-D: `Bottom` (`v = 1`) additionally box-blends the even output
     // row's chroma with the previous chroma row via the `chroma_prev` lookback.
-    let center_sited = chroma_420_center_sited_h(chroma_location);
-    let bottom_v = chroma_420_bottom_sited_v(chroma_location);
+    let center_sited = chroma_420_center_sited_h(&chroma_location);
+    let bottom_v = chroma_420_bottom_sited_v(&chroma_location);
     // RFC #238 Top (`v = 0`, FORWARD fold): `Top` / `TopLeft` box-blend the ODD
     // output row's chroma with the NEXT chroma row — unavailable to a row-at-a-time
     // walk when the odd row arrives — so the identity colour decode holds the odd
     // row's whole output (its Y, its full-resolution alpha, and its decode params)
     // in a FORWARD one-row delay and emits it once the following even row supplies
     // the next chroma. Luma is siting-independent and written in order regardless.
-    let top_v = chroma_420_top_sited_v(chroma_location);
+    let top_v = chroma_420_top_sited_v(&chroma_location);
 
     // Per-frame chroma-siting freeze (RFC #238, mirroring the resample-path guard
     // above): the first output-bearing row pins the effective 4:2:0 phase — the
@@ -2219,6 +2223,10 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuva420p9<BE>, R> {
   type Input<'r> = Yuva420p9Row<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     if self.width & 1 != 0 {
       return Err(MixedSinkerError::WidthAlignment(WidthAlignment::odd(
@@ -2372,6 +2380,10 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuva420p10<BE>, R> {
   type Input<'r> = Yuva420p10Row<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     if self.width & 1 != 0 {
       return Err(MixedSinkerError::WidthAlignment(WidthAlignment::odd(
@@ -2525,6 +2537,10 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuva420p12<BE>, R> {
   type Input<'r> = Yuva420p12Row<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     if self.width & 1 != 0 {
       return Err(MixedSinkerError::WidthAlignment(WidthAlignment::odd(
@@ -2678,6 +2694,10 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuva420p16<BE>, R> {
   type Input<'r> = Yuva420p16Row<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     if self.width & 1 != 0 {
       return Err(MixedSinkerError::WidthAlignment(WidthAlignment::odd(
@@ -2762,7 +2782,7 @@ fn yuva420p_high_bit_process<const BITS: u32, const BE: bool, F: crate::SourceFo
   u_half_row: &[u16],
   v_half_row: &[u16],
   a_row: &[u16],
-  matrix: crate::ColorMatrix,
+  matrix: crate::KernelMatrix,
   full_range: bool,
   y_slice: RowSlice,
   u_slice: RowSlice,
@@ -2772,14 +2792,14 @@ fn yuva420p_high_bit_process<const BITS: u32, const BE: bool, F: crate::SourceFo
   // `big_endian` flag the helper passes from `BE`. Function POINTERS (not
   // generic `Fn` bounds) so the 4:2:0 dispatcher and its 4:4:4 twin below —
   // distinct fn items of the SAME signature — coerce to one parameter type.
-  rgb_dispatch: fn(&[u16], &[u16], &[u16], &mut [u8], usize, crate::ColorMatrix, bool, bool, bool),
+  rgb_dispatch: fn(&[u16], &[u16], &[u16], &mut [u8], usize, crate::KernelMatrix, bool, bool, bool),
   rgb_u16_dispatch: fn(
     &[u16],
     &[u16],
     &[u16],
     &mut [u16],
     usize,
-    crate::ColorMatrix,
+    crate::KernelMatrix,
     bool,
     bool,
     bool,
@@ -2791,7 +2811,7 @@ fn yuva420p_high_bit_process<const BITS: u32, const BE: bool, F: crate::SourceFo
     &[u16],
     &mut [u8],
     usize,
-    crate::ColorMatrix,
+    crate::KernelMatrix,
     bool,
     bool,
     bool,
@@ -2806,7 +2826,7 @@ fn yuva420p_high_bit_process<const BITS: u32, const BE: bool, F: crate::SourceFo
     &mut [u8],
     &mut [u8],
     usize,
-    crate::ColorMatrix,
+    crate::KernelMatrix,
     bool,
     bool,
     bool,
@@ -2818,7 +2838,7 @@ fn yuva420p_high_bit_process<const BITS: u32, const BE: bool, F: crate::SourceFo
     &[u16],
     &mut [u16],
     usize,
-    crate::ColorMatrix,
+    crate::KernelMatrix,
     bool,
     bool,
     bool,
@@ -2837,7 +2857,7 @@ fn yuva420p_high_bit_process<const BITS: u32, const BE: bool, F: crate::SourceFo
     &[u16],
     &mut [u8],
     usize,
-    crate::ColorMatrix,
+    crate::KernelMatrix,
     bool,
     bool,
     bool,
@@ -2848,7 +2868,7 @@ fn yuva420p_high_bit_process<const BITS: u32, const BE: bool, F: crate::SourceFo
     &[u16],
     &mut [u16],
     usize,
-    crate::ColorMatrix,
+    crate::KernelMatrix,
     bool,
     bool,
     bool,
@@ -2860,7 +2880,7 @@ fn yuva420p_high_bit_process<const BITS: u32, const BE: bool, F: crate::SourceFo
     &[u16],
     &mut [u8],
     usize,
-    crate::ColorMatrix,
+    crate::KernelMatrix,
     bool,
     bool,
     bool,
@@ -2873,7 +2893,7 @@ fn yuva420p_high_bit_process<const BITS: u32, const BE: bool, F: crate::SourceFo
     &mut [u8],
     &mut [u8],
     usize,
-    crate::ColorMatrix,
+    crate::KernelMatrix,
     bool,
     bool,
     bool,
@@ -2885,7 +2905,7 @@ fn yuva420p_high_bit_process<const BITS: u32, const BE: bool, F: crate::SourceFo
     &[u16],
     &mut [u16],
     usize,
-    crate::ColorMatrix,
+    crate::KernelMatrix,
     bool,
     bool,
     bool,
@@ -2895,7 +2915,7 @@ fn yuva420p_high_bit_process<const BITS: u32, const BE: bool, F: crate::SourceFo
   let h = sinker.height;
   let use_simd = sinker.simd;
   // Chroma siting (#302): `Copy`, read before the field split-borrow below.
-  let chroma_location = sinker.chroma_location;
+  let chroma_location = sinker.chroma_location.clone();
 
   if w & 1 != 0 {
     return Err(MixedSinkerError::WidthAlignment(WidthAlignment::odd(w)));
@@ -2990,18 +3010,18 @@ fn yuva420p_high_bit_process<const BITS: u32, const BE: bool, F: crate::SourceFo
   // Chroma siting (#302): the centered horizontal sitings reconstruct chroma
   // at the phase-0.5 position then feed the 4:4:4 (+ source-alpha) kernels; the
   // default / co-sited path keeps the byte-identical fused 4:2:0 decode.
-  let center_sited = chroma_420_center_sited_h(chroma_location);
+  let center_sited = chroma_420_center_sited_h(&chroma_location);
   // RFC #238 S6f: `Bottom` (a strict sub-case of `center_sited` — h = 0.5, v = 1)
   // additionally box-blends the even output row's chroma with the previous chroma
   // row via the `chroma_prev_u16` lookback maintained below; `Center` keeps the
   // vertical-replicate (co-sited) decode, byte-identical to S6c.
-  let bottom_v = chroma_420_bottom_sited_v(chroma_location);
+  let bottom_v = chroma_420_bottom_sited_v(&chroma_location);
   // RFC #238 Top (`v = 0`, FORWARD fold): `Top` / `TopLeft` hold the ODD output
   // row's whole decode (its Y, its full-resolution alpha, and its decode params) in
   // a forward one-row delay and emit it at the following even row, forward-blended
   // through the `Bottom`-EVEN kernels at the even index; luma is siting-independent
   // and written in order regardless.
-  let top_v = chroma_420_top_sited_v(chroma_location);
+  let top_v = chroma_420_top_sited_v(&chroma_location);
 
   // Per-frame chroma-siting freeze (RFC #238, mirroring the resample-path guard):
   // the first output-bearing row pins the effective 4:2:0 phase — the horizontal
@@ -3555,7 +3575,7 @@ fn yuva420p_high_bit_resample<const BITS: u32, const BE: bool>(
   u_half_row: &[u16],
   v_half_row: &[u16],
   a_row: &[u16],
-  matrix: crate::ColorMatrix,
+  matrix: crate::KernelMatrix,
   full_range: bool,
   y_slice: RowSlice,
   u_slice: RowSlice,
@@ -3568,7 +3588,7 @@ fn yuva420p_high_bit_resample<const BITS: u32, const BE: bool>(
     &[u16],
     &mut [u8],
     usize,
-    crate::ColorMatrix,
+    crate::KernelMatrix,
     bool,
     bool,
     bool,
@@ -3580,7 +3600,7 @@ fn yuva420p_high_bit_resample<const BITS: u32, const BE: bool>(
     &[u16],
     &mut [u16],
     usize,
-    crate::ColorMatrix,
+    crate::KernelMatrix,
     bool,
     bool,
     bool,
@@ -3598,7 +3618,7 @@ fn yuva420p_high_bit_resample<const BITS: u32, const BE: bool>(
     &[u16],
     &mut [u8],
     usize,
-    crate::ColorMatrix,
+    crate::KernelMatrix,
     bool,
     bool,
     bool,
@@ -3610,7 +3630,7 @@ fn yuva420p_high_bit_resample<const BITS: u32, const BE: bool>(
     &[u16],
     &mut [u16],
     usize,
-    crate::ColorMatrix,
+    crate::KernelMatrix,
     bool,
     bool,
     bool,
@@ -3620,7 +3640,7 @@ fn yuva420p_high_bit_resample<const BITS: u32, const BE: bool>(
   let h = sinker.height;
   let use_simd = sinker.simd;
   // Chroma siting (#302): `Copy`, read before the field split-borrow below.
-  let chroma_location = sinker.chroma_location;
+  let chroma_location = sinker.chroma_location.clone();
 
   if w & 1 != 0 {
     return Err(MixedSinkerError::WidthAlignment(WidthAlignment::odd(w)));
@@ -3716,9 +3736,9 @@ fn yuva420p_high_bit_resample<const BITS: u32, const BE: bool>(
   // one-row output delay: the odd row is HELD (its Y + full-resolution alpha) and
   // the following even row feeds TWO source rows through the SAME `Bottom`-EVEN
   // kernels — the RGB-domain reconstruct-then-bin, again with no native plan.
-  let center_sited = chroma_420_center_sited_h(chroma_location);
-  let bottom_v = chroma_420_bottom_sited_v(chroma_location);
-  let top_v = chroma_420_top_sited_v(chroma_location);
+  let center_sited = chroma_420_center_sited_h(&chroma_location);
+  let bottom_v = chroma_420_bottom_sited_v(&chroma_location);
+  let top_v = chroma_420_top_sited_v(&chroma_location);
   // A colour output drives the centered chroma reconstruction (u8 OR native
   // u16); a luma-only row bins the native Y (siting-independent) and never
   // reconstructs chroma, so it stays on the co-sited fused arm.

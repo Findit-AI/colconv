@@ -19,7 +19,10 @@ use pixon::{
 
 fn decode(frame: &Yuv444pFrame<'_>, spec: ColorSpec) -> Result<Vec<u8>, pixon::Error> {
   let mut rgb = vec![0u8; 2 * 2 * 3];
-  Convert::from(frame).spec(spec).rgb(&mut rgb).run()?;
+  Convert::from(frame)
+    .spec(spec.clone())
+    .rgb(&mut rgb)
+    .run()?;
   Ok(rgb)
 }
 
@@ -138,7 +141,10 @@ fn main() -> Result<(), pixon::Error> {
     ),
   );
   let mut rgb = vec![0u8; 4 * 2 * 3];
-  Convert::from(&dcp).spec(st428).rgb(&mut rgb).run()?;
+  Convert::from(&dcp)
+    .spec(st428.clone())
+    .rgb(&mut rgb)
+    .run()?;
   println!(
     "ST 428-1, FfmpegTabulated (default) -> rgb({:3}, {:3}, {:3})",
     rgb[0], rgb[1], rgb[2]

@@ -54,7 +54,7 @@ fn yuva422p_rgba_u8_with_source_alpha_passes_through() {
   let mut sink = MixedSinker::<Yuva422p>::new(16, 8)
     .with_rgba(&mut rgba)
     .unwrap();
-  yuva422p_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuva422p_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
 
   for px in rgba.chunks(4) {
     assert!(px[0].abs_diff(128) <= 1, "got {px:?}");
@@ -76,13 +76,13 @@ fn yuva422p_with_rgb_alpha_drop_matches_yuv422p() {
   let mut s_yuv = MixedSinker::<Yuv422p>::new(16, 8)
     .with_rgb(&mut rgb_yuv)
     .unwrap();
-  yuv422p_to(&yuv, true, ColorMatrix::Bt709, &mut s_yuv).unwrap();
+  yuv422p_to(&yuv, true, s_yuv.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   let mut rgb_yuva = std::vec![0u8; 16 * 8 * 3];
   let mut s_yuva = MixedSinker::<Yuva422p>::new(16, 8)
     .with_rgb(&mut rgb_yuva)
     .unwrap();
-  yuva422p_to(&yuva, true, ColorMatrix::Bt709, &mut s_yuva).unwrap();
+  yuva422p_to(&yuva, true, s_yuva.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   assert_eq!(rgb_yuv, rgb_yuva);
 }
@@ -101,7 +101,7 @@ fn yuva422p9_rgba_u8_with_source_alpha_passes_through() {
   let mut sink = MixedSinker::<Yuva422p9>::new(16, 8)
     .with_rgba(&mut rgba)
     .unwrap();
-  yuva422p9_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuva422p9_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
 
   for px in rgba.chunks(4) {
     assert!(px[0].abs_diff(128) <= 1, "got {px:?}");
@@ -122,7 +122,7 @@ fn yuva422p9_rgba_u16_native_depth() {
   let mut sink = MixedSinker::<Yuva422p9>::new(16, 8)
     .with_rgba_u16(&mut rgba)
     .unwrap();
-  yuva422p9_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuva422p9_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
 
   for px in rgba.chunks(4) {
     assert_eq!(px[3], 128, "alpha at native depth");
@@ -142,7 +142,7 @@ fn yuva422p10_rgba_u8_with_source_alpha_passes_through() {
   let mut sink = MixedSinker::<Yuva422p10>::new(16, 8)
     .with_rgba(&mut rgba)
     .unwrap();
-  yuva422p10_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuva422p10_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
 
   for px in rgba.chunks(4) {
     assert_eq!(px[3], 128, "alpha = 512 >> (10-8) = 128");
@@ -162,7 +162,7 @@ fn yuva422p10_rgba_u16_native_depth() {
   let mut sink = MixedSinker::<Yuva422p10>::new(16, 8)
     .with_rgba_u16(&mut rgba)
     .unwrap();
-  yuva422p10_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuva422p10_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
 
   for px in rgba.chunks(4) {
     assert_eq!(px[3], 512, "alpha at native depth");
@@ -183,7 +183,7 @@ fn yuva422p16_rgba_u8_with_source_alpha_passes_through() {
   let mut sink = MixedSinker::<Yuva422p16>::new(16, 8)
     .with_rgba(&mut rgba)
     .unwrap();
-  yuva422p16_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuva422p16_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
 
   for px in rgba.chunks(4) {
     assert_eq!(px[3], 128, "alpha = 32768 >> 8 = 128");
@@ -203,7 +203,7 @@ fn yuva422p16_rgba_u16_native_depth_full_range() {
   let mut sink = MixedSinker::<Yuva422p16>::new(16, 8)
     .with_rgba_u16(&mut rgba)
     .unwrap();
-  yuva422p16_to(&src, true, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuva422p16_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
 
   for px in rgba.chunks(4) {
     assert_eq!(px[3], 32768, "alpha at native depth");
@@ -249,10 +249,10 @@ fn yuva422p12_rgba_u8_simd_matches_scalar_with_random_yuva() {
   .unwrap();
 
   for &matrix in &[
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::YCgCo,
   ] {
     for &full_range in &[true, false] {
       let mut rgba_simd = std::vec![0u8; w * h * 4];
@@ -261,13 +261,13 @@ fn yuva422p12_rgba_u8_simd_matches_scalar_with_random_yuva() {
       let mut s_simd = MixedSinker::<Yuva422p12>::new(w, h)
         .with_rgba(&mut rgba_simd)
         .unwrap();
-      yuva422p12_to(&src, full_range, matrix, &mut s_simd).unwrap();
+      yuva422p12_to(&src, full_range, s_simd.set_kernel_matrix(matrix)).unwrap();
 
       let mut s_scalar = MixedSinker::<Yuva422p12>::new(w, h)
         .with_rgba(&mut rgba_scalar)
         .unwrap();
       s_scalar.set_simd(false);
-      yuva422p12_to(&src, full_range, matrix, &mut s_scalar).unwrap();
+      yuva422p12_to(&src, full_range, s_scalar.set_kernel_matrix(matrix)).unwrap();
 
       if rgba_simd != rgba_scalar {
         let mismatch = rgba_simd
@@ -317,10 +317,10 @@ fn yuva422p12_rgba_u16_simd_matches_scalar_with_random_yuva() {
   .unwrap();
 
   for &matrix in &[
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::YCgCo,
   ] {
     for &full_range in &[true, false] {
       let mut rgba_simd = std::vec![0u16; w * h * 4];
@@ -329,13 +329,13 @@ fn yuva422p12_rgba_u16_simd_matches_scalar_with_random_yuva() {
       let mut s_simd = MixedSinker::<Yuva422p12>::new(w, h)
         .with_rgba_u16(&mut rgba_simd)
         .unwrap();
-      yuva422p12_to(&src, full_range, matrix, &mut s_simd).unwrap();
+      yuva422p12_to(&src, full_range, s_simd.set_kernel_matrix(matrix)).unwrap();
 
       let mut s_scalar = MixedSinker::<Yuva422p12>::new(w, h)
         .with_rgba_u16(&mut rgba_scalar)
         .unwrap();
       s_scalar.set_simd(false);
-      yuva422p12_to(&src, full_range, matrix, &mut s_scalar).unwrap();
+      yuva422p12_to(&src, full_range, s_scalar.set_kernel_matrix(matrix)).unwrap();
 
       if rgba_simd != rgba_scalar {
         let mismatch = rgba_simd
@@ -397,12 +397,12 @@ fn yuva422p_strategy_a_plus_matches_independent_kernel() {
 
   for full_range in [true, false] {
     for matrix in [
-      ColorMatrix::Bt601,
-      ColorMatrix::Bt709,
-      ColorMatrix::Bt2020Ncl,
-      ColorMatrix::Smpte240m,
-      ColorMatrix::Fcc,
-      ColorMatrix::YCgCo,
+      KernelMatrix::Bt601,
+      KernelMatrix::Bt709,
+      KernelMatrix::Bt2020Ncl,
+      KernelMatrix::Smpte240m,
+      KernelMatrix::Fcc,
+      KernelMatrix::YCgCo,
     ] {
       // Sinker combo path (A+).
       let mut sinker_rgb = std::vec![0u8; width * height * 3];
@@ -413,7 +413,7 @@ fn yuva422p_strategy_a_plus_matches_independent_kernel() {
           .unwrap()
           .with_rgba(&mut sinker_rgba)
           .unwrap();
-        yuva422p_to(&frame, full_range, matrix, &mut sink).unwrap();
+        yuva422p_to(&frame, full_range, sink.set_kernel_matrix(matrix)).unwrap();
       }
 
       // Reference: scalar inline-α kernel per row.
@@ -492,12 +492,12 @@ fn yuva422p9_strategy_a_plus_matches_independent_kernel() {
   .unwrap();
   for full_range in [true, false] {
     for matrix in [
-      ColorMatrix::Bt601,
-      ColorMatrix::Bt709,
-      ColorMatrix::Bt2020Ncl,
-      ColorMatrix::Smpte240m,
-      ColorMatrix::Fcc,
-      ColorMatrix::YCgCo,
+      KernelMatrix::Bt601,
+      KernelMatrix::Bt709,
+      KernelMatrix::Bt2020Ncl,
+      KernelMatrix::Smpte240m,
+      KernelMatrix::Fcc,
+      KernelMatrix::YCgCo,
     ] {
       let mut sinker_rgb = std::vec![0u8; width * height * 3];
       let mut sinker_rgba = std::vec![0u8; width * height * 4];
@@ -507,7 +507,7 @@ fn yuva422p9_strategy_a_plus_matches_independent_kernel() {
           .unwrap()
           .with_rgba(&mut sinker_rgba)
           .unwrap();
-        yuva422p9_to(&frame, full_range, matrix, &mut sink).unwrap();
+        yuva422p9_to(&frame, full_range, sink.set_kernel_matrix(matrix)).unwrap();
       }
       let mut inline_rgb = std::vec![0u8; width * height * 3];
       let mut inline_rgba = std::vec![0u8; width * height * 4];
@@ -580,12 +580,12 @@ fn yuva422p9_strategy_a_plus_u16_matches_independent_kernel() {
   .unwrap();
   for full_range in [true, false] {
     for matrix in [
-      ColorMatrix::Bt601,
-      ColorMatrix::Bt709,
-      ColorMatrix::Bt2020Ncl,
-      ColorMatrix::Smpte240m,
-      ColorMatrix::Fcc,
-      ColorMatrix::YCgCo,
+      KernelMatrix::Bt601,
+      KernelMatrix::Bt709,
+      KernelMatrix::Bt2020Ncl,
+      KernelMatrix::Smpte240m,
+      KernelMatrix::Fcc,
+      KernelMatrix::YCgCo,
     ] {
       let mut sinker_rgb = std::vec![0u16; width * height * 3];
       let mut sinker_rgba = std::vec![0u16; width * height * 4];
@@ -595,7 +595,7 @@ fn yuva422p9_strategy_a_plus_u16_matches_independent_kernel() {
           .unwrap()
           .with_rgba_u16(&mut sinker_rgba)
           .unwrap();
-        yuva422p9_to(&frame, full_range, matrix, &mut sink).unwrap();
+        yuva422p9_to(&frame, full_range, sink.set_kernel_matrix(matrix)).unwrap();
       }
       let mut inline_rgb = std::vec![0u16; width * height * 3];
       let mut inline_rgba = std::vec![0u16; width * height * 4];
@@ -668,12 +668,12 @@ fn yuva422p10_strategy_a_plus_matches_independent_kernel() {
   .unwrap();
   for full_range in [true, false] {
     for matrix in [
-      ColorMatrix::Bt601,
-      ColorMatrix::Bt709,
-      ColorMatrix::Bt2020Ncl,
-      ColorMatrix::Smpte240m,
-      ColorMatrix::Fcc,
-      ColorMatrix::YCgCo,
+      KernelMatrix::Bt601,
+      KernelMatrix::Bt709,
+      KernelMatrix::Bt2020Ncl,
+      KernelMatrix::Smpte240m,
+      KernelMatrix::Fcc,
+      KernelMatrix::YCgCo,
     ] {
       let mut sinker_rgb = std::vec![0u8; width * height * 3];
       let mut sinker_rgba = std::vec![0u8; width * height * 4];
@@ -683,7 +683,7 @@ fn yuva422p10_strategy_a_plus_matches_independent_kernel() {
           .unwrap()
           .with_rgba(&mut sinker_rgba)
           .unwrap();
-        yuva422p10_to(&frame, full_range, matrix, &mut sink).unwrap();
+        yuva422p10_to(&frame, full_range, sink.set_kernel_matrix(matrix)).unwrap();
       }
       let mut inline_rgb = std::vec![0u8; width * height * 3];
       let mut inline_rgba = std::vec![0u8; width * height * 4];
@@ -756,12 +756,12 @@ fn yuva422p10_strategy_a_plus_u16_matches_independent_kernel() {
   .unwrap();
   for full_range in [true, false] {
     for matrix in [
-      ColorMatrix::Bt601,
-      ColorMatrix::Bt709,
-      ColorMatrix::Bt2020Ncl,
-      ColorMatrix::Smpte240m,
-      ColorMatrix::Fcc,
-      ColorMatrix::YCgCo,
+      KernelMatrix::Bt601,
+      KernelMatrix::Bt709,
+      KernelMatrix::Bt2020Ncl,
+      KernelMatrix::Smpte240m,
+      KernelMatrix::Fcc,
+      KernelMatrix::YCgCo,
     ] {
       let mut sinker_rgb = std::vec![0u16; width * height * 3];
       let mut sinker_rgba = std::vec![0u16; width * height * 4];
@@ -771,7 +771,7 @@ fn yuva422p10_strategy_a_plus_u16_matches_independent_kernel() {
           .unwrap()
           .with_rgba_u16(&mut sinker_rgba)
           .unwrap();
-        yuva422p10_to(&frame, full_range, matrix, &mut sink).unwrap();
+        yuva422p10_to(&frame, full_range, sink.set_kernel_matrix(matrix)).unwrap();
       }
       let mut inline_rgb = std::vec![0u16; width * height * 3];
       let mut inline_rgba = std::vec![0u16; width * height * 4];
@@ -844,12 +844,12 @@ fn yuva422p12_strategy_a_plus_matches_independent_kernel() {
   .unwrap();
   for full_range in [true, false] {
     for matrix in [
-      ColorMatrix::Bt601,
-      ColorMatrix::Bt709,
-      ColorMatrix::Bt2020Ncl,
-      ColorMatrix::Smpte240m,
-      ColorMatrix::Fcc,
-      ColorMatrix::YCgCo,
+      KernelMatrix::Bt601,
+      KernelMatrix::Bt709,
+      KernelMatrix::Bt2020Ncl,
+      KernelMatrix::Smpte240m,
+      KernelMatrix::Fcc,
+      KernelMatrix::YCgCo,
     ] {
       let mut sinker_rgb = std::vec![0u8; width * height * 3];
       let mut sinker_rgba = std::vec![0u8; width * height * 4];
@@ -859,7 +859,7 @@ fn yuva422p12_strategy_a_plus_matches_independent_kernel() {
           .unwrap()
           .with_rgba(&mut sinker_rgba)
           .unwrap();
-        yuva422p12_to(&frame, full_range, matrix, &mut sink).unwrap();
+        yuva422p12_to(&frame, full_range, sink.set_kernel_matrix(matrix)).unwrap();
       }
       let mut inline_rgb = std::vec![0u8; width * height * 3];
       let mut inline_rgba = std::vec![0u8; width * height * 4];
@@ -932,12 +932,12 @@ fn yuva422p12_strategy_a_plus_u16_matches_independent_kernel() {
   .unwrap();
   for full_range in [true, false] {
     for matrix in [
-      ColorMatrix::Bt601,
-      ColorMatrix::Bt709,
-      ColorMatrix::Bt2020Ncl,
-      ColorMatrix::Smpte240m,
-      ColorMatrix::Fcc,
-      ColorMatrix::YCgCo,
+      KernelMatrix::Bt601,
+      KernelMatrix::Bt709,
+      KernelMatrix::Bt2020Ncl,
+      KernelMatrix::Smpte240m,
+      KernelMatrix::Fcc,
+      KernelMatrix::YCgCo,
     ] {
       let mut sinker_rgb = std::vec![0u16; width * height * 3];
       let mut sinker_rgba = std::vec![0u16; width * height * 4];
@@ -947,7 +947,7 @@ fn yuva422p12_strategy_a_plus_u16_matches_independent_kernel() {
           .unwrap()
           .with_rgba_u16(&mut sinker_rgba)
           .unwrap();
-        yuva422p12_to(&frame, full_range, matrix, &mut sink).unwrap();
+        yuva422p12_to(&frame, full_range, sink.set_kernel_matrix(matrix)).unwrap();
       }
       let mut inline_rgb = std::vec![0u16; width * height * 3];
       let mut inline_rgba = std::vec![0u16; width * height * 4];
@@ -1021,12 +1021,12 @@ fn yuva422p16_strategy_a_plus_matches_independent_kernel() {
   .unwrap();
   for full_range in [true, false] {
     for matrix in [
-      ColorMatrix::Bt601,
-      ColorMatrix::Bt709,
-      ColorMatrix::Bt2020Ncl,
-      ColorMatrix::Smpte240m,
-      ColorMatrix::Fcc,
-      ColorMatrix::YCgCo,
+      KernelMatrix::Bt601,
+      KernelMatrix::Bt709,
+      KernelMatrix::Bt2020Ncl,
+      KernelMatrix::Smpte240m,
+      KernelMatrix::Fcc,
+      KernelMatrix::YCgCo,
     ] {
       let mut sinker_rgb = std::vec![0u8; width * height * 3];
       let mut sinker_rgba = std::vec![0u8; width * height * 4];
@@ -1036,7 +1036,7 @@ fn yuva422p16_strategy_a_plus_matches_independent_kernel() {
           .unwrap()
           .with_rgba(&mut sinker_rgba)
           .unwrap();
-        yuva422p16_to(&frame, full_range, matrix, &mut sink).unwrap();
+        yuva422p16_to(&frame, full_range, sink.set_kernel_matrix(matrix)).unwrap();
       }
       let mut inline_rgb = std::vec![0u8; width * height * 3];
       let mut inline_rgba = std::vec![0u8; width * height * 4];
@@ -1109,12 +1109,12 @@ fn yuva422p16_strategy_a_plus_u16_matches_independent_kernel() {
   .unwrap();
   for full_range in [true, false] {
     for matrix in [
-      ColorMatrix::Bt601,
-      ColorMatrix::Bt709,
-      ColorMatrix::Bt2020Ncl,
-      ColorMatrix::Smpte240m,
-      ColorMatrix::Fcc,
-      ColorMatrix::YCgCo,
+      KernelMatrix::Bt601,
+      KernelMatrix::Bt709,
+      KernelMatrix::Bt2020Ncl,
+      KernelMatrix::Smpte240m,
+      KernelMatrix::Fcc,
+      KernelMatrix::YCgCo,
     ] {
       let mut sinker_rgb = std::vec![0u16; width * height * 3];
       let mut sinker_rgba = std::vec![0u16; width * height * 4];
@@ -1124,7 +1124,7 @@ fn yuva422p16_strategy_a_plus_u16_matches_independent_kernel() {
           .unwrap()
           .with_rgba_u16(&mut sinker_rgba)
           .unwrap();
-        yuva422p16_to(&frame, full_range, matrix, &mut sink).unwrap();
+        yuva422p16_to(&frame, full_range, sink.set_kernel_matrix(matrix)).unwrap();
       }
       let mut inline_rgb = std::vec![0u16; width * height * 3];
       let mut inline_rgba = std::vec![0u16; width * height * 4];
@@ -1205,7 +1205,7 @@ fn yuva422p_direct_luma_u16_with_hsv_no_rgb_buffer_writes_both() {
       .unwrap()
       .with_hsv(&mut hh, &mut ss, &mut vv)
       .unwrap();
-    yuva422p_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    yuva422p_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
     // White-box: the direct HSV path is RGB-free — the rgb scratch is
     // never grown.
     assert_eq!(
@@ -1229,7 +1229,7 @@ fn yuva422p_direct_luma_u16_with_hsv_no_rgb_buffer_writes_both() {
       .unwrap()
       .with_hsv(&mut oh, &mut os, &mut ov)
       .unwrap();
-    yuva422p_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    yuva422p_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   assert_eq!(hh, oh, "direct H == rgb-attached H");
   assert_eq!(ss, os, "direct S == rgb-attached S");

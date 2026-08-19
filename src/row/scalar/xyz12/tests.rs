@@ -219,7 +219,7 @@ fn narrow_unit_to_u16_round_half_up() {
 fn xyz12_to_rgb_f32_rec709_zero_input() {
   let xyz = [0_u16; 3];
   let mut out = [0.0_f32; 3];
-  xyz12_to_rgb_f32_row::<false>(&xyz, &mut out, 1, DcpTargetGamut::Rec709);
+  xyz12_to_rgb_f32_row::<false>(&xyz, &mut out, 1, KernelGamut::Rec709);
   assert_eq!(out, [0.0; 3]);
 }
 
@@ -260,7 +260,7 @@ fn pack12_le_dirty(code: u16, low_bits: u16) -> u16 {
 fn xyz12_to_rgb_f32_dci_p3_mid_gray() {
   let xyz: [u16; 3] = [pack12_le(0x800), pack12_le(0x800), pack12_le(0x800)];
   let mut out = [0.0_f32; 3];
-  xyz12_to_rgb_f32_row::<false>(&xyz, &mut out, 1, DcpTargetGamut::DciP3);
+  xyz12_to_rgb_f32_row::<false>(&xyz, &mut out, 1, KernelGamut::DciP3);
   // DCI-P3 (theatrical, DCI white) expected at u12 mid-gray:
   //   linear XYZ = ((0x800 / 4095)^2.6) / 0.91653 ≈ 0.158 (per channel)
   //   RGB_lin    = M_DCI_P3 · (0.158, 0.158, 0.158)
@@ -276,7 +276,7 @@ fn xyz12_to_rgb_f32_dci_p3_mid_gray() {
 fn xyz12_to_rgb_f32_rec709_mid_gray() {
   let xyz: [u16; 3] = [pack12_le(0x800), pack12_le(0x800), pack12_le(0x800)];
   let mut out = [0.0_f32; 3];
-  xyz12_to_rgb_f32_row::<false>(&xyz, &mut out, 1, DcpTargetGamut::Rec709);
+  xyz12_to_rgb_f32_row::<false>(&xyz, &mut out, 1, KernelGamut::Rec709);
   assert_close(out[0], 0.216_984_87, "R");
   assert_close(out[1], 0.170_760_4, "G");
   assert_close(out[2], 0.163_619_68, "B");
@@ -286,7 +286,7 @@ fn xyz12_to_rgb_f32_rec709_mid_gray() {
 fn xyz12_to_rgb_f32_rec2020_three_quarter() {
   let xyz: [u16; 3] = [pack12_le(0xC00), pack12_le(0xC00), pack12_le(0xC00)];
   let mut out = [0.0_f32; 3];
-  xyz12_to_rgb_f32_row::<false>(&xyz, &mut out, 1, DcpTargetGamut::Rec2020);
+  xyz12_to_rgb_f32_row::<false>(&xyz, &mut out, 1, KernelGamut::Rec2020);
   assert_close(out[0], 0.572_369_93, "R");
   assert_close(out[1], 0.498_964_94, "G");
   assert_close(out[2], 0.473_854_f32, "B");
@@ -297,7 +297,7 @@ fn xyz12_to_rgb_f32_preserves_negative_after_matrix() {
   // y_only_max under Rec.709 → R = -1.677, G = +2.05, B = -0.222.
   let xyz: [u16; 3] = [pack12_le(0), pack12_le(0xFFF), pack12_le(0)];
   let mut out = [0.0_f32; 3];
-  xyz12_to_rgb_f32_row::<false>(&xyz, &mut out, 1, DcpTargetGamut::Rec709);
+  xyz12_to_rgb_f32_row::<false>(&xyz, &mut out, 1, KernelGamut::Rec709);
   assert!(out[0] < 0.0, "expected negative R, got {}", out[0]);
   assert!(out[2] < 0.0, "expected negative B, got {}", out[2]);
   assert_close(out[0], -1.677_395_3, "R");
@@ -311,7 +311,7 @@ fn xyz12_to_rgb_clamps_at_u8() {
   // clamp + x255 → R = 255, G = 0.
   let xyz: [u16; 3] = [pack12_le(0xFFF), pack12_le(0), pack12_le(0)];
   let mut out = [0_u8; 3];
-  xyz12_to_rgb_row::<false>(&xyz, &mut out, 1, DcpTargetGamut::Rec709);
+  xyz12_to_rgb_row::<false>(&xyz, &mut out, 1, KernelGamut::Rec709);
   assert_eq!(out[0], 255);
   assert_eq!(out[1], 0);
 }
@@ -320,7 +320,7 @@ fn xyz12_to_rgb_clamps_at_u8() {
 fn xyz12_to_rgba_fills_alpha_max() {
   let xyz: [u16; 3] = [pack12_le(0x800), pack12_le(0x800), pack12_le(0x800)];
   let mut out = [0_u8; 4];
-  xyz12_to_rgba_row::<false>(&xyz, &mut out, 1, DcpTargetGamut::DciP3);
+  xyz12_to_rgba_row::<false>(&xyz, &mut out, 1, KernelGamut::DciP3);
   assert_eq!(out[3], 0xFF);
 }
 
@@ -328,7 +328,7 @@ fn xyz12_to_rgba_fills_alpha_max() {
 fn xyz12_to_rgba_u16_fills_alpha_max() {
   let xyz: [u16; 3] = [pack12_le(0x800), pack12_le(0x800), pack12_le(0x800)];
   let mut out = [0_u16; 4];
-  xyz12_to_rgba_u16_row::<false>(&xyz, &mut out, 1, DcpTargetGamut::DciP3);
+  xyz12_to_rgba_u16_row::<false>(&xyz, &mut out, 1, KernelGamut::DciP3);
   assert_eq!(out[3], 0xFFFF);
 }
 
@@ -358,8 +358,8 @@ fn xyz12_be_byte_swap_matches_le() {
   let xyz_be: [u16; 3] = [pack12_be(0x800), pack12_be(0x800), pack12_be(0x800)];
   let mut out_le = [0.0_f32; 3];
   let mut out_be = [0.0_f32; 3];
-  xyz12_to_rgb_f32_row::<false>(&xyz_le, &mut out_le, 1, DcpTargetGamut::DciP3);
-  xyz12_to_rgb_f32_row::<true>(&xyz_be, &mut out_be, 1, DcpTargetGamut::DciP3);
+  xyz12_to_rgb_f32_row::<false>(&xyz_le, &mut out_le, 1, KernelGamut::DciP3);
+  xyz12_to_rgb_f32_row::<true>(&xyz_be, &mut out_be, 1, KernelGamut::DciP3);
   assert_eq!(out_le, out_be);
 }
 
@@ -367,7 +367,7 @@ fn xyz12_be_byte_swap_matches_le() {
 fn xyz12_to_rgb_u16_full_range_scaling() {
   let xyz: [u16; 3] = [pack12_le(0xFFF), pack12_le(0xFFF), pack12_le(0xFFF)];
   let mut out = [0_u16; 3];
-  xyz12_to_rgb_u16_row::<false>(&xyz, &mut out, 1, DcpTargetGamut::DciP3);
+  xyz12_to_rgb_u16_row::<false>(&xyz, &mut out, 1, KernelGamut::DciP3);
   // Per derivation: rgb_linear = (1.265, 1.044, 1.0) → after OETF +
   // clamp [0,1] x 65535 → (65535, 65535, 65535).
   assert_eq!(out[0], 65535);
@@ -383,7 +383,7 @@ fn xyz12_to_rgb_u16_full_range_scaling() {
 fn xyz12_to_rgb_f16_clamps_to_unit_range() {
   let xyz: [u16; 3] = [pack12_le(0xFFF), pack12_le(0), pack12_le(0)];
   let mut out = [half::f16::from_f32(0.0); 3];
-  xyz12_to_rgb_f16_row::<false>(&xyz, &mut out, 1, DcpTargetGamut::Rec709);
+  xyz12_to_rgb_f16_row::<false>(&xyz, &mut out, 1, KernelGamut::Rec709);
   assert_eq!(out[0].to_f32(), 1.0);
   assert_eq!(out[1].to_f32(), 0.0);
 }
@@ -396,7 +396,7 @@ fn xyz12_to_rgb_f16_clamps_to_unit_range() {
 fn xyz12_to_rgba_f16_alpha_one() {
   let xyz: [u16; 3] = [pack12_le(0x800), pack12_le(0x800), pack12_le(0x800)];
   let mut out = [half::f16::from_f32(0.0); 4];
-  xyz12_to_rgba_f16_row::<false>(&xyz, &mut out, 1, DcpTargetGamut::DciP3);
+  xyz12_to_rgba_f16_row::<false>(&xyz, &mut out, 1, KernelGamut::DciP3);
   assert_eq!(out[3].to_f32(), 1.0);
 }
 
@@ -406,9 +406,9 @@ fn xyz12_to_rgb_target_gamut_changes_output() {
   let mut out_p3 = [0.0_f32; 3];
   let mut out_709 = [0.0_f32; 3];
   let mut out_2020 = [0.0_f32; 3];
-  xyz12_to_rgb_f32_row::<false>(&xyz, &mut out_p3, 1, DcpTargetGamut::DciP3);
-  xyz12_to_rgb_f32_row::<false>(&xyz, &mut out_709, 1, DcpTargetGamut::Rec709);
-  xyz12_to_rgb_f32_row::<false>(&xyz, &mut out_2020, 1, DcpTargetGamut::Rec2020);
+  xyz12_to_rgb_f32_row::<false>(&xyz, &mut out_p3, 1, KernelGamut::DciP3);
+  xyz12_to_rgb_f32_row::<false>(&xyz, &mut out_709, 1, KernelGamut::Rec709);
+  xyz12_to_rgb_f32_row::<false>(&xyz, &mut out_2020, 1, KernelGamut::Rec2020);
   // All three should differ on R (different matrix scales).
   assert!(
     (out_p3[0] - out_709[0]).abs() > 1e-3,
@@ -437,8 +437,8 @@ fn xyz12_to_rgb_low_4_bits_ignored() {
   ];
   let mut out_clean = [0_u8; 3];
   let mut out_dirty = [0_u8; 3];
-  xyz12_to_rgb_row::<false>(&xyz_clean, &mut out_clean, 1, DcpTargetGamut::DciP3);
-  xyz12_to_rgb_row::<false>(&xyz_dirty, &mut out_dirty, 1, DcpTargetGamut::DciP3);
+  xyz12_to_rgb_row::<false>(&xyz_clean, &mut out_clean, 1, KernelGamut::DciP3);
+  xyz12_to_rgb_row::<false>(&xyz_dirty, &mut out_dirty, 1, KernelGamut::DciP3);
   assert_eq!(out_clean, out_dirty);
 }
 
@@ -453,14 +453,14 @@ fn xyz12_to_rgb_multi_pixel_independence() {
     pack12_le(0), // pixel 1
   ];
   let mut out = [0_u8; 6];
-  xyz12_to_rgb_row::<false>(&xyz, &mut out, 2, DcpTargetGamut::Rec709);
+  xyz12_to_rgb_row::<false>(&xyz, &mut out, 2, KernelGamut::Rec709);
 
   let mut single = [0_u8; 3];
-  xyz12_to_rgb_row::<false>(&xyz[..3], &mut single, 1, DcpTargetGamut::Rec709);
+  xyz12_to_rgb_row::<false>(&xyz[..3], &mut single, 1, KernelGamut::Rec709);
   assert_eq!(&out[..3], &single);
 
   let mut single1 = [0_u8; 3];
-  xyz12_to_rgb_row::<false>(&xyz[3..], &mut single1, 1, DcpTargetGamut::Rec709);
+  xyz12_to_rgb_row::<false>(&xyz[3..], &mut single1, 1, KernelGamut::Rec709);
   assert_eq!(&out[3..], &single1);
 }
 
@@ -488,7 +488,7 @@ fn xyz12_to_rgb_multi_pixel_independence() {
 fn xyz12_dci_p3_zero_input_zero_output_reference() {
   let xyz: [u16; 3] = [pack12_le(0), pack12_le(0), pack12_le(0)];
   let mut out = [0.0_f32; 3];
-  xyz12_to_rgb_f32_row::<false>(&xyz, &mut out, 1, DcpTargetGamut::DciP3);
+  xyz12_to_rgb_f32_row::<false>(&xyz, &mut out, 1, KernelGamut::DciP3);
   assert_eq!(out, [0.0, 0.0, 0.0]);
 }
 
@@ -510,7 +510,7 @@ fn xyz12_dci_p3_zero_input_zero_output_reference() {
 fn xyz12_dci_p3_mid_gray_reference_dci_white() {
   let xyz: [u16; 3] = [pack12_le(0x800), pack12_le(0x800), pack12_le(0x800)];
   let mut out = [0.0_f32; 3];
-  xyz12_to_rgb_f32_row::<false>(&xyz, &mut out, 1, DcpTargetGamut::DciP3);
+  xyz12_to_rgb_f32_row::<false>(&xyz, &mut out, 1, KernelGamut::DciP3);
   assert_close(out[0], 0.228_194_8, "DciP3 mid-gray R");
   assert_close(out[1], 0.165_165_9, "DciP3 mid-gray G");
   assert_close(out[2], 0.189_893_85, "DciP3 mid-gray B");
@@ -544,7 +544,7 @@ fn xyz12_dci_p3_mid_gray_reference_dci_white() {
 fn xyz12_dci_p3_peak_white_reference() {
   let xyz: [u16; 3] = [pack12_le(0xFFF), pack12_le(0xFFF), pack12_le(0xFFF)];
   let mut out = [0.0_f32; 3];
-  xyz12_to_rgb_f32_row::<false>(&xyz, &mut out, 1, DcpTargetGamut::DciP3);
+  xyz12_to_rgb_f32_row::<false>(&xyz, &mut out, 1, KernelGamut::DciP3);
   assert_close(out[0], 1.382_636_5, "DciP3 peak R");
   assert_close(out[1], 1.000_743_3, "DciP3 peak G");
   assert_close(out[2], 1.150_570_4, "DciP3 peak B");
@@ -564,7 +564,7 @@ fn xyz12_dci_p3_peak_white_reference() {
 fn xyz12_dci_p3_x_only_axis_reference() {
   let xyz: [u16; 3] = [pack12_le(0xFFF), pack12_le(0), pack12_le(0)];
   let mut out = [0.0_f32; 3];
-  xyz12_to_rgb_f32_row::<false>(&xyz, &mut out, 1, DcpTargetGamut::DciP3);
+  xyz12_to_rgb_f32_row::<false>(&xyz, &mut out, 1, KernelGamut::DciP3);
   assert_close(out[0], 2.973_600_4, "DciP3 X-only R");
   assert_close(out[1], -0.867_585_36, "DciP3 X-only G");
   assert_close(out[2], 0.044_997_863, "DciP3 X-only B");
@@ -579,7 +579,7 @@ fn xyz12_dci_p3_x_only_axis_reference() {
 fn xyz12_rec709_mid_gray_reference() {
   let xyz: [u16; 3] = [pack12_le(0x800), pack12_le(0x800), pack12_le(0x800)];
   let mut out = [0.0_f32; 3];
-  xyz12_to_rgb_f32_row::<false>(&xyz, &mut out, 1, DcpTargetGamut::Rec709);
+  xyz12_to_rgb_f32_row::<false>(&xyz, &mut out, 1, KernelGamut::Rec709);
   assert_close(out[0], 0.216_984_87, "Rec.709 mid-gray R");
   assert_close(out[1], 0.170_760_4, "Rec.709 mid-gray G");
   assert_close(out[2], 0.163_619_68, "Rec.709 mid-gray B");
@@ -591,7 +591,7 @@ fn xyz12_rec709_mid_gray_reference() {
 fn xyz12_rec2020_mid_gray_reference() {
   let xyz: [u16; 3] = [pack12_le(0x800), pack12_le(0x800), pack12_le(0x800)];
   let mut out = [0.0_f32; 3];
-  xyz12_to_rgb_f32_row::<false>(&xyz, &mut out, 1, DcpTargetGamut::Rec2020);
+  xyz12_to_rgb_f32_row::<false>(&xyz, &mut out, 1, KernelGamut::Rec2020);
   assert_close(out[0], 0.199_452_52, "Rec.2020 mid-gray R");
   assert_close(out[1], 0.173_873_25, "Rec.2020 mid-gray G");
   assert_close(out[2], 0.165_122_9, "Rec.2020 mid-gray B");

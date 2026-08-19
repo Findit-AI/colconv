@@ -16,7 +16,7 @@ use super::{high_bit_plane_wasm, interleave_uv_wasm};
 
 fn check_yuv444p_n_u8_simd128_rgba_with_alpha_src_equivalence<const BITS: u32>(
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   alpha_seed: usize,
 ) {
@@ -57,12 +57,12 @@ fn check_yuv444p_n_u8_simd128_rgba_with_alpha_src_equivalence<const BITS: u32>(
 #[test]
 fn simd128_yuva444p10_rgba_matches_scalar_all_matrices_16() {
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       check_yuv444p_n_u8_simd128_rgba_with_alpha_src_equivalence::<10>(16, m, full, 89);
@@ -76,7 +76,7 @@ fn simd128_yuva444p10_rgba_matches_scalar_widths() {
   for w in [16usize, 17, 31, 47, 63, 1920, 1922] {
     check_yuv444p_n_u8_simd128_rgba_with_alpha_src_equivalence::<10>(
       w,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       true,
       89,
     );
@@ -91,13 +91,13 @@ fn simd128_yuva444p10_rgba_matches_scalar_random_alpha() {
   for seed in [13usize, 41, 89, 127, 211] {
     check_yuv444p_n_u8_simd128_rgba_with_alpha_src_equivalence::<10>(
       16,
-      ColorMatrix::Bt601,
+      KernelMatrix::Bt601,
       false,
       seed,
     );
     check_yuv444p_n_u8_simd128_rgba_with_alpha_src_equivalence::<10>(
       31,
-      ColorMatrix::Bt2020Ncl,
+      KernelMatrix::Bt2020Ncl,
       true,
       seed,
     );
@@ -112,19 +112,19 @@ fn simd128_yuva444p_n_rgba_matches_scalar_all_bits() {
   for full in [true, false] {
     check_yuv444p_n_u8_simd128_rgba_with_alpha_src_equivalence::<9>(
       16,
-      ColorMatrix::Bt601,
+      KernelMatrix::Bt601,
       full,
       53,
     );
     check_yuv444p_n_u8_simd128_rgba_with_alpha_src_equivalence::<12>(
       16,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       full,
       53,
     );
     check_yuv444p_n_u8_simd128_rgba_with_alpha_src_equivalence::<14>(
       16,
-      ColorMatrix::Bt2020Ncl,
+      KernelMatrix::Bt2020Ncl,
       full,
       53,
     );
@@ -136,14 +136,19 @@ fn simd128_yuva444p_n_rgba_matches_scalar_all_bits_widths() {
   for w in [17usize, 47, 1922] {
     check_yuv444p_n_u8_simd128_rgba_with_alpha_src_equivalence::<9>(
       w,
-      ColorMatrix::Smpte240m,
+      KernelMatrix::Smpte240m,
       false,
       89,
     );
-    check_yuv444p_n_u8_simd128_rgba_with_alpha_src_equivalence::<12>(w, ColorMatrix::Fcc, true, 89);
+    check_yuv444p_n_u8_simd128_rgba_with_alpha_src_equivalence::<12>(
+      w,
+      KernelMatrix::Fcc,
+      true,
+      89,
+    );
     check_yuv444p_n_u8_simd128_rgba_with_alpha_src_equivalence::<14>(
       w,
-      ColorMatrix::YCgCo,
+      KernelMatrix::YCgCo,
       false,
       89,
     );
@@ -154,7 +159,7 @@ fn simd128_yuva444p_n_rgba_matches_scalar_all_bits_widths() {
 
 fn check_yuv_420_u8_simd128_rgba_with_alpha_src_equivalence(
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   alpha_seed: usize,
 ) {
@@ -200,7 +205,7 @@ fn check_yuv_420_u8_simd128_rgba_with_alpha_src_equivalence(
 
 fn check_yuv420p_n_u8_simd128_rgba_with_alpha_src_equivalence<const BITS: u32>(
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   alpha_seed: usize,
 ) {
@@ -240,7 +245,7 @@ fn check_yuv420p_n_u8_simd128_rgba_with_alpha_src_equivalence<const BITS: u32>(
 
 fn check_yuv420p16_u8_simd128_rgba_with_alpha_src_equivalence(
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   alpha_seed: usize,
 ) {
@@ -281,12 +286,12 @@ fn check_yuv420p16_u8_simd128_rgba_with_alpha_src_equivalence(
 #[test]
 fn simd128_yuva420p_rgba_matches_scalar_all_matrices() {
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       check_yuv_420_u8_simd128_rgba_with_alpha_src_equivalence(16, m, full, 89);
@@ -297,22 +302,22 @@ fn simd128_yuva420p_rgba_matches_scalar_all_matrices() {
 #[test]
 fn simd128_yuva420p_rgba_matches_scalar_widths_and_alpha() {
   for w in [16usize, 18, 30, 34, 1920, 1922] {
-    check_yuv_420_u8_simd128_rgba_with_alpha_src_equivalence(w, ColorMatrix::Bt709, true, 89);
+    check_yuv_420_u8_simd128_rgba_with_alpha_src_equivalence(w, KernelMatrix::Bt709, true, 89);
   }
   for seed in [13usize, 41, 127, 211] {
-    check_yuv_420_u8_simd128_rgba_with_alpha_src_equivalence(16, ColorMatrix::Bt601, false, seed);
+    check_yuv_420_u8_simd128_rgba_with_alpha_src_equivalence(16, KernelMatrix::Bt601, false, seed);
   }
 }
 
 #[test]
 fn simd128_yuva420p_n_rgba_matches_scalar_all_bits() {
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       check_yuv420p_n_u8_simd128_rgba_with_alpha_src_equivalence::<9>(16, m, full, 89);
@@ -327,19 +332,19 @@ fn simd128_yuva420p_n_rgba_matches_scalar_widths() {
   for w in [16usize, 18, 30, 34, 1920, 1922] {
     check_yuv420p_n_u8_simd128_rgba_with_alpha_src_equivalence::<9>(
       w,
-      ColorMatrix::Bt601,
+      KernelMatrix::Bt601,
       false,
       89,
     );
     check_yuv420p_n_u8_simd128_rgba_with_alpha_src_equivalence::<10>(
       w,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       true,
       89,
     );
     check_yuv420p_n_u8_simd128_rgba_with_alpha_src_equivalence::<12>(
       w,
-      ColorMatrix::Smpte240m,
+      KernelMatrix::Smpte240m,
       true,
       89,
     );
@@ -349,12 +354,12 @@ fn simd128_yuva420p_n_rgba_matches_scalar_widths() {
 #[test]
 fn simd128_yuva420p16_rgba_matches_scalar_all_matrices() {
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       check_yuv420p16_u8_simd128_rgba_with_alpha_src_equivalence(16, m, full, 89);
@@ -365,10 +370,10 @@ fn simd128_yuva420p16_rgba_matches_scalar_all_matrices() {
 #[test]
 fn simd128_yuva420p16_rgba_matches_scalar_widths_and_alpha() {
   for w in [16usize, 18, 30, 34, 1920, 1922] {
-    check_yuv420p16_u8_simd128_rgba_with_alpha_src_equivalence(w, ColorMatrix::Bt709, false, 89);
+    check_yuv420p16_u8_simd128_rgba_with_alpha_src_equivalence(w, KernelMatrix::Bt709, false, 89);
   }
   for seed in [13usize, 41, 127, 211] {
-    check_yuv420p16_u8_simd128_rgba_with_alpha_src_equivalence(16, ColorMatrix::Bt601, true, seed);
+    check_yuv420p16_u8_simd128_rgba_with_alpha_src_equivalence(16, KernelMatrix::Bt601, true, seed);
   }
 }
 
@@ -376,7 +381,7 @@ fn simd128_yuva420p16_rgba_matches_scalar_widths_and_alpha() {
 
 fn check_yuv444p_n_u16_simd128_rgba_equivalence<const BITS: u32>(
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   let y = planar_n_plane::<BITS>(width, 37);
@@ -413,7 +418,7 @@ fn check_yuv444p_n_u16_simd128_rgba_equivalence<const BITS: u32>(
 #[cfg(feature = "yuv-semi-planar")]
 fn check_pn_444_u16_simd128_rgba_equivalence<const BITS: u32>(
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   let y = high_bit_plane_wasm::<BITS>(width, 37);
@@ -441,7 +446,7 @@ fn check_pn_444_u16_simd128_rgba_equivalence<const BITS: u32>(
 
 fn check_yuv444p16_u16_simd128_rgba_equivalence(
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   let y = p16_plane_wasm(width, 37);
@@ -470,7 +475,7 @@ fn check_yuv444p16_u16_simd128_rgba_equivalence(
 #[cfg(feature = "yuv-semi-planar")]
 fn check_p_n_444_16_u16_simd128_rgba_equivalence(
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   let y = p16_plane_wasm(width, 37);
@@ -492,12 +497,12 @@ fn check_p_n_444_16_u16_simd128_rgba_equivalence(
 #[test]
 fn simd128_yuv444p_n_rgba_u16_matches_scalar_all_bits() {
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       check_yuv444p_n_u16_simd128_rgba_equivalence::<9>(16, m, full);
@@ -511,10 +516,10 @@ fn simd128_yuv444p_n_rgba_u16_matches_scalar_all_bits() {
 #[test]
 fn simd128_yuv444p_n_rgba_u16_matches_scalar_tail_and_widths() {
   for w in [17usize, 31, 47, 63, 1920, 1922] {
-    check_yuv444p_n_u16_simd128_rgba_equivalence::<9>(w, ColorMatrix::Bt601, false);
-    check_yuv444p_n_u16_simd128_rgba_equivalence::<10>(w, ColorMatrix::Bt709, true);
-    check_yuv444p_n_u16_simd128_rgba_equivalence::<12>(w, ColorMatrix::Bt2020Ncl, false);
-    check_yuv444p_n_u16_simd128_rgba_equivalence::<14>(w, ColorMatrix::YCgCo, true);
+    check_yuv444p_n_u16_simd128_rgba_equivalence::<9>(w, KernelMatrix::Bt601, false);
+    check_yuv444p_n_u16_simd128_rgba_equivalence::<10>(w, KernelMatrix::Bt709, true);
+    check_yuv444p_n_u16_simd128_rgba_equivalence::<12>(w, KernelMatrix::Bt2020Ncl, false);
+    check_yuv444p_n_u16_simd128_rgba_equivalence::<14>(w, KernelMatrix::YCgCo, true);
   }
 }
 
@@ -522,12 +527,12 @@ fn simd128_yuv444p_n_rgba_u16_matches_scalar_tail_and_widths() {
 #[test]
 fn simd128_pn_444_rgba_u16_matches_scalar_all_bits() {
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       check_pn_444_u16_simd128_rgba_equivalence::<10>(16, m, full);
@@ -540,33 +545,33 @@ fn simd128_pn_444_rgba_u16_matches_scalar_all_bits() {
 #[test]
 fn simd128_pn_444_rgba_u16_matches_scalar_tail_and_widths() {
   for w in [17usize, 31, 47, 63, 1920, 1922] {
-    check_pn_444_u16_simd128_rgba_equivalence::<10>(w, ColorMatrix::Bt601, false);
-    check_pn_444_u16_simd128_rgba_equivalence::<12>(w, ColorMatrix::Bt709, true);
+    check_pn_444_u16_simd128_rgba_equivalence::<10>(w, KernelMatrix::Bt601, false);
+    check_pn_444_u16_simd128_rgba_equivalence::<12>(w, KernelMatrix::Bt709, true);
   }
 }
 
 #[test]
 fn simd128_yuv444p16_rgba_u16_matches_scalar_all_matrices() {
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       check_yuv444p16_u16_simd128_rgba_equivalence(16, m, full);
     }
   }
   for w in [17usize, 31, 47, 63, 1920, 1922] {
-    check_yuv444p16_u16_simd128_rgba_equivalence(w, ColorMatrix::Bt709, false);
+    check_yuv444p16_u16_simd128_rgba_equivalence(w, KernelMatrix::Bt709, false);
   }
 }
 
 fn check_yuv444p16_u16_simd128_rgba_with_alpha_src_equivalence(
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   alpha_seed: usize,
 ) {
@@ -607,12 +612,12 @@ fn check_yuv444p16_u16_simd128_rgba_with_alpha_src_equivalence(
 #[test]
 fn simd128_yuva444p16_rgba_u16_matches_scalar_all_matrices() {
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       check_yuv444p16_u16_simd128_rgba_with_alpha_src_equivalence(8, m, full, 89);
@@ -623,10 +628,15 @@ fn simd128_yuva444p16_rgba_u16_matches_scalar_all_matrices() {
 #[test]
 fn simd128_yuva444p16_rgba_u16_matches_scalar_widths_and_alpha() {
   for w in [8usize, 9, 15, 31, 47, 63, 1920, 1922] {
-    check_yuv444p16_u16_simd128_rgba_with_alpha_src_equivalence(w, ColorMatrix::Bt709, true, 89);
+    check_yuv444p16_u16_simd128_rgba_with_alpha_src_equivalence(w, KernelMatrix::Bt709, true, 89);
   }
   for seed in [13usize, 41, 127, 211] {
-    check_yuv444p16_u16_simd128_rgba_with_alpha_src_equivalence(8, ColorMatrix::Bt601, false, seed);
+    check_yuv444p16_u16_simd128_rgba_with_alpha_src_equivalence(
+      8,
+      KernelMatrix::Bt601,
+      false,
+      seed,
+    );
   }
 }
 
@@ -634,19 +644,19 @@ fn simd128_yuva444p16_rgba_u16_matches_scalar_widths_and_alpha() {
 #[test]
 fn simd128_p416_rgba_u16_matches_scalar_all_matrices() {
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       check_p_n_444_16_u16_simd128_rgba_equivalence(16, m, full);
     }
   }
   for w in [17usize, 31, 47, 63, 1920, 1922] {
-    check_p_n_444_16_u16_simd128_rgba_equivalence(w, ColorMatrix::Bt709, false);
+    check_p_n_444_16_u16_simd128_rgba_equivalence(w, KernelMatrix::Bt709, false);
   }
 }
 
@@ -661,7 +671,7 @@ fn simd128_p416_rgba_u16_matches_scalar_all_matrices() {
 
 fn check_yuv444p_n_u16_simd128_rgba_with_alpha_src_equivalence<const BITS: u32>(
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   alpha_seed: usize,
 ) {
@@ -702,12 +712,12 @@ fn check_yuv444p_n_u16_simd128_rgba_with_alpha_src_equivalence<const BITS: u32>(
 #[test]
 fn simd128_yuva444p10_rgba_u16_matches_scalar_all_matrices_16() {
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       check_yuv444p_n_u16_simd128_rgba_with_alpha_src_equivalence::<10>(16, m, full, 89);
@@ -721,7 +731,7 @@ fn simd128_yuva444p10_rgba_u16_matches_scalar_widths() {
   for w in [16usize, 17, 31, 47, 63, 1920, 1922] {
     check_yuv444p_n_u16_simd128_rgba_with_alpha_src_equivalence::<10>(
       w,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       true,
       89,
     );
@@ -735,13 +745,13 @@ fn simd128_yuva444p10_rgba_u16_matches_scalar_random_alpha() {
   for seed in [13usize, 41, 89, 127, 211] {
     check_yuv444p_n_u16_simd128_rgba_with_alpha_src_equivalence::<10>(
       16,
-      ColorMatrix::Bt601,
+      KernelMatrix::Bt601,
       false,
       seed,
     );
     check_yuv444p_n_u16_simd128_rgba_with_alpha_src_equivalence::<10>(
       31,
-      ColorMatrix::Bt2020Ncl,
+      KernelMatrix::Bt2020Ncl,
       true,
       seed,
     );
@@ -756,19 +766,19 @@ fn simd128_yuva444p_n_rgba_u16_matches_scalar_all_bits() {
   for full in [true, false] {
     check_yuv444p_n_u16_simd128_rgba_with_alpha_src_equivalence::<9>(
       16,
-      ColorMatrix::Bt601,
+      KernelMatrix::Bt601,
       full,
       53,
     );
     check_yuv444p_n_u16_simd128_rgba_with_alpha_src_equivalence::<12>(
       16,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       full,
       53,
     );
     check_yuv444p_n_u16_simd128_rgba_with_alpha_src_equivalence::<14>(
       16,
-      ColorMatrix::Bt2020Ncl,
+      KernelMatrix::Bt2020Ncl,
       full,
       53,
     );
@@ -780,19 +790,19 @@ fn simd128_yuva444p_n_rgba_u16_matches_scalar_all_bits_widths() {
   for w in [17usize, 47, 1922] {
     check_yuv444p_n_u16_simd128_rgba_with_alpha_src_equivalence::<9>(
       w,
-      ColorMatrix::Smpte240m,
+      KernelMatrix::Smpte240m,
       false,
       89,
     );
     check_yuv444p_n_u16_simd128_rgba_with_alpha_src_equivalence::<12>(
       w,
-      ColorMatrix::Fcc,
+      KernelMatrix::Fcc,
       true,
       89,
     );
     check_yuv444p_n_u16_simd128_rgba_with_alpha_src_equivalence::<14>(
       w,
-      ColorMatrix::YCgCo,
+      KernelMatrix::YCgCo,
       false,
       89,
     );
@@ -803,7 +813,7 @@ fn simd128_yuva444p_n_rgba_u16_matches_scalar_all_bits_widths() {
 
 fn check_yuv420p_n_u16_simd128_rgba_with_alpha_src_equivalence<const BITS: u32>(
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   alpha_seed: usize,
 ) {
@@ -843,7 +853,7 @@ fn check_yuv420p_n_u16_simd128_rgba_with_alpha_src_equivalence<const BITS: u32>(
 
 fn check_yuv420p16_u16_simd128_rgba_with_alpha_src_equivalence(
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   alpha_seed: usize,
 ) {
@@ -884,12 +894,12 @@ fn check_yuv420p16_u16_simd128_rgba_with_alpha_src_equivalence(
 #[test]
 fn simd128_yuva420p_n_rgba_u16_matches_scalar_all_bits() {
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       check_yuv420p_n_u16_simd128_rgba_with_alpha_src_equivalence::<9>(16, m, full, 89);
@@ -904,19 +914,19 @@ fn simd128_yuva420p_n_rgba_u16_matches_scalar_widths() {
   for w in [16usize, 18, 30, 34, 1920, 1922] {
     check_yuv420p_n_u16_simd128_rgba_with_alpha_src_equivalence::<9>(
       w,
-      ColorMatrix::Bt601,
+      KernelMatrix::Bt601,
       false,
       89,
     );
     check_yuv420p_n_u16_simd128_rgba_with_alpha_src_equivalence::<10>(
       w,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       true,
       89,
     );
     check_yuv420p_n_u16_simd128_rgba_with_alpha_src_equivalence::<12>(
       w,
-      ColorMatrix::Smpte240m,
+      KernelMatrix::Smpte240m,
       true,
       89,
     );
@@ -926,12 +936,12 @@ fn simd128_yuva420p_n_rgba_u16_matches_scalar_widths() {
 #[test]
 fn simd128_yuva420p16_rgba_u16_matches_scalar_all_matrices() {
   for m in [
-    ColorMatrix::Bt601,
-    ColorMatrix::Bt709,
-    ColorMatrix::Bt2020Ncl,
-    ColorMatrix::Smpte240m,
-    ColorMatrix::Fcc,
-    ColorMatrix::YCgCo,
+    KernelMatrix::Bt601,
+    KernelMatrix::Bt709,
+    KernelMatrix::Bt2020Ncl,
+    KernelMatrix::Smpte240m,
+    KernelMatrix::Fcc,
+    KernelMatrix::YCgCo,
   ] {
     for full in [true, false] {
       check_yuv420p16_u16_simd128_rgba_with_alpha_src_equivalence(16, m, full, 89);
@@ -942,9 +952,14 @@ fn simd128_yuva420p16_rgba_u16_matches_scalar_all_matrices() {
 #[test]
 fn simd128_yuva420p16_rgba_u16_matches_scalar_widths_and_alpha() {
   for w in [16usize, 18, 30, 34, 1920, 1922] {
-    check_yuv420p16_u16_simd128_rgba_with_alpha_src_equivalence(w, ColorMatrix::Bt709, false, 89);
+    check_yuv420p16_u16_simd128_rgba_with_alpha_src_equivalence(w, KernelMatrix::Bt709, false, 89);
   }
   for seed in [13usize, 41, 127, 211] {
-    check_yuv420p16_u16_simd128_rgba_with_alpha_src_equivalence(16, ColorMatrix::Bt601, true, seed);
+    check_yuv420p16_u16_simd128_rgba_with_alpha_src_equivalence(
+      16,
+      KernelMatrix::Bt601,
+      true,
+      seed,
+    );
   }
 }

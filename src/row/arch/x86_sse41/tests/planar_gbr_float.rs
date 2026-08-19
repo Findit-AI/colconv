@@ -218,7 +218,7 @@ fn sse41_gbrpf32_to_rgba_f16_f16c_matches_scalar() {
 #[test]
 #[cfg_attr(miri, ignore = "SSE4.1 SIMD intrinsics unsupported by Miri")]
 fn sse41_gbrpf32_to_luma_matches_scalar() {
-  use crate::ColorMatrix;
+  use crate::KernelMatrix;
   if !std::arch::is_x86_feature_detected!("sse4.1") {
     return;
   }
@@ -231,14 +231,14 @@ fn sse41_gbrpf32_to_luma_matches_scalar() {
     prng_f32(&mut r, 0xF009_0003);
     let mut simd = std::vec![0u8; w];
     let mut scal = std::vec![0u8; w];
-    unsafe { gbrpf32_to_luma_row::<false>(&g, &b, &r, &mut simd, w, ColorMatrix::Bt709, true) };
+    unsafe { gbrpf32_to_luma_row::<false>(&g, &b, &r, &mut simd, w, KernelMatrix::Bt709, true) };
     scalar::planar_gbr_float::gbrpf32_to_luma_row::<false>(
       &g,
       &b,
       &r,
       &mut scal,
       w,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       true,
     );
     assert_eq!(simd, scal, "gbrpf32_to_luma width={w}");
@@ -250,7 +250,7 @@ fn sse41_gbrpf32_to_luma_matches_scalar() {
 #[test]
 #[cfg_attr(miri, ignore = "SSE4.1 SIMD intrinsics unsupported by Miri")]
 fn sse41_gbrpf32_to_luma_u16_matches_scalar() {
-  use crate::ColorMatrix;
+  use crate::KernelMatrix;
   if !std::arch::is_x86_feature_detected!("sse4.1") {
     return;
   }
@@ -263,14 +263,16 @@ fn sse41_gbrpf32_to_luma_u16_matches_scalar() {
     prng_f32(&mut r, 0xF00A_0003);
     let mut simd = std::vec![0u16; w];
     let mut scal = std::vec![0u16; w];
-    unsafe { gbrpf32_to_luma_u16_row::<false>(&g, &b, &r, &mut simd, w, ColorMatrix::Bt709, true) };
+    unsafe {
+      gbrpf32_to_luma_u16_row::<false>(&g, &b, &r, &mut simd, w, KernelMatrix::Bt709, true)
+    };
     scalar::planar_gbr_float::gbrpf32_to_luma_u16_row::<false>(
       &g,
       &b,
       &r,
       &mut scal,
       w,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       true,
     );
     assert_eq!(simd, scal, "gbrpf32_to_luma_u16 width={w}");
@@ -629,7 +631,7 @@ fn sse41_gbrpf16_to_rgba_f16_lossless_matches_scalar() {
 #[test]
 #[cfg_attr(miri, ignore = "SSE4.1 + F16C SIMD intrinsics unsupported by Miri")]
 fn sse41_gbrpf16_to_luma_f16c_matches_scalar() {
-  use crate::ColorMatrix;
+  use crate::KernelMatrix;
   if !std::arch::is_x86_feature_detected!("sse4.1") || !std::arch::is_x86_feature_detected!("f16c")
   {
     return;
@@ -644,7 +646,7 @@ fn sse41_gbrpf16_to_luma_f16c_matches_scalar() {
     let mut simd = std::vec![0u8; w];
     let mut scal = std::vec![0u8; w];
     unsafe {
-      gbrpf16_to_luma_row_f16c::<false>(&g, &b, &r, &mut simd, w, ColorMatrix::Bt709, true)
+      gbrpf16_to_luma_row_f16c::<false>(&g, &b, &r, &mut simd, w, KernelMatrix::Bt709, true)
     };
     let gf: std::vec::Vec<f32> = g.iter().map(|v| v.to_f32()).collect();
     let bf: std::vec::Vec<f32> = b.iter().map(|v| v.to_f32()).collect();
@@ -655,7 +657,7 @@ fn sse41_gbrpf16_to_luma_f16c_matches_scalar() {
       &rf,
       &mut scal,
       w,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       true,
     );
     assert_eq!(simd, scal, "gbrpf16_to_luma (F16C) width={w}");
@@ -667,7 +669,7 @@ fn sse41_gbrpf16_to_luma_f16c_matches_scalar() {
 #[test]
 #[cfg_attr(miri, ignore = "SSE4.1 + F16C SIMD intrinsics unsupported by Miri")]
 fn sse41_gbrpf16_to_luma_u16_f16c_matches_scalar() {
-  use crate::ColorMatrix;
+  use crate::KernelMatrix;
   if !std::arch::is_x86_feature_detected!("sse4.1") || !std::arch::is_x86_feature_detected!("f16c")
   {
     return;
@@ -682,7 +684,7 @@ fn sse41_gbrpf16_to_luma_u16_f16c_matches_scalar() {
     let mut simd = std::vec![0u16; w];
     let mut scal = std::vec![0u16; w];
     unsafe {
-      gbrpf16_to_luma_u16_row_f16c::<false>(&g, &b, &r, &mut simd, w, ColorMatrix::Bt709, true)
+      gbrpf16_to_luma_u16_row_f16c::<false>(&g, &b, &r, &mut simd, w, KernelMatrix::Bt709, true)
     };
     let gf: std::vec::Vec<f32> = g.iter().map(|v| v.to_f32()).collect();
     let bf: std::vec::Vec<f32> = b.iter().map(|v| v.to_f32()).collect();
@@ -693,7 +695,7 @@ fn sse41_gbrpf16_to_luma_u16_f16c_matches_scalar() {
       &rf,
       &mut scal,
       w,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       true,
     );
     assert_eq!(simd, scal, "gbrpf16_to_luma_u16 (F16C) width={w}");

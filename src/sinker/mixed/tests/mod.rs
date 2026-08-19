@@ -29,7 +29,7 @@ use super::*;
   feature = "yuv-semi-planar",
   feature = "yuva",
 ))]
-use crate::ColorMatrix;
+use crate::KernelMatrix;
 // `frame::*` glob is consumed only by the families whose test files
 // reference unqualified `*Frame` types; the Bayer tests import their
 // frame types locally, so `bayer` is not in this set.

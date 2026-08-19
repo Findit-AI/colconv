@@ -47,7 +47,7 @@
 //! pass it to the runtime-count `_mm256_srl_epi16`.
 
 use super::*;
-use crate::{ColorMatrix, row::scalar};
+use crate::{KernelMatrix, row::scalar};
 
 /// Host-endian gate for Y2xx/Y216 SIMD bodies.
 ///
@@ -184,7 +184,7 @@ pub(crate) unsafe fn y2xx_n_to_rgb_or_rgba_row<
   packed: &[u16],
   out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   const {
@@ -361,7 +361,7 @@ pub(crate) unsafe fn y2xx_n_to_rgb_u16_or_rgba_u16_row<
   packed: &[u16],
   out: &mut [u16],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   const {
@@ -741,7 +741,7 @@ pub(crate) unsafe fn y2xx_n_to_hsv_row<const BITS: u32, const BE: bool>(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
 ) {
   const { assert!(BITS == 10 || BITS == 12) };

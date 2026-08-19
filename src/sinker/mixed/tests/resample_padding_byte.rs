@@ -7,7 +7,7 @@
 //! non-trivial `0x77` so a leak would change the result.
 
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   resample::{AreaResampler, CatmullRom, FilterKernel, FilteredResampler, Lanczos3, Triangle},
   sinker::MixedSinker,
   source::{Bgrx, Rgb24, Rgbx, Xbgr, Xrgb, bgrx_to, rgb24_to, rgbx_to, xbgr_to, xrgb_to},
@@ -66,7 +66,7 @@ fn rgb24_reference() -> (Vec<u8>, Vec<u8>, Vec<u8>) {
         .unwrap()
         .with_luma(&mut luma)
         .unwrap();
-    rgb24_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    rgb24_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   (rgb, rgba, luma)
 }
@@ -95,7 +95,7 @@ macro_rules! padding_format_matches_rgb24 {
         .unwrap()
         .with_luma(&mut luma)
         .unwrap();
-        $walk(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+        $walk(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
       }
       let (rgb_ref, rgba_ref, luma_ref) = rgb24_reference();
       assert_eq!(rgb, rgb_ref, "rgb");
@@ -164,7 +164,7 @@ fn rgb24_filter_reference<K: FilterKernel + Copy>(
     .unwrap()
     .with_luma(&mut luma)
     .unwrap();
-    rgb24_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    rgb24_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   (rgb, rgba, luma)
 }
@@ -198,7 +198,7 @@ macro_rules! padding_format_filter_matches_rgb24 {
               .unwrap()
               .with_luma(&mut luma)
               .unwrap();
-              $walk(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+              $walk(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
             }};
           }
           let (rgb_ref, rgba_ref, luma_ref) = match kind {
@@ -269,7 +269,7 @@ fn xrgb_identity_plan_matches_new_sink() {
     let mut sink = MixedSinker::<Xrgb>::new(SRC, SRC)
       .with_rgb(&mut direct)
       .unwrap();
-    xrgb_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    xrgb_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   let mut via_area = vec![0u8; SRC * SRC * 3];
   {
@@ -278,7 +278,7 @@ fn xrgb_identity_plan_matches_new_sink() {
         .unwrap()
         .with_rgb(&mut via_area)
         .unwrap();
-    xrgb_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+    xrgb_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   assert_eq!(direct, via_area);
 }

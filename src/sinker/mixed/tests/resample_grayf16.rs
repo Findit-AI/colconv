@@ -9,7 +9,7 @@
 //! `resample_grayf32`.
 
 use crate::{
-  ColorMatrix, PixelSink,
+  KernelMatrix, PixelSink,
   frame::{Grayf16Frame, Grayf32Frame},
   resample::{AreaResampler, ResampleError},
   sinker::{MixedSinker, MixedSinkerError},
@@ -20,7 +20,7 @@ use half::f16;
 const SRC: usize = 8;
 const OUT: usize = 4;
 const FR: bool = true;
-const M: ColorMatrix = ColorMatrix::Bt709;
+const M: KernelMatrix = KernelMatrix::Bt709;
 
 /// Re-encode a host-native f16 slice as LE-encoded byte storage (the `grayf16le`
 /// plane contract), recovered via `u16::from_le`.
@@ -101,7 +101,7 @@ fn grayf16_downscale_luma_f32_is_exact_area_mean() {
         .unwrap()
         .with_luma_f32(&mut luma_f32)
         .unwrap();
-    grayf16_to(&src, FR, M, &mut sink).unwrap();
+    grayf16_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(
     luma_f32,
@@ -156,7 +156,7 @@ fn grayf16_all_outputs_match_direct_grayf32_over_binned_luma() {
         .unwrap()
         .with_hsv(&mut h, &mut s_, &mut v_)
         .unwrap();
-    grayf16_to(&src, FR, M, &mut sink).unwrap();
+    grayf16_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
   }
 
   // Reference: the direct Grayf32 sink over the exact binned f32 luma plane.
@@ -194,7 +194,7 @@ fn grayf16_all_outputs_match_direct_grayf32_over_binned_luma() {
       .unwrap()
       .with_hsv(&mut ref_h, &mut ref_s, &mut ref_v)
       .unwrap();
-    crate::source::grayf32_to(&binned_frame, FR, M, &mut sink).unwrap();
+    crate::source::grayf32_to(&binned_frame, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(luma_f32, ref_luma_f32, "luma_f32");
   assert_eq!(rgb_f32, ref_rgb_f32, "rgb_f32");
@@ -236,7 +236,7 @@ fn grayf16_le_be_resample_outputs_identical() {
         .unwrap()
         .with_rgba(&mut le_rgba)
         .unwrap();
-    grayf16_to(&frame, FR, M, &mut sink).unwrap();
+    grayf16_to(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   }
 
   let mut be_luma_f32 = vec![0.0f32; OUT * OUT];
@@ -256,7 +256,7 @@ fn grayf16_le_be_resample_outputs_identical() {
     .unwrap()
     .with_rgba(&mut be_rgba)
     .unwrap();
-    grayf16_to_endian::<_, true>(&frame, FR, M, &mut sink).unwrap();
+    grayf16_to_endian::<_, true>(&frame, FR, sink.set_kernel_matrix(M)).unwrap();
   }
 
   assert_eq!(le_luma_f32, be_luma_f32, "luma_f32 LE/BE diverge");
@@ -286,7 +286,7 @@ fn grayf16_standalone_rgba_matches_direct_over_binned_luma() {
         .unwrap()
         .with_rgba(&mut rgba)
         .unwrap();
-    grayf16_to(&src, FR, M, &mut sink).unwrap();
+    grayf16_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   let binned_pix = as_le_f32(&block_mean_2x2(&plane));
   let mut ref_rgba = vec![0u8; OUT * OUT * 4];
@@ -295,7 +295,7 @@ fn grayf16_standalone_rgba_matches_direct_over_binned_luma() {
     let mut sink = MixedSinker::<Grayf32>::new(OUT, OUT)
       .with_rgba(&mut ref_rgba)
       .unwrap();
-    crate::source::grayf32_to(&binned, FR, M, &mut sink).unwrap();
+    crate::source::grayf32_to(&binned, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(rgba, ref_rgba, "standalone rgba");
 }
@@ -315,7 +315,7 @@ fn grayf16_identity_plan_matches_new_sink() {
     let mut sink = MixedSinker::<Grayf16>::new(SRC, SRC)
       .with_rgb_f32(&mut direct)
       .unwrap();
-    grayf16_to(&src, FR, M, &mut sink).unwrap();
+    grayf16_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   let mut via_area = vec![0.0f32; SRC * SRC * 3];
   {
@@ -324,7 +324,7 @@ fn grayf16_identity_plan_matches_new_sink() {
         .unwrap()
         .with_rgb_f32(&mut via_area)
         .unwrap();
-    grayf16_to(&src, FR, M, &mut sink).unwrap();
+    grayf16_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(direct, via_area, "identity plan must match the direct sink");
 }
@@ -341,7 +341,7 @@ fn grayf16_resample_no_outputs_is_a_no_op() {
   let mut sink =
     MixedSinker::<Grayf16, AreaResampler>::with_resampler(SRC, SRC, AreaResampler::to(OUT, OUT))
       .unwrap();
-  grayf16_to(&src, FR, M, &mut sink).unwrap();
+  grayf16_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
   assert!(
     !sink.luma_stream_f32_allocated(),
     "no-output sink allocated an f32 luma stream"
@@ -365,7 +365,9 @@ fn grayf16_out_of_sequence_first_row_rejected_before_allocation() {
       .with_luma_f32(&mut luma_f32)
       .unwrap();
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
-  let err = sink.process(Grayf16Row::new(row3, 3, M, FR)).unwrap_err();
+  let err = sink
+    .process(Grayf16Row::for_tests(row3, 3, M, FR))
+    .unwrap_err();
   assert!(
     matches!(
       err,
@@ -411,15 +413,13 @@ fn grayf16_resample_reuses_luma_stream_across_frames() {
     grayf16_to(
       &Grayf16Frame::new(&pix1, SRC as u32, SRC as u32, SRC as u32),
       FR,
-      M,
-      &mut sink,
+      sink.set_kernel_matrix(M),
     )
     .unwrap();
     grayf16_to(
       &Grayf16Frame::new(&pix2, SRC as u32, SRC as u32, SRC as u32),
       FR,
-      M,
-      &mut sink,
+      sink.set_kernel_matrix(M),
     )
     .unwrap();
   }
@@ -447,11 +447,11 @@ fn grayf16_resample_rejects_mid_frame_output_change() {
       .unwrap();
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   sink
-    .process(Grayf16Row::new(&pix[..SRC], 0, M, FR))
+    .process(Grayf16Row::for_tests(&pix[..SRC], 0, M, FR))
     .unwrap();
   sink.set_luma_f32(&mut luma_f32).unwrap();
   let err = sink
-    .process(Grayf16Row::new(&pix[SRC..2 * SRC], 1, M, FR))
+    .process(Grayf16Row::for_tests(&pix[SRC..2 * SRC], 1, M, FR))
     .unwrap_err();
   assert!(
     matches!(err, MixedSinkerError::ResampleOutputsChanged(_)),

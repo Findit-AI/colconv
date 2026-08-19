@@ -13,7 +13,7 @@
 //! and `ChromaDerivedNcl` staying internally consistent across the two paths.
 
 use super::*;
-use crate::ChromaLocation;
+use crate::{ChromaLocation, ColorMatrix};
 
 const W: u32 = 16;
 const H: u32 = 8;
@@ -79,9 +79,9 @@ fn convert_rgb(loc: ChromaLocation, simd: bool) -> Vec<u8> {
   let mut sink = MixedSinker::<Yuv422p>::new(W as usize, H as usize)
     .with_rgb(&mut rgb)
     .unwrap()
-    .with_chroma_location(loc)
+    .with_chroma_location(loc.clone())
     .with_simd(simd);
-  yuv422p_to(&src, false, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuv422p_to(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   rgb
 }
 
@@ -109,13 +109,13 @@ fn default_and_cosited_sitings_are_byte_identical() {
   let baseline = convert_rgb(ChromaLocation::Unspecified, true);
   for loc in [
     ChromaLocation::Unspecified,
-    ChromaLocation::Unknown(99),
+    ChromaLocation::other("unassigned-99"),
     ChromaLocation::Left,
     ChromaLocation::TopLeft,
     ChromaLocation::BottomLeft,
   ] {
     assert_eq!(
-      convert_rgb(loc, true),
+      convert_rgb(loc.clone(), true),
       baseline,
       "siting {loc:?} must keep the byte-identical default decode"
     );
@@ -135,7 +135,7 @@ fn default_path_does_not_allocate_chroma_scratch() {
     .with_rgb(&mut rgb)
     .unwrap()
     .with_chroma_location(ChromaLocation::Left);
-  yuv422p_to(&src, false, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuv422p_to(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   let chroma_len = sink.chroma_full.len();
   drop(sink);
   assert_eq!(
@@ -159,7 +159,7 @@ fn center_grows_chroma_scratch_to_full_width() {
     .with_rgb(&mut rgb)
     .unwrap()
     .with_chroma_location(ChromaLocation::Center);
-  yuv422p_to(&src, false, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuv422p_to(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   let chroma_len = sink.chroma_full.len();
   drop(sink);
   assert_eq!(
@@ -185,7 +185,12 @@ fn center_rgb_matches_upsample_then_444_reference() {
   let mut ref_sink = MixedSinker::<Yuv444p>::new(W as usize, H as usize)
     .with_rgb(&mut rgb_ref)
     .unwrap();
-  yuv444p_to(&ref_src, false, ColorMatrix::Bt601, &mut ref_sink).unwrap();
+  yuv444p_to(
+    &ref_src,
+    false,
+    ref_sink.set_kernel_matrix(KernelMatrix::Bt601),
+  )
+  .unwrap();
 
   assert_eq!(
     convert_rgb(ChromaLocation::Center, true),
@@ -262,14 +267,19 @@ fn center_rgba_and_hsv_match_444_reference() {
       .with_rgba(&mut rgba)
       .unwrap()
       .with_chroma_location(ChromaLocation::Center);
-    yuv422p_to(&src, false, ColorMatrix::Bt601, &mut sink).unwrap();
+    yuv422p_to(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
 
     let ref_src = Yuv444pFrame::new(&yp, &u444, &v444, W, H, W, W, W);
     let mut rgba_ref = std::vec![0u8; (W * H * 4) as usize];
     let mut ref_sink = MixedSinker::<Yuv444p>::new(W as usize, H as usize)
       .with_rgba(&mut rgba_ref)
       .unwrap();
-    yuv444p_to(&ref_src, false, ColorMatrix::Bt601, &mut ref_sink).unwrap();
+    yuv444p_to(
+      &ref_src,
+      false,
+      ref_sink.set_kernel_matrix(KernelMatrix::Bt601),
+    )
+    .unwrap();
     assert_eq!(
       rgba, rgba_ref,
       "centered RGBA must equal upsample-then-4:4:4"
@@ -288,7 +298,7 @@ fn center_rgba_and_hsv_match_444_reference() {
       .with_hsv(&mut h, &mut s, &mut v)
       .unwrap()
       .with_chroma_location(ChromaLocation::Center);
-    yuv422p_to(&src, false, ColorMatrix::Bt601, &mut sink).unwrap();
+    yuv422p_to(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
 
     let ref_src = Yuv444pFrame::new(&yp, &u444, &v444, W, H, W, W, W);
     let (mut hr, mut sr, mut vr) = (
@@ -299,7 +309,12 @@ fn center_rgba_and_hsv_match_444_reference() {
     let mut ref_sink = MixedSinker::<Yuv444p>::new(W as usize, H as usize)
       .with_hsv(&mut hr, &mut sr, &mut vr)
       .unwrap();
-    yuv444p_to(&ref_src, false, ColorMatrix::Bt601, &mut ref_sink).unwrap();
+    yuv444p_to(
+      &ref_src,
+      false,
+      ref_sink.set_kernel_matrix(KernelMatrix::Bt601),
+    )
+    .unwrap();
     assert_eq!(
       (h, s, v),
       (hr, sr, vr),
@@ -333,7 +348,7 @@ fn centered_alloc_failure_leaves_outputs_untouched() {
     .with_chroma_location(ChromaLocation::Center);
 
   super::super::arm_chroma_full_alloc_failure();
-  let err = yuv422p_to(&src, false, ColorMatrix::Bt601, &mut sink).unwrap_err();
+  let err = yuv422p_to(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap_err();
   drop(sink);
 
   assert!(
@@ -368,7 +383,7 @@ fn no_output_row_does_not_allocate_chroma_scratch() {
   let src = Yuv422pFrame::new(&yp, &up, &vp, W, H, W, W / 2, W / 2);
   let mut sink = MixedSinker::<Yuv422p>::new(W as usize, H as usize)
     .with_chroma_location(ChromaLocation::Center);
-  yuv422p_to(&src, false, ColorMatrix::Bt601, &mut sink).unwrap();
+  yuv422p_to(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt601)).unwrap();
   let chroma_len = sink.chroma_full.len();
   drop(sink);
   assert_eq!(
@@ -402,7 +417,7 @@ fn no_output_row_large_geometry_does_not_overflow() {
   let y = std::vec![128u8; w];
   let c = std::vec![128u8; w / 2];
   let mut sink = MixedSinker::<Yuv422p>::new(w, h).with_chroma_location(ChromaLocation::Center);
-  let row = Yuv422pRow::new(&y, &c, &c, idx, ColorMatrix::Bt601, false);
+  let row = Yuv422pRow::for_tests(&y, &c, &c, idx, KernelMatrix::Bt601, false);
   crate::PixelSink::process(&mut sink, row).unwrap();
   let chroma_len = sink.chroma_full.len();
   drop(sink);
@@ -447,8 +462,14 @@ fn centered_chroma_derived_ncl_consistent_with_default() {
     let mut sink = MixedSinker::<Yuv422p>::new(W as usize, H as usize)
       .with_rgb(&mut rgb)
       .unwrap()
-      .with_color_spec(spec(loc));
-    yuv422p_to(&src, false, ColorMatrix::ChromaDerivedNcl, &mut sink).unwrap();
+      .with_color_spec(&spec(loc))
+      .unwrap();
+    yuv422p_to(
+      &src,
+      false,
+      sink.set_kernel_matrix(KernelMatrix::ChromaDerivedNcl),
+    )
+    .unwrap();
     rgb
   };
   let decode_bt709 = |loc: ChromaLocation| -> Vec<u8> {
@@ -457,8 +478,8 @@ fn centered_chroma_derived_ncl_consistent_with_default() {
     let mut sink = MixedSinker::<Yuv422p>::new(W as usize, H as usize)
       .with_rgb(&mut rgb)
       .unwrap()
-      .with_chroma_location(loc);
-    yuv422p_to(&src, false, ColorMatrix::Bt709, &mut sink).unwrap();
+      .with_chroma_location(loc.clone());
+    yuv422p_to(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
     rgb
   };
 
@@ -505,32 +526,32 @@ fn direct_path_mid_frame_siting_flip_is_rejected() {
     (ChromaLocation::Left, ChromaLocation::Center),
     (ChromaLocation::Center, ChromaLocation::Left),
   ] {
-    let want = convert_rgb(loc1, true);
+    let want = convert_rgb(loc1.clone(), true);
     let mut rgb = std::vec![0u8; w * h * 3];
     let mut sink = MixedSinker::<Yuv422p>::new(w, h)
       .with_rgb(&mut rgb)
       .unwrap()
-      .with_chroma_location(loc1)
+      .with_chroma_location(loc1.clone())
       .with_simd(true);
     crate::PixelSink::begin_frame(&mut sink, W, H).unwrap();
-    let row0 = Yuv422pRow::new(
+    let row0 = Yuv422pRow::for_tests(
       &yp[0..w],
       &up[0..cw],
       &vp[0..cw],
       0,
-      ColorMatrix::Bt601,
+      KernelMatrix::Bt601,
       false,
     );
     crate::PixelSink::process(&mut sink, row0).unwrap();
     let scratch_len = sink.chroma_full.len();
 
-    sink.set_chroma_location(loc2);
-    let row1 = Yuv422pRow::new(
+    sink.set_chroma_location(loc2.clone());
+    let row1 = Yuv422pRow::for_tests(
       &yp[w..2 * w],
       &up[cw..2 * cw],
       &vp[cw..2 * cw],
       1,
-      ColorMatrix::Bt601,
+      KernelMatrix::Bt601,
       false,
     );
     let err = crate::PixelSink::process(&mut sink, row1).unwrap_err();
@@ -546,14 +567,14 @@ fn direct_path_mid_frame_siting_flip_is_rejected() {
 
     // Flip back and drive the rest of the frame in order; the retried row 1 and the
     // remaining rows must reconstruct exactly as a clean single-phase decode.
-    sink.set_chroma_location(loc1);
+    sink.set_chroma_location(loc1.clone());
     for r in 1..h {
-      let row = Yuv422pRow::new(
+      let row = Yuv422pRow::for_tests(
         &yp[r * w..(r + 1) * w],
         &up[r * cw..(r + 1) * cw],
         &vp[r * cw..(r + 1) * cw],
         r,
-        ColorMatrix::Bt601,
+        KernelMatrix::Bt601,
         false,
       );
       crate::PixelSink::process(&mut sink, row).unwrap();

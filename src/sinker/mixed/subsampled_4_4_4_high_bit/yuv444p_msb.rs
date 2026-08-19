@@ -19,7 +19,7 @@ use super::super::{
   rgb_row_buf_or_scratch, rgba_plane_row_slice, rgba_u16_plane_row_slice,
 };
 use crate::{
-  ColorMatrix, PixelSink,
+  KernelMatrix, PixelSink,
   resample::{
     AveragingDomain, InsertionContext, InsertionPoint, ResamplePlan, select_insertion_point,
   },
@@ -110,7 +110,7 @@ fn yuv444p_msb_process_native<const BITS: u32, const BE: bool>(
   y_row: &[u16],
   u_row: &[u16],
   v_row: &[u16],
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   idx: usize,
   w: usize,
@@ -282,6 +282,10 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv444p10Msb<BE>, R> {
   type Input<'r> = Yuv444p10MsbRow<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     check_dimensions_match(self.width, self.height, width, height)?;
     reset_high_bit_yuv_streams(self);
@@ -772,6 +776,10 @@ impl<R, const BE: bool> PixelSink for MixedSinker<'_, Yuv444p12Msb<BE>, R> {
   type Input<'r> = Yuv444p12MsbRow<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     check_dimensions_match(self.width, self.height, width, height)?;
     reset_high_bit_yuv_streams(self);

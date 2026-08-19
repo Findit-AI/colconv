@@ -46,7 +46,7 @@
 //! the `gray`-solo build.
 
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   frame::Ya8Frame,
   resample::{
     CatmullRom, FilterKernel, FilterStream, FilteredResampler, Lanczos3, ResampleError, Resampler,
@@ -56,7 +56,7 @@ use crate::{
   source::{Ya8, ya8_to},
 };
 
-const M: ColorMatrix = ColorMatrix::Bt709;
+const M: KernelMatrix = KernelMatrix::Bt709;
 const FR: bool = true;
 /// Limited (studio) range — exercises native-Y luma against the range-dependent
 /// `rgb_to_luma*` it must NOT use.
@@ -144,7 +144,7 @@ fn ya8_filter_outputs<K: FilterKernel + Copy>(
     .unwrap()
     .with_luma_u16(&mut luma_u16)
     .unwrap();
-    ya8_to(&src, full_range, M, &mut sink).unwrap();
+    ya8_to(&src, full_range, sink.set_kernel_matrix(M)).unwrap();
   }
   FilterOutputs {
     rgb,
@@ -351,7 +351,7 @@ fn area_luma(
         .unwrap()
         .with_luma(&mut luma)
         .unwrap();
-    ya8_to(&src, full_range, M, &mut sink).unwrap();
+    ya8_to(&src, full_range, sink.set_kernel_matrix(M)).unwrap();
   }
   luma
 }
@@ -428,7 +428,7 @@ fn luma_filter_equals_gray8() {
               .unwrap()
               .with_luma_u16(&mut g_lu16)
               .unwrap();
-            gray8_to(&gsrc, FR, M, &mut sink).unwrap();
+            gray8_to(&gsrc, FR, sink.set_kernel_matrix(M)).unwrap();
           }};
         }
         match kernel_tag {
@@ -473,7 +473,7 @@ fn premultiplied_filter_is_unsupported() {
   .with_alpha_mode(AlphaMode::Premultiplied)
   .with_rgba(&mut rgba)
   .unwrap();
-  let err = ya8_to(&src, FR, M, &mut sink).unwrap_err();
+  let err = ya8_to(&src, FR, sink.set_kernel_matrix(M)).unwrap_err();
   assert!(
     matches!(
       err,
@@ -540,7 +540,7 @@ mod packed_rgba_equivalence {
       .unwrap()
       .with_rgba(&mut out)
       .unwrap();
-      rgba_to(&src, FR, M, &mut sink).unwrap();
+      rgba_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     }
     out
   }
@@ -566,7 +566,7 @@ mod packed_rgba_equivalence {
       .unwrap()
       .with_rgba_u16(&mut out)
       .unwrap();
-      rgba64_to(&src, FR, M, &mut sink).unwrap();
+      rgba64_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
     }
     out
   }

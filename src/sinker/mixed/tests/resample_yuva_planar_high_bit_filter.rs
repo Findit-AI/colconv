@@ -37,14 +37,14 @@
 //! 16-bit format has no over-native-max overshoot to clip.
 
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   resample::{
     CatmullRom, FilterKernel, FilterStream, FilteredResampler, Lanczos3, Resampler, Triangle,
   },
   sinker::{AlphaMode, MixedSinker},
 };
 
-const M: ColorMatrix = ColorMatrix::Bt709;
+const M: KernelMatrix = KernelMatrix::Bt709;
 const FR: bool = true;
 const SRC: usize = 8;
 const OUT: usize = 4;
@@ -119,7 +119,7 @@ fn rgba64_filter_rgba_u16<K: FilterKernel>(
     .unwrap()
     .with_rgba_u16(&mut out)
     .unwrap();
-    rgba64_to(&src, FR, M, &mut sink).unwrap();
+    rgba64_to(&src, FR, sink.set_kernel_matrix(M)).unwrap();
   }
   out
 }
@@ -247,7 +247,7 @@ macro_rules! planar_yuva_hb_filter_suite {
           .unwrap()
           .with_luma_u16(&mut luma_u16)
           .unwrap();
-          $walker(&frame(y, u, v, a), FR, M, &mut sink).unwrap();
+          $walker(&frame(y, u, v, a), FR, sink.set_kernel_matrix(M)).unwrap();
         }
         FilterOutputs {
           rgb,
@@ -372,7 +372,7 @@ macro_rules! planar_yuva_hb_filter_suite {
         .with_alpha_mode(AlphaMode::Premultiplied)
         .with_rgba_u16(&mut rgba_u16)
         .unwrap();
-        let err = $walker(&frame(&y, &u, &v, &a), FR, M, &mut sink).unwrap_err();
+        let err = $walker(&frame(&y, &u, &v, &a), FR, sink.set_kernel_matrix(M)).unwrap_err();
         assert!(
           matches!(
             err,
@@ -533,7 +533,7 @@ macro_rules! planar_yuva_hb_filter_suite {
           let mut sink = MixedSinker::<$marker>::new(SRC, SRC)
             .with_rgba_u16(&mut rgba)
             .unwrap();
-          $walker(&frame(y, u, v, a), FR, M, &mut sink).unwrap();
+          $walker(&frame(y, u, v, a), FR, sink.set_kernel_matrix(M)).unwrap();
         }
         rgba
       }

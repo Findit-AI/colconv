@@ -42,7 +42,7 @@ fn rgbf16_with_rgb_clamps_to_u8() {
   let mut sink = MixedSinker::<Rgbf16>::new(16, 4)
     .with_rgb(&mut rgb_out)
     .unwrap();
-  rgbf16_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  rgbf16_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   for px in rgb_out.chunks(3) {
     assert_eq!(px, [255, 255, 0]);
@@ -68,7 +68,7 @@ fn rgbf16_with_rgb_u16_clamps_to_u16() {
   let mut sink = MixedSinker::<Rgbf16>::new(16, 4)
     .with_rgb_u16(&mut rgb_out)
     .unwrap();
-  rgbf16_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  rgbf16_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   // 0.5 * 65535 ≈ 32767 or 32768 (half-precision rounds 0.5 to exact 0.5,
   // so downstream is the same as Rgbf32); 1.0 → 65535; 1.5 → 65535 (clamp).
@@ -102,7 +102,7 @@ fn rgbf16_with_rgb_f16_is_lossless() {
   let mut sink = MixedSinker::<Rgbf16>::new(16, 4)
     .with_rgb_f16(&mut rgb_out)
     .unwrap();
-  rgbf16_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  rgbf16_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   // Bit-exact equality (no rounding, no clamping in the f16 path).
   assert_eq!(rgb_out, pix);
@@ -126,7 +126,7 @@ fn rgbf16_with_rgb_f32_widens_losslessly() {
   let mut sink = MixedSinker::<Rgbf16>::new(16, 4)
     .with_rgb_f32(&mut rgb_out)
     .unwrap();
-  rgbf16_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  rgbf16_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   // Each widened f32 must equal the f16 widened via to_f32.
   let expected: std::vec::Vec<f32> = pix.iter().map(|h| h.to_f32()).collect();
@@ -153,7 +153,7 @@ fn rgbf16_with_luma_u8() {
   let mut sink = MixedSinker::<Rgbf16>::new(16, 4)
     .with_luma(&mut luma_out)
     .unwrap();
-  rgbf16_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  rgbf16_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   for &y in &luma_out {
     assert_eq!(y, 255);
@@ -179,7 +179,7 @@ fn rgbf16_with_luma_u16() {
   let mut sink = MixedSinker::<Rgbf16>::new(16, 4)
     .with_luma_u16(&mut luma_out)
     .unwrap();
-  rgbf16_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  rgbf16_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   // u8 luma 255 → u16 255 (zero-extended).
   for &y in &luma_out {
@@ -210,7 +210,7 @@ fn rgbf16_with_hsv() {
   let mut sink = MixedSinker::<Rgbf16>::new(16, 4)
     .with_hsv(&mut h_out, &mut s_out, &mut v_out)
     .unwrap();
-  rgbf16_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  rgbf16_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   for i in 0..n {
     assert_eq!(h_out[i], 0);
@@ -278,7 +278,7 @@ fn rgbf16_simd_matches_scalar_with_random_input() {
     .unwrap()
     .with_luma_u16(&mut luma_u16_simd)
     .unwrap();
-  rgbf16_to(&src, true, ColorMatrix::Bt709, &mut s_simd).unwrap();
+  rgbf16_to(&src, true, s_simd.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   let mut s_scalar = MixedSinker::<Rgbf16>::new(w, h)
     .with_rgb(&mut rgb_scalar)
@@ -298,7 +298,7 @@ fn rgbf16_simd_matches_scalar_with_random_input() {
     .with_luma_u16(&mut luma_u16_scalar)
     .unwrap();
   s_scalar.set_simd(false);
-  rgbf16_to(&src, true, ColorMatrix::Bt709, &mut s_scalar).unwrap();
+  rgbf16_to(&src, true, s_scalar.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   assert_eq!(rgb_simd, rgb_scalar, "RGB output diverges");
   assert_eq!(rgba_simd, rgba_scalar, "RGBA output diverges");
@@ -359,7 +359,7 @@ fn rgbf16_sinker_le_encoded_frame_decodes_correctly() {
     .with_simd(false)
     .with_rgb_f16(&mut rgb_f16_out)
     .unwrap();
-  rgbf16_to(&src, true, ColorMatrix::Bt709, &mut sink).unwrap();
+  rgbf16_to(&src, true, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
 
   assert_eq!(
     rgb_f16_out, intended,
@@ -418,7 +418,12 @@ fn rgbf16_le_be_roundtrip_byte_identical() {
     .with_simd(false)
     .with_rgb_f16(&mut out_le)
     .unwrap();
-  rgbf16_to(&frame_le, true, ColorMatrix::Bt709, &mut sink_le).unwrap();
+  rgbf16_to(
+    &frame_le,
+    true,
+    sink_le.set_kernel_matrix(KernelMatrix::Bt709),
+  )
+  .unwrap();
 
   // BE path — explicit `Rgbf16<true>` monomorphization.
   let frame_be = Rgbf16BeFrame::try_new(&pix_be, 16, 4, 16 * 3).unwrap();
@@ -427,7 +432,12 @@ fn rgbf16_le_be_roundtrip_byte_identical() {
     .with_simd(false)
     .with_rgb_f16(&mut out_be)
     .unwrap();
-  rgbf16_to_endian(&frame_be, true, ColorMatrix::Bt709, &mut sink_be).unwrap();
+  rgbf16_to_endian(
+    &frame_be,
+    true,
+    sink_be.set_kernel_matrix(KernelMatrix::Bt709),
+  )
+  .unwrap();
 
   // Both outputs must equal the intended host-native values bit-for-bit.
   assert_eq!(

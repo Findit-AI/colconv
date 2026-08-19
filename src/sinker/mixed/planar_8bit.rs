@@ -11,7 +11,7 @@ use super::{
   reconstruct_chroma, rgb_row_buf_or_scratch, rgba_plane_row_slice, st428_chroma_derived_guard,
 };
 use crate::{
-  ColorMatrix, PixelSink,
+  KernelMatrix, PixelSink,
   resample::{
     AreaStream, AveragingDomain, FilterStream, InsertionContext, InsertionPoint, OutOfSequenceRow,
     PlanGeometry, ResampleError, ResamplePlan, select_insertion_point, try_zeroed,
@@ -578,8 +578,8 @@ fn yuv444_identity_color_row(
   one_plane_end: usize,
   w: usize,
   h: usize,
-  matrix: crate::ColorMatrix,
-  primaries: crate::Primaries,
+  matrix: crate::KernelMatrix,
+  primaries: &crate::Primaries,
   full_range: bool,
   use_simd: bool,
 ) -> Result<(), MixedSinkerError> {
@@ -676,7 +676,7 @@ fn yuv440_identity_color_row(
   one_plane_end: usize,
   w: usize,
   h: usize,
-  matrix: crate::ColorMatrix,
+  matrix: crate::KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) -> Result<(), MixedSinkerError> {
@@ -822,6 +822,10 @@ impl<R> PixelSink for MixedSinker<'_, Yuv420p, R> {
   type Input<'r> = Yuv420pRow<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     // Reject odd-width sinkers up front — the underlying row
     // primitives assume `width & 1 == 0` and would panic on the
@@ -905,11 +909,11 @@ impl<R> PixelSink for MixedSinker<'_, Yuv420p, R> {
     let use_simd = self.simd;
     // Chroma siting (#302): drives the identity-plan horizontal chroma
     // phase. `Copy`, so read it out before the field split-borrow below.
-    let chroma_location = self.chroma_location;
+    let chroma_location = self.chroma_location.clone();
     // Source primaries (#303): the `ChromaDerivedNcl` decode derives its
     // Kr/Kb from these. `Copy`, read before the split-borrow; consumed by the
     // identity-plan RGB / RGBA path (non-`ChromaDerivedNcl` matrices ignore it).
-    let primaries = self.primaries;
+    let primaries = self.primaries.clone();
     // ST 428-1 interpretation (#310): decides whether a `ChromaDerivedNcl` decode
     // over CIE-XYZ `SmpteSt428` primaries is rejected. `Copy`, read before the
     // split-borrow; frozen with a deferred `Top` odd row so its later flush runs
@@ -967,7 +971,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuv420p, R> {
     // is CIE XYZ, so deriving YCbCr weights from its tabulated primaries is
     // meaningless. The default `FfmpegTabulated` mode always returns `Ok`, so
     // the derivation below stays byte-identical to the pre-#310 behaviour.
-    st428_chroma_derived_guard(row.matrix(), primaries, self.st428_interpretation)
+    st428_chroma_derived_guard(row.matrix(), &primaries, self.st428_interpretation)
       .map_err(MixedSinkerError::St428CieXyzUnsupported)?;
 
     // Split-borrow so the `rgb_scratch` path and the `hsv` write don't
@@ -1046,8 +1050,8 @@ impl<R> PixelSink for MixedSinker<'_, Yuv420p, R> {
       // RGB-domain reconstruction tiers box-blend the even output row's chroma
       // with the previous chroma row via the `chroma_prev` lookback. `Center` /
       // `Top` keep `v_phase = 0` (co-sited vertical, byte-identical to S3a).
-      let center_sited = chroma_420_center_sited_h(chroma_location);
-      let bottom_v = chroma_420_bottom_sited_v(chroma_location);
+      let center_sited = chroma_420_center_sited_h(&chroma_location);
+      let bottom_v = chroma_420_bottom_sited_v(&chroma_location);
       // RFC #238 Top (`v = 0`, FORWARD fold). `Top` shares `Center`'s centered
       // horizontal phase, `TopLeft` the co-sited one; both fold the forward
       // vertical triangle. Disjoint from `bottom_v` (a chroma sample cannot be
@@ -1055,7 +1059,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuv420p, R> {
       // it into `area_chroma_420`'s vertical weights via `v_top`; the RGB-domain
       // reconstruction tiers reconstruct each row's chroma through a FORWARD
       // one-row delay (mirror of `Bottom`'s backward `chroma_prev` lookback).
-      let top_v = chroma_420_top_sited_v(chroma_location);
+      let top_v = chroma_420_top_sited_v(&chroma_location);
       let chroma_h_phase = if center_sited {
         YUV422P_CENTERED_H_PHASE
       } else {
@@ -1128,7 +1132,8 @@ impl<R> PixelSink for MixedSinker<'_, Yuv420p, R> {
         AveragingDomain::Linear => {
           #[cfg(feature = "rgb")]
           {
-            let tf = transfer_function.unwrap_or_else(|| TransferFunction::for_matrix(matrix));
+            let tf = transfer_function
+              .unwrap_or_else(|| TransferFunction::for_matrix(&crate::ColorMatrix::from(matrix)));
             // RFC #238 Top (`v = 0`) FORWARD one-row delay for the linear-light
             // reconstruction tier — the structure of the row-stage / filter delays,
             // adapted to the linear accumulator (which decodes each source row into
@@ -2539,12 +2544,12 @@ impl<R> PixelSink for MixedSinker<'_, Yuv420p, R> {
     // Chroma siting (#302): the centered horizontal sitings reconstruct
     // chroma at the phase-0.5 position; the default / co-sited path keeps the
     // byte-identical nearest-neighbor decode.
-    let center_sited = chroma_420_center_sited_h(chroma_location);
+    let center_sited = chroma_420_center_sited_h(&chroma_location);
     // Bottom-sited vertical phase (#302): `ChromaLocation::Bottom` (a strict
     // sub-case of `center_sited`, so it always rides the centered staging below)
     // additionally box-blends the EVEN output row's chroma with the PREVIOUS
     // chroma row (a backward one-row lookback).
-    let bottom_v = chroma_420_bottom_sited_v(chroma_location);
+    let bottom_v = chroma_420_bottom_sited_v(&chroma_location);
     // Top-sited vertical phase (RFC #238): `Top` / `TopLeft` (`v = 0`) box-blend
     // the ODD output row's chroma with the NEXT chroma row — which a row-at-a-time
     // stream has not been fed when the odd row arrives — so the identity colour
@@ -2552,7 +2557,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuv420p, R> {
     // (`chroma_top_pending` / `chroma_top_y`) and emits it once the following even
     // row supplies the next chroma. Handled in its own branch below; the luma
     // planes are siting-independent and written in order regardless.
-    let top_v = chroma_420_top_sited_v(chroma_location);
+    let top_v = chroma_420_top_sited_v(&chroma_location);
 
     // RFC #238 Top: freeze the effective 4:2:0 chroma siting on the direct
     // (identity) path too, mirroring the resample tiers' choke-point CHECK above
@@ -2712,8 +2717,9 @@ impl<R> PixelSink for MixedSinker<'_, Yuv420p, R> {
         // writing any colour, so the forward-delay decode is guarded exactly like
         // the in-order path and a rejected flush stays retry-atomic (#180).
         let (frozen_primaries, frozen_interp) = chroma_top_st428
+          .clone()
           .expect("Top forward-delay freezes ST 428 colorimetry with chroma_top_pending");
-        st428_chroma_derived_guard(p_matrix, frozen_primaries, frozen_interp)
+        st428_chroma_derived_guard(p_matrix, &frozen_primaries, frozen_interp)
           .map_err(MixedSinkerError::St428CieXyzUnsupported)?;
         *chroma_top_pending = None;
         *chroma_top_st428 = None;
@@ -2743,7 +2749,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuv420p, R> {
           w,
           h,
           p_matrix,
-          frozen_primaries,
+          &frozen_primaries,
           p_full_range,
           use_simd,
         )?;
@@ -2786,7 +2792,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuv420p, R> {
           w,
           h,
           row.matrix(),
-          primaries,
+          &primaries,
           row.full_range(),
           use_simd,
         )?;
@@ -2883,7 +2889,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuv420p, R> {
           rgba_row,
           w,
           row.matrix(),
-          primaries,
+          &primaries,
           row.full_range(),
           use_simd,
         );
@@ -2895,7 +2901,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuv420p, R> {
           rgba_row,
           w,
           row.matrix(),
-          primaries,
+          &primaries,
           row.full_range(),
           use_simd,
         );
@@ -2953,7 +2959,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuv420p, R> {
         rgb_row,
         w,
         row.matrix(),
-        primaries,
+        &primaries,
         row.full_range(),
         use_simd,
       );
@@ -2965,7 +2971,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuv420p, R> {
         rgb_row,
         w,
         row.matrix(),
-        primaries,
+        &primaries,
         row.full_range(),
         use_simd,
       );
@@ -3378,7 +3384,7 @@ pub(super) fn yuv420p_process_native(
   y_row: &[u8],
   u_half: &[u8],
   v_half: &[u8],
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   idx: usize,
   w: usize,
@@ -3799,7 +3805,7 @@ pub(super) fn bicublin_yuv420p_resample(
   y_row: &[u8],
   u_half: &[u8],
   v_half: &[u8],
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   idx: usize,
   w: usize,
@@ -4092,7 +4098,7 @@ pub(super) fn yuv420p_process_resampled(
   y_row: &[u8],
   u_half: &[u8],
   v_half: &[u8],
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   idx: usize,
   w: usize,
@@ -4497,7 +4503,7 @@ pub(super) fn yuva420p_process_native(
   u_half: &[u8],
   v_half: &[u8],
   a_row: &[u8],
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   idx: usize,
   w: usize,
@@ -5137,7 +5143,7 @@ pub(super) fn yuv_planar_process_native(
   y_row: &[u8],
   u_row: &[u8],
   v_row: &[u8],
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   idx: usize,
   w: usize,
@@ -5444,6 +5450,10 @@ impl<R> PixelSink for MixedSinker<'_, Yuv410p, R> {
   type Input<'r> = Yuv410pRow<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     // Yuv410p requires width to be a multiple of 4 (the row kernels
     // operate on 4-pixel chroma groups). Height is unconstrained — the
@@ -5488,7 +5498,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuv410p, R> {
     let use_simd = self.simd;
     // Chroma siting (#302): drives the horizontal chroma phase. `Copy`, so read
     // it out before the field split-borrow below.
-    let chroma_location = self.chroma_location;
+    let chroma_location = self.chroma_location.clone();
 
     // Defense in depth — see Yuv420p impl.
     if w & 3 != 0 {
@@ -5565,7 +5575,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuv410p, R> {
     if let Some(plan) = plan.as_ref() {
       let matrix = row.matrix();
       let full_range = row.full_range();
-      let center_sited = chroma_410_center_sited_h(chroma_location);
+      let center_sited = chroma_410_center_sited_h(&chroma_location);
       let chroma_h_phase = if center_sited {
         YUV41X_CENTERED_H_PHASE
       } else {
@@ -5805,7 +5815,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuv410p, R> {
     // default / co-sited path keeps the byte-identical nearest decode. This PR
     // sites 4:1:0 horizontally only — the vertical chroma replication is
     // unchanged.
-    let center_sited = chroma_410_center_sited_h(chroma_location);
+    let center_sited = chroma_410_center_sited_h(&chroma_location);
 
     // RFC #238 #302: mirror the resample branch's per-frame siting freeze on the
     // identity path. `chroma_location` is public and `Copy`, so a caller can flip
@@ -6088,6 +6098,10 @@ impl<R> PixelSink for MixedSinker<'_, Yuv422p, R> {
   type Input<'r> = Yuv422pRow<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     if self.width & 1 != 0 {
       return Err(MixedSinkerError::WidthAlignment(WidthAlignment::odd(
@@ -6138,7 +6152,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuv422p, R> {
     let use_simd = self.simd;
     // Chroma siting (#302): drives the identity-plan horizontal chroma phase.
     // `Copy`, so read it out before the field split-borrow below.
-    let chroma_location = self.chroma_location;
+    let chroma_location = self.chroma_location.clone();
 
     if w & 1 != 0 {
       return Err(MixedSinkerError::WidthAlignment(WidthAlignment::odd(w)));
@@ -6226,7 +6240,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuv422p, R> {
       // so the native fast tier and the encoded HSV-only arm fold the phase
       // into the chroma area weights (`area_chroma_422`), while the RGB-domain
       // converters reconstruct full-width chroma here.
-      let center_sited = chroma_422_center_sited_h(chroma_location);
+      let center_sited = chroma_422_center_sited_h(&chroma_location);
       let chroma_h_phase = if center_sited {
         YUV422P_CENTERED_H_PHASE
       } else {
@@ -6319,7 +6333,8 @@ impl<R> PixelSink for MixedSinker<'_, Yuv422p, R> {
         AveragingDomain::Linear => {
           #[cfg(feature = "rgb")]
           {
-            let tf = transfer_function.unwrap_or_else(|| TransferFunction::for_matrix(matrix));
+            let tf = transfer_function
+              .unwrap_or_else(|| TransferFunction::for_matrix(&crate::ColorMatrix::from(matrix)));
             // Dispatch first; commit the domain freeze to Linear ONLY when the
             // tail accepts an output-bearing row (`r.is_ok() && need_output`).
             // A no-output call returns Ok without consuming; a filter /
@@ -6918,7 +6933,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuv422p, R> {
     // co-sited path keeps the byte-identical nearest-neighbor decode. 4:2:2 is
     // subsampled horizontally only — there is no vertical blend or chroma
     // lookback (cf. the Yuv420p `Bottom` path).
-    let center_sited = chroma_422_center_sited_h(chroma_location);
+    let center_sited = chroma_422_center_sited_h(&chroma_location);
 
     // Per-frame chroma-siting freeze (RFC #238, mirroring the resample-path guard
     // above): the first output-bearing row pins the phase; a later row whose siting
@@ -7202,6 +7217,10 @@ impl<R> PixelSink for MixedSinker<'_, Yuv444p, R> {
   type Input<'r> = Yuv444pRow<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     check_dimensions_match(self.width, self.height, width, height)?;
     if let Some(stream) = self.rgb_stream.as_mut() {
@@ -7370,7 +7389,8 @@ impl<R> PixelSink for MixedSinker<'_, Yuv444p, R> {
         AveragingDomain::Linear => {
           #[cfg(feature = "rgb")]
           {
-            let tf = transfer_function.unwrap_or_else(|| TransferFunction::for_matrix(matrix));
+            let tf = transfer_function
+              .unwrap_or_else(|| TransferFunction::for_matrix(&crate::ColorMatrix::from(matrix)));
             // Dispatch first; commit the domain freeze to Linear ONLY when the
             // tail accepts an output-bearing row (`r.is_ok() && need_output`).
             // A no-output call returns Ok without consuming; a filter /
@@ -7748,6 +7768,10 @@ impl<R> PixelSink for MixedSinker<'_, Yuv440p, R> {
   type Input<'r> = Yuv440pRow<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     check_dimensions_match(self.width, self.height, width, height)?;
     if let Some(stream) = self.rgb_stream.as_mut() {
@@ -7810,7 +7834,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuv440p, R> {
     // Chroma siting (RFC #238 S8b): 4:4:0 carries only a VERTICAL phase
     // (full-width chroma → no horizontal siting). `Copy`, so read it out before
     // the field split-borrow below.
-    let chroma_location = self.chroma_location;
+    let chroma_location = self.chroma_location.clone();
 
     if row.y().len() != w {
       return Err(MixedSinkerError::RowShapeMismatch(RowShapeMismatch::new(
@@ -7911,7 +7935,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuv440p, R> {
       // AFTER the resample preflight, so a rejected / out-of-sequence row is
       // caught before that chroma reservation (the #180 reserve-after-preflight
       // invariant).
-      let bottom_v = chroma_440_bottom_sited_v(chroma_location);
+      let bottom_v = chroma_440_bottom_sited_v(&chroma_location);
       let chroma_v_phase = if bottom_v { 1.0 } else { 0.0 };
       // RFC #238 Top (`v = 0`, FORWARD fold) — `Top` / `TopLeft`. 4:4:0 has no
       // horizontal phase, so both share the identical full-width vertical box
@@ -7920,7 +7944,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuv440p, R> {
       // `area_chroma_440`'s vertical weights via `top_v`; the RGB-domain
       // reconstruction tiers reconstruct each row's chroma through a FORWARD
       // one-row delay (mirror of `Bottom`'s backward `chroma_prev` lookback).
-      let top_v = chroma_440_top_sited_v(chroma_location);
+      let top_v = chroma_440_top_sited_v(&chroma_location);
       let want_color = rgb.is_some() || rgba.is_some() || hsv.is_some();
       let convert_rgb = |scratch: &mut [u8]| {
         yuv_444_to_rgb_row(
@@ -8002,7 +8026,8 @@ impl<R> PixelSink for MixedSinker<'_, Yuv440p, R> {
         AveragingDomain::Linear => {
           #[cfg(feature = "rgb")]
           {
-            let tf = transfer_function.unwrap_or_else(|| TransferFunction::for_matrix(matrix));
+            let tf = transfer_function
+              .unwrap_or_else(|| TransferFunction::for_matrix(&crate::ColorMatrix::from(matrix)));
             // Dispatch first; commit the domain freeze to Linear ONLY when the
             // tail accepts an output-bearing row (`r.is_ok() && need_output`).
             // A no-output call returns Ok without consuming; a filter /
@@ -9197,7 +9222,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuv440p, R> {
     // row's full-width chroma with the previous chroma row; the default / Center
     // sitings keep the byte-identical co-sited decode. 4:4:0 has full-width
     // chroma, so there is no horizontal phase.
-    let bottom_v = chroma_440_bottom_sited_v(chroma_location);
+    let bottom_v = chroma_440_bottom_sited_v(&chroma_location);
     // Top-sited vertical phase (RFC #238): `Top` / `TopLeft` (`v = 0`) box-blend
     // the ODD output row's chroma with the NEXT chroma row — which a
     // row-at-a-time stream has not been fed when the odd row arrives — so the
@@ -9205,7 +9230,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuv440p, R> {
     // delay (`chroma_top_pending` / `chroma_top_y`) and emits it once the
     // following even row supplies the next chroma. Handled in its own branch
     // below; the luma planes are siting-independent and written in order.
-    let top_v = chroma_440_top_sited_v(chroma_location);
+    let top_v = chroma_440_top_sited_v(&chroma_location);
 
     // RFC #238: freeze the vertical chroma siting on the direct (identity) path
     // too. The resample branch above rejects a mid-frame vertical-phase flip via
@@ -9643,6 +9668,10 @@ impl<R> PixelSink for MixedSinker<'_, Yuv411p, R> {
   type Input<'r> = Yuv411pRow<'r>;
   type Error = MixedSinkerError;
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn kernel_matrix(&self) -> crate::KernelMatrix {
+    self.kernel_matrix
+  }
   fn begin_frame(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
     // FFmpeg-compatible: arbitrary widths accepted (chroma row is
     // `width.div_ceil(4)` samples; the scalar kernel handles a
@@ -9675,7 +9704,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuv411p, R> {
     let use_simd = self.simd;
     // Chroma siting (#302): drives the horizontal chroma phase. `Copy`, so read
     // it out before the field split-borrow below.
-    let chroma_location = self.chroma_location;
+    let chroma_location = self.chroma_location.clone();
 
     // Chroma row shape: `width.div_ceil(4)` samples (FFmpeg
     // `AV_PIX_FMT_YUV411P`). For widths divisible by 4 this matches
@@ -9746,7 +9775,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuv411p, R> {
     if let Some(plan) = plan.as_ref() {
       let matrix = row.matrix();
       let full_range = row.full_range();
-      let center_sited = chroma_411_center_sited_h(chroma_location);
+      let center_sited = chroma_411_center_sited_h(&chroma_location);
       let chroma_h_phase = if center_sited {
         YUV41X_CENTERED_H_PHASE
       } else {
@@ -9939,7 +9968,7 @@ impl<R> PixelSink for MixedSinker<'_, Yuv411p, R> {
     // the `1→4` phase-0.375 position then decode via the 4:4:4 kernels; the
     // default / co-sited path keeps the byte-identical nearest decode. 4:1:1 is
     // subsampled horizontally only — no vertical blend or chroma lookback.
-    let center_sited = chroma_411_center_sited_h(chroma_location);
+    let center_sited = chroma_411_center_sited_h(&chroma_location);
 
     // RFC #238 #302: mirror the resample branch's per-frame siting freeze on the
     // identity path. `chroma_location` is public and `Copy`, so a caller can flip

@@ -31,14 +31,14 @@
 
 use super::*;
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   resample::{AreaResampler, ResampleError},
   sinker::{MixedSinker, MixedSinkerError},
 };
 
 const SRC: usize = 12;
 const OUT: usize = 6;
-const M: ColorMatrix = ColorMatrix::Bt601;
+const M: KernelMatrix = KernelMatrix::Bt601;
 const FR: bool = true;
 
 // ---- V210 wire packing ------------------------------------------------
@@ -215,7 +215,7 @@ fn direct_rgb_u8(packed: &[u8]) -> Vec<u8> {
   let mut sink = MixedSinker::<V210>::new(SRC, SRC)
     .with_rgb(&mut rgb)
     .unwrap();
-  v210_to(&frame(packed), FR, M, &mut sink).unwrap();
+  v210_to(&frame(packed), FR, sink.set_kernel_matrix(M)).unwrap();
   rgb
 }
 
@@ -224,7 +224,7 @@ fn direct_rgb_u16(packed: &[u8]) -> Vec<u16> {
   let mut sink = MixedSinker::<V210>::new(SRC, SRC)
     .with_rgb_u16(&mut rgb)
     .unwrap();
-  v210_to(&frame(packed), FR, M, &mut sink).unwrap();
+  v210_to(&frame(packed), FR, sink.set_kernel_matrix(M)).unwrap();
   rgb
 }
 
@@ -233,7 +233,7 @@ fn direct_luma_u16(packed: &[u8]) -> Vec<u16> {
   let mut sink = MixedSinker::<V210>::new(SRC, SRC)
     .with_luma_u16(&mut y)
     .unwrap();
-  v210_to(&frame(packed), FR, M, &mut sink).unwrap();
+  v210_to(&frame(packed), FR, sink.set_kernel_matrix(M)).unwrap();
   y
 }
 
@@ -254,7 +254,7 @@ fn rgb_u8_matches_area_bin_of_direct() {
     )
     .with_rgb(&mut rgb)
     .unwrap();
-    v210_to(&frame(&packed), FR, M, &mut sink).unwrap();
+    v210_to(&frame(&packed), FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(rgb, block_mean_2x2_rgb_u8(&direct_rgb_u8(&packed)));
 }
@@ -274,7 +274,7 @@ fn rgb_u16_is_exact_native_area_mean() {
     )
     .with_rgb_u16(&mut rgb)
     .unwrap();
-    v210_to(&frame(&packed), FR, M, &mut sink).unwrap();
+    v210_to(&frame(&packed), FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(rgb, block_mean_2x2_rgb_u16(&direct_rgb_u16(&packed)));
 }
@@ -296,7 +296,7 @@ fn luma_is_native_y_area_mean() {
     .unwrap()
     .with_luma_u16(&mut luma_u16)
     .unwrap();
-    v210_to(&frame(&packed), FR, M, &mut sink).unwrap();
+    v210_to(&frame(&packed), FR, sink.set_kernel_matrix(M)).unwrap();
   }
   let y_ref = block_mean_2x2_u16(&direct_luma_u16(&packed));
   assert_eq!(luma_u16, y_ref, "luma_u16 = native-Y area mean");
@@ -339,7 +339,7 @@ fn uniform_gray_color_unchanged_counterexample() {
     .unwrap()
     .with_hsv(&mut hh, &mut ss, &mut vv)
     .unwrap();
-    v210_to(&frame(&packed), FR, M, &mut sink).unwrap();
+    v210_to(&frame(&packed), FR, sink.set_kernel_matrix(M)).unwrap();
   }
   // Every direct full-res pixel is the same gray; the resampled pixels
   // must match it exactly (not a narrowed-u16 approximation).
@@ -378,7 +378,7 @@ fn luma_from_native_y_under_saturated_chroma() {
     )
     .with_luma_u16(&mut luma_u16)
     .unwrap();
-    v210_to(&frame(&packed), FR, M, &mut sink).unwrap();
+    v210_to(&frame(&packed), FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert!(
     luma_u16.iter().all(|&v| v == y),
@@ -427,7 +427,7 @@ fn all_outputs_combo() {
     .unwrap()
     .with_hsv(&mut hh, &mut ss, &mut vv)
     .unwrap();
-    v210_to(&frame(&packed), FR, M, &mut sink).unwrap();
+    v210_to(&frame(&packed), FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(rgb, rgb_u8_ref, "all-outputs rgb");
   for (px, rgb_px) in rgba.chunks_exact(4).zip(rgb_u8_ref.chunks_exact(3)) {
@@ -480,7 +480,7 @@ fn with_rgb_equals_with_rgba() {
     .unwrap()
     .with_rgba(&mut rgba)
     .unwrap();
-    v210_to(&frame(&packed), FR, M, &mut sink).unwrap();
+    v210_to(&frame(&packed), FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(rgb, rgb_ref, "with_rgb plane");
   for (px, rgb_px) in rgba.chunks_exact(4).zip(rgb.chunks_exact(3)) {
@@ -524,7 +524,7 @@ fn simd_matches_scalar_across_widths() {
       .unwrap()
       .with_luma_u16(&mut luma16_simd)
       .unwrap();
-      v210_to(&src, false, ColorMatrix::Bt709, &mut sink).unwrap();
+      v210_to(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
     }
     {
       let mut sink = force_row_stage(
@@ -536,7 +536,7 @@ fn simd_matches_scalar_across_widths() {
       .unwrap()
       .with_luma_u16(&mut luma16_scalar)
       .unwrap();
-      v210_to(&src, false, ColorMatrix::Bt709, &mut sink).unwrap();
+      v210_to(&src, false, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
     }
     assert_eq!(
       rgb_simd, rgb_scalar,
@@ -578,7 +578,7 @@ fn le_be_outputs_identical() {
     .unwrap()
     .with_luma_u16(&mut le_luma_u16)
     .unwrap();
-    v210_to(&frame(&packed_le), FR, M, &mut sink).unwrap();
+    v210_to(&frame(&packed_le), FR, sink.set_kernel_matrix(M)).unwrap();
   }
 
   let mut be_rgb = std::vec![0u8; OUT * OUT * 3];
@@ -600,7 +600,7 @@ fn le_be_outputs_identical() {
     .unwrap()
     .with_luma_u16(&mut be_luma_u16)
     .unwrap();
-    v210_to_endian::<_, true>(&be_frame, FR, M, &mut sink).unwrap();
+    v210_to_endian::<_, true>(&be_frame, FR, sink.set_kernel_matrix(M)).unwrap();
   }
 
   assert_eq!(le_rgb, be_rgb, "rgb LE/BE diverge");
@@ -622,7 +622,7 @@ fn identity_plan_matches_new_sink() {
     let mut sink = MixedSinker::<V210>::new(SRC, SRC)
       .with_rgb(&mut direct)
       .unwrap();
-    v210_to(&frame(&packed), FR, M, &mut sink).unwrap();
+    v210_to(&frame(&packed), FR, sink.set_kernel_matrix(M)).unwrap();
   }
   let mut via_area = std::vec![0u8; SRC * SRC * 3];
   {
@@ -632,7 +632,7 @@ fn identity_plan_matches_new_sink() {
     )
     .with_rgb(&mut via_area)
     .unwrap();
-    v210_to(&frame(&packed), FR, M, &mut sink).unwrap();
+    v210_to(&frame(&packed), FR, sink.set_kernel_matrix(M)).unwrap();
   }
   assert_eq!(direct, via_area, "identity plan must match the direct sink");
 }
@@ -644,7 +644,7 @@ fn no_outputs_is_a_no_op() {
     MixedSinker::<V210, AreaResampler>::with_resampler(SRC, SRC, AreaResampler::to(OUT, OUT))
       .unwrap(),
   );
-  v210_to(&frame(&packed), FR, M, &mut sink).unwrap();
+  v210_to(&frame(&packed), FR, sink.set_kernel_matrix(M)).unwrap();
   assert!(
     !sink.luma_stream_u16_allocated(),
     "no-output sink allocated a luma stream"
@@ -698,8 +698,8 @@ fn resets_streams_across_frames() {
     .unwrap()
     .with_luma_u16(&mut luma_u16)
     .unwrap();
-    v210_to(&frame(&p1), FR, M, &mut sink).unwrap();
-    v210_to(&frame(&p2), FR, M, &mut sink).unwrap();
+    v210_to(&frame(&p1), FR, sink.set_kernel_matrix(M)).unwrap();
+    v210_to(&frame(&p2), FR, sink.set_kernel_matrix(M)).unwrap();
   }
   // Frame 2's outputs must reflect frame 2 (reset succeeded).
   assert_eq!(luma_u16, block_mean_2x2_u16(&direct_luma_u16(&p2)));
@@ -732,7 +732,7 @@ fn out_of_sequence_first_row_rejected_before_allocation() {
   .unwrap();
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   let err = sink
-    .process(V210Row::new(row_slice(&packed, 3), 3, M, FR))
+    .process(V210Row::for_tests(row_slice(&packed, 3), 3, M, FR))
     .unwrap_err();
   assert!(
     matches!(
@@ -771,10 +771,10 @@ fn rejects_mid_frame_out_of_sequence() {
   .unwrap();
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   sink
-    .process(V210Row::new(row_slice(&packed, 0), 0, M, FR))
+    .process(V210Row::for_tests(row_slice(&packed, 0), 0, M, FR))
     .unwrap();
   let err = sink
-    .process(V210Row::new(row_slice(&packed, 2), 2, M, FR))
+    .process(V210Row::for_tests(row_slice(&packed, 2), 2, M, FR))
     .unwrap_err();
   assert!(
     matches!(
@@ -802,11 +802,11 @@ fn rejects_mid_frame_output_change() {
   .unwrap();
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   sink
-    .process(V210Row::new(row_slice(&packed, 0), 0, M, FR))
+    .process(V210Row::for_tests(row_slice(&packed, 0), 0, M, FR))
     .unwrap();
   sink.set_luma_u16(&mut luma_u16).unwrap();
   let err = sink
-    .process(V210Row::new(row_slice(&packed, 1), 1, M, FR))
+    .process(V210Row::for_tests(row_slice(&packed, 1), 1, M, FR))
     .unwrap_err();
   assert!(
     matches!(err, MixedSinkerError::ResampleOutputsChanged(_)),
@@ -838,7 +838,7 @@ fn rejected_first_row_does_not_poison_output_retry() {
   .unwrap();
   sink.begin_frame(SRC as u32, SRC as u32).unwrap();
   let err = sink
-    .process(V210Row::new(row_slice(&packed, 3), 3, M, FR))
+    .process(V210Row::for_tests(row_slice(&packed, 3), 3, M, FR))
     .unwrap_err();
   assert!(
     matches!(
@@ -850,7 +850,7 @@ fn rejected_first_row_does_not_poison_output_retry() {
   let mut luma_u16 = std::vec![0u16; OUT * OUT];
   sink.set_luma_u16(&mut luma_u16).unwrap();
   sink
-    .process(V210Row::new(row_slice(&packed, 0), 0, M, FR))
+    .process(V210Row::for_tests(row_slice(&packed, 0), 0, M, FR))
     .expect("row 0 must succeed after a rejected out-of-sequence first row");
 }
 
@@ -891,7 +891,7 @@ fn rgb_matches_area_bin_of_direct_yuv422p10() {
     let mut sink = MixedSinker::<Yuv422p10>::new(SRC, SRC)
       .with_rgb(&mut rgb_planar_direct)
       .unwrap();
-    yuv422p10_to(&planar, false, ColorMatrix::Bt709, &mut sink).unwrap();
+    yuv422p10_to(&planar, false, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   let planar_ref = block_mean_2x2_rgb_u8(&rgb_planar_direct);
 
@@ -904,7 +904,7 @@ fn rgb_matches_area_bin_of_direct_yuv422p10() {
     )
     .with_rgb(&mut rgb_packed)
     .unwrap();
-    v210_to(&v210, false, ColorMatrix::Bt709, &mut sink).unwrap();
+    v210_to(&v210, false, sink.set_kernel_matrix(KernelMatrix::Bt709)).unwrap();
   }
   assert_eq!(
     rgb_packed, planar_ref,

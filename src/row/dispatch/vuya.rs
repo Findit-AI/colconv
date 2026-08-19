@@ -26,7 +26,7 @@ use crate::row::simd128_available;
 #[cfg(target_arch = "x86_64")]
 use crate::row::{avx2_available, avx512_available, sse41_available};
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   row::{rgb_row_bytes, rgba_row_bytes, scalar},
 };
 
@@ -53,7 +53,7 @@ pub fn vuya_to_rgb_row(
   packed: &[u8],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) {
@@ -71,34 +71,44 @@ pub fn vuya_to_rgb_row(
       target_arch = "aarch64" => {
         if neon_available() {
           // SAFETY: NEON verified at runtime.
-          unsafe { arch::neon::vuya_to_rgb_row(packed, rgb_out, width, matrix, full_range); }
+          unsafe {
+            arch::neon::vuya_to_rgb_row(packed, rgb_out, width, matrix, full_range);
+          }
           return;
         }
-      },
+      }
       target_arch = "x86_64" => {
         if avx512_available() {
           // SAFETY: AVX-512BW verified.
-          unsafe { arch::x86_avx512::vuya_to_rgb_row(packed, rgb_out, width, matrix, full_range); }
+          unsafe {
+            arch::x86_avx512::vuya_to_rgb_row(packed, rgb_out, width, matrix, full_range);
+          }
           return;
         }
         if avx2_available() {
           // SAFETY: AVX2 verified.
-          unsafe { arch::x86_avx2::vuya_to_rgb_row(packed, rgb_out, width, matrix, full_range); }
+          unsafe {
+            arch::x86_avx2::vuya_to_rgb_row(packed, rgb_out, width, matrix, full_range);
+          }
           return;
         }
         if sse41_available() {
           // SAFETY: SSE4.1 verified.
-          unsafe { arch::x86_sse41::vuya_to_rgb_row(packed, rgb_out, width, matrix, full_range); }
+          unsafe {
+            arch::x86_sse41::vuya_to_rgb_row(packed, rgb_out, width, matrix, full_range);
+          }
           return;
         }
-      },
+      }
       target_arch = "wasm32" => {
         if simd128_available() {
           // SAFETY: simd128 compile-time verified.
-          unsafe { arch::wasm_simd128::vuya_to_rgb_row(packed, rgb_out, width, matrix, full_range); }
+          unsafe {
+            arch::wasm_simd128::vuya_to_rgb_row(packed, rgb_out, width, matrix, full_range);
+          }
           return;
         }
-      },
+      }
       _ => {}
     }
   }
@@ -123,7 +133,7 @@ pub fn vuya_to_hsv_row(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) {
@@ -140,34 +150,50 @@ pub fn vuya_to_hsv_row(
       target_arch = "aarch64" => {
         if neon_available() {
           // SAFETY: NEON verified at runtime.
-          unsafe { arch::neon::vuya_to_hsv_row(packed, h_out, s_out, v_out, width, matrix, full_range); }
+          unsafe {
+            arch::neon::vuya_to_hsv_row(packed, h_out, s_out, v_out, width, matrix, full_range);
+          }
           return;
         }
-      },
+      }
       target_arch = "x86_64" => {
         if avx512_available() {
           // SAFETY: AVX-512BW verified.
-          unsafe { arch::x86_avx512::vuya_to_hsv_row(packed, h_out, s_out, v_out, width, matrix, full_range); }
+          unsafe {
+            arch::x86_avx512::vuya_to_hsv_row(
+              packed, h_out, s_out, v_out, width, matrix, full_range,
+            );
+          }
           return;
         }
         if avx2_available() {
           // SAFETY: AVX2 verified.
-          unsafe { arch::x86_avx2::vuya_to_hsv_row(packed, h_out, s_out, v_out, width, matrix, full_range); }
+          unsafe {
+            arch::x86_avx2::vuya_to_hsv_row(packed, h_out, s_out, v_out, width, matrix, full_range);
+          }
           return;
         }
         if sse41_available() {
           // SAFETY: SSE4.1 verified.
-          unsafe { arch::x86_sse41::vuya_to_hsv_row(packed, h_out, s_out, v_out, width, matrix, full_range); }
+          unsafe {
+            arch::x86_sse41::vuya_to_hsv_row(
+              packed, h_out, s_out, v_out, width, matrix, full_range,
+            );
+          }
           return;
         }
-      },
+      }
       target_arch = "wasm32" => {
         if simd128_available() {
           // SAFETY: simd128 compile-time verified.
-          unsafe { arch::wasm_simd128::vuya_to_hsv_row(packed, h_out, s_out, v_out, width, matrix, full_range); }
+          unsafe {
+            arch::wasm_simd128::vuya_to_hsv_row(
+              packed, h_out, s_out, v_out, width, matrix, full_range,
+            );
+          }
           return;
         }
-      },
+      }
       _ => {}
     }
   }
@@ -185,7 +211,7 @@ pub fn vuya_to_rgba_row(
   packed: &[u8],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) {
@@ -203,34 +229,44 @@ pub fn vuya_to_rgba_row(
       target_arch = "aarch64" => {
         if neon_available() {
           // SAFETY: NEON verified.
-          unsafe { arch::neon::vuya_to_rgba_row(packed, rgba_out, width, matrix, full_range); }
+          unsafe {
+            arch::neon::vuya_to_rgba_row(packed, rgba_out, width, matrix, full_range);
+          }
           return;
         }
-      },
+      }
       target_arch = "x86_64" => {
         if avx512_available() {
           // SAFETY: AVX-512BW verified.
-          unsafe { arch::x86_avx512::vuya_to_rgba_row(packed, rgba_out, width, matrix, full_range); }
+          unsafe {
+            arch::x86_avx512::vuya_to_rgba_row(packed, rgba_out, width, matrix, full_range);
+          }
           return;
         }
         if avx2_available() {
           // SAFETY: AVX2 verified.
-          unsafe { arch::x86_avx2::vuya_to_rgba_row(packed, rgba_out, width, matrix, full_range); }
+          unsafe {
+            arch::x86_avx2::vuya_to_rgba_row(packed, rgba_out, width, matrix, full_range);
+          }
           return;
         }
         if sse41_available() {
           // SAFETY: SSE4.1 verified.
-          unsafe { arch::x86_sse41::vuya_to_rgba_row(packed, rgba_out, width, matrix, full_range); }
+          unsafe {
+            arch::x86_sse41::vuya_to_rgba_row(packed, rgba_out, width, matrix, full_range);
+          }
           return;
         }
-      },
+      }
       target_arch = "wasm32" => {
         if simd128_available() {
           // SAFETY: simd128 compile-time verified.
-          unsafe { arch::wasm_simd128::vuya_to_rgba_row(packed, rgba_out, width, matrix, full_range); }
+          unsafe {
+            arch::wasm_simd128::vuya_to_rgba_row(packed, rgba_out, width, matrix, full_range);
+          }
           return;
         }
-      },
+      }
       _ => {}
     }
   }
@@ -256,34 +292,44 @@ pub fn vuya_to_luma_row(packed: &[u8], luma_out: &mut [u8], width: usize, use_si
       target_arch = "aarch64" => {
         if neon_available() {
           // SAFETY: NEON verified.
-          unsafe { arch::neon::vuya_to_luma_row(packed, luma_out, width); }
+          unsafe {
+            arch::neon::vuya_to_luma_row(packed, luma_out, width);
+          }
           return;
         }
-      },
+      }
       target_arch = "x86_64" => {
         if avx512_available() {
           // SAFETY: AVX-512BW verified.
-          unsafe { arch::x86_avx512::vuya_to_luma_row(packed, luma_out, width); }
+          unsafe {
+            arch::x86_avx512::vuya_to_luma_row(packed, luma_out, width);
+          }
           return;
         }
         if avx2_available() {
           // SAFETY: AVX2 verified.
-          unsafe { arch::x86_avx2::vuya_to_luma_row(packed, luma_out, width); }
+          unsafe {
+            arch::x86_avx2::vuya_to_luma_row(packed, luma_out, width);
+          }
           return;
         }
         if sse41_available() {
           // SAFETY: SSE4.1 verified.
-          unsafe { arch::x86_sse41::vuya_to_luma_row(packed, luma_out, width); }
+          unsafe {
+            arch::x86_sse41::vuya_to_luma_row(packed, luma_out, width);
+          }
           return;
         }
-      },
+      }
       target_arch = "wasm32" => {
         if simd128_available() {
           // SAFETY: simd128 compile-time verified.
-          unsafe { arch::wasm_simd128::vuya_to_luma_row(packed, luma_out, width); }
+          unsafe {
+            arch::wasm_simd128::vuya_to_luma_row(packed, luma_out, width);
+          }
           return;
         }
-      },
+      }
       _ => {}
     }
   }
@@ -311,34 +357,44 @@ pub(crate) fn vuya_to_luma_u16_row(packed: &[u8], out: &mut [u16], width: usize,
       target_arch = "aarch64" => {
         if neon_available() {
           // SAFETY: NEON verified at runtime.
-          unsafe { arch::neon::vuya_to_luma_u16_row(packed, out, width); }
+          unsafe {
+            arch::neon::vuya_to_luma_u16_row(packed, out, width);
+          }
           return;
         }
-      },
+      }
       target_arch = "x86_64" => {
         if avx512_available() {
           // SAFETY: AVX-512BW verified.
-          unsafe { arch::x86_avx512::vuya_to_luma_u16_row(packed, out, width); }
+          unsafe {
+            arch::x86_avx512::vuya_to_luma_u16_row(packed, out, width);
+          }
           return;
         }
         if avx2_available() {
           // SAFETY: AVX2 verified.
-          unsafe { arch::x86_avx2::vuya_to_luma_u16_row(packed, out, width); }
+          unsafe {
+            arch::x86_avx2::vuya_to_luma_u16_row(packed, out, width);
+          }
           return;
         }
         if sse41_available() {
           // SAFETY: SSE4.1 verified.
-          unsafe { arch::x86_sse41::vuya_to_luma_u16_row(packed, out, width); }
+          unsafe {
+            arch::x86_sse41::vuya_to_luma_u16_row(packed, out, width);
+          }
           return;
         }
-      },
+      }
       target_arch = "wasm32" => {
         if simd128_available() {
           // SAFETY: simd128 compile-time verified.
-          unsafe { arch::wasm_simd128::vuya_to_luma_u16_row(packed, out, width); }
+          unsafe {
+            arch::wasm_simd128::vuya_to_luma_u16_row(packed, out, width);
+          }
           return;
         }
-      },
+      }
       _ => {}
     }
   }
@@ -373,7 +429,7 @@ mod tests {
     // packed buffer has only 2 x 4 = 8 bytes for width = 4 (needs 16).
     let packed = [0u8; 8];
     let mut rgb = [0u8; 4 * 3];
-    vuya_to_rgb_row(&packed, &mut rgb, 4, ColorMatrix::Bt709, true, false);
+    vuya_to_rgb_row(&packed, &mut rgb, 4, KernelMatrix::Bt709, true, false);
   }
 
   #[test]
@@ -381,7 +437,7 @@ mod tests {
   fn vuya_dispatcher_rejects_short_rgb_output() {
     let packed = [0u8; 4 * 4];
     let mut rgb = [0u8; 2];
-    vuya_to_rgb_row(&packed, &mut rgb, 4, ColorMatrix::Bt709, true, false);
+    vuya_to_rgb_row(&packed, &mut rgb, 4, KernelMatrix::Bt709, true, false);
   }
 
   #[test]
@@ -389,7 +445,7 @@ mod tests {
   fn vuya_dispatcher_rejects_short_rgba_output() {
     let packed = [0u8; 4 * 4];
     let mut rgba = [0u8; 2];
-    vuya_to_rgba_row(&packed, &mut rgba, 4, ColorMatrix::Bt709, true, false);
+    vuya_to_rgba_row(&packed, &mut rgba, 4, KernelMatrix::Bt709, true, false);
   }
 
   #[test]
@@ -408,7 +464,7 @@ mod tests {
 
     // RGB — full-range gray ≈ 128
     let mut rgb = [0u8; 8 * 3];
-    vuya_to_rgb_row(&buf, &mut rgb, 8, ColorMatrix::Bt709, true, false);
+    vuya_to_rgb_row(&buf, &mut rgb, 8, KernelMatrix::Bt709, true, false);
     for px in rgb.chunks(3) {
       assert!(px[0].abs_diff(128) <= 2, "R channel off: {}", px[0]);
       assert_eq!(px[0], px[1], "R ≠ G");
@@ -417,7 +473,7 @@ mod tests {
 
     // RGBA — source alpha byte 0xAB must pass through verbatim (VUYA).
     let mut rgba = [0u8; 8 * 4];
-    vuya_to_rgba_row(&buf, &mut rgba, 8, ColorMatrix::Bt709, true, false);
+    vuya_to_rgba_row(&buf, &mut rgba, 8, KernelMatrix::Bt709, true, false);
     for px in rgba.chunks(4) {
       assert!(px[0].abs_diff(128) <= 2, "R channel off: {}", px[0]);
       assert_eq!(px[3], 0xAB, "alpha must be source value for VUYA");
@@ -446,7 +502,7 @@ mod tests {
       &p,
       &mut rgb,
       OVERFLOW_WIDTH_TIMES_4,
-      ColorMatrix::Bt709,
+      KernelMatrix::Bt709,
       true,
       false,
     );

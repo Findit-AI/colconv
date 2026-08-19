@@ -15,7 +15,7 @@ use crate::row::simd128_available;
 #[cfg(target_arch = "x86_64")]
 use crate::row::{avx2_available, avx512_available, sse41_available};
 use crate::{
-  ColorMatrix,
+  KernelMatrix,
   row::{rgb_row_bytes, rgba_row_bytes, scalar},
 };
 // `ChromaDerivedNcl` resolves its coefficients from the signalled primaries,
@@ -39,7 +39,7 @@ pub fn yuv_420_to_rgb_row(
   v_half: &[u8],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) {
@@ -74,7 +74,7 @@ pub fn yuv_420_to_rgb_row(
           }
           return;
         }
-      },
+      }
       target_arch = "x86_64" => {
         if avx512_available() {
           // SAFETY: `avx512_available()` verified AVX‑512BW is present.
@@ -109,7 +109,7 @@ pub fn yuv_420_to_rgb_row(
           }
           return;
         }
-      },
+      }
       // Future x86_64 tiers (avx512 promoted above AVX2, ssse3 below
       // SSE4.1) slot in here, each branch guarded by the matching
       // `is_x86_feature_detected!` / `cfg!(target_feature = ...)` pair.
@@ -127,7 +127,7 @@ pub fn yuv_420_to_rgb_row(
           }
           return;
         }
-      },
+      }
       _ => {
         // Targets without a SIMD backend (riscv64, powerpc, …) fall
         // through to the scalar path below.
@@ -156,7 +156,7 @@ pub fn yuv_420_to_rgba_row(
   v_half: &[u8],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) {
@@ -180,7 +180,7 @@ pub fn yuv_420_to_rgba_row(
           }
           return;
         }
-      },
+      }
       target_arch = "x86_64" => {
         if avx512_available() {
           // SAFETY: `avx512_available()` verified AVX‑512BW is present.
@@ -209,7 +209,7 @@ pub fn yuv_420_to_rgba_row(
           }
           return;
         }
-      },
+      }
       target_arch = "wasm32" => {
         if simd128_available() {
           // SAFETY: simd128 compile‑time availability verified.
@@ -220,7 +220,7 @@ pub fn yuv_420_to_rgba_row(
           }
           return;
         }
-      },
+      }
       _ => {
         // Targets without a SIMD backend fall through to scalar.
       }
@@ -231,7 +231,7 @@ pub fn yuv_420_to_rgba_row(
 }
 
 /// [`yuv_420_to_rgb_row`] that additionally honours
-/// [`ColorMatrix::ChromaDerivedNcl`] (ITU-T H.273 `MatrixCoefficients =
+/// [`KernelMatrix::ChromaDerivedNcl`] (ITU-T H.273 `MatrixCoefficients =
 /// 12`), whose `Kr` / `Kb` are *derived* from the signalled colour
 /// `primaries` rather than fixed by the matrix tag.
 ///
@@ -252,12 +252,12 @@ pub fn yuv_420_to_rgb_row_primaries(
   v_half: &[u8],
   rgb_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
-  primaries: Primaries,
+  matrix: KernelMatrix,
+  primaries: &Primaries,
   full_range: bool,
   use_simd: bool,
 ) {
-  if matches!(matrix, ColorMatrix::ChromaDerivedNcl) && primaries.chromaticities().is_some() {
+  if matches!(matrix, KernelMatrix::ChromaDerivedNcl) && primaries.chromaticities().is_some() {
     // Same release-build boundary asserts as `yuv_420_to_rgb_row` (the
     // scalar kernel only `debug_assert!`s its bounds).
     assert_eq!(width & 1, 0, "YUV 4:2:0 requires even width");
@@ -275,7 +275,7 @@ pub fn yuv_420_to_rgb_row_primaries(
   );
 }
 
-/// [`yuv_420_to_rgba_row`] with the [`ColorMatrix::ChromaDerivedNcl`]
+/// [`yuv_420_to_rgba_row`] with the [`KernelMatrix::ChromaDerivedNcl`]
 /// primaries-derived path — the RGBA twin of [`yuv_420_to_rgb_row_primaries`]
 /// (alpha `0xFF`, opaque). See it for the routing rationale.
 #[cfg_attr(not(tarpaulin), inline(always))]
@@ -286,12 +286,12 @@ pub fn yuv_420_to_rgba_row_primaries(
   v_half: &[u8],
   rgba_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
-  primaries: Primaries,
+  matrix: KernelMatrix,
+  primaries: &Primaries,
   full_range: bool,
   use_simd: bool,
 ) {
-  if matches!(matrix, ColorMatrix::ChromaDerivedNcl) && primaries.chromaticities().is_some() {
+  if matches!(matrix, KernelMatrix::ChromaDerivedNcl) && primaries.chromaticities().is_some() {
     assert_eq!(width & 1, 0, "YUV 4:2:0 requires even width");
     let rgba_min = rgba_row_bytes(width);
     assert!(y.len() >= width, "y row too short");
@@ -328,7 +328,7 @@ pub fn yuv_420_to_hsv_row(
   s_out: &mut [u8],
   v_out: &mut [u8],
   width: usize,
-  matrix: ColorMatrix,
+  matrix: KernelMatrix,
   full_range: bool,
   use_simd: bool,
 ) {
@@ -358,7 +358,7 @@ pub fn yuv_420_to_hsv_row(
           }
           return;
         }
-      },
+      }
       target_arch = "x86_64" => {
         if avx512_available() {
           // SAFETY: `avx512_available()` verified AVX‑512BW is present.
@@ -387,7 +387,7 @@ pub fn yuv_420_to_hsv_row(
           }
           return;
         }
-      },
+      }
       target_arch = "wasm32" => {
         if simd128_available() {
           // SAFETY: simd128 compile‑time availability verified.
@@ -398,7 +398,7 @@ pub fn yuv_420_to_hsv_row(
           }
           return;
         }
-      },
+      }
       _ => {
         // Targets without a SIMD backend fall through to scalar.
       }
