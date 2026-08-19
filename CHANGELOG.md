@@ -12,7 +12,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [SemVer](https://semver.org/spec/v2.0.0.html); pre-1.0
 breaking changes bump the `x` in `0.x.y`.
 
-## 0.2.0 — unreleased
+## 0.2.0 — 2026-08-20
 
 **Breaking**, on one count with a wide blast radius: the public dependency
 `mediaframe` crosses 0.1 → 0.4, and with it the colour vocabularies pixon
