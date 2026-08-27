@@ -93,7 +93,6 @@ fn pattern_phases(p: crate::raw::BayerPattern) -> ((usize, usize), (usize, usize
     Bggr => ((1, 1), (0, 0)),
     Grbg => ((0, 1), (1, 0)),
     Gbrg => ((1, 0), (0, 1)),
-    _ => unreachable!("invalid BayerPattern"),
   }
 }
 

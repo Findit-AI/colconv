@@ -117,7 +117,7 @@ happens, trading speed for colorimetric correctness:
 
 ```toml
 [dependencies]
-pixon = "0.2"
+pixon = "0.3"
 ```
 
 > **Renamed from `colconv`.** Everything through `colconv` 0.2.1 was published
