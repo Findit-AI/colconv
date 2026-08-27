@@ -52,8 +52,10 @@ pub(crate) fn expand_rgb_to_rgba_row(rgb: &[u8], rgba_out: &mut [u8], width: usi
   // path (RGB→RGBA fan-out called once per row when both buffers are
   // attached).
   for (rgb_px, rgba_px) in rgb[..width * 3]
-    .chunks_exact(3)
-    .zip(rgba_out[..width * 4].chunks_exact_mut(4))
+    .as_chunks::<3>()
+    .0
+    .iter()
+    .zip(rgba_out[..width * 4].as_chunks_mut::<4>().0.iter_mut())
   {
     rgba_px[0] = rgb_px[0];
     rgba_px[1] = rgb_px[1];
@@ -120,8 +122,10 @@ pub(crate) fn expand_rgb_u16_to_rgba_u16_row<const BITS: u32>(
 
   let alpha_max: u16 = ((1u32 << BITS) - 1) as u16;
   for (rgb_px, rgba_px) in rgb[..rgb_len]
-    .chunks_exact(3)
-    .zip(rgba_out[..rgba_len].chunks_exact_mut(4))
+    .as_chunks::<3>()
+    .0
+    .iter()
+    .zip(rgba_out[..rgba_len].as_chunks_mut::<4>().0.iter_mut())
   {
     rgba_px[0] = rgb_px[0];
     rgba_px[1] = rgb_px[1];

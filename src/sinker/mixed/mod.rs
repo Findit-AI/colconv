@@ -5535,7 +5535,40 @@ impl<F: SourceFormat, R> MixedSinker<'_, F, R> {
   /// it is not a second door onto the public surface: outside these tests a
   /// [`KernelMatrix`](crate::KernelMatrix) still reaches a walk only through
   /// [`ColorSpec::kernel_matrix`](crate::ColorSpec::kernel_matrix).
-  #[cfg(test)]
+  ///
+  /// The feature union below mirrors the actual caller set (every kernel-parity
+  /// suite calls this): `convert::tests`, gated on `yuv-planar` alone, and both
+  /// `sinker::mixed::tests` and `convert::source_coverage`, which need a memory
+  /// tier (`std` or `alloc`) *and* at least one pixel-format feature — `std`
+  /// alone is NOT enough, since every per-format file under `sinker::mixed::tests`
+  /// carries its own format `cfg` beneath the outer `std` gate. A plain
+  /// `#[cfg(test)]` (or a bare `feature = "std"` branch here) leaves this unused
+  /// (and `-D warnings`-fatal) on a format-free build — `alloc`-only *or*
+  /// `std`-only — where none of those caller modules produce any content.
+  #[cfg(all(
+    test,
+    any(
+      feature = "yuv-planar",
+      all(
+        any(feature = "std", feature = "alloc"),
+        any(
+          feature = "xyz",
+          feature = "mono",
+          feature = "yuv-semi-planar",
+          feature = "yuv-packed",
+          feature = "yuv-444-packed",
+          feature = "y2xx",
+          feature = "v210",
+          feature = "yuva",
+          feature = "rgb",
+          feature = "rgb-float",
+          feature = "rgb-legacy",
+          feature = "gray",
+          feature = "gbr",
+        ),
+      ),
+    ),
+  ))]
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(crate) const fn set_kernel_matrix(&mut self, matrix: crate::KernelMatrix) -> &mut Self {
     self.kernel_matrix = matrix;
@@ -7638,7 +7671,12 @@ pub(super) fn packed_rgba_u16_filter_resample<const SRC_BITS: u32, const NATIVE_
     // sub-16-bit source).
     if let Some(buf) = rgb_u16.as_deref_mut() {
       let out = &mut buf[oy * 3 * ow..(oy + 1) * 3 * ow];
-      for (rgb_px, rgba_px) in out.chunks_exact_mut(3).zip(binned.chunks_exact(4)) {
+      for (rgb_px, rgba_px) in out
+        .as_chunks_mut::<3>()
+        .0
+        .iter_mut()
+        .zip(binned.as_chunks::<4>().0.iter())
+      {
         if SRC_BITS < 16 {
           rgb_px[0] = rgba_px[0].min(native_max);
           rgb_px[1] = rgba_px[1].min(native_max);
@@ -7654,7 +7692,12 @@ pub(super) fn packed_rgba_u16_filter_resample<const SRC_BITS: u32, const NATIVE_
     // here so a sub-16-bit signed-kernel overshoot never wraps downstream.
     if need_native_rgb {
       let rgb_row = &mut color_rgb[..3 * ow];
-      for (out_px, in_px) in rgb_row.chunks_exact_mut(3).zip(binned.chunks_exact(4)) {
+      for (out_px, in_px) in rgb_row
+        .as_chunks_mut::<3>()
+        .0
+        .iter_mut()
+        .zip(binned.as_chunks::<4>().0.iter())
+      {
         if SRC_BITS < 16 {
           out_px[0] = in_px[0].min(native_max);
           out_px[1] = in_px[1].min(native_max);
@@ -7698,7 +7741,12 @@ pub(super) fn packed_rgba_u16_filter_resample<const SRC_BITS: u32, const NATIVE_
         // Clamp to the native max before the shift for a sub-16-bit source so
         // a signed-kernel overshoot clips to `255` (no-op at 16-bit).
         let dst = &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow];
-        for (d, px) in dst.chunks_exact_mut(4).zip(binned.chunks_exact(4)) {
+        for (d, px) in dst
+          .as_chunks_mut::<4>()
+          .0
+          .iter_mut()
+          .zip(binned.as_chunks::<4>().0.iter())
+        {
           if SRC_BITS < 16 {
             d[0] = (px[0].min(native_max) >> (SRC_BITS - 8)) as u8;
             d[1] = (px[1].min(native_max) >> (SRC_BITS - 8)) as u8;
@@ -7925,7 +7973,12 @@ pub(super) fn packed_rgb_u16_resample_emit<const SRC_BITS: u32, const NATIVE_LUM
       if SRC_BITS < 16 {
         // Clamping twin of `expand_rgb_u16_to_rgba_u16_row` (opaque alpha
         // is the native max, which equals its `(1 << BITS) - 1`).
-        for (rgba_px, rgb_px) in out.chunks_exact_mut(4).zip(binned.chunks_exact(3)) {
+        for (rgba_px, rgb_px) in out
+          .as_chunks_mut::<4>()
+          .0
+          .iter_mut()
+          .zip(binned.as_chunks::<3>().0.iter())
+        {
           rgba_px[0] = rgb_px[0].min(native_max);
           rgba_px[1] = rgb_px[1].min(native_max);
           rgba_px[2] = rgb_px[2].min(native_max);
@@ -8934,7 +8987,7 @@ pub(super) fn packed_rgb_u32_resample_emit<const NATIVE_LUMA16: bool>(
 fn premultiply_rgba_u32_row_in_place(row: &mut [u32], width: usize) {
   const MAX: u64 = u32::MAX as u64;
   const HALF: u64 = MAX / 2;
-  for px in row[..width * 4].chunks_exact_mut(4) {
+  for px in row[..width * 4].as_chunks_mut::<4>().0 {
     let a = u64::from(px[3]);
     for c in &mut px[..3] {
       let v = u64::from(*c);
@@ -8952,8 +9005,10 @@ fn premultiply_rgba_u32_row_in_place(row: &mut [u32], width: usize) {
 fn unpremultiply_binned_rgba_u32_into(binned: &[u32], dst: &mut [u32], width: usize) {
   const MAX: u64 = u32::MAX as u64;
   for (out_px, in_px) in dst[..width * 4]
-    .chunks_exact_mut(4)
-    .zip(binned[..width * 4].chunks_exact(4))
+    .as_chunks_mut::<4>()
+    .0
+    .iter_mut()
+    .zip(binned[..width * 4].as_chunks::<4>().0.iter())
   {
     let a = u64::from(in_px[3]);
     for c in 0..3 {
@@ -9025,7 +9080,12 @@ fn derive_packed_rgba_u32_outputs<const NATIVE_LUMA16: bool>(
   if need_narrow {
     // u8 RGB = straight `u32 >> 24` = `(u32 >> 16) >> 8`, drop α.
     let nrow = &mut narrow[..3 * ow];
-    for (d, px) in nrow.chunks_exact_mut(3).zip(c16.chunks_exact(4)) {
+    for (d, px) in nrow
+      .as_chunks_mut::<3>()
+      .0
+      .iter_mut()
+      .zip(c16.as_chunks::<4>().0.iter())
+    {
       d[0] = (px[0] >> 8) as u8;
       d[1] = (px[1] >> 8) as u8;
       d[2] = (px[2] >> 8) as u8;
@@ -9036,7 +9096,12 @@ fn derive_packed_rgba_u32_outputs<const NATIVE_LUMA16: bool>(
     if let Some(buf) = rgba.as_deref_mut() {
       // Narrow all four straight channels (α `>> 24` too) — a real binned α.
       let dst = &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow];
-      for (d, px) in dst.chunks_exact_mut(4).zip(c16.chunks_exact(4)) {
+      for (d, px) in dst
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .zip(c16.as_chunks::<4>().0.iter())
+      {
         d[0] = (px[0] >> 8) as u8;
         d[1] = (px[1] >> 8) as u8;
         d[2] = (px[2] >> 8) as u8;
@@ -9605,7 +9670,7 @@ where
   T: Copy + TryFrom<u32> + Into<u32>,
 {
   let half = max / 2;
-  for px in row[..width * 4].chunks_exact_mut(4) {
+  for px in row[..width * 4].as_chunks_mut::<4>().0 {
     let a: u32 = px[3].into();
     for c in &mut px[..3] {
       let v: u32 = (*c).into();
@@ -9653,8 +9718,10 @@ where
   T: Copy + TryFrom<u32> + Into<u32>,
 {
   for (out_px, in_px) in dst[..width * 4]
-    .chunks_exact_mut(4)
-    .zip(binned[..width * 4].chunks_exact(4))
+    .as_chunks_mut::<4>()
+    .0
+    .iter_mut()
+    .zip(binned[..width * 4].as_chunks::<4>().0.iter())
   {
     let a: u32 = in_px[3].into();
     for c in 0..3 {
@@ -9683,8 +9750,10 @@ where
   T: Copy + TryFrom<u32> + Into<u32>,
 {
   for (out_px, in_px) in dst[..width * 3]
-    .chunks_exact_mut(3)
-    .zip(binned[..width * 4].chunks_exact(4))
+    .as_chunks_mut::<3>()
+    .0
+    .iter_mut()
+    .zip(binned[..width * 4].as_chunks::<4>().0.iter())
   {
     let a: u32 = in_px[3].into();
     for c in 0..3 {
@@ -9708,8 +9777,10 @@ where
 #[cfg_attr(not(tarpaulin), inline(always))]
 fn drop_alpha_rgba_to_rgb_row<T: Copy>(rgba: &[T], dst: &mut [T], width: usize) {
   for (out_px, in_px) in dst[..width * 3]
-    .chunks_exact_mut(3)
-    .zip(rgba[..width * 4].chunks_exact(4))
+    .as_chunks_mut::<3>()
+    .0
+    .iter_mut()
+    .zip(rgba[..width * 4].as_chunks::<4>().0.iter())
   {
     out_px.copy_from_slice(&in_px[..3]);
   }
@@ -9977,7 +10048,12 @@ pub(super) fn packed_rgba_resample<const NATIVE_Y_LUMA: bool>(
     if let Some(buf) = rgba_u16.as_deref_mut() {
       let dst = &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow];
       if premult {
-        for (out_px, in_px) in dst.chunks_exact_mut(4).zip(binned.chunks_exact(4)) {
+        for (out_px, in_px) in dst
+          .as_chunks_mut::<4>()
+          .0
+          .iter_mut()
+          .zip(binned.as_chunks::<4>().0.iter())
+        {
           let a = in_px[3] as u32;
           for c in 0..3 {
             out_px[c] = unpremultiply_channel(in_px[c] as u32, a, 255) as u16;
@@ -10239,7 +10315,12 @@ pub(super) fn pal8_rgba_resample(
     if let Some(buf) = rgba_u16.as_deref_mut() {
       let dst = &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow];
       if premult {
-        for (out_px, in_px) in dst.chunks_exact_mut(4).zip(binned.chunks_exact(4)) {
+        for (out_px, in_px) in dst
+          .as_chunks_mut::<4>()
+          .0
+          .iter_mut()
+          .zip(binned.as_chunks::<4>().0.iter())
+        {
           let a = in_px[3] as u32;
           for c in 0..3 {
             let s = unpremultiply_channel(in_px[c] as u32, a, 255) as u16;
@@ -10827,7 +10908,12 @@ pub(super) fn packed_rgba_u16_resample<
     }
     if need_narrow {
       let nrow = &mut narrow[..3 * ow];
-      for (d, px) in nrow.chunks_exact_mut(3).zip(color.chunks_exact(4)) {
+      for (d, px) in nrow
+        .as_chunks_mut::<3>()
+        .0
+        .iter_mut()
+        .zip(color.as_chunks::<4>().0.iter())
+      {
         d[0] = (px[0] >> (SRC_BITS - 8)) as u8;
         d[1] = (px[1] >> (SRC_BITS - 8)) as u8;
         d[2] = (px[2] >> (SRC_BITS - 8)) as u8;
@@ -10838,7 +10924,12 @@ pub(super) fn packed_rgba_u16_resample<
       if let Some(buf) = rgba.as_deref_mut() {
         // Narrow all four straight channels (α `>> (SRC_BITS - 8)` too).
         let dst = &mut buf[oy * 4 * ow..(oy + 1) * 4 * ow];
-        for (d, px) in dst.chunks_exact_mut(4).zip(color.chunks_exact(4)) {
+        for (d, px) in dst
+          .as_chunks_mut::<4>()
+          .0
+          .iter_mut()
+          .zip(color.as_chunks::<4>().0.iter())
+        {
           d[0] = (px[0] >> (SRC_BITS - 8)) as u8;
           d[1] = (px[1] >> (SRC_BITS - 8)) as u8;
           d[2] = (px[2] >> (SRC_BITS - 8)) as u8;
@@ -12825,12 +12916,12 @@ fn y2xx_process_native<const BITS: u32, const BE: bool>(
     let logical = if BE { u16::from_be(s) } else { u16::from_le(s) };
     logical >> (16 - BITS)
   };
-  for (i, group) in packed.chunks_exact(4).enumerate() {
+  for (i, group) in packed.as_chunks::<4>().0.iter().enumerate() {
     y_scratch[i * 2] = depack(group[0]);
     y_scratch[i * 2 + 1] = depack(group[2]);
   }
   if need_color {
-    for (i, group) in packed.chunks_exact(4).enumerate() {
+    for (i, group) in packed.as_chunks::<4>().0.iter().enumerate() {
       u_scratch[i] = depack(group[1]);
       v_scratch[i] = depack(group[3]);
     }
@@ -12968,7 +13059,7 @@ fn y2xx_center_reconstruct<'c, const BITS: u32>(
     }) >> (16 - BITS);
     if be { logical.to_be() } else { logical.to_le() }
   };
-  for (i, group) in packed.chunks_exact(4).take(cw).enumerate() {
+  for (i, group) in packed.as_chunks::<4>().0.iter().take(cw).enumerate() {
     y_full[2 * i] = repack(group[0]);
     y_full[2 * i + 1] = repack(group[2]);
     u_half[i] = repack(group[1]);
@@ -13199,7 +13290,7 @@ fn v210_process_native<const BE: bool>(
       u32::from_le_bytes(bytes)
     }
   };
-  for (wi, word) in packed.chunks_exact(16).enumerate() {
+  for (wi, word) in packed.as_chunks::<16>().0.iter().enumerate() {
     let px = wi * 6;
     let w0 = load(word, 0);
     let w1 = load(word, 1);
@@ -13381,7 +13472,7 @@ fn v210_center_reconstruct<'c>(
       u32::from_le_bytes(bytes)
     }
   };
-  for (wi, word) in packed.chunks_exact(16).enumerate() {
+  for (wi, word) in packed.as_chunks::<16>().0.iter().enumerate() {
     let px = wi * 6;
     let w0 = load(word, 0);
     let w1 = load(word, 1);
@@ -13653,13 +13744,13 @@ fn packed_vuyx_process_native(
   // 4:4:4: chroma is full-width (`w`). Y is always de-packed; U / V only on a
   // colour row. The failpoint fires on the FIRST (Y) grow only.
   grow_packed_444_u8_scratch(y_scratch, w, true, w, h, plan)?;
-  for (i, group) in packed.chunks_exact(4).enumerate() {
+  for (i, group) in packed.as_chunks::<4>().0.iter().enumerate() {
     y_scratch[i] = group[2];
   }
   if need_color {
     grow_packed_444_u8_scratch(u_scratch, w, false, w, h, plan)?;
     grow_packed_444_u8_scratch(v_scratch, w, false, w, h, plan)?;
-    for (i, group) in packed.chunks_exact(4).enumerate() {
+    for (i, group) in packed.as_chunks::<4>().0.iter().enumerate() {
       u_scratch[i] = group[1];
       v_scratch[i] = group[0];
     }
@@ -13758,13 +13849,13 @@ fn packed_vyu444_process_native(
   // de-packed; U / V only on a colour row. The failpoint fires on the FIRST
   // (Y) grow only.
   grow_packed_444_u8_scratch(y_scratch, w, true, w, h, plan)?;
-  for (i, group) in packed.chunks_exact(3).enumerate() {
+  for (i, group) in packed.as_chunks::<3>().0.iter().enumerate() {
     y_scratch[i] = group[1]; // Y at byte 1
   }
   if need_color {
     grow_packed_444_u8_scratch(u_scratch, w, false, w, h, plan)?;
     grow_packed_444_u8_scratch(v_scratch, w, false, w, h, plan)?;
-    for (i, group) in packed.chunks_exact(3).enumerate() {
+    for (i, group) in packed.as_chunks::<3>().0.iter().enumerate() {
       u_scratch[i] = group[2]; // U at byte 2
       v_scratch[i] = group[0]; // V at byte 0
     }
@@ -16819,7 +16910,7 @@ pub(super) fn rgba_plane_f16_scratch<'s>(
 #[cfg(feature = "gbr")]
 #[cfg_attr(not(tarpaulin), inline(always))]
 fn premultiply_rgba_f32_row_in_place(row: &mut [f32], width: usize) {
-  for px in row[..width * 4].chunks_exact_mut(4) {
+  for px in row[..width * 4].as_chunks_mut::<4>().0 {
     let a = px[3];
     for c in &mut px[..3] {
       *c *= a;
@@ -16851,8 +16942,10 @@ fn resolve_straight_rgba_f32_into(binned: &[f32], dst: &mut [f32], width: usize,
     return;
   }
   for (out_px, in_px) in dst[..width * 4]
-    .chunks_exact_mut(4)
-    .zip(binned[..width * 4].chunks_exact(4))
+    .as_chunks_mut::<4>()
+    .0
+    .iter_mut()
+    .zip(binned[..width * 4].as_chunks::<4>().0.iter())
   {
     let a = in_px[3];
     for c in 0..3 {

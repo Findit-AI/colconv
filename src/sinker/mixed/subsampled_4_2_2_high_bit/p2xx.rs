@@ -263,7 +263,7 @@ fn p2xx_process_native<const BITS: u32, const BE: bool, const LOW_PACKED: bool>(
   if need_color {
     // P-format / NV20 chroma is interleaved `U,V,U,V…` (U at even element);
     // each of U and V is independently packed and must be de-packed.
-    for (i, pair) in uv_half.chunks_exact(2).enumerate() {
+    for (i, pair) in uv_half.as_chunks::<2>().0.iter().enumerate() {
       let u = if BE {
         u16::from_be(pair[0])
       } else {

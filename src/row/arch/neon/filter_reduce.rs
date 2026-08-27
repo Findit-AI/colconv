@@ -317,7 +317,7 @@ unsafe fn h_reduce_c1<S: NeonElem>(
     // 8-multiple arena slice.
     unsafe {
       let mut acc = vdupq_n_f64(0.0);
-      for (ci, chunk) in span.chunks_exact(8).enumerate() {
+      for (ci, chunk) in span.as_chunks::<8>().0.iter().enumerate() {
         let base = start + ci * 8;
         let s = load8_staged_c1(row, base);
         let c = widen_coeffs(chunk);
@@ -361,7 +361,7 @@ unsafe fn h_reduce_c3<S: NeonElem>(
       let mut acc0 = vdupq_n_f64(0.0);
       let mut acc1 = vdupq_n_f64(0.0);
       let mut acc2 = vdupq_n_f64(0.0);
-      for (ci, chunk) in span.chunks_exact(8).enumerate() {
+      for (ci, chunk) in span.as_chunks::<8>().0.iter().enumerate() {
         let cell = start + ci * 8;
         let c = widen_coeffs(chunk);
         let real_in_chunk = real.saturating_sub(ci * 8).min(8);

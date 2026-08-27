@@ -222,7 +222,7 @@ fn p4xx_process_native<const BITS: u32, const BE: bool>(
     // P-format chroma is interleaved `U,V,U,V…` (U at even element); each of U
     // and V is independently high-bit-packed and must be de-packed. 4:4:4 is
     // full-width: `w` interleaved pairs (`2 * w` u16).
-    for (i, pair) in uv_full.chunks_exact(2).enumerate() {
+    for (i, pair) in uv_full.as_chunks::<2>().0.iter().enumerate() {
       let u = if BE {
         u16::from_be(pair[0])
       } else {
