@@ -11,10 +11,6 @@ keywords = ["color-conversion", "yuv", "rgb", "simd", "video"]
 categories = ["multimedia", "multimedia::video", "multimedia::images", "no-std", "no-std::no-alloc"]
 license = "GPL-3.0-or-later"
 rust-version = "1.95.0"
-# The PIL golden-fixture table is 55 MB of generated high-entropy data that
-# alone blows the crates.io 10 MB package cap. Its module is
-# `#[cfg(all(test, ...))]`-gated, so the packaged crate builds without the
-# file; running the test suite requires the repository checkout.
 exclude = ["src/resample/pil_goldens.rs"]
 
 [lib]
@@ -320,9 +316,6 @@ harness = false
 name = "monoblack_to_rgb"
 harness = false
 
-# Usage examples (`cargo run --example <name>`). Each declares the feature
-# set it decodes with so the CI feature ladder only compiles it where those
-# features are enabled; the default feature set enables all of them.
 [[example]]
 name = "quickstart"
 required-features = ["std", "yuv-planar"]
@@ -377,10 +370,6 @@ std = ["thiserror/default", "mediaframe/std"]
 # it only for `cargo bench` (see `.github/workflows/benchmark.yml`).
 unstable-bench-internals = []
 
-# Umbrella — enables every per-family sub-feature below (mirrors
-# mediaframe's `frame` umbrella). Activates mediaframe's frame umbrella
-# and every pixon per-family feature so the internal sinker / row /
-# dispatch / SIMD-backend modules for every format are compiled in.
 frame = [
   "mediaframe/frame",
   "yuv-planar",
@@ -426,10 +415,6 @@ mediaframe = { version = "0.6", default-features = false }
 [dev-dependencies]
 tempfile = "3"
 
-# Criterion pulls in rayon, which doesn't build for the wasm32‑wasi*
-# targets we use to run the simd128 backends under wasmtime. Gate it
-# to non‑wasm hosts — benches never run on wasm anyway (they need
-# system threading / timing that the wasi runner doesn't expose).
 [target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
 criterion = "0.8"
 
