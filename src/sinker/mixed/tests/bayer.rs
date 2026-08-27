@@ -750,7 +750,6 @@ fn solid_pattern12(
     Bggr => ((1, 1), (0, 0)),
     Grbg => ((0, 1), (1, 0)),
     Gbrg => ((1, 0), (0, 1)),
-    _ => unreachable!("invalid BayerPattern"),
   };
   let w = width as usize;
   let h = height as usize;

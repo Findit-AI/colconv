@@ -12,6 +12,39 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [SemVer](https://semver.org/spec/v2.0.0.html); pre-1.0
 breaking changes bump the `x` in `0.x.y`.
 
+## 0.3.0 — 2026-08-28
+
+**Breaking**, on one count: the public dependency `mediaframe` crosses
+0.4 → 0.6, carrying two majors of mediaframe's own breaking changes into
+the vocabularies pixon re-exports. No pixon-authored API changes shape
+or behavior in this release.
+
+### Changed
+
+- **`mediaframe` 0.4 → 0.6.** Two upstream majors, both from mediaframe
+  0.5.0 (0.6.0's changes are all `audio::*` / `subtitle::*` — pixon has
+  no audio or subtitle surface and re-exports none of it):
+  - **`FromStr::Err` is now `Infallible`** for every all-tier vocabulary
+    pixon re-exports — `PixelFormat`, `ColorMatrix` (mediaframe's
+    `Matrix`), `Primaries`, `Transfer`, `DynamicRange`, `ChromaLocation`,
+    `DcpTargetGamut`. The `Parse*Error` types themselves are untouched
+    and still exported by mediaframe; what moves is the associated `Err`
+    type a caller's own `s.parse::<pixon::PixelFormat>()` resolves to.
+    pixon names none of these error types in its own source, so nothing
+    here needed a code change — a downstream `match` arm, `From` impl,
+    or turbofish that does name one of the old `Parse*Error` types may
+    need to drop it.
+  - **`raw::BayerPattern`** (a re-export of mediaframe's
+    `frame::BayerPattern`) **is no longer `#[non_exhaustive]`.** The four
+    named patterns (`Rggb` / `Bggr` / `Grbg` / `Gbrg`) were always the
+    whole geometric closure — a 2x2 Bayer tile admits exactly four
+    top-left phases. pixon's own `pattern_phases` kernel and its test
+    twin carried a trailing `_ => unreachable!("invalid BayerPattern")`
+    arm only because the re-exported enum was non-exhaustive; with it
+    closed, both matches are now exhaustive over the four variants and
+    the dead arm is removed (it would otherwise be a compile error under
+    this repo's `-D warnings` clippy gate: `unreachable_patterns`).
+
 ## 0.2.0 — 2026-08-20
 
 **Breaking**, on one count with a wide blast radius: the public dependency
