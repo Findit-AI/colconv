@@ -222,7 +222,7 @@ fn semi_planar_process_native(
     }
     // NV12 chroma is `U V U V …` (U at even byte), NV21 is `V U V U …`.
     let (u_off, v_off) = if swap_uv { (1, 0) } else { (0, 1) };
-    for (i, pair) in chroma_uv.chunks_exact(2).enumerate() {
+    for (i, pair) in chroma_uv.as_chunks::<2>().0.iter().enumerate() {
       u_scratch[i] = pair[u_off];
       v_scratch[i] = pair[v_off];
     }
@@ -388,7 +388,7 @@ fn semi_planar_process_native_non420(
     // NV16 / NV24 chroma is `U V U V …` (U at even byte), NV42 is
     // `V U V U …` — mirror the NV21 swapped-order split.
     let (u_off, v_off) = if swap_uv { (1, 0) } else { (0, 1) };
-    for (i, pair) in chroma_uv.chunks_exact(2).enumerate() {
+    for (i, pair) in chroma_uv.as_chunks::<2>().0.iter().enumerate() {
       u_scratch[i] = pair[u_off];
       v_scratch[i] = pair[v_off];
     }
@@ -493,7 +493,7 @@ fn nv_deinterleave_chroma_half(
     "half-width chroma scratch must be reserved via reserve_nv_chroma_half first"
   );
   let (u_off, v_off) = if swap_uv { (1, 0) } else { (0, 1) };
-  for (i, pair) in uv.chunks_exact(2).take(cw).enumerate() {
+  for (i, pair) in uv.as_chunks::<2>().0.iter().take(cw).enumerate() {
     u_half[i] = pair[u_off];
     v_half[i] = pair[v_off];
   }

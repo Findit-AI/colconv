@@ -303,7 +303,9 @@ fn mono_luma_feed_emit<S: RowResampler<u8>>(
     }
     if let Some(buf) = rgb.as_deref_mut() {
       for (px, &y) in buf[oy * 3 * ow..(oy + 1) * 3 * ow]
-        .chunks_exact_mut(3)
+        .as_chunks_mut::<3>()
+        .0
+        .iter_mut()
         .zip(out_row)
       {
         px[0] = y;
@@ -313,7 +315,9 @@ fn mono_luma_feed_emit<S: RowResampler<u8>>(
     }
     if let Some(buf) = rgba.as_deref_mut() {
       for (px, &y) in buf[oy * 4 * ow..(oy + 1) * 4 * ow]
-        .chunks_exact_mut(4)
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
         .zip(out_row)
       {
         px[0] = y;
@@ -324,7 +328,9 @@ fn mono_luma_feed_emit<S: RowResampler<u8>>(
     }
     if let Some(buf) = rgb_u16.as_deref_mut() {
       for (px, &y) in buf[oy * 3 * ow..(oy + 1) * 3 * ow]
-        .chunks_exact_mut(3)
+        .as_chunks_mut::<3>()
+        .0
+        .iter_mut()
         .zip(out_row)
       {
         let y16 = y as u16;
@@ -335,7 +341,9 @@ fn mono_luma_feed_emit<S: RowResampler<u8>>(
     }
     if let Some(buf) = rgba_u16.as_deref_mut() {
       for (px, &y) in buf[oy * 4 * ow..(oy + 1) * 4 * ow]
-        .chunks_exact_mut(4)
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
         .zip(out_row)
       {
         let y16 = y as u16;

@@ -742,7 +742,7 @@ pub(crate) fn rgb8_to_rgb_row(src: &[u8], rgb_out: &mut [u8], width: usize) {
   debug_assert!(rgb_out.len() >= width * 3, "rgb_out too short");
   for (&px, dst) in src[..width]
     .iter()
-    .zip(rgb_out[..width * 3].chunks_exact_mut(3))
+    .zip(rgb_out[..width * 3].as_chunks_mut::<3>().0.iter_mut())
   {
     dst[0] = expand3((px >> 5) & 0x07);
     dst[1] = expand3((px >> 2) & 0x07);
@@ -762,7 +762,7 @@ pub(crate) fn rgb8_to_rgba_row(src: &[u8], rgba_out: &mut [u8], width: usize) {
   debug_assert!(rgba_out.len() >= width * 4, "rgba_out too short");
   for (&px, dst) in src[..width]
     .iter()
-    .zip(rgba_out[..width * 4].chunks_exact_mut(4))
+    .zip(rgba_out[..width * 4].as_chunks_mut::<4>().0.iter_mut())
   {
     dst[0] = expand3((px >> 5) & 0x07);
     dst[1] = expand3((px >> 2) & 0x07);
@@ -784,7 +784,7 @@ pub(crate) fn rgb8_to_rgb_u16_row(src: &[u8], rgb_u16_out: &mut [u16], width: us
   debug_assert!(rgb_u16_out.len() >= width * 3, "rgb_u16_out too short");
   for (&px, dst) in src[..width]
     .iter()
-    .zip(rgb_u16_out[..width * 3].chunks_exact_mut(3))
+    .zip(rgb_u16_out[..width * 3].as_chunks_mut::<3>().0.iter_mut())
   {
     dst[0] = ((px >> 5) & 0x07) as u16;
     dst[1] = ((px >> 2) & 0x07) as u16;
@@ -804,7 +804,7 @@ pub(crate) fn rgb8_to_rgba_u16_row(src: &[u8], rgba_u16_out: &mut [u16], width: 
   debug_assert!(rgba_u16_out.len() >= width * 4, "rgba_u16_out too short");
   for (&px, dst) in src[..width]
     .iter()
-    .zip(rgba_u16_out[..width * 4].chunks_exact_mut(4))
+    .zip(rgba_u16_out[..width * 4].as_chunks_mut::<4>().0.iter_mut())
   {
     dst[0] = ((px >> 5) & 0x07) as u16;
     dst[1] = ((px >> 2) & 0x07) as u16;
@@ -829,7 +829,7 @@ pub(crate) fn bgr8_to_rgb_row(src: &[u8], rgb_out: &mut [u8], width: usize) {
   debug_assert!(rgb_out.len() >= width * 3, "rgb_out too short");
   for (&px, dst) in src[..width]
     .iter()
-    .zip(rgb_out[..width * 3].chunks_exact_mut(3))
+    .zip(rgb_out[..width * 3].as_chunks_mut::<3>().0.iter_mut())
   {
     dst[0] = expand3(px & 0x07);
     dst[1] = expand3((px >> 3) & 0x07);
@@ -849,7 +849,7 @@ pub(crate) fn bgr8_to_rgba_row(src: &[u8], rgba_out: &mut [u8], width: usize) {
   debug_assert!(rgba_out.len() >= width * 4, "rgba_out too short");
   for (&px, dst) in src[..width]
     .iter()
-    .zip(rgba_out[..width * 4].chunks_exact_mut(4))
+    .zip(rgba_out[..width * 4].as_chunks_mut::<4>().0.iter_mut())
   {
     dst[0] = expand3(px & 0x07);
     dst[1] = expand3((px >> 3) & 0x07);
@@ -871,7 +871,7 @@ pub(crate) fn bgr8_to_rgb_u16_row(src: &[u8], rgb_u16_out: &mut [u16], width: us
   debug_assert!(rgb_u16_out.len() >= width * 3, "rgb_u16_out too short");
   for (&px, dst) in src[..width]
     .iter()
-    .zip(rgb_u16_out[..width * 3].chunks_exact_mut(3))
+    .zip(rgb_u16_out[..width * 3].as_chunks_mut::<3>().0.iter_mut())
   {
     dst[0] = (px & 0x07) as u16;
     dst[1] = ((px >> 3) & 0x07) as u16;
@@ -891,7 +891,7 @@ pub(crate) fn bgr8_to_rgba_u16_row(src: &[u8], rgba_u16_out: &mut [u16], width: 
   debug_assert!(rgba_u16_out.len() >= width * 4, "rgba_u16_out too short");
   for (&px, dst) in src[..width]
     .iter()
-    .zip(rgba_u16_out[..width * 4].chunks_exact_mut(4))
+    .zip(rgba_u16_out[..width * 4].as_chunks_mut::<4>().0.iter_mut())
   {
     dst[0] = (px & 0x07) as u16;
     dst[1] = ((px >> 3) & 0x07) as u16;
@@ -915,7 +915,7 @@ pub(crate) fn rgb4_byte_to_rgb_row(src: &[u8], rgb_out: &mut [u8], width: usize)
   debug_assert!(rgb_out.len() >= width * 3, "rgb_out too short");
   for (&px, dst) in src[..width]
     .iter()
-    .zip(rgb_out[..width * 3].chunks_exact_mut(3))
+    .zip(rgb_out[..width * 3].as_chunks_mut::<3>().0.iter_mut())
   {
     dst[0] = expand1((px >> 3) & 0x01);
     dst[1] = expand2((px >> 1) & 0x03);
@@ -935,7 +935,7 @@ pub(crate) fn rgb4_byte_to_rgba_row(src: &[u8], rgba_out: &mut [u8], width: usiz
   debug_assert!(rgba_out.len() >= width * 4, "rgba_out too short");
   for (&px, dst) in src[..width]
     .iter()
-    .zip(rgba_out[..width * 4].chunks_exact_mut(4))
+    .zip(rgba_out[..width * 4].as_chunks_mut::<4>().0.iter_mut())
   {
     dst[0] = expand1((px >> 3) & 0x01);
     dst[1] = expand2((px >> 1) & 0x03);
@@ -957,7 +957,7 @@ pub(crate) fn rgb4_byte_to_rgb_u16_row(src: &[u8], rgb_u16_out: &mut [u16], widt
   debug_assert!(rgb_u16_out.len() >= width * 3, "rgb_u16_out too short");
   for (&px, dst) in src[..width]
     .iter()
-    .zip(rgb_u16_out[..width * 3].chunks_exact_mut(3))
+    .zip(rgb_u16_out[..width * 3].as_chunks_mut::<3>().0.iter_mut())
   {
     dst[0] = ((px >> 3) & 0x01) as u16;
     dst[1] = ((px >> 1) & 0x03) as u16;
@@ -977,7 +977,7 @@ pub(crate) fn rgb4_byte_to_rgba_u16_row(src: &[u8], rgba_u16_out: &mut [u16], wi
   debug_assert!(rgba_u16_out.len() >= width * 4, "rgba_u16_out too short");
   for (&px, dst) in src[..width]
     .iter()
-    .zip(rgba_u16_out[..width * 4].chunks_exact_mut(4))
+    .zip(rgba_u16_out[..width * 4].as_chunks_mut::<4>().0.iter_mut())
   {
     dst[0] = ((px >> 3) & 0x01) as u16;
     dst[1] = ((px >> 1) & 0x03) as u16;
@@ -1000,7 +1000,7 @@ pub(crate) fn bgr4_byte_to_rgb_row(src: &[u8], rgb_out: &mut [u8], width: usize)
   debug_assert!(rgb_out.len() >= width * 3, "rgb_out too short");
   for (&px, dst) in src[..width]
     .iter()
-    .zip(rgb_out[..width * 3].chunks_exact_mut(3))
+    .zip(rgb_out[..width * 3].as_chunks_mut::<3>().0.iter_mut())
   {
     dst[0] = expand1(px & 0x01);
     dst[1] = expand2((px >> 1) & 0x03);
@@ -1020,7 +1020,7 @@ pub(crate) fn bgr4_byte_to_rgba_row(src: &[u8], rgba_out: &mut [u8], width: usiz
   debug_assert!(rgba_out.len() >= width * 4, "rgba_out too short");
   for (&px, dst) in src[..width]
     .iter()
-    .zip(rgba_out[..width * 4].chunks_exact_mut(4))
+    .zip(rgba_out[..width * 4].as_chunks_mut::<4>().0.iter_mut())
   {
     dst[0] = expand1(px & 0x01);
     dst[1] = expand2((px >> 1) & 0x03);
@@ -1042,7 +1042,7 @@ pub(crate) fn bgr4_byte_to_rgb_u16_row(src: &[u8], rgb_u16_out: &mut [u16], widt
   debug_assert!(rgb_u16_out.len() >= width * 3, "rgb_u16_out too short");
   for (&px, dst) in src[..width]
     .iter()
-    .zip(rgb_u16_out[..width * 3].chunks_exact_mut(3))
+    .zip(rgb_u16_out[..width * 3].as_chunks_mut::<3>().0.iter_mut())
   {
     dst[0] = (px & 0x01) as u16;
     dst[1] = ((px >> 1) & 0x03) as u16;
@@ -1062,7 +1062,7 @@ pub(crate) fn bgr4_byte_to_rgba_u16_row(src: &[u8], rgba_u16_out: &mut [u16], wi
   debug_assert!(rgba_u16_out.len() >= width * 4, "rgba_u16_out too short");
   for (&px, dst) in src[..width]
     .iter()
-    .zip(rgba_u16_out[..width * 4].chunks_exact_mut(4))
+    .zip(rgba_u16_out[..width * 4].as_chunks_mut::<4>().0.iter_mut())
   {
     dst[0] = (px & 0x01) as u16;
     dst[1] = ((px >> 1) & 0x03) as u16;

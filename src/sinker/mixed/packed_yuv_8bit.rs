@@ -657,14 +657,14 @@ fn packed_yuv422_process_native(
     Ok(())
   };
   grow(y_scratch, w)?;
-  for (i, group) in packed.chunks_exact(4).enumerate() {
+  for (i, group) in packed.as_chunks::<4>().0.iter().enumerate() {
     y_scratch[i * 2] = group[y0_off];
     y_scratch[i * 2 + 1] = group[y1_off];
   }
   if need_color {
     grow(u_scratch, cw)?;
     grow(v_scratch, cw)?;
-    for (i, group) in packed.chunks_exact(4).enumerate() {
+    for (i, group) in packed.as_chunks::<4>().0.iter().enumerate() {
       u_scratch[i] = group[u_off];
       v_scratch[i] = group[v_off];
     }
@@ -784,7 +784,7 @@ fn packed_center_upsample_chroma<'s>(
     u_half.len() >= cw && v_half.len() >= cw,
     "half-width chroma scratch must be reserved via reserve_packed_center_chroma first"
   );
-  for (i, group) in packed.chunks_exact(4).take(cw).enumerate() {
+  for (i, group) in packed.as_chunks::<4>().0.iter().take(cw).enumerate() {
     u_half[i] = group[u_off];
     v_half[i] = group[v_off];
   }

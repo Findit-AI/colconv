@@ -15,15 +15,20 @@ breaking changes bump the `x` in `0.x.y`.
 ## 0.3.0 — 2026-08-28
 
 **Breaking**, on one count: the public dependency `mediaframe` crosses
-0.4 → 0.6, carrying two majors of mediaframe's own breaking changes into
-the vocabularies pixon re-exports. No pixon-authored API changes shape
-or behavior in this release.
+0.4 → 0.7, carrying three majors of mediaframe's own breaking changes
+into the vocabularies pixon re-exports. No pixon-authored API changes
+shape or behavior in this release.
 
 ### Changed
 
-- **`mediaframe` 0.4 → 0.6.** Two upstream majors, both from mediaframe
-  0.5.0 (0.6.0's changes are all `audio::*` / `subtitle::*` — pixon has
-  no audio or subtitle surface and re-exports none of it):
+- **`mediaframe` 0.4 → 0.7.** Three upstream majors; both API-visible
+  changes below land in the 0.4 → 0.5 crossing. 0.6.0's changes are all
+  `audio::*` / `subtitle::*` (pixon has no audio or subtitle surface and
+  re-exports none of it); 0.7.0's sole change is `mediatime` 0.3 → 0.4,
+  additive only per mediaframe's own changelog (zero fallout in its own
+  source) — pixon re-exports none of mediaframe's `mediatime`-typed
+  surface (`frame::TimestampedFrame`'s `pts` / `duration`) either, so it
+  is a no-op here too:
   - **`FromStr::Err` is now `Infallible`** for every all-tier vocabulary
     pixon re-exports — `PixelFormat`, `ColorMatrix` (mediaframe's
     `Matrix`), `Primaries`, `Transfer`, `DynamicRange`, `ChromaLocation`,
