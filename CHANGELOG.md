@@ -12,6 +12,32 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [SemVer](https://semver.org/spec/v2.0.0.html); pre-1.0
 breaking changes bump the `x` in `0.x.y`.
 
+## 0.4.0 — 2026-08-30
+
+**Breaking**, on one count: the public dependency `mediaframe` crosses
+0.7 → 0.9, two more upstream majors on top of the 0.4 → 0.7 crossing
+0.3.0 already carries. No pixon-authored API changes shape or behavior
+in this release.
+
+### Changed
+
+- **`mediaframe` 0.7 → 0.9.** Two upstream majors, neither touching
+  `pixel_format` or `color` — the only two mediaframe modules pixon's
+  public API is built on. Checked against mediaframe's own commit
+  history, not assumed: zero commits touch either module between the
+  0.7.0 and 0.9.0 tags, so this is a re-pin, not a migration.
+  - **0.8.0** adds `image::Format` (a new still-image vocabulary
+    household) and an `extensions()` face on `container::Format` /
+    `audio::ContainerFormat`. pixon re-exports none of `image`,
+    `container` or `audio` — a no-op here. (This half of the crossing
+    already sat on `main` unreleased, with no changelog entry of its
+    own; this release is the first to publish it.)
+  - **0.9.0** retires the lossy `lang::Language` wrapper for a
+    four-type `lang` household (`Language`, `ScriptSubtag`, `Region`,
+    `LanguageId`) and swaps `icu_locale_core` for `smol-bytes` /
+    `simdutf8` internally. pixon has no `lang` surface — a no-op here
+    too.
+
 ## 0.3.0 — 2026-08-28
 
 **Breaking**, on one count: the public dependency `mediaframe` crosses
