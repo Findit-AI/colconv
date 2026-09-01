@@ -12,6 +12,32 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [SemVer](https://semver.org/spec/v2.0.0.html); pre-1.0
 breaking changes bump the `x` in `0.x.y`.
 
+## Unreleased
+
+### Fixed
+
+- **`lib.rs`'s "Supported source formats" table documented roughly a third
+  of the shipped roster.** Rebuilt mechanically from the crate's own
+  `Source`-trait exhaustiveness proof (`src/convert/source_coverage.rs`):
+  143 shipped formats now have a table row (up from 49), adding the RGB /
+  RGB-legacy / RGB-float / Gray / Mono families (previously undocumented
+  entirely), the GBR high-bit-depth tier, native YUVA, the packed 4:2:2
+  8-bit family, and the stray gaps `Yuv410p` / `Yuv444p10Msb` /
+  `Yuv444p12Msb` / `Nv20` / `Ayuv` / `Uyva` / `Vyu444` / `Xv48`.
+- **The "YUVA sources (alpha-drop)" section described already-shipped work
+  as a future item** ("RGBA pass-through ... is the dedicated Ship 8 work
+  item"). `with_rgba` / `with_rgba_u16` (real alpha pass-through on
+  `MixedSinker`) and the native `Yuva420p` / `Yuva422p` / `Yuva444p` frame
+  families have shipped since 0.2.0; the section now documents them as
+  present, keeps alpha-drop as a still-valid lighter-weight alternative for
+  callers who skip the `yuva` feature, and no longer hand-duplicates a
+  format list that had already drifted (it was missing every 12-bit YUVA
+  variant).
+- Docs-only: no code, no public API and no behavior changed. `cargo fmt`,
+  `cargo +stable doc --all-features` (zero warnings traceable to `lib.rs`),
+  doctests and the full `--all-features` test suite (7215 tests) are all
+  green, unchanged from before this commit.
+
 ## 0.4.0 — 2026-08-30
 
 **Breaking**, on one count: the public dependency `mediaframe` crosses
