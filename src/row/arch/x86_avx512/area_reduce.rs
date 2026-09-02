@@ -677,7 +677,7 @@ pub(crate) unsafe fn area_h_reduce_row_f32_c1(
     // 8-multiple arena slice.
     unsafe {
       let mut acc = _mm512_setzero_pd();
-      for (ci, chunk) in span.chunks_exact(8).enumerate() {
+      for (ci, chunk) in span.as_chunks::<8>().0.iter().enumerate() {
         let base = start + ci * 8;
         let s = if base + 8 <= row.len() {
           _mm256_loadu_ps(row.as_ptr().add(base))
@@ -724,7 +724,7 @@ pub(crate) unsafe fn area_h_reduce_row_f32_c3(
       let mut acc0 = _mm512_setzero_pd();
       let mut acc1 = _mm512_setzero_pd();
       let mut acc2 = _mm512_setzero_pd();
-      for (ci, chunk) in span.chunks_exact(8).enumerate() {
+      for (ci, chunk) in span.as_chunks::<8>().0.iter().enumerate() {
         let base = (start + ci * 8) * 3;
         let mut sbuf = [0f32; 24];
         let p = if base + 24 <= row.len() {

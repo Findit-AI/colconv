@@ -61,7 +61,7 @@ pub(crate) unsafe fn area_h_reduce_row_c1(
     // stack copy; weight loads come from the 8-multiple arena slice.
     unsafe {
       let mut acc = _mm_setzero_si128();
-      for (ci, chunk) in span.chunks_exact(8).enumerate() {
+      for (ci, chunk) in span.as_chunks::<8>().0.iter().enumerate() {
         let base = start + ci * 8;
         let s8 = if base + 8 <= row.len() {
           _mm_loadl_epi64(row.as_ptr().add(base).cast())
@@ -127,7 +127,7 @@ pub(crate) unsafe fn area_h_reduce_row_c3(
     // the 8-multiple arena slice.
     unsafe {
       let mut acc = [_mm_setzero_si128(); 3];
-      for (ci, chunk) in span.chunks_exact(8).enumerate() {
+      for (ci, chunk) in span.as_chunks::<8>().0.iter().enumerate() {
         let base = (start + ci * 8) * 3;
         let mut sbuf = [0u8; 24];
         let (v0, v1) = if base + 24 <= row.len() {
@@ -244,7 +244,7 @@ pub(crate) unsafe fn area_h_reduce_row_u16_c1(
     // 8-multiple arena slice.
     unsafe {
       let mut acc = _mm_setzero_si128();
-      for (ci, chunk) in span.chunks_exact(8).enumerate() {
+      for (ci, chunk) in span.as_chunks::<8>().0.iter().enumerate() {
         let base = start + ci * 8;
         let s16 = if base + 8 <= row.len() {
           _mm_loadu_si128(row.as_ptr().add(base).cast())
@@ -308,7 +308,7 @@ pub(crate) unsafe fn area_h_reduce_row_u16_c3(
     // arena slice.
     unsafe {
       let mut acc = [_mm_setzero_si128(); 3];
-      for (ci, chunk) in span.chunks_exact(8).enumerate() {
+      for (ci, chunk) in span.as_chunks::<8>().0.iter().enumerate() {
         let base = (start + ci * 8) * 3;
         let mut sbuf = [0u16; 24];
         let (v0, v1, v2) = if base + 24 <= row.len() {
@@ -478,7 +478,7 @@ pub(crate) unsafe fn area_h_reduce_row_f32_c1(
     // 8-multiple arena slice.
     unsafe {
       let mut acc = _mm_setzero_pd();
-      for (ci, chunk) in span.chunks_exact(8).enumerate() {
+      for (ci, chunk) in span.as_chunks::<8>().0.iter().enumerate() {
         let base = start + ci * 8;
         let (s_lo, s_hi) = if base + 8 <= row.len() {
           (
@@ -530,7 +530,7 @@ pub(crate) unsafe fn area_h_reduce_row_f32_c3(
       let mut acc0 = _mm_setzero_pd();
       let mut acc1 = _mm_setzero_pd();
       let mut acc2 = _mm_setzero_pd();
-      for (ci, chunk) in span.chunks_exact(8).enumerate() {
+      for (ci, chunk) in span.as_chunks::<8>().0.iter().enumerate() {
         let base = (start + ci * 8) * 3;
         let mut sbuf = [0f32; 24];
         let p = if base + 24 <= row.len() {

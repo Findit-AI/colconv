@@ -12,7 +12,71 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [SemVer](https://semver.org/spec/v2.0.0.html); pre-1.0
 breaking changes bump the `x` in `0.x.y`.
 
-## Unreleased
+## 0.5.0 — 2026-09-02
+
+**Breaking**, on one count: the public dependency `mediaframe` crosses
+0.9 → 0.10, carrying a fix to the `other()` / `FromStr` relationship
+through every vocabulary pixon re-exports. No pixon-authored API
+changes shape or behavior in this release.
+
+### Changed
+
+- **`mediaframe` 0.9 → 0.10.** One upstream major, entirely mediaframe's
+  own 0.10.0 — the prior `"0.9"` pin already spanned 0.9.0–0.9.2 (a
+  `lang`-registry internal relayout and two additive codec households,
+  neither reachable from pixon's surface), so 0.10.0 is the whole delta.
+  Two changes, checked against mediaframe's own 0.10.0 CHANGELOG entry,
+  not assumed:
+  - **A case-sensitivity axis for every vocabulary's parse table**
+    (`Insensitive` / `Sensitive`, `pub(crate)`). mediaframe's own notes
+    declare this a "zero behaviour change" release-over-release: all
+    twenty-two `Other(SmolStr)` households — `PixelFormat` and the six
+    `color` vocabularies pixon re-exports among them — declare
+    `Insensitive`, the fold every one of them already matched by. A
+    no-op here.
+  - **`other()` now delegates to `FromStr`'s own match table instead of
+    wrapping unconditionally, and a stranger's spelling is preserved
+    verbatim in `Other` rather than ASCII-folded to lowercase.** A real
+    behavior change on the households themselves, so this crate's own
+    call sites were censused rather than assumed clear: no `.other(`,
+    `.parse(`, `from_str(` or direct `::Other(` construction exists
+    anywhere in `src/` or `examples/` — pixon consumes `PixelFormat`
+    and the `color` vocabularies (`ColorMatrix`/`Matrix`, `Primaries`,
+    `Transfer`, `DynamicRange`, `ChromaLocation`, `DcpTargetGamut`)
+    exclusively as typed, named variants, never through string parsing.
+    (`frame::{Rotation, FieldOrder, StereoMode}` ride along in the
+    wholesale `pub use mediaframe::frame` re-export and see no pixon
+    code at all.) The one place this crate *does* call `.other(...)` is
+    its own test suite: 43 call sites across five types (`ChromaLocation`
+    × 32, `DynamicRange` × 5, `Transfer` × 3, `ColorMatrix` × 2,
+    `DcpTargetGamut` × 1 — chroma-siting, colorimetry and
+    resample-strategy coverage), all built from six synthetic,
+    already-lowercase slugs (`"unassigned-7"`, `"unassigned-9"`,
+    `"unassigned-42"`, `"unassigned-99"`, `"acescct"`, `"acescg"`) that
+    name no roster member of the type they're called on — checked
+    against mediaframe's own `FromStr` match tables for all five types,
+    not assumed. ASCII-fold and verbatim are byte-identical for an
+    already-lowercase input, and none of the six collide with a named
+    variant, so every one of the 43 sites still lands in `Other`, with
+    the same stored spelling 0.9 gave it. Production dispatch *does*
+    pattern-match several of these households directly on their named
+    variants — not exclusively through a closed `KernelMatrix` /
+    `KernelGamut` selector: separate `matches!(tag, ColorMatrix::Ictcp)`
+    / `ChromaDerivedCl` / `IptC2` / `Smpte2085` checks each gate a
+    non-affine kernel path in `row/dispatch/yuv444/yuv444p12.rs` and
+    `sinker/mixed/subsampled_4_4_4_high_bit/yuv444p.rs`; `Primaries` ×
+    `Transfer` resolve `ClSystem` in `row/scalar/cl/mod.rs`;
+    `ChromaLocation` drives the siting predicates in
+    `sinker/mixed/mod.rs`; `DynamicRange::Full` gates a branch in
+    `walker/mod.rs`. Every one of those matches is on the closed set of
+    *named* variants, though, with `Other` falling through an
+    unhandled/default arm: a census of every match arm across `src/`
+    found none that destructures `Other`'s payload (no `Other(s)` /
+    `Other(slug)` binding anywhere), so no dispatch decision reads an
+    `Other` value's spelling — only which variant a value is, which the
+    0.10 crossing does not change for any input pixon's own code ever
+    constructs, string or otherwise. Wire and public contracts are
+    unchanged for every roster value pixon's API surface carries.
 
 ### Fixed
 
