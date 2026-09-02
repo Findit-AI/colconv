@@ -290,7 +290,7 @@ unsafe fn h_reduce_c1<S: Avx512Elem>(
     // from the 8-multiple arena slice.
     unsafe {
       let mut acc = _mm512_setzero_pd();
-      for (ci, chunk) in span.chunks_exact(8).enumerate() {
+      for (ci, chunk) in span.as_chunks::<8>().0.iter().enumerate() {
         let s = load8_staged_c1(row, start + ci * 8);
         let c = widen_coeffs(chunk);
         let real_in_chunk = real.saturating_sub(ci * 8).min(8);
@@ -324,7 +324,7 @@ unsafe fn h_reduce_c3<S: Avx512Elem>(
       let mut acc0 = _mm512_setzero_pd();
       let mut acc1 = _mm512_setzero_pd();
       let mut acc2 = _mm512_setzero_pd();
-      for (ci, chunk) in span.chunks_exact(8).enumerate() {
+      for (ci, chunk) in span.as_chunks::<8>().0.iter().enumerate() {
         let cell = start + ci * 8;
         let c = widen_coeffs(chunk);
         let real_in_chunk = real.saturating_sub(ci * 8).min(8);
